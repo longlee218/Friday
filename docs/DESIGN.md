@@ -27,7 +27,10 @@ account. Separate modules — the user-side is deliberately rip-out-able.
 **Two delivery paths.** Discord has no inbound webhook for messages — delivery
 is gateway-websocket-only — so redundancy is REST-based:
 
-1. Gateway with RESUME (`session_id` and last `seq` persisted).
+1. Gateway with RESUME. The library owns the session id and sequence number
+   in memory and reconnects on its own; neither is persisted. After a process
+   restart Discord will not resume a stale session anyway, and the cursor plus
+   the sweep close that gap for less code.
 2. REST backfill sweep every ~5 min:
    `GET /channels/{id}/messages?after={last_seen_id}` per watched channel.
 
@@ -40,6 +43,24 @@ Messages authored by the watched account are dropped at the provider, so the
 agent can never react to its own replies. `capture_own_messages` disables that
 for testing; it must be off in normal operation, since an agent that answers
 itself has no natural stopping point.
+
+**Cursors** record how far each watched channel has been read. They advance on
+every message *seen*, not every message kept, so the sweep does not re-fetch
+traffic already dropped — and they only ever move forward, because the sweep
+replays old messages after newer live ones.
+
+**Known ingestion gaps, accepted deliberately:**
+
+- **One-to-one DMs are gateway-only.** They are watched but not listed in
+  `watched_channels`, so there is no list for the sweep to iterate. Enumerating
+  DM channels every few minutes is a lot of API traffic for a rarer path, so a
+  DM sent during an outage can be lost.
+- **Threads are not swept.** A thread message reports its parent as the channel,
+  and the parent's history does not contain it. Messages sent in a thread during
+  an outage can be lost.
+
+Both are recoverable later by adding sweep targets; neither is worth the traffic
+today.
 
 **Two classes of connection failure, handled differently:**
 
@@ -78,8 +99,9 @@ gateways, which is the dropped-socket failure this design works hard to avoid.
 | `step_runs` | `(task_id, step_name)` | structured output + trimmed transcript per node |
 | `memory_staging` | → task | agent-written entries awaiting promotion |
 
-Gateway runtime state (`session_id`, `seq`, `last_seen_message_id` per channel)
-lives in the same DB, so a container restart resumes instead of cold-starting.
+Per-channel cursors (`last_seen_message_id`) live in the same DB, so a
+container restart resumes instead of cold-starting. Gateway session state is
+deliberately *not* persisted — see Ingestion.
 
 ## LLM runtime
 

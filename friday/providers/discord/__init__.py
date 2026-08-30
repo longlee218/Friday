@@ -7,9 +7,10 @@ from collections.abc import AsyncIterator
 import discord_self
 
 from friday.models import InboundEvent
+from friday.providers import CredentialRejected
 from friday.providers.discord.normalise import normalise
 
-__all__ = ["DiscordUserProvider"]
+__all__ = ["DiscordUserProvider", "is_credential_rejected"]
 
 log = logging.getLogger(__name__)
 
@@ -35,16 +36,23 @@ class DiscordUserProvider:
         self._client = client or discord_self.Client()
         self._capture_own_messages = capture_own_messages
         self._incoming: asyncio.Queue[InboundEvent] = asyncio.Queue()
+        self.reconnected = asyncio.Event()
 
         # Handlers are bound by attribute name: dispatch looks up "on_" + event.
         # `Client.event` registers by the function's own __name__, so a private
         # method name would register a handler nothing ever calls.
         self._client.on_message = self._handle_message
         self._client.on_ready = self._handle_ready
+        self._client.on_resumed = self._handle_resumed
 
     async def _handle_ready(self) -> None:
         user = self._client.user
         log.info("connected to discord as %s (%s)", user, getattr(user, "id", "?"))
+        self.reconnected.set()
+
+    async def _handle_resumed(self) -> None:
+        log.info("discord session resumed")
+        self.reconnected.set()
 
     async def _handle_message(self, message) -> None:
         me = self._client.user
@@ -96,11 +104,41 @@ class DiscordUserProvider:
                 # The connection ended. Surface why rather than waiting forever
                 # on a queue nothing will ever fill again.
                 incoming.cancel()
-                connection.result()  # re-raises the real failure, if any
-                raise ConnectionError("discord connection closed")
+                self._reraise(connection)
         finally:
             connection.cancel()
             await self._client.close()
+
+
+    @staticmethod
+    def _reraise(connection: asyncio.Task) -> None:
+        """The connection ended. Say why, in terms an operator can act on."""
+        try:
+            connection.result()
+        except Exception as exc:
+            if is_credential_rejected(exc):
+                log.error(
+                    "discord rejected the account credential — not retrying. "
+                    "The token is dead (a password change or 2FA toggle "
+                    "invalidates it); supply a new one."
+                )
+                raise CredentialRejected(str(exc) or "credential rejected") from exc
+            log.warning("discord connection failed: %s", exc)
+            raise
+        raise ConnectionError("discord connection closed without an error")
+
+
+def is_credential_rejected(exc: BaseException) -> bool:
+    """True when reconnecting is pointless.
+
+    Everything else — dropped sockets, server errors — is transient and the
+    library's own retry loop handles it.
+    """
+    if isinstance(exc, discord_self.LoginFailure):
+        return True
+    return (
+        isinstance(exc, discord_self.ConnectionClosed) and exc.code == 4004
+    )
 
 
 def reply_target_id(event: InboundEvent) -> str:

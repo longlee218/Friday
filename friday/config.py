@@ -24,6 +24,9 @@ class IngestConfig:
     # can reply as the account, capturing its own messages makes it answer
     # itself in a loop.
     capture_own_messages: bool = False
+    # How often the recovery sweep runs. The live connection is the fast path;
+    # this only exists to close gaps it missed.
+    sweep_interval_seconds: float = 300.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +57,9 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
                 _mention_type(value) for value in ingest.get("mention_types") or ()
             ),
             capture_own_messages=bool(ingest.get("capture_own_messages", False)),
+            sweep_interval_seconds=float(
+                ingest.get("sweep_interval_seconds", 300.0)
+            ),
         ),
     )
 

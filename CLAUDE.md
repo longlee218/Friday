@@ -75,9 +75,10 @@ not an implementation detail:
   web server on `:8086` are all asyncio tasks in a single event loop. This
   follows from SQLite: multiple writers over a shared volume means contention
   and locking bugs.
-- **SQLite is the only state store**, including gateway resume state
-  (`session_id`, `seq`, `last_seen_message_id`). Anything that must survive a
-  restart goes in the DB, never in memory. **DB access must be async**
+- **SQLite is the only state store**, including per-channel cursors
+  (`last_seen_message_id`). Anything that must survive a restart goes in the DB,
+  never in memory. Gateway session state is the exception and is deliberately
+  not persisted: the library owns it, and cursors plus the sweep cover restarts. **DB access must be async**
   (`aiosqlite` or a thread executor) — a blocking call on the event loop stalls
   the Discord gateways.
 - **Two Discord identities in one process.** `discord.py` for the bot,

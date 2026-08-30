@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from friday.config import load_config
 from friday.db import Database
 from friday.inbox import Inbox
+from friday.providers import CredentialRejected
 from friday.providers.discord import DiscordUserProvider
 
 log = logging.getLogger("friday")
@@ -60,6 +61,8 @@ async def run() -> None:
             # match on a substring rather than the whole message.
             if smoke and "hi there" in event.text.lower():
                 await provider.reply(event, "What'sapp")
+    except CredentialRejected as exc:
+        raise SystemExit(f"Discord rejected the credential: {exc}") from exc
     finally:
         await db.close()
 

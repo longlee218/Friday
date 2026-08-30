@@ -13,6 +13,10 @@ ingest:
   # answer its own messages forever.
   capture_own_messages: true
 
+  # How often the recovery sweep runs, in seconds. It also runs immediately
+  # whenever the connection comes back.
+  sweep_interval_seconds: 300
+
   # Channels to watch. Threads inside a watched channel are covered
   # automatically — a thread reports its parent as the channel.
   #

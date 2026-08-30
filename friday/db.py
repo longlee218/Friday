@@ -23,6 +23,17 @@ CREATE TABLE IF NOT EXISTS events (
 -- thread_id is stored as '' rather than NULL for the absent case: SQLite treats
 -- NULLs as distinct in a key, which would let one channel accumulate a new
 -- session per message.
+-- How far we have read each channel. The backfill sweep asks for messages
+-- after this point, so it must only ever move forward: the sweep replays old
+-- messages after newer live ones, and a rewind would re-fetch the same window
+-- on every pass.
+CREATE TABLE IF NOT EXISTS channel_cursors (
+    provider             TEXT NOT NULL,
+    channel_id           TEXT NOT NULL,
+    last_seen_message_id TEXT NOT NULL,
+    PRIMARY KEY (provider, channel_id)
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
     provider   TEXT NOT NULL,
     channel_id TEXT NOT NULL,
@@ -78,6 +89,36 @@ class Database:
         )
         await self._connection.commit()
         return cursor.rowcount == 1
+
+    async def advance_cursor(self, event: InboundEvent) -> None:
+        """Move a channel's cursor forward to this message, never backward.
+
+        Ids are numeric snowflakes, so age is a numeric comparison — as text,
+        '99' would sort after '100' and look newer.
+        """
+        await self._connection.execute(
+            """
+            INSERT INTO channel_cursors (provider, channel_id, last_seen_message_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT (provider, channel_id) DO UPDATE
+                SET last_seen_message_id = excluded.last_seen_message_id
+                WHERE CAST(excluded.last_seen_message_id AS INTEGER)
+                    > CAST(channel_cursors.last_seen_message_id AS INTEGER)
+            """,
+            (event.provider, event.channel_id, event.provider_message_id),
+        )
+        await self._connection.commit()
+
+    async def cursor_for(self, provider: str, channel_id: str) -> str | None:
+        cursor = await self._connection.execute(
+            """
+            SELECT last_seen_message_id FROM channel_cursors
+            WHERE provider = ? AND channel_id = ?
+            """,
+            (provider, channel_id),
+        )
+        row = await cursor.fetchone()
+        return row["last_seen_message_id"] if row else None
 
     async def record_session(self, event: InboundEvent) -> None:
         """Ensure the conversation this event belongs to exists."""

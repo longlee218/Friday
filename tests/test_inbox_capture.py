@@ -135,3 +135,78 @@ async def test_an_unwatched_channel_is_reported_as_the_reason_for_dropping(
         await captured(inbox)
 
     assert "channel elsewhere is not watched" in caplog.text
+
+
+async def test_seeing_a_message_advances_that_channels_cursor(inbox, provider, db):
+    provider.emit(make_event(message_id="100"))
+
+    await captured(inbox)
+
+    assert await db.cursor_for("fake", "watched") == "100"
+
+
+async def test_the_cursor_tracks_the_newest_message_seen(inbox, provider, db):
+    provider.emit(make_event(message_id="100"))
+    provider.emit(make_event(message_id="200"))
+
+    await captured(inbox)
+
+    assert await db.cursor_for("fake", "watched") == "200"
+
+
+async def test_an_older_message_arriving_later_does_not_rewind_the_cursor(
+    inbox, provider, db
+):
+    """The sweep replays old messages after newer live ones. Rewinding the
+    cursor would make it re-fetch the same window forever."""
+    provider.emit(make_event(message_id="200"))
+    provider.emit(make_event(message_id="100"))
+
+    await captured(inbox)
+
+    assert await db.cursor_for("fake", "watched") == "200"
+
+
+async def test_the_cursor_is_compared_by_age_not_alphabetically(
+    inbox, provider, db
+):
+    """Message ids are numeric snowflakes: '99' is older than '100', but sorts
+    after it as text."""
+    provider.emit(make_event(message_id="100"))
+    provider.emit(make_event(message_id="99"))
+
+    await captured(inbox)
+
+    assert await db.cursor_for("fake", "watched") == "100"
+
+
+async def test_a_message_that_is_dropped_still_advances_the_cursor(
+    inbox, provider, db
+):
+    """Otherwise the sweep re-fetches traffic we have already looked at."""
+    provider.emit(make_event(message_id="100", mention_type=None))
+
+    await captured(inbox)
+
+    assert await db.cursor_for("fake", "watched") == "100"
+
+
+async def test_an_unknown_channel_has_no_cursor(db):
+    assert await db.cursor_for("fake", "never-seen") is None
+
+
+async def test_cursors_survive_a_restart(tmp_path, provider, config):
+    from friday.db import Database
+    from friday.inbox import Inbox
+
+    path = str(tmp_path / "friday.db")
+    first = await Database.connect(path)
+    provider.emit(make_event(message_id="100"))
+    await captured(Inbox(provider=provider, db=first, config=config))
+    await first.close()
+
+    reopened = await Database.connect(path)
+    try:
+        assert await reopened.cursor_for("fake", "watched") == "100"
+    finally:
+        await reopened.close()

@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
 from friday.models import InboundEvent
 
-__all__ = ["Provider"]
+__all__ = ["CredentialRejected", "Provider"]
+
+
+class CredentialRejected(Exception):
+    """The account credential is no longer valid.
+
+    Terminal by nature: no amount of retrying fixes it, only a human supplying
+    a new credential. Raised so the process can stop loudly rather than
+    reconnect forever while receiving nothing.
+    """
 
 
 @runtime_checkable
@@ -18,6 +28,20 @@ class Provider(Protocol):
 
     name: str
 
+    #: Set by the provider whenever it (re)connects, so the recovery sweep can
+    #: run at once instead of waiting out the timer.
+    reconnected: asyncio.Event
+
     def stream(self) -> AsyncIterator[InboundEvent]:
         """Yield normalised inbound messages as they arrive."""
+        ...
+
+    def history(
+        self, channel_id: str, *, after: str | None
+    ) -> AsyncIterator[InboundEvent]:
+        """Yield past messages in a channel, oldest first, after a message id.
+
+        `after=None` means from the beginning. This is the recovery path: the
+        live connection can miss messages, and this is how they are found.
+        """
         ...

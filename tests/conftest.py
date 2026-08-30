@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -22,13 +23,36 @@ class FakeProvider:
 
     def __init__(self) -> None:
         self._queued: list[InboundEvent] = []
+        self._history: dict[str, list[InboundEvent]] = {}
+        self.history_calls: list[tuple[str, str | None]] = []
+        self.reconnected = asyncio.Event()
+        # By default the live stream ends once queued events are drained, so
+        # tests terminate. Set True when a test needs it to stay open.
+        self.keep_open = False
+        self._closed = asyncio.Event()
+
+    def close(self) -> None:
+        self._closed.set()
 
     def emit(self, event: InboundEvent) -> None:
+        """Deliver on the live path."""
         self._queued.append(event)
+
+    def emit_history(self, channel_id: str, *events: InboundEvent) -> None:
+        """Make events retrievable by a sweep of this channel."""
+        self._history.setdefault(channel_id, []).extend(events)
 
     async def stream(self):
         for event in self._queued:
             yield event
+        if self.keep_open:
+            await self._closed.wait()
+
+    async def history(self, channel_id: str, *, after: str | None):
+        self.history_calls.append((channel_id, after))
+        for event in self._history.get(channel_id, []):
+            if after is None or int(event.provider_message_id) > int(after):
+                yield event
 
 
 def make_event(
