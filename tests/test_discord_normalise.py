@@ -16,10 +16,24 @@ ME = 100
 MY_ROLES = frozenset({200, 201})
 
 
+def guild_channel(id=10, parent_id=None):
+    return SimpleNamespace(id=id, parent_id=parent_id)
+
+
+def dm_channel(id=20):
+    """A one-to-one DM: exactly one recipient."""
+    return SimpleNamespace(id=id, parent_id=None, recipient=SimpleNamespace(id=55))
+
+
+def group_channel(id=30):
+    """A group DM: several recipients, no single `recipient`."""
+    return SimpleNamespace(id=id, parent_id=None, recipients=[SimpleNamespace(id=55)])
+
+
 def message(
     *,
     guild=SimpleNamespace(id=1),
-    channel=SimpleNamespace(id=10, parent_id=None),
+    channel=None,
     mentions=(),
     role_mentions=(),
     content="hello",
@@ -27,7 +41,7 @@ def message(
     return SimpleNamespace(
         id=999,
         guild=guild,
-        channel=channel,
+        channel=channel if channel is not None else guild_channel(),
         mentions=list(mentions),
         role_mentions=list(role_mentions),
         content=content,
@@ -59,7 +73,7 @@ def test_a_role_i_do_not_hold_is_not_a_mention():
 
 
 def test_any_direct_message_counts_even_without_an_explicit_mention():
-    event = normalised(message(guild=None))
+    event = normalised(message(guild=None, channel=dm_channel()))
 
     assert event.mention_type is MentionType.DM
 
@@ -81,7 +95,7 @@ def test_a_direct_mention_outranks_a_role_mention():
 def test_a_thread_message_records_the_parent_channel_and_the_thread():
     event = normalised(
         message(
-            channel=SimpleNamespace(id=77, parent_id=10),
+            channel=guild_channel(id=77, parent_id=10),
             mentions=[SimpleNamespace(id=ME)],
         )
     )
@@ -103,3 +117,30 @@ def test_the_message_details_are_carried_across():
     assert event.text == "it is down"
     assert event.author_id == "55"
     assert event.author_name == "dana"
+
+
+def test_a_group_chat_message_without_a_mention_is_not_a_mention():
+    """A group chat is not a DM: most of its traffic is not addressed to us."""
+    event = normalised(message(guild=None, channel=group_channel()))
+
+    assert event.mention_type is None
+
+
+def test_being_mentioned_in_a_group_chat_is_a_direct_mention():
+    event = normalised(
+        message(
+            guild=None,
+            channel=group_channel(),
+            mentions=[SimpleNamespace(id=ME)],
+        )
+    )
+
+    assert event.mention_type is MentionType.DIRECT
+
+
+def test_a_group_chat_reports_its_own_channel_id_so_it_can_be_whitelisted():
+    event = normalised(
+        message(guild=None, channel=group_channel(id=30), mentions=[SimpleNamespace(id=ME)])
+    )
+
+    assert (event.channel_id, event.thread_id) == ("30", None)

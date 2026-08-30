@@ -121,3 +121,17 @@ async def test_threads_and_their_parent_channel_are_separate_sessions(
     await captured(inbox)
 
     assert sorted(s.thread_id or "" for s in await db.sessions()) == ["", "t1"]
+
+
+async def test_an_unwatched_channel_is_reported_as_the_reason_for_dropping(
+    inbox, provider, caplog
+):
+    """Silent drops are the hardest failure to debug; the reason must be logged."""
+    import logging
+
+    provider.emit(make_event(message_id="m1", channel_id="elsewhere"))
+
+    with caplog.at_level(logging.DEBUG, logger="friday.inbox"):
+        await captured(inbox)
+
+    assert "channel elsewhere is not watched" in caplog.text

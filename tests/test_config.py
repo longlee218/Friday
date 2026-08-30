@@ -39,3 +39,13 @@ def test_an_unknown_mention_type_is_rejected_by_name(tmp_path):
 def test_a_missing_configuration_file_is_reported_by_path(tmp_path):
     with pytest.raises(ConfigError, match="nope.yaml"):
         load_config(tmp_path / "nope.yaml")
+
+
+def test_an_unquoted_channel_id_still_matches(tmp_path):
+    """YAML parses a bare id as an int; a silent no-match would watch nothing."""
+    path = tmp_path / "config.yaml"
+    path.write_text("ingest:\n  watched_channels: [1360170800153366600]\n")
+
+    config = load_config(path)
+
+    assert config.ingest.watched_channels == frozenset({"1360170800153366600"})

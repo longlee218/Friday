@@ -20,6 +20,10 @@ class IngestConfig:
 
     watched_channels: frozenset[str]
     mention_types: frozenset[MentionType]
+    # Testing escape hatch only. Leave off in normal operation: once the agent
+    # can reply as the account, capturing its own messages makes it answer
+    # itself in a loop.
+    capture_own_messages: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,10 +45,15 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
     return Config(
         database_path=raw.get("database_path", "./data/friday.db"),
         ingest=IngestConfig(
-            watched_channels=frozenset(ingest.get("watched_channels") or ()),
+            # Coerced to str: an unquoted id in YAML parses as an int and
+            # would then never match, silently watching nothing.
+            watched_channels=frozenset(
+                str(c) for c in ingest.get("watched_channels") or ()
+            ),
             mention_types=frozenset(
                 _mention_type(value) for value in ingest.get("mention_types") or ()
             ),
+            capture_own_messages=bool(ingest.get("capture_own_messages", False)),
         ),
     )
 

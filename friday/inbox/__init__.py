@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 
 from friday.config import IngestConfig
@@ -7,6 +8,8 @@ from friday.db import Database
 from friday.models import InboundEvent, MentionType
 
 __all__ = ["Inbox"]
+
+log = logging.getLogger(__name__)
 
 
 class Inbox:
@@ -26,18 +29,23 @@ class Inbox:
     async def stream(self) -> AsyncIterator[InboundEvent]:
         """Yield in-scope mentions, each exactly once, already persisted."""
         async for event in self._provider.stream():
-            if not self._in_scope(event):
+            reason = self._out_of_scope_reason(event)
+            if reason:
+                log.debug("dropped %s: %s", event.provider_message_id, reason)
                 continue
             if await self._db.record_event(event):
                 await self._db.record_session(event)
                 yield event
 
-    def _in_scope(self, event: InboundEvent) -> bool:
+    def _out_of_scope_reason(self, event: InboundEvent) -> str | None:
+        """None means in scope. A string says why it was dropped."""
         if event.mention_type is None:
-            return False
+            return "does not address the account"
         if event.mention_type not in self._config.mention_types:
-            return False
+            return f"{event.mention_type} is not a watched mention type"
         if event.mention_type is MentionType.DM:
             # DMs are scoped by being DMs; the channel whitelist doesn't apply.
-            return True
-        return event.channel_id in self._config.watched_channels
+            return None
+        if event.channel_id not in self._config.watched_channels:
+            return f"channel {event.channel_id} is not watched"
+        return None

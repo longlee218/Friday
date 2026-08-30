@@ -24,19 +24,58 @@ class DiscordUserProvider:
 
     name = "discord"
 
-    def __init__(self, token: str, *, client: discord_self.Client | None = None):
+    def __init__(
+        self,
+        token: str,
+        *,
+        client: discord_self.Client | None = None,
+        capture_own_messages: bool = False,
+    ):
         self._token = token
         self._client = client or discord_self.Client()
+        self._capture_own_messages = capture_own_messages
         self._incoming: asyncio.Queue[InboundEvent] = asyncio.Queue()
-        self._client.event(self._on_message)
 
-    async def _on_message(self, message) -> None:
+        # Handlers are bound by attribute name: dispatch looks up "on_" + event.
+        # `Client.event` registers by the function's own __name__, so a private
+        # method name would register a handler nothing ever calls.
+        self._client.on_message = self._handle_message
+        self._client.on_ready = self._handle_ready
+
+    async def _handle_ready(self) -> None:
+        user = self._client.user
+        log.info("connected to discord as %s (%s)", user, getattr(user, "id", "?"))
+
+    async def _handle_message(self, message) -> None:
         me = self._client.user
-        if me is None or message.author.id == me.id:
+        if me is None:
+            return
+        if message.author.id == me.id and not self._capture_own_messages:
             return  # never react to our own messages
-        await self._incoming.put(
-            normalise(message, me_id=me.id, my_role_ids=_roles_in(message.guild))
+        event = normalise(
+            message, me_id=me.id, my_role_ids=_roles_in(message.guild)
         )
+        log.debug(
+            "saw %s in %s (%s) from %s: %r",
+            event.mention_type or "no mention",
+            event.channel_id,
+            event.thread_id or "no thread",
+            event.author_name,
+            event.text[:120],
+        )
+        await self._incoming.put(event)
+
+    async def reply(self, event: InboundEvent, text: str) -> None:
+        """Post a message back into the conversation the event came from.
+
+        Sends as the watched account. Ticket 06 puts the approval gate in front
+        of this; until then nothing but the smoke test should call it.
+        """
+        target_id = int(reply_target_id(event))
+        channel = self._client.get_channel(target_id) or await (
+            self._client.fetch_channel(target_id)
+        )
+        await channel.send(text)
 
     async def stream(self) -> AsyncIterator[InboundEvent]:
         """Connect, then yield every message the account can see.
@@ -47,10 +86,30 @@ class DiscordUserProvider:
         connection = asyncio.create_task(self._client.start(self._token))
         try:
             while True:
-                yield await self._incoming.get()
+                incoming = asyncio.create_task(self._incoming.get())
+                done, _ = await asyncio.wait(
+                    {incoming, connection}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if incoming in done:
+                    yield incoming.result()
+                    continue
+                # The connection ended. Surface why rather than waiting forever
+                # on a queue nothing will ever fill again.
+                incoming.cancel()
+                connection.result()  # re-raises the real failure, if any
+                raise ConnectionError("discord connection closed")
         finally:
             connection.cancel()
             await self._client.close()
+
+
+def reply_target_id(event: InboundEvent) -> str:
+    """Where a reply belongs: in the thread if there was one, else the channel.
+
+    Replying to a thread message in the parent channel loses the context the
+    person was in.
+    """
+    return event.thread_id or event.channel_id
 
 
 def _roles_in(guild) -> frozenset[int]:

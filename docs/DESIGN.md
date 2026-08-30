@@ -36,6 +36,28 @@ makes double-delivery a no-op. Path 2 exists because RESUME only replays if you
 reconnect before the replay buffer overfills; past that you get Opcode 9 Invalid
 Session and the gap is gone.
 
+Messages authored by the watched account are dropped at the provider, so the
+agent can never react to its own replies. `capture_own_messages` disables that
+for testing; it must be off in normal operation, since an agent that answers
+itself has no natural stopping point.
+
+**Two classes of connection failure, handled differently:**
+
+- **Transient** — dropped network, unexpected close, server error. Reconnect
+  with backoff, resume, then sweep to close the gap.
+- **Fatal** — close code **4004, authentication failed**, meaning the account
+  credential is no longer valid. Stop reconnecting and alert. Retrying is
+  pointless: only a human pasting a new credential fixes it.
+
+Collapsing these into one retry loop is the most dangerous bug available here.
+A process stuck retrying a dead credential is alive, logging "reconnecting",
+and receiving nothing — indistinguishable from a quiet week.
+
+The credential dies on a **security event, not a timer**: a password change or a
+2FA toggle invalidates every session immediately. A plain logout does not. So
+there is nothing to refresh on a schedule and no expiry to pre-empt — the only
+correct behaviour is to detect rejection and escalate.
+
 ## Provider abstraction
 
 An `InboundEvent` dataclass and a bidirectional `Provider` protocol with
@@ -212,6 +234,9 @@ in Discord.
   more than N minutes, plus a daily "alive, processed N mentions" summary. The
   board also shows connection status. A dead container and a quiet day look
   identical without this.
+- **A rejected credential alerts immediately**, not after the disconnection
+  threshold. It is a known-terminal state, so waiting N minutes to report it
+  only delays the one action that can fix it.
 
 ## Classification policy
 

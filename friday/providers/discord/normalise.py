@@ -29,14 +29,25 @@ def normalise(
 
 
 def _mention_type(message, me_id: int, my_role_ids: Collection[int]):
-    if message.guild is None:
-        # Every DM is addressed to us by construction.
+    if _is_one_to_one_dm(message.channel):
         return MentionType.DM
     if any(user.id == me_id for user in message.mentions):
         return MentionType.DIRECT
     if any(role.id in my_role_ids for role in message.role_mentions):
         return MentionType.ROLE
     return None
+
+
+def _is_one_to_one_dm(channel) -> bool:
+    """True only for a private conversation with a single other person.
+
+    Every message in one is addressed to us by construction, so no mention is
+    needed. A *group* chat is deliberately not included: most of its traffic is
+    not for us, so it behaves like a channel — it must be whitelisted and must
+    actually mention us. The library gives a one-to-one DM a single `recipient`
+    and a group one `recipients`.
+    """
+    return getattr(channel, "recipient", None) is not None
 
 
 def _location(channel) -> tuple[str, str | None]:
