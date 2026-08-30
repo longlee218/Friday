@@ -1,0 +1,8 @@
+# Structured configuration. Secrets live in .env, never here.
+database_path: ./data/friday.db
+
+ingest:
+  # Channel ids to watch. DMs are always watched and are not listed here.
+  watched_channels: []
+  # Which kinds of mention create work: direct, role, dm
+  mention_types: ["direct", "role", "dm"]
