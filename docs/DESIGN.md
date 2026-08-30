@@ -103,69 +103,122 @@ Per-channel cursors (`last_seen_message_id`) live in the same DB, so a
 container restart resumes instead of cold-starting. Gateway session state is
 deliberately *not* persisted — see Ingestion.
 
+## Layers
+
+```
+Intake  →  Triage agent  →  Workflow  →  Responder agent
+(built)    type, confidence   deterministic   writes in the
+           and parameters     Python          operator's voice
+```
+
+Only two steps use a model. The control flow between them is ordinary code.
+
 ## LLM runtime
 
-**All OpenAI.** One provider, one key, one set of failure modes.
+**The OpenAI Agents SDK** (`openai-agents`), driven through the **Chat
+Completions** API rather than Responses. Chat Completions is the de-facto
+standard that other providers implement, so `base_url`, `api_key` and `model`
+are configuration — DeepSeek, MiniMax or anything else OpenAI-compatible can be
+swapped in without touching code.
 
-**A manual agent loop on the Responses API.** Per iteration: call
-`client.responses.create(...)`, extend the input list with `response.output`,
-append a `{"type": "function_call_output", "call_id": ..., "output": ...}` for
-each `function_call`, repeat until no function calls remain. Reasoning items and
-every other output item are replayed unchanged inside the loop.
+```python
+client = AsyncOpenAI(base_url=..., api_key=...)
+Agent(model=OpenAIChatCompletionsModel(model=..., openai_client=client))
+```
 
-`store=False` — conversation state is held client-side for the node's duration
-and checkpointed at node end. Nothing conversational lives on OpenAI's servers,
-consistent with SQLite being the single source of truth.
+**Tracing must be disabled** (`set_tracing_disabled(True)`). It is on by
+default and exports to OpenAI using the same key as model requests — with a
+third-party provider that leaks both the traffic and the credential.
 
-## Nodes
+**A known compatibility risk:** the SDK sends `response_format: json_schema`
+for structured output, and some OpenAI-compatible providers reject it with a
+400. This is why triage expresses its result as a **tool call** rather than a
+structured output type — tool calling is the better-supported surface. Verify
+against the chosen provider before relying on either.
 
-Every unit of reasoning is a **node**, declared as a frozen dataclass:
+## Triage
 
-| Field | Purpose |
-| --- | --- |
-| `name` | stable identifier, and the `step_runs` key |
-| `prompt` | instructions |
-| `tools` | the subset taken from the registry |
-| `output_schema` | JSON schema — becomes `text.format`, the next node's contract, and the test assertion |
-| `model` | chosen per node |
-| `max_turns` | tool-use iteration cap |
-| `token_cap` | accumulated-usage backstop |
-| `on_refusal` | behaviour when the model returns a `refusal` content part |
-| `can_pause` | whether this node may return `Pause(question)` |
+One model call per mention. It decides three things and performs no I/O:
 
-**Triage is a node** — `tools=[]`, `max_turns=1`, and the
-`report_bug | tracing | skip` enum as its `output_schema`. One runner, one code
-path; a misclassification is as debuggable as a bad investigation.
+- **type** — `api_issue | access_request | doc_question | skip`
+- **confidence**
+- **parameters** — what the message actually contained
 
-**A procedure is data, not a coroutine** — an ordered list of nodes. The runner
-persists each node's result to `step_runs` before advancing, so resume means
-loading the row and continuing at the first unfinished node. A node needing a
-human returns `Pause(question)` rather than awaiting.
+The type-plus-parameters pair is expressed as **one tool per type**, which is
+how a discriminated union is encoded here: each tool's schema declares the
+parameters its own type needs, and the model picks one.
 
-This matters because a suspended coroutine is process memory: a task sitting in
-`HITL` across a container restart would know its state but not its position, and
-could only re-run from the top, repeating side effects.
+```
+create_api_issue_task(environment?, correlation_id?, curl?, summary)
+create_access_request_task(project, permission, summary)
+create_doc_question_task(question, doc_ref?)
+skip(reason)
+```
 
-**Checkpoint contents:** the structured output (the contract — downstream nodes
-may read only this) plus a trimmed transcript of tool calls and results
-(diagnostics — nothing downstream may read it). Trimming happens at node end,
-never inside the loop.
+`tool_use_behavior="stop_on_first_tool"` ends the run on the first call, so this
+is a single turn with no loop.
 
-**Abnormal exits — all route to `HITL`, never to a silent discard:**
+**The tool reports the decision; it does not act on it.** Triage stays pure, so
+it is testable with no database — the caller applies the outcome.
 
-- turn cap exceeded (~8–10 for investigation nodes),
-- token cap exceeded (accumulated from per-iteration `usage`),
-- **refusal** — arrives as a completed response whose message content part is
-  `type: "refusal"`, not as an error, so the loop must check for it explicitly.
+**Parameters matter more than the type.** The most common real action is not
+diagnosis, it is noticing a report is incomplete and asking for what is missing:
 
-There is no model-visible budget primitive here, so a capped node gets cut off
-rather than wrapping up gracefully. That is an argument for keeping nodes small.
+> *"Which environment are you using? Could you give me the CURL or the
+> correlationId?"*
 
-**Prompt assembly is stable → volatile:** system instructions, the long-term
-memory file, and tool definitions first; then prior node outputs; then the
-triggering message and thread context last. Caching is prefix-match, so anything
-after the volatile section is uncacheable. Per-node models mean per-model
-caches — nodes on different models share nothing.
+That is mechanical, high-frequency, and cannot be embarrassingly wrong. An
+`api_issue` with no `correlation_id` and no `curl` takes that path; one with
+them goes to tracing. Same type, different action, decided by parameters.
+
+**Never-drop is enforced through the SDK's `error_handlers`**, which recover
+from `max_turns`, `model_refusal` and `invalid_final_output` by returning a
+value instead of raising. Each maps to a task needing human input.
+
+**Triage runs off a queue, not inline.** Events are already persisted, so a
+separate task picks up untriaged ones. A model call inside the ingest loop would
+stall the gateway consumer for its duration — the exact failure the recovery
+layer exists to prevent, self-inflicted.
+
+**Categories are not all model decisions.** Salary, off-topic and social talk
+are filtered to `skip` before the model sees them. A rule that important should
+not depend on a classifier having a good day.
+
+## Workflows
+
+One workflow per type, **deterministic Python** — branching, not reasoning:
+
+```
+api_issue:
+    missing correlation_id and curl  → ask for them
+    otherwise                        → trace, then answer
+```
+
+Agentic workflows are a later step, taken per type once the deterministic one is
+proven. Starting deterministic means the behaviour is inspectable, cheap, and
+identical every time, which is what makes the first weeks of logs worth reading.
+
+## Responder
+
+The second agent. It writes replies in the operator's voice, learning from
+**few-shot examples of their real past replies** rather than a written style
+guide — real examples carry tone that description does not.
+
+This requires the operator's own messages to be retained as conversation
+context. They are still skipped as *triggers* (otherwise the agent answers
+itself), but skipping them as *context* would leave every stored conversation
+missing one side of itself.
+
+**Drafts go to review; the system posts on approval.** Direct posting is
+promotable later, per category, on evidence — the "send me the correlationId"
+reply is the obvious first candidate once a run of them has been approved
+unchanged.
+
+**A draft records the message it was based on.** On approval, if newer messages
+have arrived in that conversation, the reply is not posted: the task returns for
+rework. This makes posting a stale answer impossible rather than unlikely, and
+the check happens at the only moment that matters. A short debounce before
+drafting keeps most follow-ups from creating a draft at all.
 
 ## Tools
 
@@ -259,21 +312,6 @@ in Discord.
 - **A rejected credential alerts immediately**, not after the disconnection
   threshold. It is a known-terminal state, so waiting N minutes to report it
   only delays the one action that can fix it.
-
-## Classification policy
-
-Structured output against a closed enum with a confidence score, over the
-message *and* its thread context — without context, follow-ups ("still broken
-btw") misclassify.
-
-- `skip` → event row, no task. Retained to surface false negatives and to build
-  the labelled set the threshold is derived from.
-- A follow-up in a session with an open task **updates that task**; if the label
-  changes, it routes to `HITL`.
-- Below threshold → `HITL`.
-
-Start the threshold high and log every scored decision; set the real number from
-the observed distribution, not from a guess.
 
 ## Repo conventions
 
