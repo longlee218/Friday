@@ -1,6 +1,46 @@
 # Structured configuration. Secrets live in .env, never here.
 database_path: ./data/friday.db
 
+# ── Agents ─────────────────────────────────────────────────────────────────
+# One block per step that calls a model, each self-contained: where the model
+# lives, which key reaches it, and how it should behave. They are different jobs
+# — the cheap high-volume one should not be paying for the careful one.
+#
+# ${VAR} reads from .env. An unset variable is an error, not an empty string.
+#
+# Everything goes through the Chat Completions API, which is why swapping
+# provider is three lines rather than a rewrite. Known endpoints:
+#   OpenAI    https://api.openai.com/v1
+#   DeepSeek  https://api.deepseek.com
+#   MiniMax   https://api.minimaxi.chat/v1
+agents:
+  # Runs on every single mention. Verified against MiniMax: M2.7 cannot extract
+  # parameters (environment, correlationId) regardless of prompting; M3 can. The
+  # high-volume path needs the better model here, which inverts the usual
+  # assumption — do not 'optimise' this down without re-running the probe.
+  triage:
+    api_key: ${TRIAGE_API_KEY}
+    base_url: "https://api.minimax.io/v1"
+    model: "MiniMax-M3"
+    settings:
+      temperature: 0
+    max_turns: 1
+    # Escalate to a human below this rather than guessing. A placeholder until
+    # real decisions accumulate — do not trust this number yet.
+    confidence_threshold: 0.7
+
+  # Runs only on tasks that reached a reply. Low volume, and the output goes out
+  # under your name — worth a better model and some warmth.
+  responder:
+    api_key: ${RESPONDER_API_KEY}
+    base_url: "https://api.minimax.io/v1"
+    model: "MiniMax-M3"
+    settings:
+      temperature: 0.7
+    max_turns: 1
+    # How many of your past replies to show it as tone examples.
+    tone_examples: 8
+
 ingest:
   # Which kinds of mention create work: direct, role, dm
   #   direct — someone @s the account

@@ -53,3 +53,43 @@ Structured output via `response_format: json_schema` is rejected by some
 OpenAI-compatible providers. Expressing the union as tool calls avoids that, but
 the chosen provider should be verified early — it decides whether this ticket's
 approach works at all.
+
+## Verified against the live provider
+
+Probed MiniMax (`https://api.minimax.io/v1`) with the exact shape this ticket
+describes — one tool per type, `stop_on_first_tool`, real messages.
+
+**Tool calling works.** The compatibility risk that would have sunk this approach
+(providers rejecting `response_format: json_schema`) does not apply, because the
+union is expressed as tools.
+
+**`tool_choice="required"` is not optional.** Without it, the vaguest message —
+"the api is wrong", the single most common shape — calls no tool at all and
+produces nothing. With it, that message correctly becomes an `api_issue` with
+every parameter null, which is exactly the "ask for the missing fields" path.
+
+**Model choice decides parameter extraction, prompting does not.**
+
+| | environment + correlationId extracted |
+| --- | --- |
+| MiniMax-M2.7, plain prompt | no |
+| MiniMax-M2.7, prompt with explicit copy-verbatim rules and examples | no |
+| MiniMax-M3, plain prompt | yes |
+| MiniMax-M3, explicit prompt | yes |
+
+M2.7 returns null for fields sitting in plain text. No amount of prompting fixed
+it. Use M3 for triage.
+
+**Vietnamese works.** "api sai roi, moi truong staging, correlationId abc-123-def"
+extracted `staging` and `abc-123-def` correctly, and "luong thang nay ve chua"
+was correctly skipped as a salary question.
+
+**One data-quality bug to handle:** the model sometimes emits the *string*
+`"null"` rather than a JSON null. Parameters must be normalised — `"null"`,
+`"none"` and empty string all mean absent — or the workflow will treat the string
+as a real value and skip asking for the field.
+
+**Worth considering:** `correlation_id`, `environment` and `curl` are all
+mechanically detectable with a regex. Extracting them deterministically would be
+free, exact, and immune to model quality — with the model as a fallback rather
+than the primary path.
