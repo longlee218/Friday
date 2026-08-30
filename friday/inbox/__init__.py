@@ -101,12 +101,39 @@ class Inbox:
         await self._db.advance_cursor(event)
         reason = self._out_of_scope_reason(event)
         if reason:
+            # Not for us — but if this conversation has already asked us for
+            # something, the surrounding talk is what makes the next mention
+            # readable.
+            if await self._db.conversation_is_tracked(event):
+                await self._db.record_message(event)
             log.debug("dropped %s: %s", event.provider_message_id, reason)
             return None
         if not await self._db.record_event(event):
             return None  # already seen on the other delivery path
-        await self._db.record_session(event)
+        if await self._db.record_session(event):
+            await self._seed_context(event)
+        await self._db.record_message(event)
         return event
+
+    async def _seed_context(self, event: InboundEvent) -> None:
+        """Pull in what was said before a conversation first involved us.
+
+        Runs once per conversation. Without it the first mention has no history
+        behind it, which is exactly when context matters most.
+        """
+        seeded = 0
+        async for past in self._provider.recent(
+            event.conversation_id,
+            before=event.provider_message_id,
+            limit=self._config.context_messages,
+        ):
+            await self._db.record_message(past)
+            seeded += 1
+        log.info(
+            "seeded %d context message(s) for conversation %s",
+            seeded,
+            event.conversation_id,
+        )
 
     def _out_of_scope_reason(self, event: InboundEvent) -> str | None:
         """None means in scope. A string says why it was dropped."""

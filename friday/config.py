@@ -27,6 +27,8 @@ class IngestConfig:
     # How often the recovery sweep runs. The live connection is the fast path;
     # this only exists to close gaps it missed.
     sweep_interval_seconds: float = 300.0
+    # How many prior messages to pull in when a conversation first mentions us.
+    context_messages: int = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +62,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             sweep_interval_seconds=float(
                 ingest.get("sweep_interval_seconds", 300.0)
             ),
+            context_messages=int(ingest.get("context_messages", 20)),
         ),
     )
 

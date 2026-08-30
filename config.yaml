@@ -17,6 +17,10 @@ ingest:
   # whenever the connection comes back.
   sweep_interval_seconds: 300
 
+  # How many prior messages to pull in the first time a conversation
+  # mentions you, so the first mention has history behind it.
+  context_messages: 20
+
   # Channels to watch. Threads inside a watched channel are covered
   # automatically — a thread reports its parent as the channel.
   #

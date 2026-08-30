@@ -36,6 +36,16 @@ class Provider(Protocol):
         """Yield normalised inbound messages as they arrive."""
         ...
 
+    def recent(
+        self, conversation_id: str, *, before: str, limit: int
+    ) -> AsyncIterator[InboundEvent]:
+        """Yield up to `limit` messages immediately preceding `before`.
+
+        Used once per conversation, to seed context at the moment it first
+        becomes relevant.
+        """
+        ...
+
     def history(
         self, channel_id: str, *, after: str | None
     ) -> AsyncIterator[InboundEvent]:

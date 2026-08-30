@@ -31,6 +31,15 @@ class InboundEvent:
     created_at: datetime
     mention_type: MentionType | None
 
+    @property
+    def conversation_id(self) -> str:
+        """Where the exchange is actually happening.
+
+        A thread is its own conversation: seeding context from the parent
+        channel would pull in messages nobody in the thread was reading.
+        """
+        return self.thread_id or self.channel_id
+
 
 @dataclass(frozen=True, slots=True)
 class Session:

@@ -25,6 +25,8 @@ class FakeProvider:
         self._queued: list[InboundEvent] = []
         self._history: dict[str, list[InboundEvent]] = {}
         self.history_calls: list[tuple[str, str | None]] = []
+        self._recent: dict[str, list[InboundEvent]] = {}
+        self.recent_calls: list[tuple[str, str, int]] = []
         self.reconnected = asyncio.Event()
         # By default the live stream ends once queued events are drained, so
         # tests terminate. Set True when a test needs it to stay open.
@@ -38,6 +40,10 @@ class FakeProvider:
         """Deliver on the live path."""
         self._queued.append(event)
 
+    def emit_recent(self, conversation_id: str, *events: InboundEvent) -> None:
+        """Make events retrievable as prior context for a conversation."""
+        self._recent.setdefault(conversation_id, []).extend(events)
+
     def emit_history(self, channel_id: str, *events: InboundEvent) -> None:
         """Make events retrievable by a sweep of this channel."""
         self._history.setdefault(channel_id, []).extend(events)
@@ -47,6 +53,11 @@ class FakeProvider:
             yield event
         if self.keep_open:
             await self._closed.wait()
+
+    async def recent(self, conversation_id: str, *, before: str, limit: int):
+        self.recent_calls.append((conversation_id, before, limit))
+        for event in self._recent.get(conversation_id, [])[-limit:]:
+            yield event
 
     async def history(self, channel_id: str, *, after: str | None):
         self.history_calls.append((channel_id, after))

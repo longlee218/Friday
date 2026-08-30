@@ -27,6 +27,19 @@ CREATE TABLE IF NOT EXISTS events (
 -- after this point, so it must only ever move forward: the sweep replays old
 -- messages after newer live ones, and a rewind would re-fetch the same window
 -- on every pass.
+-- Conversation context. Only conversations that have mentioned us are kept,
+-- so this is not a copy of every watched channel.
+CREATE TABLE IF NOT EXISTS messages (
+    provider            TEXT NOT NULL,
+    provider_message_id TEXT NOT NULL,
+    conversation_id     TEXT NOT NULL,
+    author_id           TEXT NOT NULL,
+    author_name         TEXT NOT NULL,
+    text                TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    PRIMARY KEY (provider, provider_message_id)
+);
+
 CREATE TABLE IF NOT EXISTS channel_cursors (
     provider             TEXT NOT NULL,
     channel_id           TEXT NOT NULL,
@@ -120,9 +133,59 @@ class Database:
         row = await cursor.fetchone()
         return row["last_seen_message_id"] if row else None
 
-    async def record_session(self, event: InboundEvent) -> None:
-        """Ensure the conversation this event belongs to exists."""
+    async def record_message(self, event: InboundEvent) -> None:
+        """Retain a message as conversation context."""
         await self._connection.execute(
+            """
+            INSERT OR IGNORE INTO messages (
+                provider, provider_message_id, conversation_id,
+                author_id, author_name, text, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.provider,
+                event.provider_message_id,
+                event.conversation_id,
+                event.author_id,
+                event.author_name,
+                event.text,
+                event.created_at.isoformat(),
+            ),
+        )
+        await self._connection.commit()
+
+    async def messages(self, conversation_id: str | None = None) -> list[InboundEvent]:
+        sql = "SELECT * FROM messages"
+        params: tuple = ()
+        if conversation_id is not None:
+            sql += " WHERE conversation_id = ?"
+            params = (conversation_id,)
+        cursor = await self._connection.execute(sql + " ORDER BY created_at", params)
+        return [
+            InboundEvent(
+                provider=row["provider"],
+                provider_message_id=row["provider_message_id"],
+                channel_id=row["conversation_id"],
+                thread_id=None,
+                author_id=row["author_id"],
+                author_name=row["author_name"],
+                text=row["text"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                mention_type=None,
+            )
+            for row in await cursor.fetchall()
+        ]
+
+    async def conversation_is_tracked(self, event: InboundEvent) -> bool:
+        cursor = await self._connection.execute(
+            "SELECT 1 FROM sessions WHERE provider = ? AND channel_id = ? AND thread_id = ?",
+            (event.provider, event.channel_id, event.thread_id or ""),
+        )
+        return await cursor.fetchone() is not None
+
+    async def record_session(self, event: InboundEvent) -> bool:
+        """Ensure the conversation exists. True if this created it."""
+        cursor = await self._connection.execute(
             """
             INSERT OR IGNORE INTO sessions (provider, channel_id, thread_id)
             VALUES (?, ?, ?)
@@ -130,6 +193,7 @@ class Database:
             (event.provider, event.channel_id, event.thread_id or ""),
         )
         await self._connection.commit()
+        return cursor.rowcount == 1
 
     async def sessions(self) -> list[Session]:
         cursor = await self._connection.execute(
