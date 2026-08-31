@@ -34,6 +34,7 @@ class Heartbeat:
         keep_model_calls_days: float | None = None,
         liveness: "Liveness | None" = None,
         promotion=None,
+        context_rebuilder=None,
         extra=None,
     ) -> None:
         self._db = db
@@ -44,6 +45,10 @@ class Heartbeat:
         self._keep_days = keep_model_calls_days
         self._liveness = liveness
         self._promotion = promotion
+        #: Rebuilds channel context files, but only when promotion actually
+        #: promoted something — a rebuild on every idle beat would cost a
+        #: summary call for nothing new to say.
+        self._context_rebuilder = context_rebuilder
         self._started = datetime.now(timezone.utc)
         self._last_seen: int | None = None
 
@@ -53,8 +58,17 @@ class Heartbeat:
             await self.beat()
             if self._liveness is not None:
                 await self._liveness.check()
-            if self._promotion is not None:
-                await self._promotion.run_once()
+            await self.promote()
+
+    async def promote(self) -> None:
+        """Run one promotion pass, and rebuild channel context if it changed
+        anything. A tick that promoted nothing rebuilds nothing — a summary
+        call on every idle beat would cost real money for no new context."""
+        if self._promotion is None:
+            return
+        promoted = await self._promotion.run_once()
+        if promoted and self._context_rebuilder is not None:
+            await self._context_rebuilder.rebuild_all()
 
     async def beat(self) -> str:
         # Trimming rides the beat rather than owning a loop: it is one indexed
