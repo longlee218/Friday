@@ -195,6 +195,30 @@ layer exists to prevent, self-inflicted.
 are filtered to `skip` before the model sees them. A rule that important should
 not depend on a classifier having a good day.
 
+## Steps and state
+
+A workflow is an ordered set of named steps. A step takes the state so far, does
+one thing, and hands back what it learned; its result is recorded before the next
+begins, so a restart continues at the first unfinished step rather than paying
+for the finished ones again.
+
+Built here rather than adopted. A graph library was measured at twenty-two extra
+packages, a second HTTP client in the same container, and two of its own tables
+in the one SQLite file, for a feature that is about a hundred lines. **Revisit
+when durable resume spreads past two workflows** — below that the library costs
+more than it saves.
+
+Branching and parallelism are deliberately not part of it: `if` and
+`asyncio.gather` already express both, and a graph that exists to replace them
+puts a language between the author and their own code.
+
+The hard part is neither the state nor the ordering. **A step with a side effect
+can crash after causing it and before recording that it did**, and resuming then
+does it twice. Within this system's own store, a step's result and its effect
+commit together or not at all. Once something has left the process, only an
+idempotency key helps — the same choice the outbox already makes, for the same
+reason.
+
 ## Promoting a workflow
 
 A workflow starts deterministic. It is promoted to something agentic **per task

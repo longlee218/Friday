@@ -6,7 +6,7 @@ against a stand-in sequence, since the real ones are not yet specified.
 
 **Blocked by:** 04, 05
 
-**Status:** superseded
+**Status:** superseded — reopened as 28
 
 - [ ] A stand-in two-step sequence runs to completion and records each step's result before the next begins
 - [ ] Killing the process mid-sequence and restarting resumes at the first unfinished step
@@ -57,3 +57,16 @@ parameters where the next pass will find it.
 
 Reopen this if a step ever becomes expensive enough that re-running it costs more
 than checkpointing it would. Nothing is near that today.
+
+
+## Reopened as ticket 28
+
+Closing this was wrong. The reason given — a planner writes nothing until it
+returns, so there is no position to resume from — holds only while a planner is
+one cheap call. The design has always been that a step may spend five tool calls
+and ten minutes against a log store, and that *is* a position; losing it costs
+money rather than a retry.
+
+What was right in the closure is that the machinery should not be a graph engine.
+Ticket 28 builds the checkpointing this ticket asked for, and explicitly not the
+branching and parallelism, which ordinary Python already expresses.
