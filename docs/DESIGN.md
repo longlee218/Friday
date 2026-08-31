@@ -91,13 +91,24 @@ SQLite, WAL mode, on a named Docker volume. Access is **async** (`aiosqlite` or
 a thread executor) — a blocking DB call on the event loop stalls the Discord
 gateways, which is the dropped-socket failure this design works hard to avoid.
 
+Two kinds of storage share the file and must not be conflated. **Application
+tables** hold this project's domain. **Agent session tables** hold conversation
+history in the shape the Agents SDK's `Session` protocol expects — a transcript
+of an agent's own turns, which is a different thing from a channel transcript of
+many humans.
+
 | Table | Key | Holds |
 | --- | --- | --- |
-| `events` | unique `(provider, provider_message_id)` | every mention incl. skips: text, author, mention type, label, confidence |
-| `sessions` | `(provider, channel_id, thread_id)` | conversation context |
-| `tasks` | → session | work items and their state |
-| `step_runs` | `(task_id, step_name)` | structured output + trimmed transcript per node |
+| `messages` | unique `(provider, provider_message_id)` | every message seen. A non-null `mention_type` marks the ones addressed to us — that column, not a second table, is the triage queue. Carries the triage decision: type, confidence, parameters |
+| `conversations` | `(provider, channel_id, thread_id)` | one exchange on one platform |
+| `tasks` | → conversation | work items, their state, and their approval |
+| `outbox` | → task | outbound intents: conversation, text, sender, reply_to, kind, attempts, last_error |
+| `llm_calls` | → agent run | prompt, output, tool calls and tokens per model call, for the debug view. Trimmed on a retention bound |
 | `memory_staging` | → task | agent-written entries awaiting promotion |
+
+`events` and `messages` were separate tables and are now one. Every in-scope
+mention was written to both, so a column added to one silently went missing from
+the other — which is exactly how `is_own` came to disagree with itself.
 
 Per-channel cursors (`last_seen_message_id`) live in the same DB, so a
 container restart resumes instead of cold-starting. Gateway session state is
@@ -287,11 +298,46 @@ nothing else and does not need to be in the watched channels.
 
 **Everything the outside world sees comes from the user account.**
 
+## Outbound
+
+**A reply is a row, not a call.** Workflows return an outbound intent; the
+Outbox delivers it. Nothing else calls a provider's `send()`.
+
+This exists because deciding what to say and knowing where to put it are
+different jobs, and because everything that can fail has to fail in one place.
+Approval, audit, retry, rate limits and the manual-send list are then all views
+over the same rows.
+
+- **The row is written when the workflow decides**, not when approval arrives.
+  The sender's query joins the task: `WHERE outbox.kind <> 'reply' OR
+  tasks.approved_at IS NOT NULL`. Approval stays a fact about the task; the
+  guard is one query rather than a check each caller must remember.
+- **`kind` decides whether approval is needed** — see CONTEXT.md. Asking for a
+  missing correlationId is the system completing a task's own required
+  parameters, not the agent speaking for the operator, so it does not queue
+  behind a human.
+- **Delivery is at-least-once.** The row is marked sent after the API call, not
+  before. A crash mid-send may post twice; the alternative loses an approved
+  reply silently, and a lost reply is indistinguishable from working correctly.
+- **Retries are bounded**, with backoff, both configured in `config.yaml`. On
+  exhaustion the row goes `failed` and its task to `needs_human`.
+- **A failed row is sent by hand.** The bot DMs it with its text; confirming
+  moves the row to `sent_manually` and resolves the task. The distinction from
+  `failed` is the audit trail: delivered by a human, not abandoned.
+
+Its own delivery included — the approval card is an outbox row with
+`kind = approval_card`. If it were sent directly, a failed approval DM would be
+invisible and the task would wait forever for a decision nobody was asked for.
+
 ## Board — `:8086`
 
-FastAPI, server-rendered HTML, HTMX polling. Read-only: five state columns, plus
-per-provider connection status and last-event timestamp. All interaction happens
-in Discord.
+FastAPI, server-rendered HTML, HTMX polling. **Read-only** — it displays, and
+every action happens in Discord. That is what lets it run without auth.
+
+It is a **debug view**, not a control panel: tasks by state, the live message
+stream, model calls with their prompts and tool calls, outbound rows including
+what failed to send and its text to copy, plus per-provider connection status
+and the time of the last captured event.
 
 ## Ops
 

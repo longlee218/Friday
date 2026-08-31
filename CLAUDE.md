@@ -31,7 +31,32 @@ implemented.
 uv sync                 # create/update .venv from pyproject + uv.lock
 uv run run_agent.py     # run the entrypoint
 uv add <package>        # add a dependency (updates pyproject.toml and uv.lock)
+uv run pytest -q        # the whole suite; -k <expr> for one test
 ```
+
+Persistence is **SQLAlchemy 2.0 async** (`friday/schema.py` holds the mapped
+classes, `friday/db.py` converts them to and from the domain dataclasses) with
+**Alembic** migrations in `migrations/`. `run_agent.py` upgrades to head at
+startup, before anything opens the database.
+
+```bash
+FRIDAY_DB=/tmp/new.db uv run alembic upgrade head          # build a clean db, then
+FRIDAY_DB=/tmp/new.db uv run alembic revision --autogenerate -m "what changed"
+uv run alembic upgrade head                                # apply to the real one
+uv run alembic current                                     # where this db is
+```
+
+**Always autogenerate against a freshly migrated throwaway database, never the
+live one.** `data/friday.db` was built by hand-written DDL before Alembic existed
+and then stamped, so reflecting it yields ~27 cosmetic differences — `TEXT` vs
+`VARCHAR`, `server_default`s the models do not declare, a different column order.
+All are functionally identical in SQLite, and all of them would land in a
+migration that changes nothing.
+
+The database path comes from `config.yaml`, not `alembic.ini` — `FRIDAY_DB`
+overrides it. `tests/test_migrations.py` fails if `schema.py` and the migrations
+stop describing the same database; tests build their schema from the models,
+the service builds it from migrations, and nothing else keeps those in step.
 
 Prefer `uv run ...` over activating the venv manually, and let `uv add` edit
 `pyproject.toml` rather than hand-editing dependencies.
@@ -132,4 +157,7 @@ The five canonical roles, unchanged (`needs-triage`, `needs-info`, `ready-for-ag
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` + `docs/adr/` at the repo root (neither exists yet). See `docs/agents/domain.md`.
+Single-context: **`CONTEXT.md`** at the repo root holds the domain vocabulary —
+Message, Conversation, Task, Triage, Workflow, Harness, Outbound intent, Outbox,
+Approval, Sender, Provider, Sweep. Read it before naming anything. `docs/adr/`
+does not exist yet. See `docs/agents/domain.md`.
