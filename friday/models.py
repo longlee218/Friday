@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 from enum import StrEnum
 
@@ -147,3 +147,25 @@ class Note:
     text: str
     support: int
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCall:
+    """Both sides of one model call.
+
+    Kept because "why did it classify that as an access request?" is always
+    asked after the fact, and a log line answers it while the process is alive
+    and never again.
+    """
+
+    agent: str
+    model: str
+    system_prompt: str
+    prompt: str
+    output: str
+    input_tokens: int
+    output_tokens: int
+    message_id: str | None = None
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )

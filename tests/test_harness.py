@@ -131,3 +131,19 @@ async def test_an_agent_can_be_given_servers_it_did_not_have_to_know_about():
     run = Harness(config=CONFIG, instructions="i", mcp_servers=servers)
 
     assert [s.name for s in run.agent.mcp_servers] == ["loki"]
+
+
+async def test_this_is_the_only_module_that_imports_the_sdk():
+    """Ticket 23's guarantee. Replacing the SDK is a rewrite of this file, and
+    that is only true while nothing else reaches past it — declaring a tool
+    pulls the library in, so a second importer would spread the dependency to
+    every agent written after it."""
+    import subprocess
+
+    allowed = {"friday/harness.py"}
+    hits = subprocess.run(
+        ["grep", "-rlE", r"^\s*(from agents|import agents)\b", "friday/"],
+        capture_output=True, text=True,
+    ).stdout.split()
+
+    assert set(hits) <= allowed, f"unexpected importer: {set(hits) - allowed}"

@@ -12,6 +12,12 @@ Written *after* the second agent existed. One agent is a hypothetical seam, and
 building this against triage alone would have meant guessing at what varies.
 Guardrails and handoffs have somewhere to live here when they are wanted; they
 are not invented ahead of a use.
+
+**This is the only module that imports `agents`.** The SDK is here for speed,
+not for keeps, and that is only true while replacing it means rewriting one
+file. Everything another module needs from it — declaring a tool, the logging
+hook base, an MCP server type — is re-exported below, under a name that does
+not mention the library.
 """
 
 from __future__ import annotations
@@ -21,21 +27,45 @@ from typing import Any
 
 from agents import (
     Agent,
+    AgentHooks,
     ModelSettings,
     OpenAIChatCompletionsModel,
     RunConfig,
+    RunContextWrapper,
     Runner,
+    function_tool,
     set_tracing_disabled,
+)
+from agents.mcp import (
+    MCPServer,
+    MCPServerSse,
+    MCPServerStdio,
+    create_static_tool_filter,
 )
 from openai import AsyncOpenAI
 
 from friday.config import AgentConfig
-from friday.llm_log import LogHooks
 from friday.redact import scrub
 
-__all__ = ["Harness"]
+__all__ = [
+    "Harness",
+    "Hooks",
+    "MCPServer",
+    "MCPServerSse",
+    "MCPServerStdio",
+    "ToolContext",
+    "create_static_tool_filter",
+    "tool",
+]
 
 log = logging.getLogger(__name__)
+
+#: What a tool implementation needs from the SDK, under a name that does not
+#: name it. `tool` decorates a function; `ToolContext` types its first
+#: argument; `Hooks` is the base a logging or tracing hook subclasses.
+tool = function_tool
+ToolContext = RunContextWrapper
+Hooks = AgentHooks
 
 # Tracing is on by default and exports to OpenAI using the same key as model
 # requests. With a third-party provider that leaks both the traffic and the
@@ -98,6 +128,10 @@ class Harness:
         `extra_turns` is for an agent whose answer arrives as a tool call: the
         call and its result are two turns where a written answer is one.
         """
+        # Deferred: `llm_log` reaches `Hooks` through this module, so importing
+        # it at module load time would be a cycle.
+        from friday.llm_log import LogHooks
+
         self.last_error = None
         self.agent.hooks = LogHooks(calls, model=self._config.model)
         try:

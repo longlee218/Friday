@@ -34,10 +34,10 @@ from sqlalchemy.pool import StaticPool
 
 from friday import schema
 from friday.conversation import ConversationId
-from friday.llm_log import ModelCall
 from friday.models import (
     InboundEvent,
     MentionType,
+    ModelCall,
     Note,
     Observation,
     Outbound,

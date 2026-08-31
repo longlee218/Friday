@@ -13,41 +13,16 @@ from __future__ import annotations
 import json
 import logging
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-
-from agents import AgentHooks
-
+from friday.harness import Hooks
+from friday.models import ModelCall
 from friday.redact import scrub
 
-__all__ = ["LogHooks", "ModelCall"]
+__all__ = ["LogHooks"]
 
 log = logging.getLogger("friday.llm")
 
 
-@dataclass(frozen=True, slots=True)
-class ModelCall:
-    """Both sides of one model call.
-
-    Kept because "why did it classify that as an access request?" is always
-    asked after the fact, and a log line answers it while the process is alive
-    and never again.
-    """
-
-    agent: str
-    model: str
-    system_prompt: str
-    prompt: str
-    output: str
-    input_tokens: int
-    output_tokens: int
-    message_id: str | None = None
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
-
-
-class LogHooks(AgentHooks):
+class LogHooks(Hooks):
     """Logs both sides of a call, and hands them to whoever asked for them.
 
     It collects rather than stores: triage performs no writes, so the caller

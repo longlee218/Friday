@@ -17,14 +17,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 
-from agents.mcp import (
+from friday.config import MCPServerConfig
+from friday.harness import (
     MCPServer,
     MCPServerSse,
     MCPServerStdio,
     create_static_tool_filter,
 )
-
-from friday.config import MCPServerConfig
 
 __all__ = ["build"]
 

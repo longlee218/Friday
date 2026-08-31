@@ -5,10 +5,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, fields, replace
 from typing import Any, Literal
 
-from agents import RunContextWrapper, function_tool
-
 from friday.config import AgentConfig
-from friday.harness import Harness
+from friday.harness import Harness, ToolContext, tool
 from friday.models import (
     AccessRequestParams,
     ApiIssueParams,
@@ -79,9 +77,9 @@ and never summarise a field that asks for a literal value.
 Messages about salary, personal matters, or social talk are always skip."""
 
 
-@function_tool
+@tool
 def create_api_issue_task(
-    ctx: RunContextWrapper[_Capture],
+    ctx: ToolContext[_Capture],
     confidence: float,
     summary: str,
     environment: str | None,
@@ -105,9 +103,9 @@ def create_api_issue_task(
     return "recorded"
 
 
-@function_tool
+@tool
 def create_access_request_task(
-    ctx: RunContextWrapper[_Capture],
+    ctx: ToolContext[_Capture],
     confidence: float,
     project: str,
     permission: str,
@@ -129,9 +127,9 @@ def create_access_request_task(
     return "recorded"
 
 
-@function_tool
+@tool
 def create_doc_question_task(
-    ctx: RunContextWrapper[_Capture],
+    ctx: ToolContext[_Capture],
     confidence: float,
     question: str,
     doc_ref: str | None,
@@ -151,8 +149,8 @@ def create_doc_question_task(
     return "recorded"
 
 
-@function_tool
-def skip(ctx: RunContextWrapper[_Capture], confidence: float, reason: str) -> str:
+@tool
+def skip(ctx: ToolContext[_Capture], confidence: float, reason: str) -> str:
     """The message needs no action: social talk, salary, or anything off topic.
 
     Args:
