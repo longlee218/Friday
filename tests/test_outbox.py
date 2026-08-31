@@ -22,8 +22,8 @@ class Sender:
     def __init__(self) -> None:
         self.sent: list[tuple[str, str, str | None]] = []
 
-    async def send(self, conversation, text, *, reply_to=None) -> str:
-        self.sent.append((conversation.target_id, text, reply_to))
+    async def send(self, row) -> str:
+        self.sent.append((row.conversation.target_id, row.text, row.reply_to))
         return f"sent-{len(self.sent)}"
 
 
@@ -32,7 +32,7 @@ class Refusing(Sender):
         super().__init__()
         self._error = error
 
-    async def send(self, conversation, text, *, reply_to=None) -> None:
+    async def send(self, row) -> None:
         raise RuntimeError(self._error)
 
 
@@ -189,3 +189,21 @@ async def test_sending_by_hand_is_recorded_apart_from_abandoning(db):
     await db.mark_outbound_sent_manually(queued.id)
 
     assert (await db.outbound())[0].state == "sent_manually"
+
+
+async def test_approving_a_task_releases_its_reply(db):
+    """The whole point of the join: approval is recorded on the task, and the
+    reply becomes sendable without anything having to remember it was waiting."""
+    opened = await task(db)
+    await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
+        sender="discord_user", text="cho anh xin correlationId",
+    )
+    sender = Sender()
+
+    assert await outbox(db, sender).run_once() == []
+
+    await db.approve_task(opened.id, by="longle_")
+    await outbox(db, sender).run_once()
+
+    assert [text for _, text, _ in sender.sent] == ["cho anh xin correlationId"]

@@ -11,13 +11,14 @@ from friday.models import Task
 from friday.outbox import Kind
 from friday.workflows import PARAMS, Action, Ask, Park, plan
 
-__all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "WorkflowRunner"]
+__all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "REVIEW", "WorkflowRunner"]
 
 log = logging.getLogger(__name__)
 
 PENDING = TaskState.PENDING
 ASKED = TaskState.WAITING_FOR_DETAILS
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN
+REVIEW = TaskState.REVIEW
 
 
 class WorkflowRunner:
@@ -42,6 +43,9 @@ class WorkflowRunner:
         tone_examples: int = 8,
         max_asks: int = 3,
         sender: str = "discord_user",
+        #: Which identity asks. Not the one that speaks: buttons are an
+        #: application-only feature, so the question goes out as the bot.
+        approver: str = "discord_bot",
         batch_size: int = 20,
     ) -> None:
         self._db = db
@@ -50,6 +54,7 @@ class WorkflowRunner:
         self._tone_examples = tone_examples
         self._max_asks = max_asks
         self._sender = sender
+        self._approver = approver
         self._batch_size = batch_size
 
     async def run_forever(self, poll_interval_seconds: float = 2.0) -> None:
@@ -87,6 +92,20 @@ class WorkflowRunner:
                 reply_to=await self._db.last_mention_in(task.conversation),
             )
             log.info("task %d: queued a %s — %r", task.id, kind, text)
+            if kind is Kind.REPLY:
+                # Nobody has been asked yet, and a draft nobody was asked about
+                # waits forever. The card is an outbound row like any other, so
+                # a card that fails to send shows up rather than going quiet.
+                await self._db.queue_outbound(
+                    task_id=task.id,
+                    conversation=task.conversation,
+                    kind=Kind.APPROVAL_CARD,
+                    sender=self._approver,
+                    text=text,
+                )
+                # Waiting on the operator, not on the reporter. Different
+                # people, different columns, different thing to chase.
+                return await self._move(task, REVIEW)
             return await self._move(task, ASKED)
 
         if isinstance(action, Ask):

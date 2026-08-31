@@ -43,6 +43,9 @@ agents:
 
 # ── Workflows ──────────────────────────────────────────────────────────────
 # How often to say the process is alive and what it is holding.
+# Who is asked to approve a reply, by direct message from the bot.
+operator_id: 482447107983147039
+
 # The read-only debug view. It shows every captured message and every model
 # prompt and has no authentication, so it stays on loopback unless BOARD_TOKEN
 # is set.

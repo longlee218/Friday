@@ -110,10 +110,11 @@ async def test_a_drafted_reply_waits_for_approval(db):
 
     await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
 
-    (queued,) = await db.outbound()
-    assert queued.kind == "reply"
-    assert queued.text == "cho anh xin cái correlationId với"
-    assert await db.sendable_outbound() == []
+    reply, card = await db.outbound()
+    assert reply.kind == "reply"
+    assert reply.text == "cho anh xin cái correlationId với"
+    # Only the question is sendable. The reply itself waits to be answered.
+    assert [r.kind for r in await db.sendable_outbound()] == ["approval_card"]
 
 
 async def test_the_responder_is_told_what_to_say(db):
@@ -142,3 +143,49 @@ async def test_without_a_responder_nothing_changes(db):
     await WorkflowRunner(db=db, auto_ask=True).run_once()
 
     assert (await db.outbound())[0].kind == "ask_for_details"
+
+
+async def test_a_draft_comes_with_a_card_asking_about_it(db):
+    """A draft nobody was asked about waits forever. The card is itself an
+    outbound row, so a card that fails to send is visible rather than silent."""
+    await make_task(db)
+
+    await WorkflowRunner(
+        db=db, auto_ask=True, responder=StubResponder("cho anh xin correlationId")
+    ).run_once()
+
+    kinds = [r.kind for r in await db.outbound()]
+    assert kinds == ["reply", "approval_card"]
+
+    card = (await db.outbound())[1]
+    assert card.sender == "discord_bot"
+    assert card.text == "cho anh xin correlationId"
+    assert await db.sendable_outbound() == [card]  # the card goes; the reply waits
+
+
+async def test_no_card_when_there_is_nothing_to_approve(db):
+    await make_task(db)
+
+    await WorkflowRunner(db=db, auto_ask=True).run_once()
+
+    assert [r.kind for r in await db.outbound()] == ["ask_for_details"]
+
+
+async def test_a_task_waiting_on_approval_is_in_review(db):
+    """`waiting_for_details` means waiting on the reporter. This is waiting on
+    the operator, which is a different thing and its own column on the board."""
+    await make_task(db)
+
+    acted = await WorkflowRunner(
+        db=db, auto_ask=True, responder=StubResponder("cho anh xin correlationId")
+    ).run_once()
+
+    assert acted[0].state == "review"
+
+
+async def test_a_task_waiting_on_the_reporter_still_is(db):
+    await make_task(db)
+
+    acted = await WorkflowRunner(db=db, auto_ask=True).run_once()
+
+    assert acted[0].state == ASKED

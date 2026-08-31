@@ -21,7 +21,9 @@ from friday.redact import Redacting
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
 from friday.providers.discord import DiscordUserProvider
+from friday.providers.discord.bot import DiscordBot
 from friday.responder import Responder
+from friday.tasks import TaskState
 from friday.triage import Triage
 from friday.triage.runner import TriageRunner
 from friday.workflows.runner import WorkflowRunner
@@ -29,13 +31,10 @@ from friday.workflows.runner import WorkflowRunner
 log = logging.getLogger("friday")
 
 
-async def ingest(inbox: Inbox, provider, smoke: bool) -> None:
+async def ingest(inbox: Inbox) -> None:
     """Capture mentions. Never waits on anything slow."""
-    async for event in inbox.stream():
-        # Temporary end-to-end check that outbound works. Ticket 06 replaces
-        # this with the real path, where nothing posts without approval.
-        if smoke and "hi there" in event.text.lower():
-            await provider.reply(event, "What'sapp")
+    async for _ in inbox.stream():
+        pass
 
 
 async def serve_board(db, provider, config, sock) -> None:
@@ -116,12 +115,42 @@ async def run() -> None:
             "responder on %s — its drafts need approval before they go out",
             responder_config.model,
         )
+    async def decided(*, task_id: int, approved: bool, by: str) -> None:
+        """What a button press means.
+
+        Approving records who and when on the task, which is the only thing
+        standing between a queued reply and the channel — the outbox selects on
+        it, so nothing has to remember the reply was waiting.
+        """
+        if approved:
+            await db.approve_task(task_id, by=by)
+            log.info("task %d approved by %s", task_id, by)
+            return
+        await db.move_task(task_id, TaskState.NEEDS_HUMAN)
+        log.info("task %d rejected by %s", task_id, by)
+
+    bot_token = os.environ.get("DISCORD_BOT_TOKEN")
+    bot = (
+        DiscordBot(bot_token, operator_id=config.operator_id, on_decision=decided)
+        if bot_token and config.operator_id
+        else None
+    )
+    if bot is None:
+        log.warning(
+            "no approval path: set DISCORD_BOT_TOKEN and operator_id, or drafts "
+            "will queue and never be asked about"
+        )
+
+    senders = {"discord_user": provider}
+    if bot is not None:
+        senders["discord_bot"] = bot
+
     outbox = Outbox(
         db=db,
         # A conversation names a platform; a sender names an identity. Both
         # Discord clients speak into the same conversations, so these are two
         # different namespaces and the registry keys on the second.
-        senders={"discord_user": provider},
+        senders=senders,
         max_attempts=config.outbox.max_attempts,
         backoff_seconds=config.outbox.backoff_seconds,
     )
@@ -167,12 +196,12 @@ async def run() -> None:
     # consumer, which is the exact failure the recovery layer exists to prevent.
     try:
         async with asyncio.TaskGroup() as group:
-            group.create_task(
-                ingest(inbox, provider, os.environ.get("SMOKE_ECHO") == "1")
-            )
+            group.create_task(ingest(inbox))
             group.create_task(runner.run_forever())
             group.create_task(workflows.run_forever())
             group.create_task(outbox.run_forever())
+            if bot is not None:
+                group.create_task(bot.start())
             group.create_task(heartbeat.run_forever())
             group.create_task(serve_board(db, provider, config, board_socket))
     except* CredentialRejected as group_exc:

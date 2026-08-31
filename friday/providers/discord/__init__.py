@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 import discord_self
 
 from friday.conversation import ConversationId
-from friday.models import InboundEvent
+from friday.models import InboundEvent, Outbound
 from friday.providers import CredentialRejected
 from friday.providers.discord.normalise import normalise
 
@@ -136,36 +136,26 @@ class DiscordUserProvider:
             self._client.fetch_channel(target)
         )
 
-    async def reply(self, event: InboundEvent, text: str) -> None:
-        """Post a message back into the conversation the event came from.
-
-        Sends as the watched account. Ticket 06 puts the approval gate in front
-        of this; until then nothing but the smoke test should call it.
-        """
-        await self.send(event.conversation, text)
-
-    async def send(
-        self, conversation: ConversationId, text: str, *, reply_to: str | None = None
-    ) -> str:
+    async def send(self, row: Outbound) -> str:
         """Post into a conversation, as the watched account.
 
         `reply_to` hangs the message under the one it answers, which is what
         keeps a busy channel readable. `fail_if_not_exists=False` so a deleted
         message degrades to a plain post rather than losing the reply.
         """
-        channel = await self._channel(int(conversation.target_id))
+        channel = await self._channel(int(row.conversation.target_id))
         reference = (
             discord_self.MessageReference(
-                message_id=int(reply_to),
+                message_id=int(row.reply_to),
                 channel_id=channel.id,
                 fail_if_not_exists=False,
             )
-            if reply_to is not None
+            if row.reply_to is not None
             else None
         )
-        # The id comes back so the outbox can recognise this message when
-        # the gateway delivers it to us as one of our own.
-        return str((await channel.send(text, reference=reference)).id)
+        # The id comes back so the outbox can recognise this message when the
+        # gateway delivers it to us as one of our own.
+        return str((await channel.send(row.text, reference=reference)).id)
 
     async def stream(self) -> AsyncIterator[InboundEvent]:
         """Connect, then yield every message the account can see.

@@ -94,6 +94,9 @@ class Config:
     #: How often to say the process is alive and what it is holding. A
     #: working agent on a quiet day is otherwise indistinguishable from a
     #: dead one.
+    #: Who is asked to approve a reply. The bot direct-messages them; it
+    #: needs no shared server, verified against the live account.
+    operator_id: int = 0
     #: The read-only debug view. Loopback by default: it shows every
     #: captured message and model prompt, and has no authentication.
     board_host: str = "127.0.0.1"
@@ -133,6 +136,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
                 (raw.get("outbox") or {}).get("backoff_seconds", 30.0)
             ),
         ),
+        operator_id=int(raw.get("operator_id", 0)),
         board_host=str(raw.get("board_host", "127.0.0.1")),
         board_port=int(raw.get("board_port", 8086)),
         board_origins=tuple(raw.get("board_origins") or ()),

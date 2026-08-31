@@ -88,9 +88,7 @@ class Outbox:
             await self._give_up(row, f"no sender named {row.sender!r}")
             return
         try:
-            sent = await sender.send(
-                row.conversation, row.text, reply_to=row.reply_to
-            )
+            sent = await sender.send(row)
         except Exception as exc:  # noqa: BLE001 - every failure is recorded
             await self._retry_or_give_up(row, exc)
             return
