@@ -54,6 +54,10 @@ class AgentConfig:
     model: str
     settings: dict[str, Any] = field(default_factory=dict)
     max_turns: int = 1
+    #: How much room this model has, in tokens. Providers vary, so this
+    #: cannot be hardcoded — it decides when a conversation has grown large
+    #: enough that summarising it costs less than passing it raw.
+    context_window: int = 128_000
     #: Step-specific knobs the model layer does not care about, e.g. the
     #: confidence threshold for triage or the tone-example count for the
     #: responder.
@@ -104,12 +108,24 @@ class OutboxConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ContextConfig:
+    """Where a channel's knowledge lives, and when it is worth summarising."""
+
+    directory: str = "context"
+    #: What share of the model's context window a conversation has to reach
+    #: before a summary is worth a model call. Below it, the raw messages are
+    #: cheaper than summarising them.
+    summary_share: float = 0.5
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     database_path: str
     ingest: IngestConfig
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     workflows: WorkflowConfig = field(default_factory=WorkflowConfig)
     outbox: OutboxConfig = field(default_factory=OutboxConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
     mcp_servers: tuple[MCPServerConfig, ...] = ()
     #: How often to say the process is alive and what it is holding. A
     #: working agent on a quiet day is otherwise indistinguishable from a
@@ -163,6 +179,12 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             max_attempts=int((raw.get("outbox") or {}).get("max_attempts", 3)),
             backoff_seconds=float(
                 (raw.get("outbox") or {}).get("backoff_seconds", 30.0)
+            ),
+        ),
+        context=ContextConfig(
+            directory=str((raw.get("context") or {}).get("directory", "context")),
+            summary_share=float(
+                (raw.get("context") or {}).get("summary_share", 0.5)
             ),
         ),
         operator_id=int(raw.get("operator_id", 0)),
@@ -242,6 +264,7 @@ def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
             model=spec.pop("model"),
             settings=spec.pop("settings", None) or {},
             max_turns=int(spec.pop("max_turns", 1)),
+            context_window=int(spec.pop("context_window", 128_000)),
             options=spec,  # whatever is left is step-specific
         )
     return agents

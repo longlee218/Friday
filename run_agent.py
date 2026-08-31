@@ -12,6 +12,7 @@ from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
 
+from friday.channel_context import ContextRebuilder, ContextStore
 from friday.config import ConfigError, load_config
 from friday.db import Database
 from friday.harness import Harness
@@ -91,6 +92,11 @@ async def _run(stack: AsyncExitStack) -> None:
         raise SystemExit("No 'triage' agent in config.yaml — see the agents section.")
 
     db = await Database.connect(config.database_path)
+
+    context_store = ContextStore(config.context.directory)
+    for problem in context_store.validate_all():
+        log.warning("channel context file could not be read — %s", problem)
+
     provider = DiscordUserProvider(token=token)
     inbox = Inbox(provider=provider, db=db, config=config.ingest)
     runner = TriageRunner(
@@ -102,9 +108,10 @@ async def _run(stack: AsyncExitStack) -> None:
         context_messages=config.ingest.context_messages,
     )
 
+    promotion = Promotion(db=db)
     # Read once, at build time: a promotion takes effect on the next start
     # rather than invalidating a warm prompt cache mid-run.
-    learned = await Promotion(db=db).render()
+    learned = await promotion.render()
 
     responder_config = config.agents.get("responder")
     responder = (
@@ -196,7 +203,14 @@ async def _run(stack: AsyncExitStack) -> None:
     heartbeat = Heartbeat(
         db=db,
         liveness=liveness,
-        promotion=Promotion(db=db),
+        promotion=promotion,
+        context_rebuilder=ContextRebuilder(
+            store=context_store,
+            db=db,
+            promotion=promotion,
+            summary_config=config.agents.get("summary"),
+            summary_share=config.context.summary_share,
+        ),
         interval_seconds=config.heartbeat_seconds,
         keep_model_calls_days=config.keep_model_calls_days,
         extra=inbox.tally,
