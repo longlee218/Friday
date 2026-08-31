@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from friday.config import ConfigError, load_config
 from friday.db import Database
 from friday.inbox import Inbox
+from friday.liveness import Heartbeat
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
 from friday.providers.discord import DiscordUserProvider
@@ -27,13 +28,6 @@ log = logging.getLogger("friday")
 async def ingest(inbox: Inbox, provider, smoke: bool) -> None:
     """Capture mentions. Never waits on anything slow."""
     async for event in inbox.stream():
-        log.info(
-            "captured %s from %s in %s: %s",
-            event.mention_type,
-            event.author_name,
-            event.channel_id,
-            event.text,
-        )
         # Temporary end-to-end check that outbound works. Ticket 06 replaces
         # this with the real path, where nothing posts without approval.
         if smoke and "hi there" in event.text.lower():
@@ -69,6 +63,7 @@ async def run() -> None:
     workflows = WorkflowRunner(
         db=db,
         auto_ask=config.workflows.auto_ask_for_details,
+        max_asks=config.workflows.max_asks,
     )
     outbox = Outbox(
         db=db,
@@ -78,6 +73,11 @@ async def run() -> None:
         senders={"discord_user": provider},
         max_attempts=config.outbox.max_attempts,
         backoff_seconds=config.outbox.backoff_seconds,
+    )
+    heartbeat = Heartbeat(
+        db=db,
+        interval_seconds=config.heartbeat_seconds,
+        extra=inbox.tally,
     )
 
     if config.workflows.auto_ask_for_details:
@@ -91,11 +91,20 @@ async def run() -> None:
             "agent can reply, or it will answer itself"
         )
     log.info(
-        "watching %d channel(s) for %s | triage on %s",
+        "watching %d channel(s) for %s | triage on %s via %s",
         len(config.ingest.watched_channels),
         ", ".join(sorted(config.ingest.mention_types)),
         triage_config.model,
+        triage_config.base_url,
     )
+    for channel_id in sorted(config.ingest.watched_channels):
+        log.info(
+            "  channel %s — read up to %s",
+            channel_id,
+            await db.cursor_for(provider.name, channel_id) or "(nothing yet)",
+        )
+    # What is already in flight, so a restart does not look like a fresh start.
+    log.info("picking up: %s", await heartbeat.summary())
 
     # Four independent loops. Nothing that can block belongs in the one that
     # reads the gateway: a model call or a rate-limited send would stall the
@@ -108,6 +117,7 @@ async def run() -> None:
             group.create_task(runner.run_forever())
             group.create_task(workflows.run_forever())
             group.create_task(outbox.run_forever())
+            group.create_task(heartbeat.run_forever())
     except* CredentialRejected as group_exc:
         raise SystemExit(
             f"Discord rejected the credential: {group_exc.exceptions[0]}"

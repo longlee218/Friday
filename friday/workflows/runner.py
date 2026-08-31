@@ -38,11 +38,13 @@ class WorkflowRunner:
         *,
         db: Database,
         auto_ask: bool,
+        max_asks: int = 3,
         sender: str = "discord_user",
         batch_size: int = 20,
     ) -> None:
         self._db = db
         self._auto_ask = auto_ask
+        self._max_asks = max_asks
         self._sender = sender
         self._batch_size = batch_size
 
@@ -59,6 +61,16 @@ class WorkflowRunner:
 
     async def _act(self, task: Task) -> Task:
         action = self._plan(task)
+
+        if isinstance(action, Ask):
+            asked = await self._db.outbound_count(task.id, kind=Kind.ASK_FOR_DETAILS)
+            if asked >= self._max_asks:
+                log.info(
+                    "task %d: asked %d times without an answer — a human's now",
+                    task.id,
+                    asked,
+                )
+                return await self._move(task, NEEDS_HUMAN)
 
         if isinstance(action, Ask) and self._auto_ask:
             await self._db.queue_outbound(

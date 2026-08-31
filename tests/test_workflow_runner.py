@@ -73,3 +73,17 @@ async def test_types_without_a_workflow_wait_for_a_human(db):
 
     assert await db.outbound() == []
     assert (await db.tasks())[0].state == "needs_human"
+
+
+async def test_a_task_stops_being_asked_after_a_few_tries(db):
+    """Asking forever is how a helpful question becomes noise. After the bound
+    it becomes a human's problem, which is what a human is for."""
+    opened = await make_task(db)
+    runner = WorkflowRunner(db=db, auto_ask=True, max_asks=2)
+
+    for _ in range(3):
+        await db.set_task_state(opened.id, "pending")
+        await runner.run_once()
+
+    assert len(await db.outbound()) == 2
+    assert (await db.tasks())[0].state == "needs_human"

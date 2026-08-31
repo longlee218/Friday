@@ -28,6 +28,13 @@ class Inbox:
         self._provider = provider
         self._db = db
         self._config = config
+        #: What has arrived and what became of it. Read by the heartbeat: a
+        #: message that is dropped leaves no row anywhere, so without this the
+        #: difference between "nothing arrived" and "everything was out of
+        #: scope" is invisible — and they need completely different fixes.
+        self.seen = 0
+        self.kept = 0
+        self.dropped: dict[str, int] = {}
 
     async def stream(self) -> AsyncIterator[InboundEvent]:
         """Yield in-scope mentions, each exactly once, already persisted.
@@ -117,24 +124,50 @@ class Inbox:
             log.info("sweep recovered %d missed message(s)", len(recovered))
         return recovered
 
+    def tally(self) -> str:
+        """One line: what arrived, and why most of it did not stay."""
+        dropped = ", ".join(
+            f"{n} {reason}" for reason, n in sorted(self.dropped.items())
+        )
+        return f"gateway {self.seen} seen, {self.kept} kept" + (
+            f", dropped: {dropped}" if dropped else ""
+        )
+
     async def _accept(self, event: InboundEvent) -> InboundEvent | None:
         """Both delivery paths converge here. None means it was not kept."""
+        self.seen += 1
         # Advance before scoping: the cursor records what we have *looked at*,
         # so the sweep does not re-fetch traffic we already dropped.
         await self._db.advance_cursor(event)
         reason = self._out_of_scope_reason(event)
         if reason:
+            self.dropped[reason] = self.dropped.get(reason, 0) + 1
             # Not for us — but if this conversation has already asked us for
             # something, the surrounding talk is what makes the next mention
             # readable.
             if await self._db.conversation_is_tracked(event):
                 await self._db.record_message(event, context_only=True)
-            log.debug("dropped %s: %s", event.provider_message_id, reason)
+            log.debug(
+                "dropped %s from %s: %s — %r",
+                event.provider_message_id,
+                event.author_name,
+                reason,
+                event.text[:80],
+            )
             return None
         if not await self._db.record_message(event):
             return None  # already seen on the other delivery path
         if await self._db.record_conversation(event):
             await self._seed_context(event)
+        self.kept += 1
+        log.info(
+            "kept %s (%s) from %s in %s: %r",
+            event.provider_message_id,
+            event.mention_type,
+            event.author_name,
+            event.conversation,
+            event.text[:120],
+        )
         return event
 
     async def _seed_context(self, event: InboundEvent) -> None:

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Integer, cast, event, or_, select, update
+from sqlalchemy import Integer, cast, event, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -357,6 +357,19 @@ class Database:
         async with self._sessions() as session:
             rows = await session.scalars(query.order_by(schema.Outbound.id))
             return [_outbound(row) for row in rows]
+
+    async def outbound_count(self, task_id: int, *, kind: str) -> int:
+        """How many of one kind we have already sent about a task — which is
+        what bounds asking the same question."""
+        async with self._sessions() as session:
+            return await session.scalar(
+                select(func.count())
+                .select_from(schema.Outbound)
+                .where(
+                    schema.Outbound.task_id == task_id,
+                    schema.Outbound.kind == str(kind),
+                )
+            )
 
     async def _set_outbound(self, outbound_id: int, **values) -> None:
         async with self._sessions.begin() as session:

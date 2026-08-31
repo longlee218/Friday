@@ -142,15 +142,24 @@ class TriageRunner:
         # re-ask the same question for the rest of the conversation.
         gained = [k for k, v in fresh.items() if not task.params.get(k)]
         merged = {**task.params, **fresh}
-        if not gained:
-            log.debug("task %d: follow-up added no missing detail", task.id)
-            if merged == task.params:
-                return task
+        if merged != task.params:
             await self._db.set_task_params(task.id, merged)
-            return replace(task, params=merged)
+            task = replace(task, params=merged)
+        if not gained:
+            # Still missing what it was waiting for. Send it back to be
+            # re-planned rather than absorbing the message in silence: the
+            # reporter answered, we still cannot act, and they need to be told
+            # that again. The workflow bounds how often that happens.
+            log.info(
+                "task %d: follow-up still has no %s — re-planning",
+                task.id,
+                " or ".join(k for k, v in task.params.items() if not v) or "detail",
+            )
+            if task.state == ASKED:
+                await self._db.set_task_state(task.id, PENDING)
+                return replace(task, state=PENDING)
+            return task
 
-        await self._db.set_task_params(task.id, merged)
-        task = replace(task, params=merged)
         log.info("task %d: follow-up supplied %s", task.id, ", ".join(gained))
         if task.state == ASKED:
             await self._db.set_task_state(task.id, PENDING)

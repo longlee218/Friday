@@ -62,6 +62,9 @@ class AgentConfig:
 
 @dataclass(frozen=True, slots=True)
 class WorkflowConfig:
+    #: How many times to ask for the same missing detail before handing the
+    #: task to a person. Asking forever is how a helpful question becomes noise.
+    max_asks: int = 3
     #: Send the "which environment / correlationId?" question without waiting
     #: for approval. The only reply allowed out unreviewed: it is the same
     #: question every time, and a wrong classification costs the reporter one
@@ -85,6 +88,10 @@ class Config:
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     workflows: WorkflowConfig = field(default_factory=WorkflowConfig)
     outbox: OutboxConfig = field(default_factory=OutboxConfig)
+    #: How often to say the process is alive and what it is holding. A
+    #: working agent on a quiet day is otherwise indistinguishable from a
+    #: dead one.
+    heartbeat_seconds: float = 60.0
 
 
 def load_config(path: Path | str = DEFAULT_PATH) -> Config:
@@ -100,9 +107,10 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
     return Config(
         agents=_agents(_expand(raw.get("agents") or {})),
         workflows=WorkflowConfig(
+            max_asks=int((raw.get("workflows") or {}).get("max_asks", 3)),
             auto_ask_for_details=bool(
                 (raw.get("workflows") or {}).get("auto_ask_for_details", False)
-            )
+            ),
         ),
         outbox=OutboxConfig(
             max_attempts=int((raw.get("outbox") or {}).get("max_attempts", 3)),
@@ -110,6 +118,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
                 (raw.get("outbox") or {}).get("backoff_seconds", 30.0)
             ),
         ),
+        heartbeat_seconds=float(raw.get("heartbeat_seconds", 60.0)),
         database_path=raw.get("database_path", "./data/friday.db"),
         ingest=IngestConfig(
             # Coerced to str: an unquoted id in YAML parses as an int and

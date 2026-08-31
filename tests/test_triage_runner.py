@@ -159,23 +159,6 @@ async def test_a_follow_up_merges_new_details_into_the_open_task(inbox, provider
     assert task.params["environment"] == "production"
     assert task.state == "pending"  # re-planned now that it can be traced
 
-
-async def test_a_follow_up_that_adds_nothing_leaves_the_task_waiting(
-    inbox, provider, db
-):
-    """Otherwise every "any update?" re-asks the same question."""
-    provider.emit(make_event(message_id="10"))
-    await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
-    await db.set_task_state((await db.tasks())[0].id, "waiting_for_details")
-
-    provider.emit(make_event(message_id="20", text="it is still slow"))
-    await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
-
-    assert (await db.tasks())[0].state == "waiting_for_details"
-
-
 async def test_a_skip_is_still_recorded_as_a_decision(inbox, provider, db):
     """A skip creates no task, so without this the decision leaves no trace and
     the confidence threshold can never be checked against real messages."""
@@ -225,3 +208,19 @@ async def test_an_escalation_is_recorded_as_a_decision(inbox, provider, db):
     (decision,) = await db.decisions()
     assert decision["type"] == "needs_human"
     assert "model exploded" in decision["params"]["reason"]
+
+
+async def test_a_follow_up_without_the_details_asks_again(inbox, provider, db):
+    """A task waiting for a correlationId that gets another message without one
+    still needs it. Staying silent leaves the reporter thinking they were
+    heard."""
+    provider.emit(make_event(message_id="10"))
+    await captured(inbox)
+    await runner(db, StubTriage(api_issue())).run_once()
+    await db.set_task_state((await db.tasks())[0].id, "waiting_for_details")
+
+    provider.emit(make_event(message_id="20", text="it is still slow"))
+    await captured(inbox)
+    await runner(db, StubTriage(api_issue())).run_once()
+
+    assert (await db.tasks())[0].state == "pending"  # the workflow will re-ask
