@@ -208,3 +208,25 @@ async def test_it_asks_again_once_the_burst_has_passed(db):
     await runner.run_once()
 
     assert len([r for r in await db.outbound() if r.kind == "ask_for_details"]) == 2
+
+
+async def test_an_answer_from_a_workflow_waits_for_approval(db):
+    """This is the producer the approval path never had. A workflow that can
+    actually answer something says so, and the operator decides whether it goes
+    out under their name."""
+    from friday.workflows import Reply
+
+    async def answers(params, agent):
+        return Reply("cache đầy thôi, anh clear rồi nhé")
+
+    await make_task(db, correlation_id="abc-123")
+    runner = WorkflowRunner(db=db, auto_ask=True, planners={"api_issue": answers})
+
+    acted = await runner.run_once()
+
+    reply, card = await db.outbound()
+    assert reply.kind == "reply"
+    assert reply.text == "cache đầy thôi, anh clear rồi nhé"
+    # Only the question is sendable; the answer waits to be answered.
+    assert [r.kind for r in await db.sendable_outbound()] == ["approval_card"]
+    assert acted[0].state == "review"

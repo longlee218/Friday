@@ -44,9 +44,17 @@ parameters — and writes nothing. Every message gets exactly one of two outcome
 
 ## Workflow
 
-What to do about a task, as ordinary branching Python. Returns an **action**,
-never a side effect. Deterministic first; promoted to something agentic per task
-type only once the deterministic one has proven itself.
+What to do about a task. Returns an **action** — `Ask`, `Reply` or `Park` —
+never a side effect.
+
+A planner is a function of the task's parameters. The deterministic ones are
+pure and stay that way; one that has to look something up is handed a
+**harness** and may be a coroutine. That is where a workflow becomes agentic,
+per task type and on evidence, rather than everywhere at once.
+
+`Ask` is the agent's own decision. `Reply` waits for approval — asking for a
+correlationId costs a question if it is wrong, and asserting a cause costs the
+operator's credibility with their own team.
 
 One rule holds for every type: **a task missing something it cannot work
 without has to say so.** Required-ness is read off the parameter type —

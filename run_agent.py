@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from friday.config import ConfigError, load_config
 from friday.db import Database
+from friday.harness import Harness
 from friday.inbox import Inbox
 from friday.api import bind, build_api, check_exposure
 from friday.board import build_board
@@ -106,8 +107,21 @@ async def _run(stack: AsyncExitStack) -> None:
         if config.workflows.use_responder and responder_config
         else None
     )
+    # A harness for workflow steps that need to look something up. Built only
+    # if configured: a workflow that decides by branching needs none.
+    workflow_config = config.agents.get("workflow")
+    workflow_agent = (
+        Harness(
+            config=workflow_config,
+            instructions=workflow_config.options.get("instructions", ""),
+            mcp_servers=servers,
+        )
+        if workflow_config
+        else None
+    )
     workflows = WorkflowRunner(
         db=db,
+        agent=workflow_agent,
         auto_ask=config.workflows.auto_ask_for_details,
         responder=responder,
         tone_examples=int(

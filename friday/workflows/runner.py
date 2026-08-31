@@ -10,7 +10,7 @@ from friday.db import Database
 from friday.tasks import TaskState
 from friday.models import Task
 from friday.outbox import Kind
-from friday.workflows import PARAMS, Action, Ask, Park, plan
+from friday.workflows import PARAMS, Action, Ask, Park, Reply, plan
 
 __all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "REVIEW", "WorkflowRunner"]
 
@@ -41,6 +41,10 @@ class WorkflowRunner:
         db: Database,
         auto_ask: bool,
         responder=None,
+        #: Handed to a planner that needs to look something up.
+        agent=None,
+        #: Overrides the registry — a step can be tried before it is registered.
+        planners: dict | None = None,
         tone_examples: int = 8,
         max_asks: int = 3,
         #: How long to let a burst settle. Three messages in ten seconds
@@ -56,6 +60,8 @@ class WorkflowRunner:
         self._db = db
         self._auto_ask = auto_ask
         self._responder = responder
+        self._agent = agent
+        self._planners = planners
         self._tone_examples = tone_examples
         self._max_asks = max_asks
         self._debounce = debounce_seconds
@@ -95,7 +101,10 @@ class WorkflowRunner:
             log.info("task %d: asked the operator to look", task.id)
 
     async def _act(self, task: Task) -> Task:
-        action = self._plan(task)
+        action = await self._plan(task)
+
+        if isinstance(action, Reply):
+            return await self._propose(task, action.text)
 
         if isinstance(action, Ask):
             if await self._too_soon(task):
@@ -127,6 +136,32 @@ class WorkflowRunner:
         else:
             log.info("task %d: %s", task.id, action.reason)
         return await self._move(task, NEEDS_HUMAN)
+
+    async def _propose(self, task: Task, text: str) -> Task:
+        """An answer, and the question that asks whether to send it.
+
+        Both are rows, so a card nobody could deliver shows up rather than
+        leaving an answer waiting for a decision nobody was asked for.
+        """
+        await self._db.queue_outbound(
+            task_id=task.id,
+            conversation=task.conversation,
+            kind=Kind.REPLY,
+            sender=self._sender,
+            text=text,
+            reply_to=await self._db.last_mention_in(task.conversation),
+        )
+        await self._db.queue_outbound(
+            task_id=task.id,
+            conversation=task.conversation,
+            kind=Kind.APPROVAL_CARD,
+            sender=self._approver,
+            text=text,
+        )
+        log.info("task %d: proposed an answer — %r", task.id, text)
+        # Waiting on the operator, not on the reporter. Different people,
+        # different columns, different thing to chase.
+        return await self._move(task, REVIEW)
 
     async def _too_soon(self, task: Task) -> bool:
         """Let a burst settle before answering it.
@@ -167,12 +202,17 @@ class WorkflowRunner:
         )
         return template if draft is None else draft.text
 
-    def _plan(self, task: Task) -> Action:
+    async def _plan(self, task: Task) -> Action:
         params = PARAMS.get(task.type)
         if params is None:
             return Park(f"unknown task type {task.type!r}")
         try:
-            return plan(task.type, params(**task.params))
+            return await plan(
+                task.type,
+                params(**task.params),
+                agent=self._agent,
+                planners=self._planners,
+            )
         except TypeError as exc:
             # Stored parameters that no longer fit their type — a schema change
             # landing on rows written before it. Work, not a crash.

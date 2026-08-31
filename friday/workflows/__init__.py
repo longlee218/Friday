@@ -8,6 +8,7 @@ has proven itself.
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, fields
 from typing import get_args, get_type_hints
 
@@ -18,12 +19,24 @@ from friday.models import (
     Params,
 )
 
-__all__ = ["Action", "Ask", "Park", "PARAMS", "plan", "plan_api_issue"]
+__all__ = ["Action", "Ask", "PARAMS", "Park", "Reply", "plan", "plan_api_issue"]
 
 
 @dataclass(frozen=True, slots=True)
 class Ask:
     """Ask the reporter for something. The text is ready to send."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class Reply:
+    """An answer. Unlike an `Ask`, this waits for approval.
+
+    The asymmetry is the point: asking for a correlationId costs a question if
+    it is wrong, and asserting a cause costs the operator's credibility with
+    their own team.
+    """
 
     text: str
 
@@ -35,7 +48,7 @@ class Park:
     reason: str
 
 
-Action = Ask | Park
+Action = Ask | Reply | Park
 
 
 def plan_api_issue(params: ApiIssueParams) -> Action:
@@ -81,18 +94,31 @@ _ASKED_AS = {
 }
 
 
-def plan(task_type: str, params: Params) -> Action:
+async def plan(
+    task_type: str,
+    params: Params,
+    *,
+    agent=None,
+    planners: dict | None = None,
+) -> Action:
     """What to do about a task.
 
-    A type with its own workflow gets it. Everything else falls back to the one
-    rule that always holds: a task missing something it cannot work without has
-    to say so. Silence there is the same failure as a dropped mention — the
-    reporter believes they were heard and nothing is happening.
+    Asynchronous because a planner may need to go and look something up. The
+    deterministic ones stay pure functions and are adapted by the registry —
+    they do not become coroutines to satisfy the ones that are.
+
+    `agent` is a `Harness`, handed to whichever planner asks for it. A planner
+    that reads an external store is where a workflow becomes agentic, per task
+    type, on evidence.
+
+    `planners` overrides the registry, which is how a step is tested without
+    reaching anything and how a new one is tried before it is registered.
     """
-    planner = _PLANNERS.get(task_type)
-    if planner is not None:
-        return planner(params)
-    return plan_by_required_parameters(task_type, params)
+    planner = (planners or _PLANNERS).get(task_type)
+    if planner is None:
+        return plan_by_required_parameters(task_type, params)
+    result = planner(params, agent)
+    return await result if inspect.isawaitable(result) else result
 
 
 def plan_by_required_parameters(task_type: str, params: Params) -> Action:
@@ -129,4 +155,6 @@ def _question(missing: list[str]) -> str:
     return "Could you tell me " + " and ".join(wanted) + "?"
 
 
-_PLANNERS = {"api_issue": lambda params: plan_api_issue(params)}
+#: A deterministic planner is a pure function; the registry adapts it to the
+#: two-argument shape rather than making it pretend to need an agent.
+_PLANNERS = {"api_issue": lambda params, agent: plan_api_issue(params)}
