@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from friday.db import Database
-from friday.outbox import FAILED, QUEUED
+from friday.conversation import ConversationId
+from friday.outbox import FAILED, QUEUED, Kind
 
-__all__ = ["Heartbeat"]
+__all__ = ["Heartbeat", "Liveness"]
 
 log = logging.getLogger("friday.liveness")
 
@@ -31,6 +32,7 @@ class Heartbeat:
         db: Database,
         interval_seconds: float = 60.0,
         keep_model_calls_days: float | None = None,
+        liveness: "Liveness | None" = None,
         extra=None,
     ) -> None:
         self._db = db
@@ -39,6 +41,7 @@ class Heartbeat:
         #: was dropped, which is stored nowhere by design.
         self._extra = extra
         self._keep_days = keep_model_calls_days
+        self._liveness = liveness
         self._started = datetime.now(timezone.utc)
         self._last_seen: int | None = None
 
@@ -46,6 +49,8 @@ class Heartbeat:
         while True:
             await asyncio.sleep(self._interval)
             await self.beat()
+            if self._liveness is not None:
+                await self._liveness.check()
 
     async def beat(self) -> str:
         # Trimming rides the beat rather than owning a loop: it is one indexed
@@ -102,3 +107,87 @@ def _duration(seconds: float) -> str:
     if seconds < 5400:
         return f"{int(seconds // 60)}m"
     return f"{seconds / 3600:.1f}h"
+
+
+#: Alerts are not about a conversation, but the outbox stores one. This names
+#: the fact rather than leaving an empty string to be puzzled over.
+NOWHERE = ConversationId("system", "liveness")
+
+
+class Liveness:
+    """Tells the operator when something is wrong, and when it stops being.
+
+    A dead connection and a quiet afternoon are indistinguishable from outside,
+    and the whole system is built to make that distinction for *mentions*. It
+    applies at least as much to the process holding them.
+
+    Messages go out through the outbox like everything else: they retry, and one
+    that could not be delivered shows on the board rather than vanishing.
+    """
+
+    def __init__(
+        self,
+        *,
+        db: Database,
+        gateway,
+        operator: str = "discord_bot",
+        down_after_seconds: float = 300.0,
+        summary_at_hour: int | None = 9,
+    ) -> None:
+        self._db = db
+        self._gateway = gateway
+        self._operator = operator
+        self._down_after = down_after_seconds
+        self._summary_hour = summary_at_hour
+        self._told_about: datetime | None = None
+        self._summarised_on: date | None = None
+
+    async def check(self, *, now: datetime | None = None) -> None:
+        now = now or datetime.now(timezone.utc)
+        await self._connection(now)
+        await self._summary(now)
+
+    async def _connection(self, now: datetime) -> None:
+        down_since = self._gateway.down_since
+        if down_since is None:
+            if self._told_about is not None:
+                # Said, because otherwise the operator is left believing it is
+                # still down and acting on that.
+                self._told_about = None
+                await self._say("Discord is back. Anything missed is swept up.")
+            return
+        if self._told_about is not None:
+            return  # once; a repeat is an alert you learn to ignore
+        # Discord drops and resumes constantly, and alerting on a blip trains
+        # the operator to ignore the one that matters.
+        down_for = (now - down_since).total_seconds()
+        if down_for < self._down_after:
+            return
+        self._told_about = down_since
+        await self._say(
+            f"Discord has been disconnected for {_duration(down_for)}. "
+            "Nothing is being captured."
+        )
+
+    async def _summary(self, now: datetime) -> None:
+        if self._summary_hour is None or now.hour < self._summary_hour:
+            return
+        if self._summarised_on == now.date():
+            return
+        self._summarised_on = now.date()
+        counts = await self._db.counts()
+        tasks = sum(counts["tasks"].values())
+        await self._say(
+            f"Alive. {counts['messages']} messages held, {tasks} tasks, "
+            f"{counts['untriaged']} waiting to be looked at."
+        )
+
+    async def _say(self, text: str) -> None:
+        await self._db.queue_outbound(
+            task_id=None,
+            conversation=NOWHERE,
+            kind=Kind.ALERT,
+            sender=self._operator,
+            text=text,
+        )
+        log.info("told the operator: %s", text)

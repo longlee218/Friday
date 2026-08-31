@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import logging
 from collections.abc import AsyncIterator
 
@@ -36,6 +37,9 @@ class DiscordUserProvider:
         self._client = client or discord_self.Client()
         self._incoming: asyncio.Queue[InboundEvent] = asyncio.Queue()
         self.reconnected = asyncio.Event()
+        #: When the gateway went away, or None while it is up. A dead
+        #: connection and a quiet channel look identical without this.
+        self.down_since: datetime | None = None
 
         # Handlers are bound by attribute name: dispatch looks up "on_" + event.
         # `Client.event` registers by the function's own __name__, so a private
@@ -43,14 +47,26 @@ class DiscordUserProvider:
         self._client.on_message = self._handle_message
         self._client.on_ready = self._handle_ready
         self._client.on_resumed = self._handle_resumed
+        self._client.on_disconnect = self._handle_disconnect
+
+    async def _handle_disconnect(self) -> None:
+        """The library fires this on every reconnection attempt, so the first
+        one is the one that counts — taking the latest would reset the clock
+        forever and the alert would never fire.
+        """
+        if self.down_since is None:
+            self.down_since = datetime.now(timezone.utc)
+            log.warning("discord gateway disconnected")
 
     async def _handle_ready(self) -> None:
         user = self._client.user
         log.info("connected to discord as %s (%s)", user, getattr(user, "id", "?"))
+        self.down_since = None
         self.reconnected.set()
 
     async def _handle_resumed(self) -> None:
         log.info("discord session resumed")
+        self.down_since = None
         self.reconnected.set()
 
     async def _handle_message(self, message) -> None:

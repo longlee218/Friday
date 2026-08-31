@@ -42,6 +42,9 @@ class Kind(StrEnum):
     #: The agent answering in the operator's name. The only kind that waits:
     #: the risk is in answering, not in asking.
     REPLY = "reply"
+    #: The system talking about itself: a connection that died, or a day's
+    #: summary. Belongs to no task.
+    ALERT = "alert"
     #: A task nobody can act on. Not a question — the operator is being told,
     #: because a task in a column nobody watches is the same as a lost one.
     HELP_WANTED = "help_wanted"
@@ -132,6 +135,6 @@ class Outbox:
         it has to look like work rather than like a quiet success.
         """
         await self._db.fail_outbound(row.id, reason)
-        await self._db.move_task(row.task_id, NEEDS_HUMAN)
-        log.error("outbound %d gave up, task %d needs a human: %s",
-                  row.id, row.task_id, reason)
+        if row.task_id is not None:
+            await self._db.move_task(row.task_id, NEEDS_HUMAN)
+        log.error("outbound %d gave up: %s", row.id, reason)

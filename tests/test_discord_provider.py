@@ -170,3 +170,32 @@ async def test_recent_reads_backwards_from_a_message():
     assert [e.provider_message_id for e in seen] == ["11", "12"]
     assert channel.calls[0]["before"].id == 13
     assert channel.calls[0]["limit"] == 2
+
+
+async def test_the_provider_knows_when_it_went_down():
+    """Nothing tracked this. A dead gateway and a quiet channel produced the
+    same observable: no messages."""
+    client = stub_client()
+    provider = DiscordUserProvider("token", client=client)
+
+    assert provider.down_since is None
+
+    await client.on_disconnect()
+    assert provider.down_since is not None
+
+    await client.on_ready()
+    assert provider.down_since is None
+
+
+async def test_a_second_drop_does_not_restart_the_clock():
+    """discord.py fires on_disconnect on every reconnection attempt. Taking the
+    latest would reset the timer forever and the alert would never fire."""
+    client = SimpleNamespace()
+    client.user = StubUser(1)
+    provider = DiscordUserProvider("token", client=client)
+
+    await client.on_disconnect()
+    first = provider.down_since
+    await client.on_disconnect()
+
+    assert provider.down_since == first

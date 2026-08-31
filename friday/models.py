@@ -73,7 +73,7 @@ class Outbound:
     """
 
     id: int
-    task_id: int
+    task_id: int | None
     conversation: ConversationId
     kind: str
     sender: str

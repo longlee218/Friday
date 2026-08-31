@@ -56,6 +56,11 @@ board_origins: []
 
 heartbeat_seconds: 60
 
+# How long Discord may be down before you are told, and when the daily
+# "still alive" summary goes out.
+down_after_seconds: 300
+summary_at_hour: 9
+
 # How long to keep the prompts and outputs behind each decision.
 keep_model_calls_days: 14
 

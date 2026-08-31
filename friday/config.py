@@ -104,6 +104,12 @@ class Config:
     #: Browser origins allowed to read the API — the frontend in development.
     board_origins: tuple[str, ...] = ()
     heartbeat_seconds: float = 60.0
+    #: How long the gateway may be down before the operator is told. Discord
+    #: drops and resumes constantly; alerting on a blip trains you to ignore
+    #: the alert that matters.
+    down_after_seconds: float = 300.0
+    #: Hour of the day for the 'still alive' summary. None to not send one.
+    summary_at_hour: int | None = 9
     #: How long to keep model calls. Prompts are large and nobody reads old
     #: ones; a container that never restarts would fill its volume.
     keep_model_calls_days: float = 14.0
@@ -141,6 +147,11 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
         board_port=int(raw.get("board_port", 8086)),
         board_origins=tuple(raw.get("board_origins") or ()),
         heartbeat_seconds=float(raw.get("heartbeat_seconds", 60.0)),
+        down_after_seconds=float(raw.get("down_after_seconds", 300.0)),
+        summary_at_hour=(
+            None if raw.get("summary_at_hour", 9) is None
+            else int(raw.get("summary_at_hour", 9))
+        ),
         keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
         database_path=raw.get("database_path", "./data/friday.db"),
         ingest=IngestConfig(

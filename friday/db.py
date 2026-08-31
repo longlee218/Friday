@@ -411,7 +411,7 @@ class Database:
     async def queue_outbound(
         self,
         *,
-        task_id: int,
+        task_id: int | None,
         conversation: ConversationId,
         kind: str,
         sender: str,
@@ -443,7 +443,9 @@ class Database:
         async with self._sessions() as session:
             rows = await session.scalars(
                 select(schema.Outbound)
-                .join(schema.Task, schema.Task.id == schema.Outbound.task_id)
+                # Outer, so a row with no task — an alert about the system
+                # itself — is still selected rather than dropped by the join.
+                .outerjoin(schema.Task, schema.Task.id == schema.Outbound.task_id)
                 .where(
                     schema.Outbound.state == OUTBOUND_QUEUED,
                     or_(

@@ -135,7 +135,8 @@ class Outbound(Base):
     __tablename__ = "outbox"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    task_id: Mapped[int] = mapped_column(index=True)
+    #: Null for an alert: it is about the system, not about work.
+    task_id: Mapped[int | None] = mapped_column(index=True)
     conversation_id: Mapped[str]
     kind: Mapped[str]
     #: Which identity speaks. Not the conversation's provider: the bot and the

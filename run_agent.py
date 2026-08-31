@@ -16,7 +16,7 @@ from friday.db import Database
 from friday.inbox import Inbox
 from friday.api import bind, build_api, check_exposure
 from friday.board import build_board
-from friday.liveness import Heartbeat
+from friday.liveness import Heartbeat, Liveness
 from friday.redact import Redacting
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
@@ -159,8 +159,15 @@ async def run() -> None:
         max_attempts=config.outbox.max_attempts,
         backoff_seconds=config.outbox.backoff_seconds,
     )
+    liveness = Liveness(
+        db=db,
+        gateway=provider,
+        down_after_seconds=config.down_after_seconds,
+        summary_at_hour=config.summary_at_hour,
+    )
     heartbeat = Heartbeat(
         db=db,
+        liveness=liveness,
         interval_seconds=config.heartbeat_seconds,
         keep_model_calls_days=config.keep_model_calls_days,
         extra=inbox.tally,
