@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from friday.config import ConfigError, load_config
 from friday.db import Database
 from friday.inbox import Inbox
+from friday.api import build_api, check_exposure
 from friday.board import build_board
 from friday.liveness import Heartbeat
 from friday.redact import Redacting
@@ -36,7 +37,7 @@ async def ingest(inbox: Inbox, provider, smoke: bool) -> None:
             await provider.reply(event, "What'sapp")
 
 
-async def serve_board(db, provider, port: int) -> None:
+async def serve_board(db, provider, config) -> None:
     """The board runs in this process like everything else.
 
     Read-only, so it needs no authentication — there is nothing here to abuse,
@@ -44,16 +45,31 @@ async def serve_board(db, provider, port: int) -> None:
     """
     import uvicorn
 
-    board = build_board(
-        db=db,
-        provider_status=lambda: (
-            "connected" if provider.reconnected.is_set() else "connecting"
-        ),
+    status = lambda: (  # noqa: E731
+        "connected" if provider.reconnected.is_set() else "connecting"
     )
+    check_exposure(config.board_host, token=os.environ.get("BOARD_TOKEN"))
+
+    app = build_api(
+        db=db, provider_status=status, origins=list(config.board_origins)
+    )
+    # The JSON routes are declared first, so they match before this catches
+    # everything else with the server-rendered page.
+    app.mount("/", build_board(db=db, provider_status=status))
+
     server = uvicorn.Server(
-        uvicorn.Config(board, host="0.0.0.0", port=port, log_level="warning")
+        uvicorn.Config(
+            app,
+            host=config.board_host,
+            port=config.board_port,
+            log_level="warning",
+        )
     )
-    log.info("board on http://localhost:%d", port)
+    log.info(
+        "board on http://%s:%d (api at /api/board)",
+        config.board_host,
+        config.board_port,
+    )
     await server.serve()
 
 
@@ -81,6 +97,7 @@ async def run() -> None:
         confidence_threshold=float(
             triage_config.options.get("confidence_threshold", 0.7)
         ),
+        context_messages=config.ingest.context_messages,
     )
 
     workflows = WorkflowRunner(
@@ -142,7 +159,7 @@ async def run() -> None:
             group.create_task(workflows.run_forever())
             group.create_task(outbox.run_forever())
             group.create_task(heartbeat.run_forever())
-            group.create_task(serve_board(db, provider, config.board_port))
+            group.create_task(serve_board(db, provider, config))
     except* CredentialRejected as group_exc:
         raise SystemExit(
             f"Discord rejected the credential: {group_exc.exceptions[0]}"

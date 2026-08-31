@@ -60,38 +60,30 @@ class Heartbeat:
         return line
 
     async def summary(self) -> str:
-        messages = await self._db.messages()
-        untriaged = await self._db.untriaged_mentions(limit=1000)
-        tasks = await self._db.tasks()
-        queued = await self._db.outbound(QUEUED)
-        failed = await self._db.outbound(FAILED)
+        counts = await self._db.counts()
+        total = counts["messages"]
+        outbound = counts["outbound"]
 
-        new = "" if self._last_seen is None else f" (+{len(messages) - self._last_seen})"
-        self._last_seen = len(messages)
+        new = "" if self._last_seen is None else f" (+{total - self._last_seen})"
+        self._last_seen = total
 
-        states = _tally(t.state for t in tasks)
+        states = ", ".join(f"{n} {s}" for s, n in sorted(counts["tasks"].items()))
         parts = [
             f"alive {_since(self._started)}",
-            f"messages {len(messages)}{new}",
-            f"last {_ago(max((m.created_at for m in messages), default=None))}",
-            f"untriaged {len(untriaged)}",
+            f"messages {total}{new}",
+            f"last {_ago(counts['last_message_at'])}",
+            f"untriaged {counts['untriaged']}",
             f"tasks {states or 'none'}",
-            f"outbox {len(queued)} queued",
+            f"outbox {outbound.get(QUEUED, 0)} queued",
         ]
+        failed = outbound.get(FAILED, 0)
         if self._extra is not None:
             parts.append(self._extra())
         if failed:
             # Loud, because these are messages nobody has delivered and the
             # only way anyone finds out is by being told.
-            parts.append(f"{len(failed)} FAILED TO SEND")
+            parts.append(f"{failed} FAILED TO SEND")
         return " | ".join(parts)
-
-
-def _tally(values) -> str:
-    counts: dict[str, int] = {}
-    for value in values:
-        counts[value] = counts.get(value, 0) + 1
-    return ", ".join(f"{n} {state}" for state, n in sorted(counts.items()))
 
 
 def _since(start: datetime) -> str:

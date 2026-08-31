@@ -43,8 +43,13 @@ agents:
 
 # ── Workflows ──────────────────────────────────────────────────────────────
 # How often to say the process is alive and what it is holding.
-# The read-only debug view.
+# The read-only debug view. It shows every captured message and every model
+# prompt and has no authentication, so it stays on loopback unless BOARD_TOKEN
+# is set.
+board_host: "127.0.0.1"
 board_port: 8086
+# Browser origins allowed to read the API — the frontend in development.
+board_origins: []
 
 heartbeat_seconds: 60
 

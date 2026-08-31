@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Integer, cast, delete, event, func, or_, select, update
+from sqlalchemy import Integer, cast, delete, event, func, literal, or_, select, update
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -25,9 +25,18 @@ from friday import schema
 from friday.conversation import ConversationId
 from friday.llm_log import ModelCall
 from friday.models import InboundEvent, MentionType, Outbound, Task
+from friday.redact import scrub
 from friday.tasks import OPEN, IllegalTransition, TaskState, may_move
 
 __all__ = ["Database"]
+
+_OLDEST_FIRST = (schema.Message.created_at, schema.Message.provider_message_id)
+#: Ties break on the id cast as a number — two messages can share a timestamp,
+#: and a snowflake is the platform's own answer to which came first.
+_NEWEST_FIRST = (
+    schema.Message.created_at.desc(),
+    cast(schema.Message.provider_message_id, Integer).desc(),
+)
 
 OUTBOUND_QUEUED = "queued"
 OUTBOUND_SENT = "sent"
@@ -115,17 +124,37 @@ class Database:
             return result.rowcount == 1
 
     async def messages(
-        self, conversation: ConversationId | None = None
+        self, conversation: ConversationId | None = None, *, limit: int | None = None
     ) -> list[InboundEvent]:
-        """Everything seen, or everything seen in one conversation."""
+        """Messages in chronological order, most recent `limit` of them.
+
+        Bounded because this is what a model is given as context: unbounded, the
+        prompt grows with the channel and a long-running conversation eventually
+        costs more than it explains.
+        """
         query = select(schema.Message)
         if conversation is not None:
             query = query.where(schema.Message.conversation_id == str(conversation))
-        return await self._events(
-            query.order_by(
-                schema.Message.created_at, schema.Message.provider_message_id
+        if limit is None:
+            return await self._events(query.order_by(*_OLDEST_FIRST))
+        newest = await self._events(query.order_by(*_NEWEST_FIRST).limit(limit))
+        return list(reversed(newest))
+
+    async def page_messages(
+        self, *, limit: int = 50, before: str | None = None
+    ) -> list[InboundEvent]:
+        """A page of the feed, newest first.
+
+        Keyset rather than offset: the table is written to constantly, and an
+        offset would skip or repeat rows as it grows underneath the reader.
+        """
+        query = select(schema.Message)
+        if before is not None:
+            query = query.where(
+                cast(schema.Message.provider_message_id, Integer)
+                < cast(literal(before), Integer)
             )
-        )
+        return await self._events(query.order_by(*_NEWEST_FIRST).limit(limit))
 
     async def mentions(self) -> list[InboundEvent]:
         """Only the messages that addressed us."""
@@ -218,7 +247,8 @@ class Database:
             query = query.where(schema.ModelCall.message_id == message_id)
         async with self._sessions() as session:
             rows = await session.scalars(
-                query.order_by(schema.ModelCall.created_at).limit(limit)
+                query.order_by(schema.ModelCall.created_at.desc(),
+                               schema.ModelCall.id.desc()).limit(limit)
             )
             return [
                 ModelCall(
@@ -285,6 +315,38 @@ class Database:
                 .limit(limit)
             )
             return list(reversed([_event(row) for row in rows]))
+
+    async def counts(self) -> dict:
+        """How much of everything there is, without materialising any of it."""
+        async with self._sessions() as session:
+            return {
+                "messages": await session.scalar(
+                    select(func.count()).select_from(schema.Message)
+                ),
+                "untriaged": await session.scalar(
+                    select(func.count())
+                    .select_from(schema.Message)
+                    .where(
+                        schema.Message.mention_type.is_not(None),
+                        schema.Message.triaged_at.is_(None),
+                    )
+                ),
+                "last_message_at": await session.scalar(
+                    select(func.max(schema.Message.created_at))
+                ),
+                "tasks": dict(
+                    (await session.execute(
+                        select(schema.Task.state, func.count())
+                        .group_by(schema.Task.state)
+                    )).all()
+                ),
+                "outbound": dict(
+                    (await session.execute(
+                        select(schema.Outbound.state, func.count())
+                        .group_by(schema.Outbound.state)
+                    )).all()
+                ),
+            }
 
     # ---- cursors -------------------------------------------------------
 
@@ -418,7 +480,7 @@ class Database:
                 .where(schema.Outbound.id == outbound_id)
                 .values(
                     attempts=schema.Outbound.attempts + 1,
-                    last_error=error,
+                    last_error=scrub(error),
                     retry_after=retry_after,
                 )
             )
@@ -431,7 +493,9 @@ class Database:
                 .values(
                     state=OUTBOUND_FAILED,
                     attempts=schema.Outbound.attempts + 1,
-                    last_error=error,
+                    # A provider exception can quote an Authorization header,
+                    # and this is the only path by which one reaches the store.
+                    last_error=scrub(error),
                 )
             )
 
@@ -442,12 +506,14 @@ class Database:
             outbound_id, state=OUTBOUND_SENT_MANUALLY, sent_at=_now()
         )
 
-    async def outbound(self, state: str | None = None) -> list[Outbound]:
+    async def outbound(
+        self, state: str | None = None, *, limit: int | None = None
+    ) -> list[Outbound]:
         query = select(schema.Outbound)
         if state is not None:
             query = query.where(schema.Outbound.state == state)
         async with self._sessions() as session:
-            rows = await session.scalars(query.order_by(schema.Outbound.id))
+            rows = await session.scalars(query.order_by(schema.Outbound.id).limit(limit))
             return [_outbound(row) for row in rows]
 
     async def outbound_count(self, task_id: int, *, kind: str) -> int:
@@ -570,8 +636,10 @@ class Database:
             .limit(limit)
         )
 
-    async def tasks(self) -> list[Task]:
-        return await self._tasks(select(schema.Task).order_by(schema.Task.id))
+    async def tasks(self, *, limit: int | None = None) -> list[Task]:
+        return await self._tasks(
+            select(schema.Task).order_by(schema.Task.id).limit(limit)
+        )
 
     async def _tasks(self, query) -> list[Task]:
         async with self._sessions() as session:

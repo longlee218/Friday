@@ -43,27 +43,28 @@ def build_board(*, db: Database, provider_status: Callable[[], str]) -> FastAPI:
 
 
 async def _body(db: Database, status: str) -> str:
-    messages = await db.messages()
-    tasks = await db.tasks()
-    failed = await db.outbound(FAILED)
-    queued = await db.outbound(QUEUED)
+    counts = await db.counts()
+    messages = await db.page_messages(limit=25)
+    tasks = await db.tasks(limit=200)
+    failed = await db.outbound(FAILED, limit=50)
     calls = {c.message_id: c for c in await db.model_calls(limit=200)}
 
-    last = max((m.created_at for m in messages), default=None)
     sections = [
-        _header(status, last, len(messages), len(queued)),
+        _header(status, counts),
         _failed(failed),
         _tasks(tasks),
-        _messages(messages[-25:], calls),
+        _messages(messages, calls),
     ]
     return "\n".join(section for section in sections if section)
 
 
-def _header(status: str, last, messages: int, queued: int) -> str:
+def _header(status: str, counts: dict) -> str:
+    last = counts["last_message_at"]
     when = last.strftime("%H:%M:%S") if last else "never"
     return (
         f'<p class="bar">discord <b>{_e(status)}</b> · last event <b>{when}</b>'
-        f" · {messages} messages · {queued} queued to send</p>"
+        f" · {counts['messages']} messages"
+        f" · {counts['outbound'].get(QUEUED, 0)} queued to send</p>"
     )
 
 
@@ -99,7 +100,7 @@ def _tasks(tasks) -> str:
 
 def _messages(messages, calls) -> str:
     rows = []
-    for message in reversed(messages):
+    for message in messages:
         call = calls.get(message.provider_message_id)
         rows.append(
             f'<li><span class="who">{_e(message.author_name)}</span>'
