@@ -6,7 +6,7 @@ the same tasks. What changes is that a column added to a message exists once.
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done
 
 `events` and `messages` are near-duplicates today. Every in-scope mention is written
 to both, so a column added to one silently goes missing from the other — which is how
@@ -18,10 +18,10 @@ The same pass settles a name collision before it lands: `friday.models.Session` 
 *a conversation*, while the Agents SDK's `Session` means *an agent's own transcript*.
 Once agent sessions exist, one of them has to move. It should be ours.
 
-- [ ] A message that addresses the operator and one that does not are stored in the same table, distinguished by mention type
-- [ ] The triage queue is a query over that table, not a separate table
-- [ ] A triage decision is recorded against the message it was made about
-- [ ] Conversation context is read from the same table the queue reads from
-- [ ] An existing database is migrated in place, keeping its messages and decisions
-- [ ] The conversation concept is named `Conversation` throughout, leaving `Session` free for the SDK's meaning
-- [ ] No behaviour changes: the same messages produce the same tasks, and the test suite proves it before and after
+- [x] A message that addresses the operator and one that does not are stored in the same table, distinguished by mention type
+- [x] The triage queue is a query over that table, not a separate table
+- [x] A triage decision is recorded against the message it was made about
+- [x] Conversation context is read from the same table the queue reads from
+- [x] An existing database is migrated in place, keeping its messages and decisions
+- [x] The conversation concept is named `Conversation` throughout, leaving `Session` free for the SDK's meaning
+- [x] No behaviour changes: the same messages produce the same tasks, and the test suite proves it before and after

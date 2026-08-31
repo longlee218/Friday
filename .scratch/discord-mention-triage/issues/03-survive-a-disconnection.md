@@ -11,19 +11,19 @@ which is the worst failure this system can have.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A brief disconnection followed by a reconnect loses no messages
+- [x] A brief disconnection followed by a reconnect loses no messages
 - [x] An outage long enough to invalidate the session still recovers the missed messages via the periodic sweep
 - [x] A message delivered by both the live connection and the sweep produces exactly one stored event
 - [x] The sweep runs on a timer as well as on reconnect, so a stalled-but-open connection is still covered
 - [x] Resume state and per-channel position survive a process restart; the service does not re-process history from the beginning
 - [x] The sweep is scoped to whitelisted channels and does not fan out across everything visible
-- [ ] A transient failure (dropped network, unexpected close) reconnects with backoff and recovers the gap
+- [x] A transient failure (dropped network, unexpected close) reconnects with backoff and recovers the gap
 - [x] A rejected credential stops reconnection instead of retrying, and surfaces unmistakably — a dead token must never present as a quiet channel
 - [x] The two failure classes are distinguishable in logs, so an operator can tell 'retrying' from 'needs a human'
 - [x] Each watched channel records how far it has been read, advancing on every message seen and never moving backward
-- [ ] A session's recent history is fetched once when it produces its first mention, and its messages are persisted from then on
+- [x] A session's recent history is fetched once when it produces its first mention, and its messages are persisted from then on
 - [x] One-to-one DMs and threads are knowingly not swept; this is recorded, not silently missing
 
 ## Comments
@@ -46,3 +46,16 @@ built. Ticket 04 needs it.
 replay are `Client.start(reconnect=True)`. Whether they behave as documented,
 and whether `history(after=...)` paginates correctly against real Discord, can
 only be proven by a live run.
+
+
+## Closed late, and it should be recorded why
+
+This shipped in an earlier session with these three criteria unticked, and they
+could not have passed: `DiscordUserProvider` had no `history()` and no
+`recent()` at all. `Provider` is a Protocol, so nothing checked, and every test
+ran against the fake — which had both. The recovery sweep raised `AttributeError`
+on every pass and `Inbox.stream()` swallowed it, so the live path kept working
+and the process looked healthy.
+
+Both methods, and a test that the adapter has what the inbox will call, landed on
+2026-08-31. The criteria are ticked now because they are true now.

@@ -7,7 +7,7 @@ are demoable on their own.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] A direct mention of the watched account in a whitelisted channel produces exactly one stored event
 - [x] A role mention that the watched account holds is captured the same way
