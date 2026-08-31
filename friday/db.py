@@ -789,6 +789,26 @@ class Database:
                 update(schema.Task).where(schema.Task.id == task_id).values(**values)
             )
 
+    async def tasks_needing_announcement(
+        self, kind: str, *, state: str, limit: int = 20
+    ) -> list[Task]:
+        """Tasks in a state that nobody has been told about.
+
+        One anti-join rather than a count per task: the outbox row is already
+        the record of having said something, so asking it directly beats
+        denormalising the same fact onto the task and keeping the two in step.
+        """
+        told = select(schema.Outbound.task_id).where(
+            schema.Outbound.task_id == schema.Task.id,
+            schema.Outbound.kind == str(kind),
+        )
+        return await self._tasks(
+            select(schema.Task)
+            .where(schema.Task.state == str(state), ~told.exists())
+            .order_by(schema.Task.id)
+            .limit(limit)
+        )
+
     async def tasks_in_state(self, state: str, limit: int = 20) -> list[Task]:
         return await self._tasks(
             select(schema.Task)

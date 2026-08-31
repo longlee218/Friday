@@ -86,11 +86,14 @@ class WorkflowRunner:
 
         A task in a column nobody is watching is the same as a lost one. Told
         once, because a notification that repeats is one you learn to ignore —
-        the outbox row is itself the record of having told them.
+        and the outbox row is itself the record of having told them, which is
+        why finding the untold ones is one anti-join rather than a count per
+        task on every poll.
         """
-        for task in await self._db.tasks_in_state(NEEDS_HUMAN, self._batch_size):
-            if await self._db.outbound_count(task.id, kind=Kind.HELP_WANTED):
-                continue
+        waiting = await self._db.tasks_needing_announcement(
+            Kind.HELP_WANTED, state=NEEDS_HUMAN, limit=self._batch_size
+        )
+        for task in waiting:
             await self._db.queue_outbound(
                 task_id=task.id,
                 conversation=task.conversation,

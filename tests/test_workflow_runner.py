@@ -230,3 +230,24 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     # Only the question is sendable; the answer waits to be answered.
     assert [r.kind for r in await db.sendable_outbound()] == ["approval_card"]
     assert acted[0].state == "review"
+
+
+async def test_finding_what_to_announce_takes_one_query(db):
+    """It ran a count per task, every two seconds, for something that almost
+    never has anything to do — twenty-one queries to usually find nothing."""
+    queries: list[str] = []
+    original = db.tasks_needing_announcement
+
+    async def counted(*a, **kw):
+        queries.append("scan")
+        return await original(*a, **kw)
+
+    db.tasks_needing_announcement = counted
+    for _ in range(5):
+        task = await make_task(db, correlation_id="abc-123")
+        await db.move_task(task.id, TaskState.NEEDS_HUMAN)
+
+    await WorkflowRunner(db=db, auto_ask=True).run_once()
+
+    assert len(queries) == 1
+    assert len(await db.outbound()) == 5

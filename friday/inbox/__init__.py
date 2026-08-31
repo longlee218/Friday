@@ -134,17 +134,27 @@ class Inbox:
         )
 
     async def _accept(self, event: InboundEvent) -> InboundEvent | None:
-        """Both delivery paths converge here. None means it was not kept."""
+        """Both delivery paths converge here. None means it was not kept.
+
+        The cursor moves **last**. It records "read up to here", and the sweep
+        asks for what comes after — so advancing before the message is stored
+        means a crash in between loses it for good, because nothing will look at
+        that range again. Advancing after costs a re-read on the next sweep, and
+        `record_message` deduplicates on `(provider, provider_message_id)`, so a
+        re-read is free. It is the same at-least-once trade the outbox makes,
+        for the same reason.
+        """
         self.seen += 1
-        # Advance before scoping: the cursor records what we have *looked at*,
-        # so the sweep does not re-fetch traffic we already dropped.
+        kept = await self._handle(event)
+        # Only reached if `_handle` returned. A failure leaves the cursor where
+        # it was, and the sweep finds the message again.
         await self._db.advance_cursor(event)
+        return kept
+
+    async def _handle(self, event: InboundEvent) -> InboundEvent | None:
         reason = self._out_of_scope_reason(event)
         if reason:
             self.dropped[reason] = self.dropped.get(reason, 0) + 1
-            # Not for us — but if this conversation has already asked us for
-            # something, the surrounding talk is what makes the next mention
-            # readable.
             if await self._db.conversation_is_tracked(event):
                 await self._db.record_message(event, context_only=True)
             log.debug(

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from conftest import captured, make_event
 from friday.config import IngestConfig
 from friday.inbox import Inbox
@@ -211,3 +213,52 @@ async def test_cursors_survive_a_restart(tmp_path, provider, config):
         assert await reopened.cursor_for("fake", "watched") == "100"
     finally:
         await reopened.close()
+
+
+async def test_a_message_is_recorded_before_the_cursor_moves_past_it(inbox, provider, db):
+    """The cursor says "read up to here", and the sweep asks for what comes
+    after. Moving it first means a crash between the two loses the message for
+    good — nothing will ever look at that range again."""
+    provider.emit(make_event(message_id="10"))
+
+    order: list[str] = []
+    record, advance = db.record_message, db.advance_cursor
+
+    async def watched_record(event, **kw):
+        order.append("record")
+        return await record(event, **kw)
+
+    async def watched_advance(event):
+        order.append("cursor")
+        return await advance(event)
+
+    db.record_message, db.advance_cursor = watched_record, watched_advance
+    await captured(inbox)
+
+    assert order.index("record") < order.index("cursor")
+
+
+async def test_a_dropped_message_still_moves_the_cursor(inbox, provider, db):
+    """Out of scope is a decision, not a failure. Leaving the cursor behind
+    would make the sweep re-read it forever."""
+    provider.emit(make_event(message_id="10", mention_type=None))
+
+    await captured(inbox)
+
+    assert await db.cursor_for("fake", "watched") == "10"
+
+
+async def test_a_failure_leaves_the_cursor_where_it_was(inbox, provider, db):
+    """The point of the ordering. If recording fails, the message has not been
+    handled, and the sweep must still be able to find it."""
+
+    async def refuses(event, **kw):
+        raise RuntimeError("disk full")
+
+    db.record_message = refuses
+    provider.emit(make_event(message_id="10"))
+
+    with pytest.raises(RuntimeError):
+        await captured(inbox)
+
+    assert await db.cursor_for("fake", "watched") is None
