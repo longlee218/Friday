@@ -77,18 +77,23 @@ async def test_observations_are_scoped_to_their_task(db):
     assert [o.text for o in await db.observations(task_id=first.id)] == ["mine"]
 
 
-async def test_nothing_reads_them_back_into_a_prompt(db):
-    """The guarantee this ticket actually makes. An agent learning from its own
-    unreviewed notes drifts, and there is no floor to that."""
+async def test_only_two_things_read_them_and_neither_prompts_with_them(db):
+    """The guarantee this ticket actually makes.
+
+    The store answers for them and the promotion pass consumes them; nothing
+    else may look. An agent given its own unreviewed notes as context drifts,
+    and nothing about the output says so — which is why this is asserted rather
+    than intended.
+    """
     import subprocess
 
+    allowed = {"friday/db.py", "friday/notes.py"}
     hits = subprocess.run(
-        ["grep", "-rn", "observations(", "friday/"],
+        ["grep", "-rln", r"\.observations(", "friday/"],
         capture_output=True, text=True,
-    ).stdout.splitlines()
-    readers = [h for h in hits if "friday/db.py" not in h]
+    ).stdout.split()
 
-    assert readers == [], f"something reads observations: {readers}"
+    assert set(hits) <= allowed, f"unexpected reader: {set(hits) - allowed}"
 
 
 async def test_a_step_can_be_given_it_as_a_tool(db):

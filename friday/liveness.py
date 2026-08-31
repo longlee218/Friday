@@ -33,6 +33,7 @@ class Heartbeat:
         interval_seconds: float = 60.0,
         keep_model_calls_days: float | None = None,
         liveness: "Liveness | None" = None,
+        promotion=None,
         extra=None,
     ) -> None:
         self._db = db
@@ -42,6 +43,7 @@ class Heartbeat:
         self._extra = extra
         self._keep_days = keep_model_calls_days
         self._liveness = liveness
+        self._promotion = promotion
         self._started = datetime.now(timezone.utc)
         self._last_seen: int | None = None
 
@@ -51,6 +53,8 @@ class Heartbeat:
             await self.beat()
             if self._liveness is not None:
                 await self._liveness.check()
+            if self._promotion is not None:
+                await self._promotion.run_once()
 
     async def beat(self) -> str:
         # Trimming rides the beat rather than owning a loop: it is one indexed

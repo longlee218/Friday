@@ -20,6 +20,7 @@ from friday.api import bind, build_api, check_exposure
 from friday.board import build_board
 from friday.liveness import Heartbeat, Liveness
 from friday.mcp import build as build_mcp
+from friday.notes import Promotion
 from friday.redact import Redacting, install_excepthook
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
@@ -101,9 +102,13 @@ async def _run(stack: AsyncExitStack) -> None:
         context_messages=config.ingest.context_messages,
     )
 
+    # Read once, at build time: a promotion takes effect on the next start
+    # rather than invalidating a warm prompt cache mid-run.
+    learned = await Promotion(db=db).render()
+
     responder_config = config.agents.get("responder")
     responder = (
-        Responder(config=responder_config)
+        Responder(config=responder_config, notes=learned)
         if config.workflows.use_responder and responder_config
         else None
     )
@@ -114,6 +119,7 @@ async def _run(stack: AsyncExitStack) -> None:
         Harness(
             config=workflow_config,
             instructions=workflow_config.options.get("instructions", ""),
+            notes=learned,
             mcp_servers=servers,
         )
         if workflow_config
@@ -190,6 +196,7 @@ async def _run(stack: AsyncExitStack) -> None:
     heartbeat = Heartbeat(
         db=db,
         liveness=liveness,
+        promotion=Promotion(db=db),
         interval_seconds=config.heartbeat_seconds,
         keep_model_calls_days=config.keep_model_calls_days,
         extra=inbox.tally,

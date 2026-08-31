@@ -55,6 +55,11 @@ class Harness:
         #: Tool servers outside this process. Which ones an agent gets is
         #: composition, not something the agent declares.
         mcp_servers: list | None = None,
+        #: What has been learned across earlier tasks. Appended to the
+        #: instructions rather than to the prompt, because that is the
+        #: stable early part — a byte that moves there costs a cache hit on
+        #: everything after it.
+        notes: str = "",
         model=None,
         context_type: type | None = None,
         **agent_options: Any,
@@ -64,7 +69,7 @@ class Harness:
         agent_class = Agent[context_type] if context_type else Agent
         self.agent = agent_class(
             name=config.name,
-            instructions=instructions,
+            instructions=f"{instructions}\n\n{notes}" if notes else instructions,
             model=model or _chat_model(config),
             tools=tools or [],
             mcp_servers=mcp_servers or [],

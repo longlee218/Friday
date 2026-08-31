@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, String, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Base", "Conversation", "Cursor", "Message", "ModelCall", "Observation", "Outbound", "Task"]
+__all__ = ["Base", "Conversation", "Cursor", "Message", "ModelCall", "Note", "Observation", "Outbound", "Task"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -191,3 +191,19 @@ class Observation(Base):
     #: Set by the compaction pass when an approved outcome corroborated it.
     #: Ticket 10; named here so the shape is complete rather than migrated later.
     promoted_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
+
+
+class Note(Base):
+    """Something believed for longer than one task.
+
+    Keyed on (category, text) so the same thing learned twice is one note with
+    more support behind it, rather than two notes saying it.
+    """
+
+    __tablename__ = "notes"
+
+    category: Mapped[str] = mapped_column(primary_key=True)
+    text: Mapped[str] = mapped_column(primary_key=True)
+    #: How many approved tasks agree. What decides which notes survive a trim.
+    support: Mapped[int] = mapped_column(default=1)
+    created_at: Mapped[datetime] = mapped_column(IsoDateTime)

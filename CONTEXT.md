@@ -113,6 +113,20 @@ The runtime attaches the task and the time rather than asking for them: a model
 asked for a timestamp invents one, and a model asked which task it is working on
 is sometimes wrong.
 
+## Note
+
+Something believed for longer than one task. An observation becomes one only
+when a human approved the work it came from, and — for the categories that need
+it — when more than one approved task said the same thing.
+
+`fact` and `person` need two: a reading of how something works can be wrong, and
+a habit seen once is not a habit. A `lesson` needs one, because the operator
+already made that judgement by approving the work.
+
+Rendered as a block rebuilt from the believed set in a stable order, and reached
+through an agent's **instructions**. That is the early part of a prompt, where a
+byte that moves costs a cache hit on everything after it.
+
 ## Outbound intent
 
 Something to send, held as data rather than performed as a call. Carries the

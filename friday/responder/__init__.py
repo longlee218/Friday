@@ -52,8 +52,10 @@ class Draft:
 
 
 class Responder:
-    def __init__(self, *, config: AgentConfig, model=None) -> None:
-        self._run = Harness(config=config, instructions=INSTRUCTIONS, model=model)
+    def __init__(self, *, config: AgentConfig, model=None, notes: str = "") -> None:
+        self._run = Harness(
+            config=config, instructions=INSTRUCTIONS, model=model, notes=notes
+        )
 
     async def draft(
         self,

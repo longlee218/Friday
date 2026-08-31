@@ -137,3 +137,13 @@ class Observation:
     text: str
     created_at: datetime
     promoted_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Note:
+    """Something believed for longer than one task."""
+
+    category: str
+    text: str
+    support: int
+    created_at: datetime

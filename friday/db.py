@@ -12,7 +12,18 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Integer, cast, delete, event, func, literal, or_, select, update
+from sqlalchemy import (
+    Integer,
+    cast,
+    delete,
+    event,
+    func,
+    literal,
+    or_,
+    select,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -24,7 +35,14 @@ from sqlalchemy.pool import StaticPool
 from friday import schema
 from friday.conversation import ConversationId
 from friday.llm_log import ModelCall
-from friday.models import InboundEvent, MentionType, Observation, Outbound, Task
+from friday.models import (
+    InboundEvent,
+    MentionType,
+    Note,
+    Observation,
+    Outbound,
+    Task,
+)
 from friday.redact import scrub
 from friday.tasks import OPEN, IllegalTransition, TaskState, may_move
 
@@ -381,6 +399,84 @@ class Database:
                 )
                 for row in rows
             ]
+
+    async def clear_observations(self, ids: list[int]) -> None:
+        """Considered is considered, promoted or not."""
+        async with self._sessions.begin() as session:
+            await session.execute(
+                delete(schema.Observation).where(schema.Observation.id.in_(ids))
+            )
+
+    # ---- notes ----------------------------------------------------------
+
+    async def approved_task_ids(self) -> set[int]:
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                select(schema.Task.id).where(schema.Task.approved_at.is_not(None))
+            )
+            return set(rows)
+
+    async def support_note(self, *, category: str, text: str, by: int) -> int:
+        """Add support for a note, creating it if this is the first. Returns
+        the total, which is what decides whether it is believed yet."""
+        statement = insert(schema.Note).values(
+            category=category, text=text, support=by, created_at=_now()
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[schema.Note.category, schema.Note.text],
+                    set_={"support": schema.Note.support + by},
+                )
+            )
+            return await session.scalar(
+                select(schema.Note.support).where(
+                    schema.Note.category == category, schema.Note.text == text
+                )
+            )
+
+    async def notes(self, *, limit: int = 100) -> list[Note]:
+        """Every note row, in a stable order — best supported first, then by
+        text, so two renders between promotions are byte-identical.
+
+        Includes rows still below their category's threshold. Those are the
+        accumulated evidence: observations are used up when they are considered,
+        so this is the only place a first sighting can wait for a second.
+        Deciding which of them are *believed* needs the thresholds, and those
+        belong to `friday.notes`, not here.
+        """
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                select(schema.Note)
+                .order_by(schema.Note.support.desc(), schema.Note.text)
+                .limit(limit)
+            )
+            return [
+                Note(
+                    category=row.category,
+                    text=row.text,
+                    support=row.support,
+                    created_at=row.created_at,
+                )
+                for row in rows
+            ]
+
+    async def trim_notes(self, *, keep: int) -> None:
+        """A prompt has room for a handful of these. The best supported stay."""
+        async with self._sessions.begin() as session:
+            keeping = (
+                select(schema.Note.category, schema.Note.text)
+                .order_by(schema.Note.support.desc(), schema.Note.text)
+                .limit(keep)
+                .subquery()
+            )
+            await session.execute(
+                delete(schema.Note).where(
+                    tuple_(schema.Note.category, schema.Note.text).not_in(
+                        select(keeping.c.category, keeping.c.text)
+                    )
+                )
+            )
 
     # ---- cursors -------------------------------------------------------
 
