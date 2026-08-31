@@ -81,13 +81,29 @@ class DiscordUserProvider:
         """
         await self.send(reply_target_id(event), text)
 
-    async def send(self, conversation: ConversationId, text: str) -> None:
-        """Post into a conversation, as the watched account."""
+    async def send(
+        self, conversation: ConversationId, text: str, *, reply_to: str | None = None
+    ) -> None:
+        """Post into a conversation, as the watched account.
+
+        `reply_to` hangs the message under the one it answers, which is what
+        keeps a busy channel readable. `fail_if_not_exists=False` so a deleted
+        message degrades to a plain post rather than losing the reply.
+        """
         target = int(conversation.target_id)
         channel = self._client.get_channel(target) or await (
             self._client.fetch_channel(target)
         )
-        await channel.send(text)
+        reference = (
+            discord_self.MessageReference(
+                message_id=int(reply_to),
+                channel_id=channel.id,
+                fail_if_not_exists=False,
+            )
+            if reply_to is not None
+            else None
+        )
+        await channel.send(text, reference=reference)
 
     async def stream(self) -> AsyncIterator[InboundEvent]:
         """Connect, then yield every message the account can see.

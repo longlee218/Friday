@@ -42,6 +42,12 @@ agents:
     tone_examples: 8
 
 # ── Workflows ──────────────────────────────────────────────────────────────
+outbox:
+  # How many times to try one message before handing it to a person.
+  max_attempts: 3
+  # Doubling from here.
+  backoff_seconds: 30
+
 workflows:
   # Send "which environment / can you send the correlationId or curl?" straight
   # away, with no approval step. This is the only reply allowed out unreviewed:

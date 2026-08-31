@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from friday.config import ConfigError, load_config
 from friday.db import Database
 from friday.inbox import Inbox
+from friday.outbox import Outbox
 from friday.providers import CredentialRejected
 from friday.providers.discord import DiscordUserProvider
 from friday.triage import Triage
@@ -67,8 +68,16 @@ async def run() -> None:
 
     workflows = WorkflowRunner(
         db=db,
-        provider=provider,
         auto_ask=config.workflows.auto_ask_for_details,
+    )
+    outbox = Outbox(
+        db=db,
+        # A conversation names a platform; a sender names an identity. Both
+        # Discord clients speak into the same conversations, so these are two
+        # different namespaces and the registry keys on the second.
+        senders={"discord_user": provider},
+        max_attempts=config.outbox.max_attempts,
+        backoff_seconds=config.outbox.backoff_seconds,
     )
 
     if config.workflows.auto_ask_for_details:
@@ -88,9 +97,9 @@ async def run() -> None:
         triage_config.model,
     )
 
-    # Two independent loops. Ingestion must never wait on a model call: a slow
-    # or rate-limited provider would otherwise stall the gateway consumer, which
-    # is the exact failure the recovery layer exists to prevent.
+    # Four independent loops. Nothing that can block belongs in the one that
+    # reads the gateway: a model call or a rate-limited send would stall the
+    # consumer, which is the exact failure the recovery layer exists to prevent.
     try:
         async with asyncio.TaskGroup() as group:
             group.create_task(
@@ -98,6 +107,7 @@ async def run() -> None:
             )
             group.create_task(runner.run_forever())
             group.create_task(workflows.run_forever())
+            group.create_task(outbox.run_forever())
     except* CredentialRejected as group_exc:
         raise SystemExit(
             f"Discord rejected the credential: {group_exc.exceptions[0]}"

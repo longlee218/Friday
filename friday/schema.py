@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, String, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Base", "Conversation", "Cursor", "Message", "Task"]
+__all__ = ["Base", "Conversation", "Cursor", "Message", "Outbound", "Task"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -94,6 +94,10 @@ class Task(Base):
     confidence: Mapped[float]
     params: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(IsoDateTime)
+    #: Approval is a fact about the work, not about a message. The outbox
+    #: joins this rather than each caller checking it.
+    approved_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
+    approved_by: Mapped[str | None]
 
 
 class Cursor(Base):
@@ -122,3 +126,28 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[str] = mapped_column(primary_key=True)
+
+
+class Outbound(Base):
+    """One thing to send. Written when the workflow decides, not when it is
+    approved — so a draft, its approval and its delivery are one row."""
+
+    __tablename__ = "outbox"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(index=True)
+    conversation_id: Mapped[str]
+    kind: Mapped[str]
+    #: Which identity speaks. Not the conversation's provider: the bot and the
+    #: user account are two senders in one Discord conversation.
+    sender: Mapped[str]
+    text: Mapped[str]
+    reply_to: Mapped[str | None]
+    state: Mapped[str] = mapped_column(index=True, default="queued")
+    attempts: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str | None]
+    #: Held back until this passes. Retrying a rate-limited send at once is
+    #: how a rate limit becomes a ban.
+    retry_after: Mapped[datetime | None] = mapped_column(IsoDateTime)
+    created_at: Mapped[datetime] = mapped_column(IsoDateTime)
+    sent_at: Mapped[datetime | None] = mapped_column(IsoDateTime)

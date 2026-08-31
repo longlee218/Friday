@@ -7,6 +7,7 @@ import logging
 
 from friday.db import Database
 from friday.models import Task
+from friday.outbox import Kind
 from friday.triage import ApiIssueParams
 from friday.workflows import Ask, Park, plan_api_issue
 
@@ -22,18 +23,27 @@ NEEDS_HUMAN = "needs_human"
 class WorkflowRunner:
     """Turns a pending task into an action.
 
-    Only one reply is allowed out without review: the request for missing
-    details. It is the same question every time, and if the classification was
-    wrong it costs someone a single unnecessary question. Everything else parks
-    for a human until the approval path exists.
+    Produces outbound intents; it never delivers one. Deciding what to say and
+    knowing where to put it are different jobs, and the Outbox is the only
+    module that talks to a provider.
+
+    Only one message is allowed out without review: the request for missing
+    details. It completes the task's own required parameters rather than
+    speaking for the operator, and being wrong about it costs the reporter one
+    unnecessary question.
     """
 
     def __init__(
-        self, *, db: Database, provider, auto_ask: bool, batch_size: int = 20
+        self,
+        *,
+        db: Database,
+        auto_ask: bool,
+        sender: str = "discord_user",
+        batch_size: int = 20,
     ) -> None:
         self._db = db
-        self._provider = provider
         self._auto_ask = auto_ask
+        self._sender = sender
         self._batch_size = batch_size
 
     async def run_forever(self, poll_interval_seconds: float = 2.0) -> None:
@@ -51,13 +61,15 @@ class WorkflowRunner:
         action = self._plan(task)
 
         if isinstance(action, Ask) and self._auto_ask:
-            await self._provider.send(task.conversation, action.text)
-            log.info(
-                "task %d: replied to %s: %s",
-                task.id,
-                task.conversation,
-                action.text,
+            await self._db.queue_outbound(
+                task_id=task.id,
+                conversation=task.conversation,
+                kind=Kind.ASK_FOR_DETAILS,
+                sender=self._sender,
+                text=action.text,
+                reply_to=await self._db.last_mention_in(task.conversation),
             )
+            log.info("task %d: queued a request for missing details", task.id)
             return await self._move(task, ASKED)
 
         if isinstance(action, Ask):

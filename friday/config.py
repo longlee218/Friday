@@ -70,11 +70,21 @@ class WorkflowConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class OutboxConfig:
+    #: How many times to try one message before handing it to a person.
+    max_attempts: int = 3
+    #: Doubling from here. Retrying a rate-limited send at once is how a rate
+    #: limit becomes a ban.
+    backoff_seconds: float = 30.0
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     database_path: str
     ingest: IngestConfig
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     workflows: WorkflowConfig = field(default_factory=WorkflowConfig)
+    outbox: OutboxConfig = field(default_factory=OutboxConfig)
 
 
 def load_config(path: Path | str = DEFAULT_PATH) -> Config:
@@ -93,6 +103,12 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             auto_ask_for_details=bool(
                 (raw.get("workflows") or {}).get("auto_ask_for_details", False)
             )
+        ),
+        outbox=OutboxConfig(
+            max_attempts=int((raw.get("outbox") or {}).get("max_attempts", 3)),
+            backoff_seconds=float(
+                (raw.get("outbox") or {}).get("backoff_seconds", 30.0)
+            ),
         ),
         database_path=raw.get("database_path", "./data/friday.db"),
         ingest=IngestConfig(

@@ -62,3 +62,23 @@ class Task:
     confidence: float
     params: dict[str, Any] = field(default_factory=dict)
     created_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Outbound:
+    """Something to send, held as data rather than performed as a call.
+
+    `kind` decides whether it needs approval; `sender` decides which identity
+    says it. Approval itself is a fact about the task, not about this row.
+    """
+
+    id: int
+    task_id: int
+    conversation: ConversationId
+    kind: str
+    sender: str
+    text: str
+    reply_to: str | None = None
+    state: str = "queued"
+    attempts: int = 0
+    last_error: str | None = None
