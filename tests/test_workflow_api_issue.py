@@ -6,8 +6,7 @@ arrives without the fields needed to trace it, and the first move is to ask.
 
 from __future__ import annotations
 
-from friday.triage import ApiIssueParams
-from friday.triage import AccessRequestParams, DocQuestionParams
+from friday.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
 from friday.workflows import Ask, Park, plan, plan_api_issue
 
 

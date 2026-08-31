@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from enum import StrEnum
 
 from friday.conversation import ConversationId, resolve
@@ -82,3 +82,46 @@ class Outbound:
     state: str = "queued"
     attempts: int = 0
     last_error: str | None = None
+
+
+# ---- task parameters -------------------------------------------------
+
+"""What each kind of task carries.
+
+Here rather than in `friday.triage`, which is where they were: a workflow
+reached for the schema of a task's parameters *through the agent that happens
+to fill them in*. The types describe the work, not the thing that recognised
+it — and their annotations are read directly to decide what a task cannot
+proceed without.
+"""
+
+TaskType = Literal["api_issue", "access_request", "doc_question", "skip"]
+
+
+@dataclass(frozen=True, slots=True)
+class ApiIssueParams:
+    summary: str
+    environment: str | None = None
+    correlation_id: str | None = None
+    curl: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AccessRequestParams:
+    project: str
+    permission: str
+    summary: str
+
+
+@dataclass(frozen=True, slots=True)
+class DocQuestionParams:
+    question: str
+    doc_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SkipParams:
+    reason: str
+
+
+Params = ApiIssueParams | AccessRequestParams | DocQuestionParams | SkipParams

@@ -9,10 +9,10 @@ Nothing this writes reaches a channel on its own. The fixed template was
 allowed out unreviewed because it was the same sentence every time — that
 argument does not survive a model writing it.
 
-The plumbing here duplicates `friday.triage`: the client, the settings, the
-hooks, the error policy. That duplication is the point of ticket 14, and it
-could not be justified until a second agent existed to show what actually
-varies. This is that agent.
+What it declares is only what makes it different from triage: instructions,
+and what to do with the answer. The client, the settings, the hooks and the
+error policy belong to `friday.harness` — this agent is the reason that module
+exists.
 """
 
 from __future__ import annotations
@@ -22,11 +22,8 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, RunConfig, Runner
-from openai import AsyncOpenAI
-
 from friday.config import AgentConfig
-from friday.llm_log import LogHooks
+from friday.harness import Harness
 from friday.models import InboundEvent
 
 __all__ = ["Draft", "Responder"]
@@ -56,18 +53,7 @@ class Draft:
 
 class Responder:
     def __init__(self, *, config: AgentConfig, model=None) -> None:
-        self._config = config
-        self._agent = Agent(
-            name=config.name,
-            instructions=INSTRUCTIONS,
-            model=model or self._chat_model(config),
-            model_settings=ModelSettings(**config.settings),
-        )
-
-    @staticmethod
-    def _chat_model(config: AgentConfig) -> OpenAIChatCompletionsModel:
-        client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key)
-        return OpenAIChatCompletionsModel(model=config.model, openai_client=client)
+        self._run = Harness(config=config, instructions=INSTRUCTIONS, model=model)
 
     async def draft(
         self,
@@ -80,19 +66,12 @@ class Responder:
         """Write what `asking` says, in the operator's voice.
 
         None when it could not — the caller falls back to the template. Never a
-        reply in someone else's name that the model was unsure of, and never
+        message in someone else's name that the model was unsure of, and never
         silence either.
         """
-        self._agent.hooks = LogHooks(calls, model=self._config.model)
-        try:
-            result = await Runner.run(
-                self._agent,
-                _prompt(asking, context, tone),
-                max_turns=self._config.max_turns,
-                run_config=RunConfig(tracing_disabled=True),
-            )
-        except Exception as exc:  # noqa: BLE001 - the template still goes out
-            log.warning("responder failed, falling back to the template: %s", exc)
+        result = await self._run.run(_prompt(asking, context, tone), calls=calls)
+        if result is None:
+            log.warning("falling back to the template")
             return None
 
         text = _without_reasoning(result.final_output or "")

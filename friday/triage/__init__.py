@@ -5,22 +5,19 @@ from collections.abc import Sequence
 from dataclasses import dataclass, fields, replace
 from typing import Any, Literal
 
-from agents import (
-    Agent,
-    ModelSettings,
-    OpenAIChatCompletionsModel,
-    RunConfig,
-    RunContextWrapper,
-    Runner,
-    function_tool,
-    set_tracing_disabled,
-)
-from openai import AsyncOpenAI
+from agents import RunContextWrapper, function_tool
 
 from friday.config import AgentConfig
-from friday.llm_log import LogHooks
-from friday.redact import scrub
-from friday.models import InboundEvent
+from friday.harness import Harness
+from friday.models import (
+    AccessRequestParams,
+    ApiIssueParams,
+    DocQuestionParams,
+    InboundEvent,
+    Params,
+    SkipParams,
+    TaskType,
+)
 from friday.triage.prefilter import is_compensation_talk
 from friday.triage.params import (
     clean,
@@ -42,43 +39,6 @@ __all__ = [
 ]
 
 log = logging.getLogger(__name__)
-
-# Tracing is on by default and exports to OpenAI using the same key as model
-# requests. With a third-party provider that leaks both the traffic and the
-# credential, so it is switched off at import.
-set_tracing_disabled(True)
-
-TaskType = Literal["api_issue", "access_request", "doc_question", "skip"]
-
-
-@dataclass(frozen=True, slots=True)
-class ApiIssueParams:
-    summary: str
-    environment: str | None = None
-    correlation_id: str | None = None
-    curl: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class AccessRequestParams:
-    project: str
-    permission: str
-    summary: str
-
-
-@dataclass(frozen=True, slots=True)
-class DocQuestionParams:
-    question: str
-    doc_ref: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class SkipParams:
-    reason: str
-
-
-Params = ApiIssueParams | AccessRequestParams | DocQuestionParams | SkipParams
-
 
 @dataclass(frozen=True, slots=True)
 class Decided:
@@ -224,26 +184,20 @@ class Triage:
     """
 
     def __init__(self, *, config: AgentConfig, model=None) -> None:
-        self._config = config
-        self._agent = Agent[_Capture](
-            name=config.name,
+        self._run = Harness(
+            config=config,
             instructions=INSTRUCTIONS,
-            model=model or self._chat_model(config),
             tools=TOOLS,
-            model_settings=ModelSettings(
+            model=model,
+            context_type=_Capture,
+            model_settings={
                 # Without a forced tool call the vaguest message — "the api is
                 # wrong", the most common shape there is — produces no call at
                 # all and the mention silently yields nothing.
-                tool_choice="required",
-                **config.settings,
-            ),
+                "tool_choice": "required",
+            },
             tool_use_behavior="stop_on_first_tool",
         )
-
-    @staticmethod
-    def _chat_model(config: AgentConfig) -> OpenAIChatCompletionsModel:
-        client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key)
-        return OpenAIChatCompletionsModel(model=config.model, openai_client=client)
 
     async def decide(
         self,
@@ -257,7 +211,6 @@ class Triage:
         `calls` collects both sides of every model call, for a caller that
         wants to keep them — which is the runner, because storing is a write.
         """
-        self._agent.hooks = LogHooks(calls, model=self._config.model)
         if is_compensation_talk(event.text):
             # Decided, not dropped: it is still a recorded outcome, and the
             # model is never told what anyone earns.
@@ -267,17 +220,13 @@ class Triage:
             )
 
         capture = _Capture()
-        try:
-            await Runner.run(
-                self._agent,
-                _prompt(event, context),
-                context=capture,
-                max_turns=self._config.max_turns + 1,
-                run_config=RunConfig(tracing_disabled=True),
-            )
-        except Exception as exc:  # noqa: BLE001 - every failure becomes work
-            log.warning("triage failed for %s: %s", event.provider_message_id, exc)
-            return NeedsHuman(scrub(f"triage failed: {exc}"))
+        # One extra turn: the answer arrives as a tool call, which is the call
+        # and its result where a written answer would be one turn.
+        result = await self._run.run(
+            _prompt(event, context), context=capture, calls=calls, extra_turns=1
+        )
+        if result is None:
+            return NeedsHuman(f"triage failed: {self._run.last_error}")
 
         if capture.decided is None:
             return NeedsHuman("triage produced no classification")

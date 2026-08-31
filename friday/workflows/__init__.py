@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from typing import get_args, get_type_hints
 
-from friday.triage import (
+from friday.models import (
     AccessRequestParams,
     ApiIssueParams,
     DocQuestionParams,

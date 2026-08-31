@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from friday.triage.params import clean, find_correlation_id, find_curl, find_environment
-from friday.triage import ApiIssueParams
+from friday.models import ApiIssueParams
 
 
 @pytest.mark.parametrize("value", ["null", "NULL", "none", "None", "N/A", "n/a", "", "   "])

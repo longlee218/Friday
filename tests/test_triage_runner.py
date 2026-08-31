@@ -7,13 +7,12 @@ database and the application is testable without a model.
 from __future__ import annotations
 
 from conftest import captured, make_event
-from friday.triage import (
+from friday.models import (
     AccessRequestParams,
     ApiIssueParams,
-    Decided,
-    NeedsHuman,
     SkipParams,
 )
+from friday.triage import Decided, NeedsHuman
 from friday.triage.runner import TriageRunner
 from friday.tasks import TaskState
 
