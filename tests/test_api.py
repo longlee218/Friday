@@ -137,3 +137,34 @@ def test_binding_beyond_loopback_without_a_credential_is_refused():
     with pytest.raises(SystemExit) as refused:
         check_exposure("0.0.0.0", token=None)
     assert "loopback" in str(refused.value)
+
+
+def test_a_taken_port_is_reported_in_one_line():
+    """Uvicorn calls sys.exit inside a TaskGroup task for this, which unwinds
+    as sixty lines of traceback ending in `SystemExit: 3`. The one fact that
+    matters — something else is already on the port — is buried in it."""
+    import socket
+
+    from friday.api import bind
+
+    held = bind("127.0.0.1", 0)
+    port = held.getsockname()[1]
+
+    with pytest.raises(SystemExit) as refused:
+        bind("127.0.0.1", port)
+
+    assert str(port) in str(refused.value)
+    assert "already" in str(refused.value)
+    held.close()
+
+
+def test_binding_hands_back_a_listening_socket():
+    """Bound before the server starts, so the failure happens where it can be
+    reported rather than deep inside uvicorn's startup."""
+    from friday.api import bind
+
+    sock = bind("127.0.0.1", 0)
+    try:
+        assert sock.getsockname()[0] == "127.0.0.1"
+    finally:
+        sock.close()

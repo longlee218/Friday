@@ -14,6 +14,7 @@ the operator's account.
 
 from __future__ import annotations
 
+import socket
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
@@ -28,7 +29,7 @@ from friday.outbox import FAILED
 from friday.redact import scrub
 from friday.tasks import TaskState
 
-__all__ = ["MAX_PAGE", "build_api", "check_exposure"]
+__all__ = ["MAX_PAGE", "bind", "build_api", "check_exposure"]
 
 #: The server decides how much it will hand over, not the caller.
 MAX_PAGE = 200
@@ -211,3 +212,28 @@ def check_exposure(host: str, *, token: str | None) -> None:
         "every captured message and model prompt. Bind it to loopback, or set "
         "BOARD_TOKEN."
     )
+
+
+def bind(host: str, port: int) -> socket.socket:
+    """Take the port before the server starts.
+
+    Uvicorn's own failure here is `sys.exit(3)` from inside a task, which
+    unwinds through the TaskGroup as sixty lines of traceback ending in
+    `SystemExit: 3`. The one fact that matters — something is already on the
+    port — is somewhere in the middle of it. Binding first puts the failure
+    where it can be said in a sentence, and hands the server a socket that is
+    already ours, so nothing can take it in between.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((host, port))
+    except OSError as exc:
+        sock.close()
+        raise SystemExit(
+            f"cannot serve the board on {host}:{port} — the port is already in "
+            f"use ({exc.strerror}). Something else is running: another copy of "
+            "the agent, or serve_board.py."
+        ) from None
+    sock.listen()
+    return sock

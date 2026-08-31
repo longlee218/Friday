@@ -12,7 +12,7 @@ import asyncio
 import uvicorn
 from dotenv import load_dotenv
 
-from friday.api import build_api
+from friday.api import bind, build_api
 from friday.board import build_board
 from friday.config import load_config
 from friday.db import Database
@@ -25,12 +25,10 @@ async def main() -> None:
     status = lambda: "not connected (board only)"  # noqa: E731
     app = build_api(db=db, provider_status=status, origins=list(config.board_origins))
     app.mount("/", build_board(db=db, provider_status=status))
-    server = uvicorn.Server(
-        uvicorn.Config(app, host=config.board_host, port=config.board_port,
-                       log_level="warning")
-    )
+    sock = bind(config.board_host, config.board_port)
+    server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))
     print(f"board on http://localhost:{config.board_port}")
-    await server.serve()
+    await server.serve(sockets=[sock])
 
 
 if __name__ == "__main__":
