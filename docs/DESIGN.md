@@ -195,6 +195,27 @@ layer exists to prevent, self-inflicted.
 are filtered to `skip` before the model sees them. A rule that important should
 not depend on a classifier having a good day.
 
+## Tracing
+
+The half the system was built around and does not have. `plan_api_issue` parks a
+traceable report with the reason *"has enough to trace"*, and nothing traces it —
+which is why every criterion about answering, approving and posting a reply is
+built and unexercised.
+
+**Fetching is deterministic; reading is not.** A query for a correlationId is a
+lookup with one right answer. Deciding what a hundred log lines mean is judgement,
+and that is where the `api_issue` workflow becomes agentic — the promotion this
+design anticipated, arriving on evidence rather than on principle.
+
+**Volume is the risk, not correctness.** Logs are unbounded and a context window
+is not. A query that returns everything for a busy service costs more than the
+answer is worth and drowns the signal it was looking for, so what comes back is
+bounded before it is read and truncation is visible when it bites.
+
+Two things are unsettled and cannot be guessed: how Loki is reached, and whether
+a correlationId is a label or a field inside the line. The second decides whether
+a lookup is an indexed filter or a scan, and so whether this is affordable.
+
 ## Workflows
 
 One workflow per type, **deterministic Python** — branching, not reasoning:
