@@ -47,10 +47,16 @@ parameters — and writes nothing. Every message gets exactly one of two outcome
 What to do about a task. Returns an **action** — `Ask`, `Reply` or `Park` —
 never a side effect.
 
-A planner is a function of the task's parameters. The deterministic ones are
-pure and stay that way; one that has to look something up is handed a
-**harness** and may be a coroutine. That is where a workflow becomes agentic,
-per task type and on evidence, rather than everywhere at once.
+A planner is a function of the task's parameters, registered with
+`@planner("task_type")` where it is written. It declares the collaborators it
+wants by naming them; one that decides by branching names none and stays a pure
+function, and one that has to look something up asks for `agent` and may be a
+coroutine. That is where a workflow becomes agentic, per task type and on
+evidence, rather than everywhere at once.
+
+The reflection runs once, at import, so a task type that does not exist and a
+collaborator nothing can supply both fail on the way up rather than the first
+time that task type appears.
 
 `Ask` is the agent's own decision. `Reply` waits for approval — asking for a
 correlationId costs a question if it is wrong, and asserting a cause costs the
