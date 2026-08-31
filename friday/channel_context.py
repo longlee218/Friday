@@ -185,7 +185,7 @@ class ContextRebuilder:
     async def _maybe_summarize(self, channel_id: str) -> str | None:
         if self._summary_config is None:
             return None
-        messages = await self._db.messages(ConversationId("discord", channel_id))
+        messages = await self._db.relevant_messages(ConversationId("discord", channel_id))
         if not messages:
             return None
         # A rough count, not an exact one: the threshold it is compared
