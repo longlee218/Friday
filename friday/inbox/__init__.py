@@ -145,7 +145,7 @@ class Inbox:
         """
         seeded = 0
         async for past in self._provider.recent(
-            event.conversation_id,
+            event.conversation,
             before=event.provider_message_id,
             limit=self._config.context_messages,
         ):
@@ -154,7 +154,7 @@ class Inbox:
         log.info(
             "seeded %d context message(s) for conversation %s",
             seeded,
-            event.conversation_id,
+            event.conversation,
         )
 
     def _out_of_scope_reason(self, event: InboundEvent) -> str | None:

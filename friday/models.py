@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Any
 from enum import StrEnum
 
+from friday.conversation import ConversationId, resolve
+
 
 class MentionType(StrEnum):
     """How the watched account was addressed."""
@@ -37,29 +39,11 @@ class InboundEvent:
     is_own: bool = False
 
     @property
-    def conversation_id(self) -> str:
-        """Where the exchange is actually happening.
-
-        A thread is its own conversation: seeding context from the parent
-        channel would pull in messages nobody in the thread was reading.
-        """
-        return self.thread_id or self.channel_id
-
-
-@dataclass(frozen=True, slots=True)
-class Conversation:
-    """Where an exchange is happening: a channel, a thread, or a DM.
-
-    Identity is (provider, channel_id, thread_id). A thread and its parent
-    channel are different conversations, because they carry different context.
-
-    Not called `Session`: the Agents SDK uses that word for a transcript of an
-    agent's own turns, which is a different thing entirely.
-    """
-
-    provider: str
-    channel_id: str
-    thread_id: str | None
+    def conversation(self) -> ConversationId:
+        """Where the exchange is happening. Delegated, never derived here —
+        the rules live in one module so a platform that threads differently can
+        be added without every caller learning about it."""
+        return resolve(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +56,7 @@ class Task:
     """
 
     id: int
-    conversation_id: str
+    conversation: ConversationId
     type: str
     state: str
     confidence: float

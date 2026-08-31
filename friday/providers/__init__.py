@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
+from friday.conversation import ConversationId
 from friday.models import InboundEvent
 
 __all__ = ["CredentialRejected", "Provider"]
@@ -37,7 +38,7 @@ class Provider(Protocol):
         ...
 
     def recent(
-        self, conversation_id: str, *, before: str, limit: int
+        self, conversation: ConversationId, *, before: str, limit: int
     ) -> AsyncIterator[InboundEvent]:
         """Yield up to `limit` messages immediately preceding `before`.
 

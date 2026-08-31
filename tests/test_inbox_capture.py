@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from conftest import captured, make_event
 from friday.config import IngestConfig
 from friday.inbox import Inbox
-from friday.models import Conversation, MentionType
+from friday.conversation import ConversationId
+from friday.models import MentionType
 
 
 async def test_direct_mention_in_watched_channel_is_captured(inbox, provider):
@@ -99,7 +100,7 @@ async def test_capturing_an_event_records_its_conversation(inbox, provider, db):
     await captured(inbox)
 
     assert await db.conversations() == [
-        Conversation(provider="fake", channel_id="watched", thread_id="t1")
+        ConversationId("fake", "watched", "t1")
     ]
 
 

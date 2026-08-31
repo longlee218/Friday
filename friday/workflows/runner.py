@@ -51,11 +51,11 @@ class WorkflowRunner:
         action = self._plan(task)
 
         if isinstance(action, Ask) and self._auto_ask:
-            await self._provider.send(task.conversation_id, action.text)
+            await self._provider.send(task.conversation, action.text)
             log.info(
                 "task %d: replied to %s: %s",
                 task.id,
-                task.conversation_id,
+                task.conversation,
                 action.text,
             )
             return await self._move(task, ASKED)

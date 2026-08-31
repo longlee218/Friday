@@ -22,7 +22,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 
 from friday import schema
-from friday.models import Conversation, InboundEvent, MentionType, Task
+from friday.conversation import ConversationId
+from friday.models import InboundEvent, MentionType, Task
 
 __all__ = ["Database"]
 
@@ -88,7 +89,7 @@ class Database:
             provider_message_id=event.provider_message_id,
             channel_id=event.channel_id,
             thread_id=event.thread_id,
-            conversation_id=event.conversation_id,
+            conversation_id=str(event.conversation),
             author_id=event.author_id,
             author_name=event.author_name,
             text=event.text,
@@ -101,11 +102,13 @@ class Database:
             result = await session.execute(statement.on_conflict_do_nothing())
             return result.rowcount == 1
 
-    async def messages(self, conversation_id: str | None = None) -> list[InboundEvent]:
+    async def messages(
+        self, conversation: ConversationId | None = None
+    ) -> list[InboundEvent]:
         """Everything seen, or everything seen in one conversation."""
         query = select(schema.Message)
-        if conversation_id is not None:
-            query = query.where(schema.Message.conversation_id == conversation_id)
+        if conversation is not None:
+            query = query.where(schema.Message.conversation_id == str(conversation))
         return await self._events(
             query.order_by(
                 schema.Message.created_at, schema.Message.provider_message_id
@@ -227,53 +230,38 @@ class Database:
     async def conversation_is_tracked(self, event: InboundEvent) -> bool:
         async with self._sessions() as session:
             return await session.scalar(
-                select(schema.Conversation.provider).where(
-                    schema.Conversation.provider == event.provider,
-                    schema.Conversation.channel_id == event.channel_id,
-                    schema.Conversation.thread_id == (event.thread_id or ""),
+                select(schema.Conversation.id).where(
+                    schema.Conversation.id == str(event.conversation)
                 )
             ) is not None
 
     async def record_conversation(self, event: InboundEvent) -> bool:
         """Ensure the conversation exists. True if this created it."""
-        statement = insert(schema.Conversation).values(
-            provider=event.provider,
-            channel_id=event.channel_id,
-            thread_id=event.thread_id or "",
-        )
+        statement = insert(schema.Conversation).values(id=str(event.conversation))
         async with self._sessions.begin() as session:
             result = await session.execute(statement.on_conflict_do_nothing())
             return result.rowcount == 1
 
-    async def conversations(self) -> list[Conversation]:
+    async def conversations(self) -> list[ConversationId]:
         async with self._sessions() as session:
             rows = await session.scalars(
-                select(schema.Conversation).order_by(
-                    schema.Conversation.channel_id, schema.Conversation.thread_id
-                )
+                select(schema.Conversation.id).order_by(schema.Conversation.id)
             )
-            return [
-                Conversation(
-                    provider=row.provider,
-                    channel_id=row.channel_id,
-                    thread_id=row.thread_id or None,
-                )
-                for row in rows
-            ]
+            return [ConversationId.parse(row) for row in rows]
 
     # ---- tasks ---------------------------------------------------------
 
     async def create_task(
         self,
         *,
-        conversation_id: str,
+        conversation: ConversationId,
         type: str,
         state: str,
         confidence: float,
         params: dict,
     ) -> Task:
         row = schema.Task(
-            conversation_id=conversation_id,
+            conversation_id=str(conversation),
             type=type,
             state=state,
             confidence=confidence,
@@ -284,7 +272,7 @@ class Database:
             session.add(row)
         return _task(row)
 
-    async def open_task_for(self, conversation_id: str) -> Task | None:
+    async def open_task_for(self, conversation: ConversationId) -> Task | None:
         """The task this conversation is already working on, if any.
 
         Open means anything not finished: a follow-up belongs to work in flight,
@@ -294,7 +282,7 @@ class Database:
             row = await session.scalar(
                 select(schema.Task)
                 .where(
-                    schema.Task.conversation_id == conversation_id,
+                    schema.Task.conversation_id == str(conversation),
                     schema.Task.state != "done",
                 )
                 .order_by(schema.Task.id.desc())
@@ -352,7 +340,7 @@ def _event(row: schema.Message) -> InboundEvent:
 def _task(row: schema.Task) -> Task:
     return Task(
         id=row.id,
-        conversation_id=row.conversation_id,
+        conversation=ConversationId.parse(row.conversation_id),
         type=row.type,
         state=row.state,
         confidence=row.confidence,

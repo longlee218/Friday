@@ -7,6 +7,7 @@ from __future__ import annotations
 import pytest
 
 from friday.models import Task
+from friday.conversation import ConversationId
 from friday.workflows.runner import ASKED, WorkflowRunner
 
 
@@ -16,13 +17,13 @@ class RecordingProvider:
     def __init__(self):
         self.sent = []
 
-    async def send(self, conversation_id: str, text: str) -> None:
-        self.sent.append((conversation_id, text))
+    async def send(self, conversation, text: str) -> None:
+        self.sent.append((conversation.target_id, text))
 
 
 async def make_task(db, **params):
     return await db.create_task(
-        conversation_id="watched",
+        conversation=ConversationId("fake", "watched"),
         type="api_issue",
         state="pending",
         confidence=0.9,
@@ -75,7 +76,7 @@ async def test_a_report_that_can_be_traced_waits_for_a_human(db):
 
 
 async def test_types_without_a_workflow_wait_for_a_human(db):
-    await db.create_task(conversation_id="watched", type="doc_question",
+    await db.create_task(conversation=ConversationId("fake", "watched"), type="doc_question",
                          state="pending", confidence=0.9, params={"question": "?"})
     provider = RecordingProvider()
 

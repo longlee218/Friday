@@ -54,9 +54,9 @@ class FakeProvider:
         if self.keep_open:
             await self._closed.wait()
 
-    async def recent(self, conversation_id: str, *, before: str, limit: int):
-        self.recent_calls.append((conversation_id, before, limit))
-        for event in self._recent.get(conversation_id, [])[-limit:]:
+    async def recent(self, conversation, *, before: str, limit: int):
+        self.recent_calls.append((conversation.target_id, before, limit))
+        for event in self._recent.get(conversation.target_id, [])[-limit:]:
             yield event
 
     async def history(self, channel_id: str, *, after: str | None):
@@ -68,6 +68,7 @@ class FakeProvider:
 
 def make_event(
     *,
+    provider: str = "fake",
     message_id: str = "m1",
     channel_id: str = "watched",
     thread_id: str | None = None,
@@ -78,7 +79,7 @@ def make_event(
     is_own: bool = False,
 ) -> InboundEvent:
     return InboundEvent(
-        provider="fake",
+        provider=provider,
         provider_message_id=message_id,
         channel_id=channel_id,
         thread_id=thread_id,

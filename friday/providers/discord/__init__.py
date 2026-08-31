@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 
 import discord_self
 
+from friday.conversation import ConversationId
 from friday.models import InboundEvent
 from friday.providers import CredentialRejected
 from friday.providers.discord.normalise import normalise
@@ -80,9 +81,9 @@ class DiscordUserProvider:
         """
         await self.send(reply_target_id(event), text)
 
-    async def send(self, conversation_id: str, text: str) -> None:
+    async def send(self, conversation: ConversationId, text: str) -> None:
         """Post into a conversation, as the watched account."""
-        target = int(conversation_id)
+        target = int(conversation.target_id)
         channel = self._client.get_channel(target) or await (
             self._client.fetch_channel(target)
         )

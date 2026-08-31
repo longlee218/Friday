@@ -114,13 +114,11 @@ class Cursor(Base):
 class Conversation(Base):
     """Conversations that have involved us — not a copy of every channel.
 
-    `thread_id` is '' rather than NULL for the absent case: SQLite treats NULLs
-    in a key as distinct, which would let one channel accumulate a new
-    conversation per message.
+    Keyed by the resolved id rather than by its parts: it is one value
+    everywhere else, and two representations of the same thing is how they
+    drift.
     """
 
     __tablename__ = "conversations"
 
-    provider: Mapped[str] = mapped_column(primary_key=True)
-    channel_id: Mapped[str] = mapped_column(primary_key=True)
-    thread_id: Mapped[str] = mapped_column(primary_key=True, default="")
+    id: Mapped[str] = mapped_column(primary_key=True)

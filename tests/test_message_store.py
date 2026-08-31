@@ -6,7 +6,8 @@ queue from the surrounding context is a column, not a second table.
 
 from __future__ import annotations
 
-from conftest import captured, make_event
+from conftest import FakeProvider, captured, make_event
+from friday.conversation import ConversationId
 from friday.config import IngestConfig
 from friday.inbox import Inbox
 from friday.models import MentionType
@@ -58,7 +59,7 @@ async def test_a_message_in_a_thread_comes_back_as_a_thread_message(
     (stored,) = await db.messages()
     assert stored.channel_id == "watched"
     assert stored.thread_id == "t1"
-    assert stored.conversation_id == "t1"
+    assert stored.conversation == ConversationId("fake", "watched", "t1")
 
 
 # The migration from the old two-table shape lived here. It ran once, against
@@ -106,3 +107,23 @@ async def test_context_is_not_reported_as_a_triage_decision(inbox, provider, db)
     await captured(inbox)
 
     assert await db.decisions() == []
+
+
+async def test_two_providers_sharing_a_channel_number_do_not_share_a_history(
+    provider, db, config
+):
+    """Discord and Slack hand out ids from their own namespaces. Nothing stops
+    them colliding, and a collision would merge two strangers' conversations."""
+    other = FakeProvider()
+    other.name = "other"
+
+    provider.emit(make_event(message_id="1", text="from discord"))
+    await captured(Inbox(provider=provider, db=db, config=config))
+    other.emit(make_event(message_id="2", text="from elsewhere", provider="other"))
+    await captured(Inbox(provider=other, db=db, config=config))
+
+    here = ConversationId("fake", "watched")
+    there = ConversationId("other", "watched")
+    assert [m.text for m in await db.messages(here)] == ["from discord"]
+    assert [m.text for m in await db.messages(there)] == ["from elsewhere"]
+    assert len(await db.conversations()) == 2

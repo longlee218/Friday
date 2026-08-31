@@ -83,7 +83,7 @@ class TriageRunner:
         return touched
 
     async def _decide(self, event: InboundEvent) -> TriageOutcome:
-        context = await self._db.messages(event.conversation_id)
+        context = await self._db.messages(event.conversation)
         return await self._triage.decide(event, context=context)
 
     async def _apply(
@@ -101,7 +101,7 @@ class TriageRunner:
             return None
 
         params = asdict(outcome.params)
-        existing = await self._db.open_task_for(event.conversation_id)
+        existing = await self._db.open_task_for(event.conversation)
         if existing is not None:
             return await self._follow_up(existing, outcome)
 
@@ -166,7 +166,7 @@ class TriageRunner:
         state: str,
     ) -> Task:
         task = await self._db.create_task(
-            conversation_id=event.conversation_id,
+            conversation=event.conversation,
             type=type_,
             state=state,
             confidence=confidence,

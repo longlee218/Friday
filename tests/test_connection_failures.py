@@ -55,7 +55,7 @@ async def test_a_failure_inside_the_inbox_surfaces_instead_of_hanging(db, config
             return
             yield  # pragma: no cover
 
-        async def recent(self, conversation_id, *, before, limit):
+        async def recent(self, conversation, *, before, limit):
             return
             yield  # pragma: no cover
 
