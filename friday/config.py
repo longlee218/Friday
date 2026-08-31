@@ -62,6 +62,9 @@ class AgentConfig:
 
 @dataclass(frozen=True, slots=True)
 class WorkflowConfig:
+    #: Let the responder write the ask in the operator's voice. Off by default:
+    #: a drafted message needs approval, and the template does not.
+    use_responder: bool = False
     #: How many times to ask for the same missing detail before handing the
     #: task to a person. Asking forever is how a helpful question becomes noise.
     max_asks: int = 3
@@ -117,6 +120,9 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
         agents=_agents(_expand(raw.get("agents") or {})),
         workflows=WorkflowConfig(
             max_asks=int((raw.get("workflows") or {}).get("max_asks", 3)),
+            use_responder=bool(
+                (raw.get("workflows") or {}).get("use_responder", False)
+            ),
             auto_ask_for_details=bool(
                 (raw.get("workflows") or {}).get("auto_ask_for_details", False)
             ),

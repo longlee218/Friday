@@ -21,6 +21,7 @@ from friday.redact import Redacting
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
 from friday.providers.discord import DiscordUserProvider
+from friday.responder import Responder
 from friday.triage import Triage
 from friday.triage.runner import TriageRunner
 from friday.workflows.runner import WorkflowRunner
@@ -93,11 +94,28 @@ async def run() -> None:
         context_messages=config.ingest.context_messages,
     )
 
+    responder_config = config.agents.get("responder")
+    responder = (
+        Responder(config=responder_config)
+        if config.workflows.use_responder and responder_config
+        else None
+    )
     workflows = WorkflowRunner(
         db=db,
         auto_ask=config.workflows.auto_ask_for_details,
+        responder=responder,
+        tone_examples=int(
+            (responder_config.options.get("tone_examples", 8))
+            if responder_config
+            else 8
+        ),
         max_asks=config.workflows.max_asks,
     )
+    if responder is not None:
+        log.info(
+            "responder on %s — its drafts need approval before they go out",
+            responder_config.model,
+        )
     outbox = Outbox(
         db=db,
         # A conversation names a platform; a sender names an identity. Both

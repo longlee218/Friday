@@ -38,12 +38,16 @@ class WorkflowRunner:
         *,
         db: Database,
         auto_ask: bool,
+        responder=None,
+        tone_examples: int = 8,
         max_asks: int = 3,
         sender: str = "discord_user",
         batch_size: int = 20,
     ) -> None:
         self._db = db
         self._auto_ask = auto_ask
+        self._responder = responder
+        self._tone_examples = tone_examples
         self._max_asks = max_asks
         self._sender = sender
         self._batch_size = batch_size
@@ -73,15 +77,16 @@ class WorkflowRunner:
                 return await self._move(task, NEEDS_HUMAN)
 
         if isinstance(action, Ask) and self._auto_ask:
+            kind, text = await self._say(task, action.text)
             await self._db.queue_outbound(
                 task_id=task.id,
                 conversation=task.conversation,
-                kind=Kind.ASK_FOR_DETAILS,
+                kind=kind,
                 sender=self._sender,
-                text=action.text,
+                text=text,
                 reply_to=await self._db.last_mention_in(task.conversation),
             )
-            log.info("task %d: queued a request for missing details", task.id)
+            log.info("task %d: queued a %s — %r", task.id, kind, text)
             return await self._move(task, ASKED)
 
         if isinstance(action, Ask):
@@ -89,6 +94,28 @@ class WorkflowRunner:
         else:
             log.info("task %d: %s", task.id, action.reason)
         return await self._move(task, NEEDS_HUMAN)
+
+    async def _say(self, task: Task, template: str) -> tuple[str, str]:
+        """The template, or the same thing in the operator's voice.
+
+        A drafted message is a `reply` and waits for approval. The template is
+        allowed out unreviewed because it is the same sentence every time, and
+        that stops being true the moment a model writes it.
+
+        A responder that cannot answer falls back to the template rather than
+        producing nothing: a wrong reply in someone's name is worse than a
+        plain one, and silence is worse than both.
+        """
+        if self._responder is None:
+            return Kind.ASK_FOR_DETAILS, template
+        draft = await self._responder.draft(
+            asking=template,
+            context=await self._db.messages(task.conversation, limit=self._tone_examples),
+            tone=await self._db.tone_examples(limit=self._tone_examples),
+        )
+        if draft is None:
+            return Kind.ASK_FOR_DETAILS, template
+        return Kind.REPLY, draft.text
 
     def _plan(self, task: Task) -> Action:
         params = PARAMS.get(task.type)

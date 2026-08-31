@@ -88,3 +88,57 @@ async def test_a_task_stops_being_asked_after_a_few_tries(db):
 
     assert len(await db.outbound()) == 2
     assert (await db.tasks())[0].state == "needs_human"
+
+
+class StubResponder:
+    def __init__(self, text=None):
+        self._text = text
+        self.asked: list[str] = []
+
+    async def draft(self, *, asking, context=(), tone=(), calls=None):
+        from friday.responder import Draft
+
+        self.asked.append(asking)
+        return Draft(self._text) if self._text else None
+
+
+async def test_a_drafted_reply_waits_for_approval(db):
+    """The template goes out unreviewed because it is the same sentence every
+    time. A model writing it makes that untrue, so a draft is a reply."""
+    await make_task(db)
+    responder = StubResponder("cho anh xin cái correlationId với")
+
+    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+
+    (queued,) = await db.outbound()
+    assert queued.kind == "reply"
+    assert queued.text == "cho anh xin cái correlationId với"
+    assert await db.sendable_outbound() == []
+
+
+async def test_the_responder_is_told_what_to_say(db):
+    await make_task(db)
+    responder = StubResponder("ok")
+
+    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+
+    assert "correlationId" in responder.asked[0]
+
+
+async def test_the_template_still_goes_out_when_the_responder_cannot(db):
+    """Never a wrong reply in the operator's name; never silence either."""
+    await make_task(db)
+
+    await WorkflowRunner(db=db, auto_ask=True, responder=StubResponder(None)).run_once()
+
+    (queued,) = await db.outbound()
+    assert queued.kind == "ask_for_details"
+    assert await db.sendable_outbound() != []
+
+
+async def test_without_a_responder_nothing_changes(db):
+    await make_task(db)
+
+    await WorkflowRunner(db=db, auto_ask=True).run_once()
+
+    assert (await db.outbound())[0].kind == "ask_for_details"
