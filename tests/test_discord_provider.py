@@ -7,8 +7,10 @@ called and the process simply goes quiet.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from friday.conversation import ConversationId
 from friday.providers.discord import DiscordUserProvider
 
 
@@ -75,21 +77,96 @@ async def test_someone_elses_message_is_not_marked_as_ours():
     assert provider._incoming.get_nowait().is_own is False
 
 
-def test_a_reply_goes_to_the_thread_when_the_message_was_in_one():
-    from friday.providers.discord import reply_target_id
+def test_the_adapter_implements_everything_the_inbox_will_call():
+    """`Provider` is a Protocol, so nothing checks this at import or at
+    construction — a missing method surfaces only when the inbox reaches for it,
+    at runtime, in production. `history` and `recent` were both absent for three
+    tickets and the recovery sweep never ran once."""
+    provider = DiscordUserProvider("token", client=stub_client())
 
-    from conftest import make_event
+    missing = [
+        name
+        for name in ("name", "reconnected", "stream", "history", "recent", "send")
+        if not hasattr(provider, name)
+    ]
+    assert missing == []
 
-    event = make_event(channel_id="chan", thread_id="thread")
 
-    assert reply_target_id(event) == "thread"
+class StubHistory:
+    """A channel whose history() replays a canned list, recording its filters."""
+
+    def __init__(self, *messages):
+        self.id = 55
+        self._messages = list(messages)
+        self.calls: list[dict] = []
+
+    def history(self, **kwargs):
+        self.calls.append(kwargs)
+        messages = self._messages
+        if kwargs.get("oldest_first") is False:
+            messages = list(reversed(messages))
+
+        async def stream():
+            for message in messages[: kwargs.get("limit") or len(messages)]:
+                yield message
+
+        return stream()
 
 
-def test_a_reply_goes_to_the_channel_when_there_was_no_thread():
-    from friday.providers.discord import reply_target_id
+def stub_message(message_id, text="hello", author_id=2, channel=None):
+    return SimpleNamespace(
+        id=message_id,
+        content=text,
+        clean_content=text,
+        author=SimpleNamespace(id=author_id, display_name="reporter", bot=False),
+        channel=channel or SimpleNamespace(id=55, type=None),
+        guild=None,
+        created_at=datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc),
+        mentions=[],
+        role_mentions=[],
+    )
 
-    from conftest import make_event
 
-    event = make_event(channel_id="chan", thread_id=None)
+async def test_history_replays_a_channel_after_a_cursor():
+    """This is the recovery sweep. Without it a disconnection loses messages
+    permanently, which is the whole of ticket 03."""
+    channel = StubHistory(stub_message(10), stub_message(11))
+    client = stub_client()
+    client.get_channel = lambda _id: channel
+    provider = DiscordUserProvider("token", client=client)
 
-    assert reply_target_id(event) == "chan"
+    seen = [event async for event in provider.history("55", after="9")]
+
+    assert [e.provider_message_id for e in seen] == ["10", "11"]
+    assert channel.calls[0]["oldest_first"] is True
+    assert channel.calls[0]["after"].id == 9
+
+
+async def test_history_from_the_beginning_passes_no_cursor():
+    channel = StubHistory(stub_message(10))
+    client = stub_client()
+    client.get_channel = lambda _id: channel
+    provider = DiscordUserProvider("token", client=client)
+
+    [event async for event in provider.history("55", after=None)]
+
+    assert channel.calls[0]["after"] is None
+
+
+async def test_recent_reads_backwards_from_a_message():
+    """Seeding context: what was said before a conversation first involved us."""
+    channel = StubHistory(stub_message(10), stub_message(11), stub_message(12))
+    client = stub_client()
+    client.get_channel = lambda _id: channel
+    provider = DiscordUserProvider("token", client=client)
+
+    seen = [
+        event
+        async for event in provider.recent(
+            ConversationId("discord", "55"), before="13", limit=2
+        )
+    ]
+
+    assert [e.provider_message_id for e in seen] == ["11", "12"]
+    assert channel.calls[0]["before"].id == 13
+    assert channel.calls[0]["limit"] == 2

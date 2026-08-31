@@ -73,13 +73,76 @@ class DiscordUserProvider:
         )
         await self._incoming.put(event)
 
+    async def history(
+        self, channel_id: str, *, after: str | None
+    ) -> AsyncIterator[InboundEvent]:
+        """Replay a channel from a cursor, oldest first.
+
+        The recovery path: the live connection can miss messages, and this is
+        how they are found again.
+        """
+        async for event in self._replay(
+            channel_id,
+            after=_snowflake(after),
+            oldest_first=True,
+        ):
+            yield event
+
+    async def recent(
+        self, conversation: ConversationId, *, before: str, limit: int
+    ) -> AsyncIterator[InboundEvent]:
+        """Read backwards from a message, then hand them back in order.
+
+        Used once per conversation to seed context. Discord returns newest
+        first when reading backwards, and a transcript out of order reads to a
+        model as a different conversation.
+        """
+        collected = [
+            event
+            async for event in self._replay(
+                conversation.target_id,
+                before=_snowflake(before),
+                limit=limit,
+                oldest_first=False,
+            )
+        ]
+        for event in reversed(collected):
+            yield event
+
+    async def _replay(
+        self, channel_id: str, **filters
+    ) -> AsyncIterator[InboundEvent]:
+        """Normalise a slice of a channel's history.
+
+        `is_own` is decided the same way as on the live path — by author — so a
+        message recovered by the sweep is indistinguishable from one that
+        arrived over the gateway.
+        """
+        me = self._client.user
+        if me is None:
+            log.warning("asked for history before the client was ready")
+            return
+        channel = await self._channel(int(channel_id))
+        async for message in channel.history(**filters):
+            yield normalise(
+                message,
+                me_id=me.id,
+                my_role_ids=_roles_in(message.guild),
+                is_own=message.author.id == me.id,
+            )
+
+    async def _channel(self, target: int):
+        return self._client.get_channel(target) or await (
+            self._client.fetch_channel(target)
+        )
+
     async def reply(self, event: InboundEvent, text: str) -> None:
         """Post a message back into the conversation the event came from.
 
         Sends as the watched account. Ticket 06 puts the approval gate in front
         of this; until then nothing but the smoke test should call it.
         """
-        await self.send(reply_target_id(event), text)
+        await self.send(event.conversation, text)
 
     async def send(
         self, conversation: ConversationId, text: str, *, reply_to: str | None = None
@@ -90,10 +153,7 @@ class DiscordUserProvider:
         keeps a busy channel readable. `fail_if_not_exists=False` so a deleted
         message degrades to a plain post rather than losing the reply.
         """
-        target = int(conversation.target_id)
-        channel = self._client.get_channel(target) or await (
-            self._client.fetch_channel(target)
-        )
+        channel = await self._channel(int(conversation.target_id))
         reference = (
             discord_self.MessageReference(
                 message_id=int(reply_to),
@@ -161,13 +221,9 @@ def is_credential_rejected(exc: BaseException) -> bool:
     )
 
 
-def reply_target_id(event: InboundEvent) -> str:
-    """Where a reply belongs: in the thread if there was one, else the channel.
-
-    Replying to a thread message in the parent channel loses the context the
-    person was in.
-    """
-    return event.thread_id or event.channel_id
+def _snowflake(message_id: str | None):
+    """Discord filters on an object with an id, not on a bare number."""
+    return discord_self.Object(id=int(message_id)) if message_id else None
 
 
 def _roles_in(guild) -> frozenset[int]:
