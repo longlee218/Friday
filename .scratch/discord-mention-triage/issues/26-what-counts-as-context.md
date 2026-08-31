@@ -30,9 +30,38 @@ nothing before it can be cached. An anchored opening plus what has arrived since
 stable at the front and short at the back — the same thing the reporter would tell
 you, and the shape a cache can hold.
 
-- [ ] An inbound message records what it replies to
-- [ ] Context contains only messages that mention the operator, were written by them, or reply to them
-- [ ] Changing that definition changes what is shown without needing history that was never stored
-- [ ] A task's context opens with the messages it began from, and those do not change as the conversation continues
-- [ ] Messages that arrive after a task opens are appended rather than displacing the opening
-- [ ] The proportion of a prompt that is identical between two consecutive calls is measurable, so caching can be confirmed rather than assumed
+- [x] An inbound message records what it replies to
+- [x] Context contains only messages that mention the operator, were written by them, or reply to them
+- [x] Changing that definition changes what is shown without needing history that was never stored
+- [x] A task's context opens with the messages it began from, and those do not change as the conversation continues
+- [x] Messages that arrive after a task opens are appended rather than displacing the opening
+- [x] The proportion of a prompt that is identical between two consecutive calls is measurable, so caching can be confirmed rather than assumed
+
+## Done
+
+`InboundEvent` and the `messages` table now carry `reply_to`, populated in
+`friday/providers/discord/normalise.py` from Discord's own reply reference.
+`Database.relevant_messages(conversation)` reads (never writes) the structural
+filter: mentions the operator, was written by them, or replies to a message of
+theirs — an `is_own` id lookup makes the third signal a plain `IN` query rather
+than a join.
+
+The anchored-prefix-plus-append shape turned out not to need its own state.
+Filtering already keeps a busy channel's unrelated traffic out, so dropping the
+sliding window's `limit` entirely — unbounded, oldest first — gives the same
+guarantee for free: a relevant message, once included, is never evicted by a
+later one arriving, so the prefix a model saw on call N is still there
+untouched on call N+1. No `anchor_message_id` column, no per-task boundary to
+maintain. `TriageRunner` and `WorkflowRunner._say` both read through
+`relevant_messages` now instead of `db.messages(..., limit=N)`; the sliding
+window's `context_messages` config still exists but now only governs how much
+history the inbox *seeds* when a conversation first mentions us — a write-time
+concern this ticket deliberately left alone.
+
+`tests/test_context_relevance.py::test_the_shared_prefix_between_two_calls_is_almost_the_whole_prompt`
+is the measurability criterion: it builds the same conversation's prompt before
+and after 24 lines of unrelated noise arrive and asserts the shared prefix is
+over 90% of it — a sliding window would have shared almost none.
+
+Left alone, per the ticket: per-channel YAML context files, the base/override/
+derived split, and rebuild scheduling — that's ticket 25, built in parallel.

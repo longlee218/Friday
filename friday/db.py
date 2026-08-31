@@ -135,6 +135,7 @@ class Database:
             created_at=event.created_at,
             is_own=event.is_own,
             mention_type=event.mention_type.value if event.mention_type else None,
+            reply_to=event.reply_to,
             triaged_at=_now() if context_only else None,
         )
         async with self._sessions.begin() as session:
@@ -157,6 +158,36 @@ class Database:
             return await self._events(query.order_by(*_OLDEST_FIRST))
         newest = await self._events(query.order_by(*_NEWEST_FIRST).limit(limit))
         return list(reversed(newest))
+
+    async def relevant_messages(
+        self, conversation: ConversationId
+    ) -> list[InboundEvent]:
+        """What concerns the operator in this conversation: mentions them, was
+        written by them, or replies to something they wrote. Chronological,
+        unbounded.
+
+        This is context assembled *for a call*, not what gets stored — a
+        message thrown away at write time can never be reconsidered under a
+        better definition of relevant later, so nothing here is deleted, only
+        read selectively. Unbounded rather than the last N: a sliding window
+        changes on every call, so nothing before it can ever be cached; the
+        structural filter already keeps a busy channel's unrelated traffic out,
+        so a message once relevant stays part of the prefix forever and only
+        the tail grows as the conversation continues.
+        """
+        own = select(schema.Message.provider_message_id).where(
+            schema.Message.conversation_id == str(conversation),
+            schema.Message.is_own.is_(True),
+        )
+        query = select(schema.Message).where(
+            schema.Message.conversation_id == str(conversation),
+            or_(
+                schema.Message.mention_type.is_not(None),
+                schema.Message.is_own.is_(True),
+                schema.Message.reply_to.in_(own),
+            ),
+        )
+        return await self._events(query.order_by(*_OLDEST_FIRST))
 
     async def page_messages(
         self, *, limit: int = 50, before: str | None = None
@@ -843,6 +874,7 @@ def _event(row: schema.Message) -> InboundEvent:
         created_at=row.created_at,
         mention_type=MentionType(row.mention_type) if row.mention_type else None,
         is_own=row.is_own,
+        reply_to=row.reply_to,
     )
 
 

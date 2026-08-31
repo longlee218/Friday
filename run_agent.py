@@ -99,7 +99,6 @@ async def _run(stack: AsyncExitStack) -> None:
         confidence_threshold=float(
             triage_config.options.get("confidence_threshold", 0.7)
         ),
-        context_messages=config.ingest.context_messages,
     )
 
     # Read once, at build time: a promotion takes effect on the next start

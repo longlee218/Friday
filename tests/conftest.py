@@ -77,6 +77,7 @@ def make_event(
     author_id: str = "u-reporter",
     author_name: str = "reporter",
     is_own: bool = False,
+    reply_to: str | None = None,
 ) -> InboundEvent:
     return InboundEvent(
         provider=provider,
@@ -89,6 +90,7 @@ def make_event(
         created_at=datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc),
         mention_type=mention_type,
         is_own=is_own,
+        reply_to=reply_to,
     )
 
 

@@ -29,7 +29,14 @@ def normalise(
         created_at=message.created_at,
         mention_type=_mention_type(message, me_id, my_role_ids),
         is_own=is_own,
+        reply_to=_reply_to(message),
     )
+
+
+def _reply_to(message) -> str | None:
+    reference = getattr(message, "reference", None)
+    message_id = getattr(reference, "message_id", None)
+    return str(message_id) if message_id is not None else None
 
 
 def _mention_type(message, me_id: int, my_role_ids: Collection[int]):
