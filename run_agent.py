@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from friday.config import ConfigError, load_config
 from friday.db import Database
 from friday.inbox import Inbox
+from friday.board import build_board
 from friday.liveness import Heartbeat
 from friday.redact import Redacting
 from friday.outbox import Outbox
@@ -33,6 +34,27 @@ async def ingest(inbox: Inbox, provider, smoke: bool) -> None:
         # this with the real path, where nothing posts without approval.
         if smoke and "hi there" in event.text.lower():
             await provider.reply(event, "What'sapp")
+
+
+async def serve_board(db, provider, port: int) -> None:
+    """The board runs in this process like everything else.
+
+    Read-only, so it needs no authentication — there is nothing here to abuse,
+    and every action happens in Discord.
+    """
+    import uvicorn
+
+    board = build_board(
+        db=db,
+        provider_status=lambda: (
+            "connected" if provider.reconnected.is_set() else "connecting"
+        ),
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(board, host="0.0.0.0", port=port, log_level="warning")
+    )
+    log.info("board on http://localhost:%d", port)
+    await server.serve()
 
 
 async def run() -> None:
@@ -120,6 +142,7 @@ async def run() -> None:
             group.create_task(workflows.run_forever())
             group.create_task(outbox.run_forever())
             group.create_task(heartbeat.run_forever())
+            group.create_task(serve_board(db, provider, config.board_port))
     except* CredentialRejected as group_exc:
         raise SystemExit(
             f"Discord rejected the credential: {group_exc.exceptions[0]}"

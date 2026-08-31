@@ -16,6 +16,7 @@ import logging
 from dataclasses import asdict, replace
 
 from friday.db import Database
+from friday.tasks import TaskState
 from friday.models import InboundEvent, Task
 from friday.triage import Decided, NeedsHuman, TriageOutcome
 
@@ -23,10 +24,9 @@ __all__ = ["PENDING", "NEEDS_HUMAN", "TriageRunner"]
 
 log = logging.getLogger(__name__)
 
-PENDING = "pending"
-NEEDS_HUMAN = "needs_human"
-# Duplicated in friday.workflows.runner; ticket 05 gives the states one home.
-ASKED = "waiting_for_details"
+PENDING = TaskState.PENDING
+NEEDS_HUMAN = TaskState.NEEDS_HUMAN
+ASKED = TaskState.WAITING_FOR_DETAILS
 
 
 def _record(outcome: TriageOutcome) -> dict:
@@ -152,7 +152,7 @@ class TriageRunner:
                 task.type,
                 outcome.type,
             )
-            await self._db.set_task_state(task.id, NEEDS_HUMAN)
+            await self._db.move_task(task.id, NEEDS_HUMAN)
             return replace(task, state=NEEDS_HUMAN)
 
         fresh = {k: v for k, v in asdict(outcome.params).items() if v is not None}
@@ -175,13 +175,13 @@ class TriageRunner:
                 " or ".join(k for k, v in task.params.items() if not v) or "detail",
             )
             if task.state == ASKED:
-                await self._db.set_task_state(task.id, PENDING)
+                await self._db.move_task(task.id, PENDING)
                 return replace(task, state=PENDING)
             return task
 
         log.info("task %d: follow-up supplied %s", task.id, ", ".join(gained))
         if task.state == ASKED:
-            await self._db.set_task_state(task.id, PENDING)
+            await self._db.move_task(task.id, PENDING)
             task = replace(task, state=PENDING)
         return task
 

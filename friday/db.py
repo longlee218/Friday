@@ -25,6 +25,7 @@ from friday import schema
 from friday.conversation import ConversationId
 from friday.llm_log import ModelCall
 from friday.models import InboundEvent, MentionType, Outbound, Task
+from friday.tasks import OPEN, IllegalTransition, TaskState, may_move
 
 __all__ = ["Database"]
 
@@ -205,6 +206,7 @@ class Database:
     # ---- model calls ---------------------------------------------------
 
     async def record_model_call(self, **values) -> None:
+        values.setdefault("created_at", _now())
         async with self._sessions.begin() as session:
             session.add(schema.ModelCall(**values))
 
@@ -456,7 +458,7 @@ class Database:
                 select(schema.Task)
                 .where(
                     schema.Task.conversation_id == str(conversation),
-                    schema.Task.state != "done",
+                    schema.Task.state.in_([str(s) for s in OPEN]),
                 )
                 .order_by(schema.Task.id.desc())
                 .limit(1)
@@ -481,8 +483,28 @@ class Database:
                 .limit(1)
             )
 
-    async def set_task_state(self, task_id: int, state: str) -> None:
-        await self._set_task(task_id, state=state)
+    async def move_task(self, task_id: int, state: TaskState) -> None:
+        """Move a task, refusing anything the graph does not permit.
+
+        Enforced here rather than at each caller: this is the one place every
+        move passes through, and a state written by a caller that skipped the
+        check is a task nobody polls again.
+        """
+        async with self._sessions.begin() as session:
+            current = await session.scalar(
+                select(schema.Task.state).where(schema.Task.id == task_id)
+            )
+            if current is None:
+                raise IllegalTransition(f"no task {task_id}")
+            if not may_move(current, state):
+                raise IllegalTransition(
+                    f"task {task_id} cannot go {current} -> {state}"
+                )
+            await session.execute(
+                update(schema.Task)
+                .where(schema.Task.id == task_id)
+                .values(state=str(state))
+            )
 
     async def set_task_params(self, task_id: int, params: dict) -> None:
         await self._set_task(task_id, params=params)

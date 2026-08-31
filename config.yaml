@@ -43,6 +43,9 @@ agents:
 
 # ── Workflows ──────────────────────────────────────────────────────────────
 # How often to say the process is alive and what it is holding.
+# The read-only debug view.
+board_port: 8086
+
 heartbeat_seconds: 60
 
 # How long to keep the prompts and outputs behind each decision.

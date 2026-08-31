@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from friday.db import Database
+from friday.tasks import TaskState
 from friday.models import Task
 from friday.outbox import Kind
 from friday.workflows import PARAMS, Action, Ask, Park, plan
@@ -14,9 +15,9 @@ __all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "WorkflowRunner"]
 
 log = logging.getLogger(__name__)
 
-PENDING = "pending"
-ASKED = "waiting_for_details"
-NEEDS_HUMAN = "needs_human"
+PENDING = TaskState.PENDING
+ASKED = TaskState.WAITING_FOR_DETAILS
+NEEDS_HUMAN = TaskState.NEEDS_HUMAN
 
 
 class WorkflowRunner:
@@ -101,7 +102,7 @@ class WorkflowRunner:
             return Park(f"cannot read {task.type} parameters: {exc}")
 
     async def _move(self, task: Task, state: str) -> Task:
-        await self._db.set_task_state(task.id, state)
+        await self._db.move_task(task.id, state)
         from dataclasses import replace
 
         return replace(task, state=state)

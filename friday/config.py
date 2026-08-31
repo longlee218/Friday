@@ -91,6 +91,8 @@ class Config:
     #: How often to say the process is alive and what it is holding. A
     #: working agent on a quiet day is otherwise indistinguishable from a
     #: dead one.
+    #: The read-only debug view.
+    board_port: int = 8086
     heartbeat_seconds: float = 60.0
     #: How long to keep model calls. Prompts are large and nobody reads old
     #: ones; a container that never restarts would fill its volume.
@@ -121,6 +123,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
                 (raw.get("outbox") or {}).get("backoff_seconds", 30.0)
             ),
         ),
+        board_port=int(raw.get("board_port", 8086)),
         heartbeat_seconds=float(raw.get("heartbeat_seconds", 60.0)),
         keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
         database_path=raw.get("database_path", "./data/friday.db"),

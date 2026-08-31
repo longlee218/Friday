@@ -14,9 +14,9 @@ from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 
 from friday.models import Outbound
+from friday.tasks import TaskState
 
-#: Duplicated from the runners; ticket 05 gives the task states one home.
-NEEDS_HUMAN = "needs_human"
+NEEDS_HUMAN = TaskState.NEEDS_HUMAN
 
 __all__ = ["ASKED", "FAILED", "Kind", "Outbox", "QUEUED", "SENT", "SENT_MANUALLY"]
 
@@ -128,6 +128,6 @@ class Outbox:
         it has to look like work rather than like a quiet success.
         """
         await self._db.fail_outbound(row.id, reason)
-        await self._db.set_task_state(row.task_id, NEEDS_HUMAN)
+        await self._db.move_task(row.task_id, NEEDS_HUMAN)
         log.error("outbound %d gave up, task %d needs a human: %s",
                   row.id, row.task_id, reason)

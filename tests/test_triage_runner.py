@@ -15,6 +15,7 @@ from friday.triage import (
     SkipParams,
 )
 from friday.triage.runner import TriageRunner
+from friday.tasks import TaskState
 
 
 class StubTriage:
@@ -147,7 +148,7 @@ async def test_a_follow_up_merges_new_details_into_the_open_task(inbox, provider
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
     await runner(db, StubTriage(api_issue())).run_once()
-    await db.set_task_state((await db.tasks())[0].id, "waiting_for_details")
+    await db.move_task((await db.tasks())[0].id, TaskState.WAITING_FOR_DETAILS)
 
     provider.emit(make_event(message_id="20", text="prod, correlationId abc-123"))
     await captured(inbox)
@@ -217,7 +218,7 @@ async def test_a_follow_up_without_the_details_asks_again(inbox, provider, db):
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
     await runner(db, StubTriage(api_issue())).run_once()
-    await db.set_task_state((await db.tasks())[0].id, "waiting_for_details")
+    await db.move_task((await db.tasks())[0].id, TaskState.WAITING_FOR_DETAILS)
 
     provider.emit(make_event(message_id="20", text="it is still slow"))
     await captured(inbox)

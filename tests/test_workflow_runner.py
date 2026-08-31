@@ -9,6 +9,7 @@ import pytest
 from friday.models import Task
 from friday.conversation import ConversationId
 from friday.workflows.runner import ASKED, WorkflowRunner
+from friday.tasks import TaskState
 
 
 
@@ -82,7 +83,7 @@ async def test_a_task_stops_being_asked_after_a_few_tries(db):
     runner = WorkflowRunner(db=db, auto_ask=True, max_asks=2)
 
     for _ in range(3):
-        await db.set_task_state(opened.id, "pending")
+        await db.move_task(opened.id, TaskState.PENDING)
         await runner.run_once()
 
     assert len(await db.outbound()) == 2
