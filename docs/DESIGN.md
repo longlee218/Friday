@@ -195,26 +195,25 @@ layer exists to prevent, self-inflicted.
 are filtered to `skip` before the model sees them. A rule that important should
 not depend on a classifier having a good day.
 
-## Tracing
+## Promoting a workflow
 
-The half the system was built around and does not have. `plan_api_issue` parks a
-traceable report with the reason *"has enough to trace"*, and nothing traces it —
-which is why every criterion about answering, approving and posting a reply is
-built and unexercised.
+A workflow starts deterministic. It is promoted to something agentic **per task
+type, on evidence** — when the deterministic version has proven itself and the
+thing it cannot do is judgement rather than a missing branch.
 
-**Fetching is deterministic; reading is not.** A query for a correlationId is a
-lookup with one right answer. Deciding what a hundred log lines mean is judgement,
-and that is where the `api_issue` workflow becomes agentic — the promotion this
-design anticipated, arriving on evidence rather than on principle.
+The seam is usually the same: fetching is deterministic, reading is not. A query
+by identifier has one right answer; deciding what a hundred results mean does
+not. So the fetch is a tool with a filter on it, and the reading is the agent.
 
-**Volume is the risk, not correctness.** Logs are unbounded and a context window
-is not. A query that returns everything for a busy service costs more than the
-answer is worth and drowns the signal it was looking for, so what comes back is
-bounded before it is read and truncation is visible when it bites.
+Two things follow, and they are why this is written down rather than left to
+whoever builds the first one. **Volume is the risk, not correctness** — an
+external store is unbounded and a context window is not, so what comes back is
+bounded before it is read and truncation is visible when it bites. And **a
+read-only act is enforced beside the server, not asked for in the prompt**: a
+tool filter is a guarantee, an instruction is a request.
 
-Two things are unsettled and cannot be guessed: how Loki is reached, and whether
-a correlationId is a label or a field inside the line. The second decides whether
-a lookup is an indexed filter or a scan, and so whether this is affordable.
+The procedures themselves — which store, which tools, which query — are the
+operator's, assembled from these parts rather than designed here.
 
 ## Workflows
 
