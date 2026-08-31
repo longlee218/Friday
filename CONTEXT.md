@@ -48,6 +48,17 @@ What to do about a task, as ordinary branching Python. Returns an **action**,
 never a side effect. Deterministic first; promoted to something agentic per task
 type only once the deterministic one has proven itself.
 
+One rule holds for every type: **a task missing something it cannot work
+without has to say so.** Required-ness is read off the parameter type —
+`project: str` is required, `doc_ref: str | None` says outright that we can
+manage without it — so it is never declared twice and cannot drift from the
+schema the model is asked to fill.
+
+`api_issue` overrides that rule, because its own is not expressible as a type:
+a correlationId *or* a curl makes a request findable, and both are optional
+individually. A type with an override keeps it; everything else gets the
+general rule for free.
+
 ## Harness
 
 The one place an agent is *run*. Takes a declared agent and an input, returns an

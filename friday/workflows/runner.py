@@ -8,8 +8,7 @@ import logging
 from friday.db import Database
 from friday.models import Task
 from friday.outbox import Kind
-from friday.triage import ApiIssueParams
-from friday.workflows import Ask, Park, plan_api_issue
+from friday.workflows import PARAMS, Action, Ask, Park, plan
 
 __all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "WorkflowRunner"]
 
@@ -90,10 +89,16 @@ class WorkflowRunner:
             log.info("task %d: %s", task.id, action.reason)
         return await self._move(task, NEEDS_HUMAN)
 
-    def _plan(self, task: Task):
-        if task.type != "api_issue":
-            return Park(f"no workflow for {task.type} yet")
-        return plan_api_issue(ApiIssueParams(**task.params))
+    def _plan(self, task: Task) -> Action:
+        params = PARAMS.get(task.type)
+        if params is None:
+            return Park(f"unknown task type {task.type!r}")
+        try:
+            return plan(task.type, params(**task.params))
+        except TypeError as exc:
+            # Stored parameters that no longer fit their type — a schema change
+            # landing on rows written before it. Work, not a crash.
+            return Park(f"cannot read {task.type} parameters: {exc}")
 
     async def _move(self, task: Task, state: str) -> Task:
         await self._db.set_task_state(task.id, state)

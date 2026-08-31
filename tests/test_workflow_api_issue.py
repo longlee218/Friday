@@ -7,7 +7,8 @@ arrives without the fields needed to trace it, and the first move is to ask.
 from __future__ import annotations
 
 from friday.triage import ApiIssueParams
-from friday.workflows import Ask, Park, plan_api_issue
+from friday.triage import AccessRequestParams, DocQuestionParams
+from friday.workflows import Ask, Park, plan, plan_api_issue
 
 
 def params(**kw):
@@ -41,3 +42,62 @@ def test_the_environment_is_asked_for_only_when_it_is_missing():
 def test_an_environment_alone_is_not_enough_to_trace():
     """You cannot find a request from the environment name."""
     assert isinstance(plan_api_issue(params(environment="production")), Ask)
+
+
+# ---- the other task types --------------------------------------------------
+
+
+def test_an_access_request_without_a_project_asks_for_one():
+    """Same gap as api_issue had: a task that cannot be acted on has to say so,
+    not sit in a queue nobody is watching."""
+    action = plan(
+        "access_request", AccessRequestParams(project="", permission="write",
+                                              summary="needs access")
+    )
+
+    assert isinstance(action, Ask)
+    assert "project" in action.text
+
+
+def test_a_doc_question_without_a_question_asks_for_one():
+    action = plan("doc_question", DocQuestionParams(question="", doc_ref=None))
+
+    assert isinstance(action, Ask)
+
+
+def test_an_optional_parameter_is_never_asked_for():
+    """`doc_ref` is optional by its type. Asking for it would be asking for
+    something we said we did not need."""
+    action = plan("doc_question", DocQuestionParams(question="how does X work?",
+                                                    doc_ref=None))
+
+    assert isinstance(action, Park)
+
+
+def test_a_complete_request_parks_because_nothing_can_act_on_it_yet():
+    """Nothing grants access. Parking is honest; asking again would not be."""
+    action = plan(
+        "access_request",
+        AccessRequestParams(project="backend", permission="write", summary="s"),
+    )
+
+    assert isinstance(action, Park)
+
+
+def test_the_summary_is_never_asked_for():
+    """The model writes it. Asking the reporter for a summary of their own
+    message is nonsense."""
+    action = plan(
+        "access_request", AccessRequestParams(project="backend",
+                                              permission="write", summary="")
+    )
+
+    assert isinstance(action, Park)
+
+
+def test_api_issue_keeps_its_own_rule():
+    """A correlationId makes a request findable; its type cannot say that."""
+    traceable = ApiIssueParams(summary="s", environment=None,
+                               correlation_id="abc-123", curl=None)
+
+    assert isinstance(plan("api_issue", traceable), Park)
