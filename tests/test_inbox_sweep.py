@@ -14,7 +14,7 @@ async def test_a_sweep_captures_messages_the_live_path_never_delivered(
     swept = await inbox.sweep_once()
 
     assert [e.provider_message_id for e in swept] == ["100"]
-    assert len(await db.events()) == 1
+    assert len(await db.mentions()) == 1
 
 
 async def test_a_message_already_seen_live_is_not_captured_again_by_a_sweep(
@@ -66,7 +66,7 @@ async def test_a_swept_message_that_does_not_address_the_account_is_dropped(
     )
 
     assert await inbox.sweep_once() == []
-    assert await db.events() == []
+    assert await db.mentions() == []
 
 
 async def test_a_sweep_advances_the_cursor(inbox, provider, db):

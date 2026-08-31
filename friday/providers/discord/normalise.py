@@ -6,7 +6,7 @@ from friday.models import InboundEvent, MentionType
 
 
 def normalise(
-    message, *, me_id: int, my_role_ids: Collection[int]
+    message, *, me_id: int, my_role_ids: Collection[int], is_own: bool = False
 ) -> InboundEvent:
     """Turn a platform message into an InboundEvent.
 
@@ -22,9 +22,13 @@ def normalise(
         thread_id=thread_id,
         author_id=str(message.author.id),
         author_name=message.author.display_name,
-        text=message.content,
+        # clean_content resolves <@1234> into readable names. The raw markup
+        # is noise to a model, and worse in tone examples the responder
+        # learns from.
+        text=getattr(message, "clean_content", None) or message.content,
         created_at=message.created_at,
         mention_type=_mention_type(message, me_id, my_role_ids),
+        is_own=is_own,
     )
 
 

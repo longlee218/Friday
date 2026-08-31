@@ -41,6 +41,14 @@ agents:
     # How many of your past replies to show it as tone examples.
     tone_examples: 8
 
+# ── Workflows ──────────────────────────────────────────────────────────────
+workflows:
+  # Send "which environment / can you send the correlationId or curl?" straight
+  # away, with no approval step. This is the only reply allowed out unreviewed:
+  # it is the same question every time, and if triage got the type wrong it
+  # costs the reporter one unnecessary question. Everything else parks.
+  auto_ask_for_details: true
+
 ingest:
   # Which kinds of mention create work: direct, role, dm
   #   direct — someone @s the account

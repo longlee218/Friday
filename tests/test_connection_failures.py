@@ -7,8 +7,13 @@ and receiving nothing.
 
 from __future__ import annotations
 
-import discord_self
+import asyncio
 
+import discord_self
+import pytest
+
+from conftest import captured
+from friday.inbox import Inbox
 from friday.providers.discord import is_credential_rejected
 
 
@@ -31,3 +36,29 @@ def test_a_network_error_is_not_fatal():
 
 def test_a_close_with_no_code_is_not_fatal():
     assert not is_credential_rejected(discord_self.ConnectionClosed())
+
+
+async def test_a_failure_inside_the_inbox_surfaces_instead_of_hanging(db, config):
+    """`stream()` waits on background workers that are the only things feeding
+    it. One dying quietly stalls ingestion for the life of the process, and a
+    stalled agent is indistinguishable from a quiet day."""
+
+    class Exploding:
+        name = "fake"
+        reconnected = asyncio.Event()
+
+        async def stream(self):
+            raise RuntimeError("the gateway fell over")
+            yield  # pragma: no cover - makes this an async generator
+
+        async def history(self, channel_id, *, after):
+            return
+            yield  # pragma: no cover
+
+        async def recent(self, conversation_id, *, before, limit):
+            return
+            yield  # pragma: no cover
+
+    inbox = Inbox(provider=Exploding(), db=db, config=config)
+    with pytest.raises(RuntimeError, match="the gateway fell over"):
+        await asyncio.wait_for(captured(inbox), timeout=5)

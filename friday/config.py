@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -31,10 +34,47 @@ class IngestConfig:
     context_messages: int = 20
 
 
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+_REQUIRED_AGENT_FIELDS = ("api_key", "base_url", "model")
+
+
+@dataclass(frozen=True, slots=True)
+class AgentConfig:
+    """One step that calls a model, and everything it needs to do so.
+
+    Self-contained on purpose: reading this tells you where the model lives,
+    which key reaches it, and how it should behave, without following a
+    reference somewhere else.
+    """
+
+    name: str
+    api_key: str
+    base_url: str
+    model: str
+    settings: dict[str, Any] = field(default_factory=dict)
+    max_turns: int = 1
+    #: Step-specific knobs the model layer does not care about, e.g. the
+    #: confidence threshold for triage or the tone-example count for the
+    #: responder.
+    options: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowConfig:
+    #: Send the "which environment / correlationId?" question without waiting
+    #: for approval. The only reply allowed out unreviewed: it is the same
+    #: question every time, and a wrong classification costs the reporter one
+    #: unnecessary question. Everything else parks for a human.
+    auto_ask_for_details: bool = False
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     database_path: str
     ingest: IngestConfig
+    agents: dict[str, AgentConfig] = field(default_factory=dict)
+    workflows: WorkflowConfig = field(default_factory=WorkflowConfig)
 
 
 def load_config(path: Path | str = DEFAULT_PATH) -> Config:
@@ -48,6 +88,12 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
 
     ingest = raw.get("ingest") or {}
     return Config(
+        agents=_agents(_expand(raw.get("agents") or {})),
+        workflows=WorkflowConfig(
+            auto_ask_for_details=bool(
+                (raw.get("workflows") or {}).get("auto_ask_for_details", False)
+            )
+        ),
         database_path=raw.get("database_path", "./data/friday.db"),
         ingest=IngestConfig(
             # Coerced to str: an unquoted id in YAML parses as an int and
@@ -65,6 +111,53 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             context_messages=int(ingest.get("context_messages", 20)),
         ),
     )
+
+
+def _expand(value: Any) -> Any:
+    """Replace ${VAR} with the environment, failing loudly when unset.
+
+    An unset variable substituted as an empty string surfaces later as an
+    unexplained 401 from the provider. Naming it here is the whole point.
+    """
+    if isinstance(value, str):
+
+        def replace(match: re.Match[str]) -> str:
+            name = match.group(1)
+            try:
+                return os.environ[name]
+            except KeyError:
+                raise ConfigError(
+                    f"{name} is referenced in the configuration but is not set. "
+                    f"Add it to .env (see .env.example)."
+                ) from None
+
+        return _ENV_REF.sub(replace, value)
+    if isinstance(value, dict):
+        return {k: _expand(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand(v) for v in value]
+    return value
+
+
+def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
+    agents = {}
+    for name, spec in raw.items():
+        spec = dict(spec or {})
+        missing = [f for f in _REQUIRED_AGENT_FIELDS if not spec.get(f)]
+        if missing:
+            raise ConfigError(
+                f"Agent {name!r} is missing: {', '.join(missing)}"
+            )
+        agents[name] = AgentConfig(
+            name=name,
+            api_key=spec.pop("api_key"),
+            base_url=spec.pop("base_url"),
+            model=spec.pop("model"),
+            settings=spec.pop("settings", None) or {},
+            max_turns=int(spec.pop("max_turns", 1)),
+            options=spec,  # whatever is left is step-specific
+        )
+    return agents
 
 
 def _mention_type(value: str) -> MentionType:

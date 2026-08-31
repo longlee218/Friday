@@ -53,23 +53,26 @@ def own_message(me_id=1):
     )
 
 
-async def test_our_own_messages_are_ignored_by_default():
-    """Otherwise the agent answers its own replies, forever."""
+async def test_our_own_messages_are_delivered_and_marked_as_ours():
+    """The provider reports who wrote it. Whether that means anything is the
+    inbox's decision — and the responder needs these for tone examples."""
     client = stub_client()
     provider = DiscordUserProvider("token", client=client)
 
     await client.on_message(own_message())
 
-    assert provider._incoming.empty()
+    assert provider._incoming.get_nowait().is_own is True
 
 
-async def test_our_own_messages_are_captured_when_testing():
+async def test_someone_elses_message_is_not_marked_as_ours():
     client = stub_client()
-    provider = DiscordUserProvider("token", client=client, capture_own_messages=True)
+    provider = DiscordUserProvider("token", client=client)
+    message = own_message()
+    message.author.id = 999
 
-    await client.on_message(own_message())
+    await client.on_message(message)
 
-    assert not provider._incoming.empty()
+    assert provider._incoming.get_nowait().is_own is False
 
 
 def test_a_reply_goes_to_the_thread_when_the_message_was_in_one():

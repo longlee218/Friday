@@ -75,6 +75,7 @@ def make_event(
     text: str = "hey can you look at this",
     author_id: str = "u-reporter",
     author_name: str = "reporter",
+    is_own: bool = False,
 ) -> InboundEvent:
     return InboundEvent(
         provider="fake",
@@ -86,6 +87,7 @@ def make_event(
         text=text,
         created_at=datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc),
         mention_type=mention_type,
+        is_own=is_own,
     )
 
 
@@ -96,7 +98,7 @@ def provider() -> FakeProvider:
 
 @pytest.fixture
 async def db():
-    database = await Database.connect(":memory:")
+    database = await Database.connect(":memory:", create=True)
     yield database
     await database.close()
 

@@ -30,11 +30,9 @@ class DiscordUserProvider:
         token: str,
         *,
         client: discord_self.Client | None = None,
-        capture_own_messages: bool = False,
     ):
         self._token = token
         self._client = client or discord_self.Client()
-        self._capture_own_messages = capture_own_messages
         self._incoming: asyncio.Queue[InboundEvent] = asyncio.Queue()
         self.reconnected = asyncio.Event()
 
@@ -58,10 +56,11 @@ class DiscordUserProvider:
         me = self._client.user
         if me is None:
             return
-        if message.author.id == me.id and not self._capture_own_messages:
-            return  # never react to our own messages
         event = normalise(
-            message, me_id=me.id, my_role_ids=_roles_in(message.guild)
+            message,
+            me_id=me.id,
+            my_role_ids=_roles_in(message.guild),
+            is_own=message.author.id == me.id,
         )
         log.debug(
             "saw %s in %s (%s) from %s: %r",
@@ -79,9 +78,13 @@ class DiscordUserProvider:
         Sends as the watched account. Ticket 06 puts the approval gate in front
         of this; until then nothing but the smoke test should call it.
         """
-        target_id = int(reply_target_id(event))
-        channel = self._client.get_channel(target_id) or await (
-            self._client.fetch_channel(target_id)
+        await self.send(reply_target_id(event), text)
+
+    async def send(self, conversation_id: str, text: str) -> None:
+        """Post into a conversation, as the watched account."""
+        target = int(conversation_id)
+        channel = self._client.get_channel(target) or await (
+            self._client.fetch_channel(target)
         )
         await channel.send(text)
 

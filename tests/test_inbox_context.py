@@ -87,3 +87,36 @@ async def test_seeding_asks_for_messages_before_the_mention(inbox, provider):
     conversation, before, limit = provider.recent_calls[0]
     assert (conversation, before) == ("watched", "30")
     assert limit > 0
+
+
+async def test_our_own_messages_never_trigger_work(inbox, provider, db):
+    """Otherwise the agent answers its own replies, forever."""
+    provider.emit(make_event(message_id="30", is_own=True))
+
+    assert await captured(inbox) == []
+    assert await db.mentions() == []
+
+
+async def test_our_own_messages_are_kept_as_context_once_a_conversation_matters(
+    inbox, provider, db
+):
+    """The responder learns tone from real replies, and a stored conversation
+    missing one side of itself reads strangely to a model."""
+    provider.emit(make_event(message_id="30"))
+    provider.emit(
+        make_event(message_id="40", text="checking now", is_own=True)
+    )
+
+    await captured(inbox)
+
+    assert "checking now" in [m.text for m in await db.messages()]
+
+
+async def test_our_own_messages_are_not_kept_in_conversations_that_never_asked_us(
+    inbox, provider, db
+):
+    provider.emit(make_event(message_id="30", text="just chatting", is_own=True))
+
+    await captured(inbox)
+
+    assert await db.messages() == []

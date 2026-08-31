@@ -45,19 +45,42 @@ class Inbox:
                 item = await queue.get()
                 if item is _LIVE_STREAM_ENDED:
                     return
+                if isinstance(item, Exception):
+                    raise item
                 yield item
         finally:
             for worker in workers:
                 worker.cancel()
 
     async def _pump_live(self, queue: asyncio.Queue) -> None:
+        await self._feed(queue, self._pump_live_inner(queue))
+
+    async def _pump_live_inner(self, queue: asyncio.Queue) -> None:
         async for event in self._provider.stream():
             accepted = await self._accept(event)
             if accepted is not None:
                 await queue.put(accepted)
         await queue.put(_LIVE_STREAM_ENDED)
 
+    @staticmethod
+    async def _feed(queue: asyncio.Queue, work) -> None:
+        """Hand a worker's failure to the consumer.
+
+        Nothing else puts to the queue, so a worker that dies quietly leaves
+        `stream()` waiting on it for the life of the process — a stall that
+        looks exactly like a quiet day.
+        """
+        try:
+            await work
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - re-raised in the consumer
+            await queue.put(exc)
+
     async def _sweep_periodically(self, queue: asyncio.Queue) -> None:
+        await self._feed(queue, self._sweep_periodically_inner(queue))
+
+    async def _sweep_periodically_inner(self, queue: asyncio.Queue) -> None:
         """Sweep on a timer, and immediately whenever the provider reconnects.
 
         A reconnect means an outage just ended, which is exactly when a gap is
@@ -105,14 +128,13 @@ class Inbox:
             # something, the surrounding talk is what makes the next mention
             # readable.
             if await self._db.conversation_is_tracked(event):
-                await self._db.record_message(event)
+                await self._db.record_message(event, context_only=True)
             log.debug("dropped %s: %s", event.provider_message_id, reason)
             return None
-        if not await self._db.record_event(event):
+        if not await self._db.record_message(event):
             return None  # already seen on the other delivery path
-        if await self._db.record_session(event):
+        if await self._db.record_conversation(event):
             await self._seed_context(event)
-        await self._db.record_message(event)
         return event
 
     async def _seed_context(self, event: InboundEvent) -> None:
@@ -127,7 +149,7 @@ class Inbox:
             before=event.provider_message_id,
             limit=self._config.context_messages,
         ):
-            await self._db.record_message(past)
+            await self._db.record_message(past, context_only=True)
             seeded += 1
         log.info(
             "seeded %d context message(s) for conversation %s",
@@ -137,6 +159,12 @@ class Inbox:
 
     def _out_of_scope_reason(self, event: InboundEvent) -> str | None:
         """None means in scope. A string says why it was dropped."""
+        if event.is_own and not self._config.capture_own_messages:
+            # Never trigger work from our own messages: the agent would answer
+            # its own replies. It is still kept as context — a conversation
+            # missing one side of itself reads strangely, and the responder
+            # learns tone from these.
+            return "written by the watched account"
         if event.mention_type is None:
             return "does not address the account"
         if event.mention_type not in self._config.mention_types:

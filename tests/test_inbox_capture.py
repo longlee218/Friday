@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from conftest import captured, make_event
 from friday.config import IngestConfig
 from friday.inbox import Inbox
-from friday.models import MentionType, Session
+from friday.models import Conversation, MentionType
 
 
 async def test_direct_mention_in_watched_channel_is_captured(inbox, provider):
@@ -25,7 +25,7 @@ async def test_captured_event_is_stored_with_its_details(inbox, provider, db):
 
     await captured(inbox)
 
-    stored = await db.events()
+    stored = await db.mentions()
     assert len(stored) == 1
     assert stored[0].provider_message_id == "m1"
     assert stored[0].text == "checkout is 500ing"
@@ -42,14 +42,14 @@ async def test_same_message_delivered_twice_is_captured_once(inbox, provider, db
     events = await captured(inbox)
 
     assert [e.provider_message_id for e in events] == ["m1"]
-    assert len(await db.events()) == 1
+    assert len(await db.mentions()) == 1
 
 
 async def test_message_in_unwatched_channel_is_ignored(inbox, provider, db):
     provider.emit(make_event(message_id="m1", channel_id="some-other-channel"))
 
     assert await captured(inbox) == []
-    assert await db.events() == []
+    assert await db.mentions() == []
 
 
 async def test_message_that_does_not_address_the_account_is_ignored(
@@ -58,7 +58,7 @@ async def test_message_that_does_not_address_the_account_is_ignored(
     provider.emit(make_event(message_id="m1", mention_type=None))
 
     assert await captured(inbox) == []
-    assert await db.events() == []
+    assert await db.mentions() == []
 
 
 async def test_role_mention_is_captured(inbox, provider):
@@ -98,8 +98,8 @@ async def test_capturing_an_event_records_its_conversation(inbox, provider, db):
 
     await captured(inbox)
 
-    assert await db.sessions() == [
-        Session(provider="fake", channel_id="watched", thread_id="t1")
+    assert await db.conversations() == [
+        Conversation(provider="fake", channel_id="watched", thread_id="t1")
     ]
 
 
@@ -109,7 +109,7 @@ async def test_two_events_in_one_conversation_share_a_session(inbox, provider, d
 
     await captured(inbox)
 
-    assert len(await db.sessions()) == 1
+    assert len(await db.conversations()) == 1
 
 
 async def test_threads_and_their_parent_channel_are_separate_sessions(
@@ -120,7 +120,7 @@ async def test_threads_and_their_parent_channel_are_separate_sessions(
 
     await captured(inbox)
 
-    assert sorted(s.thread_id or "" for s in await db.sessions()) == ["", "t1"]
+    assert sorted(s.thread_id or "" for s in await db.conversations()) == ["", "t1"]
 
 
 async def test_an_unwatched_channel_is_reported_as_the_reason_for_dropping(
@@ -200,12 +200,12 @@ async def test_cursors_survive_a_restart(tmp_path, provider, config):
     from friday.inbox import Inbox
 
     path = str(tmp_path / "friday.db")
-    first = await Database.connect(path)
+    first = await Database.connect(path, create=True)
     provider.emit(make_event(message_id="100"))
     await captured(Inbox(provider=provider, db=first, config=config))
     await first.close()
 
-    reopened = await Database.connect(path)
+    reopened = await Database.connect(path, create=True)
     try:
         assert await reopened.cursor_for("fake", "watched") == "100"
     finally:
