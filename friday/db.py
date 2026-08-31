@@ -24,7 +24,7 @@ from sqlalchemy.pool import StaticPool
 from friday import schema
 from friday.conversation import ConversationId
 from friday.llm_log import ModelCall
-from friday.models import InboundEvent, MentionType, Outbound, Task
+from friday.models import InboundEvent, MentionType, Observation, Outbound, Task
 from friday.redact import scrub
 from friday.tasks import OPEN, IllegalTransition, TaskState, may_move
 
@@ -347,6 +347,40 @@ class Database:
                     )).all()
                 ),
             }
+
+    # ---- observations ---------------------------------------------------
+
+    async def record_observation(
+        self, *, task_id: int, category: str, text: str
+    ) -> None:
+        async with self._sessions.begin() as session:
+            session.add(
+                schema.Observation(
+                    task_id=task_id, category=category, text=text, created_at=_now()
+                )
+            )
+
+    async def observations(
+        self, *, task_id: int | None = None, limit: int = 100
+    ) -> list[Observation]:
+        query = select(schema.Observation)
+        if task_id is not None:
+            query = query.where(schema.Observation.task_id == task_id)
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                query.order_by(schema.Observation.id).limit(limit)
+            )
+            return [
+                Observation(
+                    id=row.id,
+                    task_id=row.task_id,
+                    category=row.category,
+                    text=row.text,
+                    created_at=row.created_at,
+                    promoted_at=row.promoted_at,
+                )
+                for row in rows
+            ]
 
     # ---- cursors -------------------------------------------------------
 

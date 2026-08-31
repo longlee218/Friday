@@ -125,3 +125,15 @@ class SkipParams:
 
 
 Params = ApiIssueParams | AccessRequestParams | DocQuestionParams | SkipParams
+
+
+@dataclass(frozen=True, slots=True)
+class Observation:
+    """Something a step learned, staged for review."""
+
+    id: int
+    task_id: int
+    category: str
+    text: str
+    created_at: datetime
+    promoted_at: datetime | None = None

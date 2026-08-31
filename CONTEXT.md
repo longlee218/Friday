@@ -99,6 +99,20 @@ second.
 Not built yet, deliberately. One agent is a hypothetical seam; two is a real
 one. Building it against triage alone would mean guessing at what varies.
 
+## Observation
+
+Something a step learned while working — a fact, a person's habit, a lesson.
+Written to a **staging tier** and read by nothing.
+
+That restraint is the point. An agent given its own unreviewed notes as context
+drifts, and the drift has no floor; it is the same failure as learning a voice
+from its own replies, one layer up. Promotion is a separate pass, over work a
+human approved.
+
+The runtime attaches the task and the time rather than asking for them: a model
+asked for a timestamp invents one, and a model asked which task it is working on
+is sometimes wrong.
+
 ## Outbound intent
 
 Something to send, held as data rather than performed as a call. Carries the

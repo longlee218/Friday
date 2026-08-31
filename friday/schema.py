@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, String, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Base", "Conversation", "Cursor", "Message", "ModelCall", "Outbound", "Task"]
+__all__ = ["Base", "Conversation", "Cursor", "Message", "ModelCall", "Observation", "Outbound", "Task"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -176,3 +176,18 @@ class ModelCall(Base):
     input_tokens: Mapped[int]
     output_tokens: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
+
+
+class Observation(Base):
+    """Something a step learned. Staged, never read back into a prompt."""
+
+    __tablename__ = "observations"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(index=True)
+    category: Mapped[str]
+    text: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(IsoDateTime)
+    #: Set by the compaction pass when an approved outcome corroborated it.
+    #: Ticket 10; named here so the shape is complete rather than migrated later.
+    promoted_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
