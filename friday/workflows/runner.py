@@ -200,7 +200,7 @@ class WorkflowRunner:
             return template
         draft = await self._responder.draft(
             asking=template,
-            context=await self._db.messages(task.conversation, limit=self._tone_examples),
+            context=await self._db.relevant_messages(task.conversation),
             tone=await self._db.tone_examples(limit=self._tone_examples),
         )
         return template if draft is None else draft.text

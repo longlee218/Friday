@@ -37,6 +37,10 @@ class InboundEvent:
     #: means "ignore" is the inbox's decision, and the responder needs these as
     #: examples of how the operator actually writes.
     is_own: bool = False
+    #: The `provider_message_id` this replies to, if it is a reply. One of the
+    #: three structural signals a relevant-context filter reads — the other two
+    #: are `mention_type` and `is_own` itself.
+    reply_to: str | None = None
 
     @property
     def conversation(self) -> ConversationId:

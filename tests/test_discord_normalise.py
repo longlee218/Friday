@@ -37,6 +37,7 @@ def message(
     mentions=(),
     role_mentions=(),
     content="hello",
+    reference=None,
 ):
     return SimpleNamespace(
         id=999,
@@ -47,6 +48,7 @@ def message(
         content=content,
         created_at=datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc),
         author=SimpleNamespace(id=55, display_name="dana"),
+        reference=reference,
     )
 
 
@@ -144,3 +146,17 @@ def test_a_group_chat_reports_its_own_channel_id_so_it_can_be_whitelisted():
     )
 
     assert (event.channel_id, event.thread_id) == ("30", None)
+
+
+def test_a_reply_records_what_it_replies_to():
+    event = normalised(
+        message(reference=SimpleNamespace(message_id=777))
+    )
+
+    assert event.reply_to == "777"
+
+
+def test_a_message_that_is_not_a_reply_records_nothing():
+    event = normalised(message())
+
+    assert event.reply_to is None

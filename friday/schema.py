@@ -74,6 +74,9 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(IsoDateTime)
     is_own: Mapped[bool] = mapped_column(default=False)
     mention_type: Mapped[str | None]
+    #: The `provider_message_id` this replies to, if any. Read at context-
+    #: assembly time to tell a reply to the operator from unrelated traffic.
+    reply_to: Mapped[str | None]
     #: Null until triage has looked at this message.
     triaged_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
     task_id: Mapped[int | None]

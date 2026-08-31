@@ -55,14 +55,12 @@ class TriageRunner:
         db: Database,
         triage,
         confidence_threshold: float,
-        context_messages: int = 20,
         batch_size: int = 50,
         poll_interval_seconds: float = 2.0,
     ) -> None:
         self._db = db
         self._triage = triage
         self._threshold = confidence_threshold
-        self._context = context_messages
         self._batch_size = batch_size
         self._poll_interval = poll_interval_seconds
 
@@ -90,7 +88,7 @@ class TriageRunner:
         Triage writes nothing, so this is where a call becomes a row — right
         beside the decision it produced, keyed on the same message.
         """
-        context = await self._db.messages(event.conversation, limit=self._context)
+        context = await self._db.relevant_messages(event.conversation)
         calls: list = []
         outcome = await self._triage.decide(event, context=context, calls=calls)
         for call in calls:
