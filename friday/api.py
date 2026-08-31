@@ -14,7 +14,9 @@ the operator's account.
 
 from __future__ import annotations
 
+import logging
 import socket
+import pathlib
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
@@ -28,6 +30,8 @@ from friday.models import InboundEvent, Outbound, Task
 from friday.outbox import FAILED
 from friday.redact import scrub
 from friday.tasks import TaskState
+
+log = logging.getLogger(__name__)
 
 __all__ = ["MAX_PAGE", "bind", "build_api", "check_exposure"]
 
@@ -194,6 +198,10 @@ def _clean(value: Any) -> Any:
 
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+#: Present in a container. Checked rather than configured, because a
+#: boolean that switches off a safety check is a boolean that gets
+#: copied into a shell on a laptop.
+_CONTAINER_MARKER = pathlib.Path("/.dockerenv")
 
 
 def check_exposure(host: str, *, token: str | None) -> None:
@@ -206,6 +214,17 @@ def check_exposure(host: str, *, token: str | None) -> None:
     different decision, and it has to be made deliberately.
     """
     if host in _LOOPBACK or token:
+        return
+    if _CONTAINER_MARKER.exists():
+        # A container's loopback is unreachable from outside it, so binding
+        # there would mean the port mapping never arrives. `0.0.0.0` here means
+        # "this container", and who can reach *that* is the publish rule one
+        # layer out — `ports: ["127.0.0.1:8086:8086"]` in compose.yaml.
+        log.warning(
+            "serving the board on %s inside a container — it is unauthenticated, "
+            "so publish it to the host's loopback only",
+            host,
+        )
         return
     raise SystemExit(
         f"refusing to serve the board on {host}: it is unauthenticated and shows "

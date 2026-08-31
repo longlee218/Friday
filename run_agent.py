@@ -20,7 +20,7 @@ from friday.api import bind, build_api, check_exposure
 from friday.board import build_board
 from friday.liveness import Heartbeat, Liveness
 from friday.mcp import build as build_mcp
-from friday.redact import Redacting
+from friday.redact import Redacting, install_excepthook
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
 from friday.providers.discord import DiscordUserProvider
@@ -275,6 +275,9 @@ def main() -> None:
     # a request header, not our own code printing it on purpose.
     for handler in logging.getLogger().handlers:
         handler.addFilter(Redacting())
+    # The filter cannot reach a crash: Python writes that straight to
+    # stderr, and a traceback carries every argument in every frame.
+    install_excepthook()
     try:
         migrate()
         asyncio.run(run())

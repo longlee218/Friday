@@ -166,7 +166,11 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             ),
         ),
         operator_id=int(raw.get("operator_id", 0)),
-        board_host=str(raw.get("board_host", "127.0.0.1")),
+        # Overridable from the environment, because the container needs a
+        # different answer from the laptop and they share config.yaml.
+        board_host=os.environ.get(
+            "FRIDAY_BOARD_HOST", str(raw.get("board_host", "127.0.0.1"))
+        ),
         board_port=int(raw.get("board_port", 8086)),
         board_origins=tuple(raw.get("board_origins") or ()),
         heartbeat_seconds=float(raw.get("heartbeat_seconds", 60.0)),

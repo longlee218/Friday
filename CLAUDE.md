@@ -61,6 +61,26 @@ the service builds it from migrations, and nothing else keeps those in step.
 Prefer `uv run ...` over activating the venv manually, and let `uv add` edit
 `pyproject.toml` rather than hand-editing dependencies.
 
+## Running it on a server
+
+```bash
+docker compose build && docker compose up -d
+docker compose logs -f
+```
+
+Secrets arrive at runtime from `.env`, never baked. `config.yaml` is mounted
+read-only, so changing a model or a threshold is a restart rather than a
+rebuild. The database is on a named volume — without it a redeploy loses the
+cursors, and the sweep either re-reads history or misses the gap.
+
+The board is unauthenticated by design and shows every captured message and
+every model prompt, so it is published to the host's loopback only. Reach it
+with a tunnel:
+
+```bash
+ssh -N -L 8086:127.0.0.1:8086 you@your-vps
+```
+
 ## Layout
 
 Target structure, from `docs/DESIGN.md`. **Nothing under `friday/` exists yet** —

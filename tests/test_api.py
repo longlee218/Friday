@@ -168,3 +168,25 @@ def test_binding_hands_back_a_listening_socket():
         assert sock.getsockname()[0] == "127.0.0.1"
     finally:
         sock.close()
+
+
+def test_a_container_may_bind_its_own_network(tmp_path, monkeypatch):
+    """Inside a container, loopback is unreachable from outside it — the port
+    mapping never arrives. `0.0.0.0` there means "this container", and what
+    restricts who can reach it is the publish rule, one layer out."""
+    from friday import api
+
+    marker = tmp_path / ".dockerenv"
+    marker.write_text("")
+    monkeypatch.setattr(api, "_CONTAINER_MARKER", marker)
+
+    api.check_exposure("0.0.0.0", token=None)
+
+
+def test_a_host_still_may_not(tmp_path, monkeypatch):
+    from friday import api
+
+    monkeypatch.setattr(api, "_CONTAINER_MARKER", tmp_path / "absent")
+
+    with pytest.raises(SystemExit, match="loopback"):
+        api.check_exposure("0.0.0.0", token=None)
