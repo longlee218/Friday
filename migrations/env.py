@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from logging.config import fileConfig
 
@@ -28,9 +29,13 @@ config = context.config
 _path = os.environ.get("FRIDAY_DB") or load_config().database_path
 config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{_path}")
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
+# Alembic's logging config sets the root logger to WARNING and, by default,
+# disables every logger that already exists. Run from the CLI that is exactly
+# what you want. Run from inside the application — `run_agent.migrate()` — it
+# switches the agent's own logging off on the way past, and a silent agent is
+# indistinguishable from one receiving nothing. Only configure logging when
+# nothing else has.
+if config.config_file_name is not None and not logging.getLogger().handlers:
     fileConfig(config.config_file_name)
 
 # add your model's MetaData object here

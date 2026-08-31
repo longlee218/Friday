@@ -8,6 +8,7 @@ breaks. This is the only thing standing between those two worlds.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -55,3 +56,24 @@ def _assert_primary_keys_match(connection) -> None:
         expected = [c.name for c in table.primary_key.columns]
         actual = [c.name for c in live.tables[name].primary_key.columns]
         assert actual == expected, f"{name} primary key drifted: {actual} != {expected}"
+
+
+def test_migrating_does_not_switch_the_applications_logging_off(tmp_path):
+    """Alembic's own config sets the root logger to WARNING and disables every
+    existing logger. From the CLI that is what you want. Called from inside the
+    app it silences the agent, which looks exactly like an agent receiving
+    nothing — and that is how it was found."""
+    import run_agent
+
+    root = logging.getLogger()
+    before = (root.level, list(root.handlers))
+    logging.basicConfig(level=logging.DEBUG, force=True)
+    os.environ["FRIDAY_DB"] = str(tmp_path / "logging.db")
+    try:
+        run_agent.migrate()
+
+        assert logging.getLogger("friday.inbox").isEnabledFor(logging.DEBUG)
+    finally:
+        os.environ.pop("FRIDAY_DB", None)
+        logging.basicConfig(level=before[0], force=True)
+        root.handlers[:] = before[1]
