@@ -52,6 +52,9 @@ class Harness:
         config: AgentConfig,
         instructions: str,
         tools: list | None = None,
+        #: Tool servers outside this process. Which ones an agent gets is
+        #: composition, not something the agent declares.
+        mcp_servers: list | None = None,
         model=None,
         context_type: type | None = None,
         **agent_options: Any,
@@ -64,6 +67,7 @@ class Harness:
             instructions=instructions,
             model=model or _chat_model(config),
             tools=tools or [],
+            mcp_servers=mcp_servers or [],
             model_settings=ModelSettings(**config.settings, **agent_options.pop(
                 "model_settings", {}
             )),

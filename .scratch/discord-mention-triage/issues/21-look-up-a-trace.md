@@ -37,3 +37,20 @@ before it is read, and the bound has to be visible when it bites.
 - [ ] Credentials for the log store live with the other secrets and never reach a log, a prompt, or the database
 - [ ] A trace is read-only, and nothing about it can post, change or delete anything
 - [ ] The lookup is exercised in tests without reaching the real log store
+
+## The wiring exists; the Loki part does not
+
+The skeleton is built and proved against a real MCP server. A server is a
+block in `config.yaml`, `friday/mcp.py` turns configuration into connections,
+the harness hands them to an agent, and the composition root owns their
+lifetime.
+
+The tool filter was the point of proving it. Pointed at a filesystem server
+with no `allow`, an agent saw **fourteen** tools including `edit_file` and
+`create_directory`; with `allow: [read_text_file]`, one read-only tool. A
+trace is a read-only act, and that is enforced beside the server rather than
+asked for in a prompt.
+
+What remains is not scaffolding: which Loki MCP server, which of its tools a
+trace may use, and how a correlationId is queried. Those are the operator's
+to settle, and the workflow is theirs to assemble.

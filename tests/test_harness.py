@@ -118,3 +118,16 @@ async def test_tracing_is_off():
     Harness(config=CONFIG, instructions="i")
 
     assert get_trace_provider()._disabled
+
+
+async def test_an_agent_can_be_given_servers_it_did_not_have_to_know_about():
+    """Which servers an agent gets is composition, not something it declares —
+    the same reason its model and base_url are configuration."""
+    from friday.config import MCPServerConfig
+    from friday.mcp import build
+
+    servers = build([MCPServerConfig(name="loki", command="npx", allow=("q",))])
+
+    run = Harness(config=CONFIG, instructions="i", mcp_servers=servers)
+
+    assert [s.name for s in run.agent.mcp_servers] == ["loki"]

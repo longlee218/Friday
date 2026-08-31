@@ -78,6 +78,23 @@ class WorkflowConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class MCPServerConfig:
+    """A tool server outside this process.
+
+    Either `command` (started here, spoken to over stdio) or `url` (already
+    running, spoken to over SSE). `allow` names the tools an agent may see —
+    empty means all of them, which is a choice rather than an oversight.
+    """
+
+    name: str
+    command: str = ""
+    args: tuple[str, ...] = ()
+    env: dict = field(default_factory=dict)
+    url: str = ""
+    allow: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class OutboxConfig:
     #: How many times to try one message before handing it to a person.
     max_attempts: int = 3
@@ -93,6 +110,7 @@ class Config:
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     workflows: WorkflowConfig = field(default_factory=WorkflowConfig)
     outbox: OutboxConfig = field(default_factory=OutboxConfig)
+    mcp_servers: tuple[MCPServerConfig, ...] = ()
     #: How often to say the process is alive and what it is holding. A
     #: working agent on a quiet day is otherwise indistinguishable from a
     #: dead one.
@@ -158,6 +176,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             else int(raw.get("summary_at_hour", 9))
         ),
         keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
+        mcp_servers=_mcp_servers(_expand(raw.get("mcp_servers") or {})),
         database_path=raw.get("database_path", "./data/friday.db"),
         ingest=IngestConfig(
             # Coerced to str: an unquoted id in YAML parses as an int and
@@ -232,3 +251,27 @@ def _mention_type(value: str) -> MentionType:
         raise ConfigError(
             f"Unknown mention type {value!r}. Known types: {known}"
         ) from exc
+
+
+def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
+    """A server with neither a command nor a url is half a connection, which is
+    worse than none: it fails at the first tool call, inside an agent run, hours
+    after anyone edited the file."""
+    servers = []
+    for name, spec in raw.items():
+        spec = spec or {}
+        if not spec.get("command") and not spec.get("url"):
+            raise ConfigError(
+                f"mcp server {name!r} needs either a command (stdio) or a url (sse)."
+            )
+        servers.append(
+            MCPServerConfig(
+                name=name,
+                command=spec.get("command", ""),
+                args=tuple(spec.get("args") or ()),
+                env=dict(spec.get("env") or {}),
+                url=spec.get("url", ""),
+                allow=tuple(spec.get("allow") or ()),
+            )
+        )
+    return tuple(servers)

@@ -64,6 +64,19 @@ summary_at_hour: 9
 # How long to keep the prompts and outputs behind each decision.
 keep_model_calls_days: 14
 
+# Tool servers outside this process. Adding one is a block here, not a module.
+#
+# `allow` names the tools an agent may see. Leaving it out means every tool the
+# server offers — including its write tools, if it has any. A trace is a
+# read-only act, so name what it may use.
+mcp_servers: {}
+#  loki:
+#    command: npx
+#    args: ["-y", "<the loki mcp server>"]
+#    env:
+#      LOKI_URL: ${LOKI_URL}
+#    allow: [query_range, labels]
+
 outbox:
   # How many times to try one message before handing it to a person.
   max_attempts: 3

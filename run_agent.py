@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import AsyncExitStack
 import os
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from friday.inbox import Inbox
 from friday.api import bind, build_api, check_exposure
 from friday.board import build_board
 from friday.liveness import Heartbeat, Liveness
+from friday.mcp import build as build_mcp
 from friday.redact import Redacting
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
@@ -67,6 +69,11 @@ async def serve_board(db, provider, config, sock) -> None:
 
 
 async def run() -> None:
+    async with AsyncExitStack() as stack:
+        await _run(stack)
+
+
+async def _run(stack: AsyncExitStack) -> None:
     config = load_config()
     Path(config.database_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -199,6 +206,14 @@ async def run() -> None:
         )
     # What is already in flight, so a restart does not look like a fresh start.
     log.info("picking up: %s", await heartbeat.summary())
+
+    # Connected here rather than by whoever uses them: a connection has a
+    # lifetime, and something has to close it. The stack unwinds with the run.
+    servers = build_mcp(config.mcp_servers)
+    for server in servers:
+        await stack.enter_async_context(server)
+    if servers:
+        log.info("mcp: %s", ", ".join(s.name for s in servers))
 
     # Claimed before any task starts. Refusing from inside the TaskGroup would
     # unwind as a traceback; from here it is a sentence.

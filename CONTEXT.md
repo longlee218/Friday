@@ -59,6 +59,17 @@ a correlationId *or* a curl makes a request findable, and both are optional
 individually. A type with an override keeps it; everything else gets the
 general rule for free.
 
+## Tool server
+
+Tools that live outside this process, reached over MCP. A server is
+**configuration** — adding one is a block in `config.yaml`, not a module — for
+the same reason `base_url` and `model` are.
+
+Which tools an agent may see is declared beside the server, not left to the
+agent's instructions: a prompt is a request and a filter is not. A log server
+offers whatever it offers, and nothing about answering "why did this request
+fail" should be able to delete a log stream.
+
 ## Harness
 
 The one place an agent is *run*. Takes a declared agent and an input, returns an
