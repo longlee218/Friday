@@ -13,28 +13,90 @@ from __future__ import annotations
 import json
 import logging
 
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
 from agents import AgentHooks
 
-__all__ = ["LogHooks"]
+from friday.redact import scrub
+
+__all__ = ["LogHooks", "ModelCall"]
 
 log = logging.getLogger("friday.llm")
 
 
+@dataclass(frozen=True, slots=True)
+class ModelCall:
+    """Both sides of one model call.
+
+    Kept because "why did it classify that as an access request?" is always
+    asked after the fact, and a log line answers it while the process is alive
+    and never again.
+    """
+
+    agent: str
+    model: str
+    system_prompt: str
+    prompt: str
+    output: str
+    input_tokens: int
+    output_tokens: int
+    message_id: str | None = None
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+
 class LogHooks(AgentHooks):
+    """Logs both sides of a call, and hands them to whoever asked for them.
+
+    It collects rather than stores: triage performs no writes, so the caller
+    decides whether a call is worth keeping.
+    """
+
+    def __init__(self, calls: list | None = None, *, model: str = "") -> None:
+        self._calls = calls
+        # The configured name, not whatever object the SDK wrapped it in: what
+        # matters later is which model we asked for.
+        self._model = model
+        self._pending: dict = {}
+
     async def on_llm_start(self, context, agent, system_prompt, input_items) -> None:
         log.debug("→ %s system:\n%s", agent.name, system_prompt)
+        prompt = []
         for item in input_items:
-            log.debug("→ %s %s", agent.name, _short(item))
+            line = _short(item)
+            prompt.append(line)
+            log.debug("→ %s %s", agent.name, line)
+        self._pending = {
+            "system_prompt": scrub(system_prompt or ""),
+            "prompt": scrub("\n".join(prompt)),
+        }
 
     async def on_llm_end(self, context, agent, response) -> None:
+        output = []
         for item in response.output:
-            log.debug("← %s %s", agent.name, _short(item))
+            line = _short(item)
+            output.append(line)
+            log.debug("← %s %s", agent.name, line)
         usage = response.usage
         log.debug(
             "← %s usage: %d in / %d out",
             agent.name,
             usage.input_tokens,
             usage.output_tokens,
+        )
+        if self._calls is None:
+            return
+        self._calls.append(
+            ModelCall(
+                agent=agent.name,
+                model=self._model,
+                output=scrub("\n".join(output)),
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                **self._pending,
+            )
         )
 
 
@@ -57,3 +119,4 @@ def _compact(arguments) -> str:
         return json.dumps(json.loads(arguments), ensure_ascii=False)
     except (TypeError, ValueError):
         return str(arguments)
+

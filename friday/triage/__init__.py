@@ -19,6 +19,7 @@ from openai import AsyncOpenAI
 
 from friday.config import AgentConfig
 from friday.llm_log import LogHooks
+from friday.redact import scrub
 from friday.models import InboundEvent
 from friday.triage.prefilter import is_compensation_talk
 from friday.triage.params import (
@@ -237,7 +238,6 @@ class Triage:
                 **config.settings,
             ),
             tool_use_behavior="stop_on_first_tool",
-            hooks=LogHooks(),
         )
 
     @staticmethod
@@ -246,8 +246,18 @@ class Triage:
         return OpenAIChatCompletionsModel(model=config.model, openai_client=client)
 
     async def decide(
-        self, event: InboundEvent, *, context: Sequence[InboundEvent] = ()
+        self,
+        event: InboundEvent,
+        *,
+        context: Sequence[InboundEvent] = (),
+        calls: list | None = None,
     ) -> TriageOutcome:
+        """Decide what a message is. Writes nothing, here or anywhere.
+
+        `calls` collects both sides of every model call, for a caller that
+        wants to keep them — which is the runner, because storing is a write.
+        """
+        self._agent.hooks = LogHooks(calls, model=self._config.model)
         if is_compensation_talk(event.text):
             # Decided, not dropped: it is still a recorded outcome, and the
             # model is never told what anyone earns.
@@ -267,7 +277,7 @@ class Triage:
             )
         except Exception as exc:  # noqa: BLE001 - every failure becomes work
             log.warning("triage failed for %s: %s", event.provider_message_id, exc)
-            return NeedsHuman(f"triage failed: {exc}")
+            return NeedsHuman(scrub(f"triage failed: {exc}"))
 
         if capture.decided is None:
             return NeedsHuman("triage produced no classification")

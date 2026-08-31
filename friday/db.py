@@ -10,9 +10,9 @@ stalls ingestion.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Integer, cast, event, func, or_, select, update
+from sqlalchemy import Integer, cast, delete, event, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -23,6 +23,7 @@ from sqlalchemy.pool import StaticPool
 
 from friday import schema
 from friday.conversation import ConversationId
+from friday.llm_log import ModelCall
 from friday.models import InboundEvent, MentionType, Outbound, Task
 
 __all__ = ["Database"]
@@ -200,6 +201,48 @@ class Database:
     async def _events(self, query) -> list[InboundEvent]:
         async with self._sessions() as session:
             return [_event(row) for row in await session.scalars(query)]
+
+    # ---- model calls ---------------------------------------------------
+
+    async def record_model_call(self, **values) -> None:
+        async with self._sessions.begin() as session:
+            session.add(schema.ModelCall(**values))
+
+    async def model_calls(
+        self, *, message_id: str | None = None, limit: int = 50
+    ) -> list[ModelCall]:
+        query = select(schema.ModelCall)
+        if message_id is not None:
+            query = query.where(schema.ModelCall.message_id == message_id)
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                query.order_by(schema.ModelCall.created_at).limit(limit)
+            )
+            return [
+                ModelCall(
+                    agent=row.agent,
+                    model=row.model,
+                    system_prompt=row.system_prompt,
+                    prompt=row.prompt,
+                    output=row.output,
+                    input_tokens=row.input_tokens,
+                    output_tokens=row.output_tokens,
+                    message_id=row.message_id,
+                    created_at=row.created_at,
+                )
+                for row in rows
+            ]
+
+    async def trim_model_calls(self, *, keep_days: float) -> int:
+        """Prompts are large and nobody reads old ones. A container that never
+        restarts would otherwise fill its volume with them."""
+        async with self._sessions.begin() as session:
+            result = await session.execute(
+                delete(schema.ModelCall).where(
+                    schema.ModelCall.created_at < _now() - timedelta(days=keep_days)
+                )
+            )
+            return result.rowcount
 
     # ---- cursors -------------------------------------------------------
 

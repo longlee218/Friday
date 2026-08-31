@@ -15,6 +15,7 @@ from friday.config import ConfigError, load_config
 from friday.db import Database
 from friday.inbox import Inbox
 from friday.liveness import Heartbeat
+from friday.redact import Redacting
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
 from friday.providers.discord import DiscordUserProvider
@@ -77,6 +78,7 @@ async def run() -> None:
     heartbeat = Heartbeat(
         db=db,
         interval_seconds=config.heartbeat_seconds,
+        keep_model_calls_days=config.keep_model_calls_days,
         extra=inbox.tally,
     )
 
@@ -142,6 +144,11 @@ def main() -> None:
         level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # On the handler, not on a logger: it has to cover the libraries too, which
+    # is where a token would actually surface — an unhandled exception carrying
+    # a request header, not our own code printing it on purpose.
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(Redacting())
     try:
         migrate()
         asyncio.run(run())

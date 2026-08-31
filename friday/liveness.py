@@ -30,6 +30,7 @@ class Heartbeat:
         *,
         db: Database,
         interval_seconds: float = 60.0,
+        keep_model_calls_days: float | None = None,
         extra=None,
     ) -> None:
         self._db = db
@@ -37,6 +38,7 @@ class Heartbeat:
         #: Anything the database cannot answer — chiefly what arrived and
         #: was dropped, which is stored nowhere by design.
         self._extra = extra
+        self._keep_days = keep_model_calls_days
         self._started = datetime.now(timezone.utc)
         self._last_seen: int | None = None
 
@@ -46,6 +48,13 @@ class Heartbeat:
             await self.beat()
 
     async def beat(self) -> str:
+        # Trimming rides the beat rather than owning a loop: it is one indexed
+        # delete, and this is the only thing already running on a timer.
+        if self._keep_days is not None:
+            removed = await self._db.trim_model_calls(keep_days=self._keep_days)
+            if removed:
+                log.info("trimmed %d model call(s) older than %s days",
+                         removed, self._keep_days)
         line = await self.summary()
         log.info("%s", line)
         return line

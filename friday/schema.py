@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, String, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Base", "Conversation", "Cursor", "Message", "Outbound", "Task"]
+__all__ = ["Base", "Conversation", "Cursor", "Message", "ModelCall", "Outbound", "Task"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -151,3 +151,23 @@ class Outbound(Base):
     retry_after: Mapped[datetime | None] = mapped_column(IsoDateTime)
     created_at: Mapped[datetime] = mapped_column(IsoDateTime)
     sent_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
+
+
+class ModelCall(Base):
+    """Both sides of one model call, kept so a decision can be explained after
+    the fact rather than only while the process is alive."""
+
+    __tablename__ = "model_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    #: The message the call was made about — what links a decision to the
+    #: prompt behind it.
+    message_id: Mapped[str | None] = mapped_column(index=True)
+    agent: Mapped[str]
+    model: Mapped[str]
+    system_prompt: Mapped[str]
+    prompt: Mapped[str]
+    output: Mapped[str]
+    input_tokens: Mapped[int]
+    output_tokens: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)

@@ -83,8 +83,27 @@ class TriageRunner:
         return touched
 
     async def _decide(self, event: InboundEvent) -> TriageOutcome:
+        """Decide, and keep the call that decided it.
+
+        Triage writes nothing, so this is where a call becomes a row — right
+        beside the decision it produced, keyed on the same message.
+        """
         context = await self._db.messages(event.conversation)
-        return await self._triage.decide(event, context=context)
+        calls: list = []
+        outcome = await self._triage.decide(event, context=context, calls=calls)
+        for call in calls:
+            await self._db.record_model_call(
+                message_id=event.provider_message_id,
+                agent=call.agent,
+                model=call.model,
+                system_prompt=call.system_prompt,
+                prompt=call.prompt,
+                output=call.output,
+                input_tokens=call.input_tokens,
+                output_tokens=call.output_tokens,
+                created_at=call.created_at,
+            )
+        return outcome
 
     async def _apply(
         self, event: InboundEvent, outcome: TriageOutcome

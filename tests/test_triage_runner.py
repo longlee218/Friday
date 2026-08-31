@@ -24,7 +24,7 @@ class StubTriage:
         self._outcomes = list(outcomes)
         self.seen = []
 
-    async def decide(self, event, *, context=()):
+    async def decide(self, event, *, context=(), calls=None):
         self.seen.append(event)
         return self._outcomes.pop(0) if self._outcomes else NeedsHuman("no script")
 

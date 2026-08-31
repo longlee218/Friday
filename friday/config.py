@@ -92,6 +92,9 @@ class Config:
     #: working agent on a quiet day is otherwise indistinguishable from a
     #: dead one.
     heartbeat_seconds: float = 60.0
+    #: How long to keep model calls. Prompts are large and nobody reads old
+    #: ones; a container that never restarts would fill its volume.
+    keep_model_calls_days: float = 14.0
 
 
 def load_config(path: Path | str = DEFAULT_PATH) -> Config:
@@ -119,6 +122,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             ),
         ),
         heartbeat_seconds=float(raw.get("heartbeat_seconds", 60.0)),
+        keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
         database_path=raw.get("database_path", "./data/friday.db"),
         ingest=IngestConfig(
             # Coerced to str: an unquoted id in YAML parses as an int and

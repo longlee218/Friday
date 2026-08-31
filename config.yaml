@@ -45,6 +45,9 @@ agents:
 # How often to say the process is alive and what it is holding.
 heartbeat_seconds: 60
 
+# How long to keep the prompts and outputs behind each decision.
+keep_model_calls_days: 14
+
 outbox:
   # How many times to try one message before handing it to a person.
   max_attempts: 3
