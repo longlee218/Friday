@@ -6,7 +6,7 @@ ticket that writes to a channel anyone else can see.
 
 **Blocked by:** 05, 12
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] A task reaching the review state sends a direct message containing the proposed reply text and approve/reject controls
 - [x] Approving posts that reply into the originating conversation, appearing as the watched account rather than as an application
