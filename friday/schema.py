@@ -144,6 +144,10 @@ class Outbound(Base):
     text: Mapped[str]
     reply_to: Mapped[str | None]
     state: Mapped[str] = mapped_column(index=True, default="queued")
+    #: The message this became once the platform accepted it. It comes back
+    #: to us over the gateway as one of our own, and this is what tells the
+    #: two apart afterwards.
+    sent_message_id: Mapped[str | None] = mapped_column(index=True)
     attempts: Mapped[int] = mapped_column(default=0)
     last_error: Mapped[str | None]
     #: Held back until this passes. Retrying a rate-limited send at once is

@@ -88,14 +88,16 @@ class Outbox:
             await self._give_up(row, f"no sender named {row.sender!r}")
             return
         try:
-            await sender.send(row.conversation, row.text, reply_to=row.reply_to)
+            sent = await sender.send(
+                row.conversation, row.text, reply_to=row.reply_to
+            )
         except Exception as exc:  # noqa: BLE001 - every failure is recorded
             await self._retry_or_give_up(row, exc)
             return
         # Marked sent after the call, never before. A crash in between may post
         # twice; the other order loses an approved reply silently, and a lost
         # reply is indistinguishable from the system working.
-        await self._db.mark_outbound_sent(row.id)
+        await self._db.mark_outbound_sent(row.id, sent_message_id=sent)
         log.info("outbound %d sent as %s: %s", row.id, row.sender, row.text)
 
     async def _retry_or_give_up(self, row: Outbound, exc: Exception) -> None:

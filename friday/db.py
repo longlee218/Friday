@@ -246,6 +246,46 @@ class Database:
             )
             return result.rowcount
 
+    async def tone_examples(self, limit: int = 8) -> list[InboundEvent]:
+        """The operator's own recent messages, for a model to learn a voice from.
+
+        Excludes anything the agent sent: it goes out under the same account
+        and comes back over the gateway indistinguishable from a real one, so
+        without this the responder learns its own voice and amplifies it every
+        round. Real examples carry a tone that a written style guide does not,
+        which is the whole reason for reading them.
+        """
+        sent = select(schema.Outbound).where(
+            schema.Outbound.state.in_((OUTBOUND_SENT, OUTBOUND_SENT_MANUALLY))
+        ).subquery()
+        our_ids = select(sent.c.sent_message_id).where(
+            sent.c.sent_message_id.is_not(None)
+        )
+        # Matching the text too, because an id is not guaranteed: `send` may
+        # return none, and rows sent before it did have none at all. An
+        # operator echoing back the agent's own sentence is not their voice
+        # either, so a false positive here costs nothing.
+        our_words = select(sent.c.text)
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                select(schema.Message)
+                .where(
+                    schema.Message.is_own.is_(True),
+                    schema.Message.provider_message_id.not_in(our_ids),
+                    schema.Message.text.not_in(our_words),
+                )
+                # Tie-broken on the id, cast as a number: two messages can
+                # share a timestamp, and a snowflake is the platform's own
+                # answer to which came first. Same reason `advance_cursor`
+                # casts rather than comparing text.
+                .order_by(
+                    schema.Message.created_at.desc(),
+                    cast(schema.Message.provider_message_id, Integer).desc(),
+                )
+                .limit(limit)
+            )
+            return list(reversed([_event(row) for row in rows]))
+
     # ---- cursors -------------------------------------------------------
 
     async def advance_cursor(self, event: InboundEvent) -> None:
@@ -358,8 +398,15 @@ class Database:
             )
             return [_outbound(row) for row in rows]
 
-    async def mark_outbound_sent(self, outbound_id: int) -> None:
-        await self._set_outbound(outbound_id, state=OUTBOUND_SENT, sent_at=_now())
+    async def mark_outbound_sent(
+        self, outbound_id: int, *, sent_message_id: str | None = None
+    ) -> None:
+        await self._set_outbound(
+            outbound_id,
+            state=OUTBOUND_SENT,
+            sent_at=_now(),
+            sent_message_id=sent_message_id,
+        )
 
     async def record_outbound_attempt(
         self, outbound_id: int, error: str, *, retry_after: datetime | None = None

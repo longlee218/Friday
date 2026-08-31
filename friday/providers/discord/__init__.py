@@ -146,7 +146,7 @@ class DiscordUserProvider:
 
     async def send(
         self, conversation: ConversationId, text: str, *, reply_to: str | None = None
-    ) -> None:
+    ) -> str:
         """Post into a conversation, as the watched account.
 
         `reply_to` hangs the message under the one it answers, which is what
@@ -163,7 +163,9 @@ class DiscordUserProvider:
             if reply_to is not None
             else None
         )
-        await channel.send(text, reference=reference)
+        # The id comes back so the outbox can recognise this message when
+        # the gateway delivers it to us as one of our own.
+        return str((await channel.send(text, reference=reference)).id)
 
     async def stream(self) -> AsyncIterator[InboundEvent]:
         """Connect, then yield every message the account can see.

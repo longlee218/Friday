@@ -22,8 +22,9 @@ class Sender:
     def __init__(self) -> None:
         self.sent: list[tuple[str, str, str | None]] = []
 
-    async def send(self, conversation, text, *, reply_to=None) -> None:
+    async def send(self, conversation, text, *, reply_to=None) -> str:
         self.sent.append((conversation.target_id, text, reply_to))
+        return f"sent-{len(self.sent)}"
 
 
 class Refusing(Sender):
