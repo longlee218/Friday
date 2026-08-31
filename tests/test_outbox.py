@@ -207,3 +207,46 @@ async def test_approving_a_task_releases_its_reply(db):
     await outbox(db, sender).run_once()
 
     assert [text for _, text, _ in sender.sent] == ["cho anh xin correlationId"]
+
+
+async def test_an_answer_the_conversation_has_moved_past_is_not_posted(db):
+    """A draft is written against a conversation that keeps moving, and the
+    approval arrives minutes or hours later. Answering a question that has since
+    been withdrawn, corrected, or answered by someone else is worse than saying
+    nothing."""
+    from conftest import make_event
+
+    opened = await task(db, approved=True)
+    await db.record_message(make_event(message_id="10", text="api is broken"))
+    row = await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
+        sender="discord_user", text="here is your answer", reply_to="10",
+    )
+    # They said something else while it waited to be approved.
+    await db.record_message(make_event(message_id="20", text="never mind, fixed it"))
+    sender = Sender()
+
+    await outbox(db, sender).run_once()
+
+    assert sender.sent == []
+    assert (await db.outbound())[0].state == "failed"
+    assert (await db.tasks())[0].state == "needs_human"
+
+
+async def test_an_ask_is_not_held_back_by_a_newer_message(db):
+    """Asking for a correlationId is still worth asking after they have said
+    something else. Only an *answer* goes stale."""
+    from conftest import make_event
+
+    opened = await task(db)
+    await db.record_message(make_event(message_id="10", text="api is broken"))
+    await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user", text="which environment?", reply_to="10",
+    )
+    await db.record_message(make_event(message_id="20", text="anyone?"))
+    sender = Sender()
+
+    await outbox(db, sender).run_once()
+
+    assert [t for _, t, _ in sender.sent] == ["which environment?"]

@@ -74,6 +74,8 @@ workflows:
   # How many times to ask for the same missing detail before it becomes a
   # person's problem.
   max_asks: 3
+  # Let a burst of follow-ups settle before answering it.
+  debounce_seconds: 45
   # Send "which environment / can you send the correlationId or curl?" straight
   # away, with no approval step. This is the only reply allowed out unreviewed:
   # it is the same question every time, and if triage got the type wrong it

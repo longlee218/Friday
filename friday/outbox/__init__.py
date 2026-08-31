@@ -90,6 +90,9 @@ class Outbox:
         return rows
 
     async def _deliver(self, row: Outbound) -> None:
+        if await self._overtaken(row):
+            await self._give_up(row, "the conversation moved on before this was approved")
+            return
         sender = self._senders.get(row.sender)
         if sender is None:
             await self._give_up(row, f"no sender named {row.sender!r}")
@@ -104,6 +107,22 @@ class Outbox:
         # reply is indistinguishable from the system working.
         await self._db.mark_outbound_sent(row.id, sent_message_id=sent)
         log.info("outbound %d sent as %s: %s", row.id, row.sender, row.text)
+
+    async def _overtaken(self, row: Outbound) -> bool:
+        """Has the conversation moved past what this answers?
+
+        Only an *answer* goes stale. A draft is written against a conversation
+        that keeps moving and approved minutes or hours later, and answering a
+        question since withdrawn, corrected, or answered by someone else is
+        worse than saying nothing. Asking for a correlationId is still worth
+        asking whatever else has been said.
+
+        Checked here, at the last moment before it goes out, because that is the
+        only moment the answer is true or false.
+        """
+        if row.kind != Kind.REPLY or row.reply_to is None:
+            return False
+        return await self._db.has_newer_message_than(row.conversation, row.reply_to)
 
     async def _retry_or_give_up(self, row: Outbound, exc: Exception) -> None:
         if row.attempts + 1 >= self._max_attempts:

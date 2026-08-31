@@ -531,6 +531,35 @@ class Database:
                 )
             )
 
+    async def last_outbound_at(self, task_id: int, *, kind: str):
+        """When we last said this kind of thing about a task."""
+        async with self._sessions() as session:
+            return await session.scalar(
+                select(func.max(schema.Outbound.created_at)).where(
+                    schema.Outbound.task_id == task_id,
+                    schema.Outbound.kind == str(kind),
+                )
+            )
+
+    async def has_newer_message_than(
+        self, conversation: ConversationId, message_id: str
+    ) -> bool:
+        """Has the conversation moved on since that message?
+
+        Numeric on the snowflake, the same way the cursor decides which message
+        is newer — as text, '99' would sort after '100'.
+        """
+        async with self._sessions() as session:
+            return await session.scalar(
+                select(func.count())
+                .select_from(schema.Message)
+                .where(
+                    schema.Message.conversation_id == str(conversation),
+                    cast(schema.Message.provider_message_id, Integer)
+                    > cast(literal(message_id), Integer),
+                )
+            ) > 0
+
     async def _set_outbound(self, outbound_id: int, **values) -> None:
         async with self._sessions.begin() as session:
             await session.execute(

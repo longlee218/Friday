@@ -109,6 +109,7 @@ async def run() -> None:
             else 8
         ),
         max_asks=config.workflows.max_asks,
+        debounce_seconds=config.workflows.debounce_seconds,
     )
     if responder is not None:
         log.info(
