@@ -66,7 +66,27 @@ class WorkflowRunner:
         acted: list[Task] = []
         for task in await self._db.tasks_in_state(PENDING, self._batch_size):
             acted.append(await self._act(task))
+        await self._raise_hands()
         return acted
+
+    async def _raise_hands(self) -> None:
+        """Tell the operator about work nobody can act on.
+
+        A task in a column nobody is watching is the same as a lost one. Told
+        once, because a notification that repeats is one you learn to ignore —
+        the outbox row is itself the record of having told them.
+        """
+        for task in await self._db.tasks_in_state(NEEDS_HUMAN, self._batch_size):
+            if await self._db.outbound_count(task.id, kind=Kind.HELP_WANTED):
+                continue
+            await self._db.queue_outbound(
+                task_id=task.id,
+                conversation=task.conversation,
+                kind=Kind.HELP_WANTED,
+                sender=self._approver,
+                text=_stuck(task),
+            )
+            log.info("task %d: asked the operator to look", task.id)
 
     async def _act(self, task: Task) -> Task:
         action = self._plan(task)
@@ -82,30 +102,16 @@ class WorkflowRunner:
                 return await self._move(task, NEEDS_HUMAN)
 
         if isinstance(action, Ask) and self._auto_ask:
-            kind, text = await self._say(task, action.text)
+            text = await self._say(task, action.text)
             await self._db.queue_outbound(
                 task_id=task.id,
                 conversation=task.conversation,
-                kind=kind,
+                kind=Kind.ASK_FOR_DETAILS,
                 sender=self._sender,
                 text=text,
                 reply_to=await self._db.last_mention_in(task.conversation),
             )
-            log.info("task %d: queued a %s — %r", task.id, kind, text)
-            if kind is Kind.REPLY:
-                # Nobody has been asked yet, and a draft nobody was asked about
-                # waits forever. The card is an outbound row like any other, so
-                # a card that fails to send shows up rather than going quiet.
-                await self._db.queue_outbound(
-                    task_id=task.id,
-                    conversation=task.conversation,
-                    kind=Kind.APPROVAL_CARD,
-                    sender=self._approver,
-                    text=text,
-                )
-                # Waiting on the operator, not on the reporter. Different
-                # people, different columns, different thing to chase.
-                return await self._move(task, REVIEW)
+            log.info("task %d: asked — %r", task.id, text)
             return await self._move(task, ASKED)
 
         if isinstance(action, Ask):
@@ -117,24 +123,23 @@ class WorkflowRunner:
     async def _say(self, task: Task, template: str) -> tuple[str, str]:
         """The template, or the same thing in the operator's voice.
 
-        A drafted message is a `reply` and waits for approval. The template is
-        allowed out unreviewed because it is the same sentence every time, and
-        that stops being true the moment a model writes it.
+        Asking is the agent's own decision, whoever phrased it: the risk in
+        this system is in *answering*, not in asking, and a request for a
+        correlationId is harmless however it is worded. The operator is
+        interrupted for answers and for trouble.
 
-        A responder that cannot answer falls back to the template rather than
-        producing nothing: a wrong reply in someone's name is worse than a
+        A responder that cannot write it falls back to the template rather than
+        producing nothing: a wrong message in someone's name is worse than a
         plain one, and silence is worse than both.
         """
         if self._responder is None:
-            return Kind.ASK_FOR_DETAILS, template
+            return template
         draft = await self._responder.draft(
             asking=template,
             context=await self._db.messages(task.conversation, limit=self._tone_examples),
             tone=await self._db.tone_examples(limit=self._tone_examples),
         )
-        if draft is None:
-            return Kind.ASK_FOR_DETAILS, template
-        return Kind.REPLY, draft.text
+        return template if draft is None else draft.text
 
     def _plan(self, task: Task) -> Action:
         params = PARAMS.get(task.type)
@@ -152,3 +157,10 @@ class WorkflowRunner:
         from dataclasses import replace
 
         return replace(task, state=state)
+
+
+def _stuck(task: Task) -> str:
+    """What it is, and enough of what it knows to judge without opening
+    anything."""
+    known = ", ".join(f"{k}: {v}" for k, v in sorted(task.params.items()) if v)
+    return f"{task.type} #{task.id} — {known or 'nothing extracted'}"

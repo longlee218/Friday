@@ -111,3 +111,35 @@ async def test_a_button_that_is_not_ours_is_ignored():
     await bot.handle("something:else:1", by="longle_")
 
     assert decisions == []
+
+
+def stuck(task_id: int = 7, text: str = "api_issue #7 — correlation_id: abc-123"):
+    return Outbound(
+        id=2, task_id=task_id, conversation=ConversationId("discord", "999"),
+        kind=Kind.HELP_WANTED, sender="discord_bot", text=text,
+    )
+
+
+async def test_being_stuck_is_told_not_asked():
+    """There is no decision to make. Buttons on it would be a question the
+    operator has to work out the meaning of."""
+    recipient = Recipient()
+    bot = DiscordBot("token", operator_id=OPERATOR, client=stub_client(recipient))
+
+    await bot.send(stuck())
+
+    (message,) = recipient.sent
+    assert message.get("view") is None
+    assert "abc-123" in message["content"]
+
+
+async def test_it_says_where_to_look():
+    recipient = Recipient()
+    bot = DiscordBot(
+        "token", operator_id=OPERATOR, client=stub_client(recipient),
+        board_url="http://localhost:8086",
+    )
+
+    await bot.send(stuck())
+
+    assert "localhost:8086" in recipient.sent[0]["content"]

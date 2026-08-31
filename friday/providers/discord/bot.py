@@ -1,4 +1,9 @@
-"""The application identity, whose only job is to ask.
+"""The application identity, whose only job is to interrupt the operator.
+
+It does that for exactly two reasons: something needs approving, and something
+cannot be handled. Asking a reporter for a correlationId is neither — the agent
+decides that itself, because the risk in this system is in *answering*, not in
+asking.
 
 Buttons are an application-only Discord feature — a user account cannot send
 message components at all — so approval has to flow through a bot. That is also
@@ -24,6 +29,7 @@ from collections.abc import Callable
 import discord
 
 from friday.models import Outbound
+from friday.outbox import Kind
 
 __all__ = ["DiscordBot"]
 
@@ -34,7 +40,7 @@ PREFIX = "friday"
 
 
 class DiscordBot:
-    """Asks the operator to approve a reply, and reports what they said."""
+    """Interrupts the operator, and reports what they said back."""
 
     name = "discord"
 
@@ -44,27 +50,35 @@ class DiscordBot:
         *,
         operator_id: int,
         client=None,
+        board_url: str | None = None,
         on_decision: Callable[..., object] | None = None,
     ) -> None:
         self._token = token
         self._operator_id = operator_id
+        self._board_url = board_url
         # No privileged intents: this identity reads nothing. It sends a direct
         # message and receives the interaction that answers it.
         self._client = client or discord.Client(intents=discord.Intents.none())
         self._on_decision = on_decision
 
     async def send(self, row: Outbound) -> str | None:
-        """Ask about one proposed reply, by direct message.
+        """Direct-message the operator about one row.
 
-        Not into the channel: what is being approved is not public until it is
-        approved.
+        Two things arrive here and they are not the same. A proposed reply is a
+        *question* — it carries buttons, and what it proposes is not public
+        until it is answered. Being stuck is a *statement*: there is no decision
+        to make, and buttons on it would be a question the operator has to work
+        out the meaning of.
         """
         user = await self._client.fetch_user(self._operator_id)
         channel = user.dm_channel or await user.create_dm()
+        asking = row.kind == Kind.APPROVAL_CARD
         message = await channel.send(
-            content=_card(row), view=_Buttons(row.task_id, self.handle)
+            content=_asking(row) if asking else _stuck(row, self._board_url),
+            view=_Buttons(row.task_id, self.handle) if asking else None,
         )
-        log.info("asked for approval of task %d", row.task_id)
+        log.info("%s the operator about task %d",
+                 "asked" if asking else "told", row.task_id)
         return str(message.id)
 
     async def handle(self, custom_id: str, *, by: str) -> None:
@@ -92,7 +106,7 @@ class DiscordBot:
         await self._client.start(self._token)
 
 
-def _card(row: Outbound) -> str:
+def _asking(row: Outbound) -> str:
     """Plain text rather than an embed: the thing being approved is a chat
     message, and it should be read as it will be sent."""
     return (
@@ -100,6 +114,12 @@ def _card(row: Outbound) -> str:
         f"> {row.text}\n"
         f"_task {row.task_id} · goes out as you_"
     )
+
+
+def _stuck(row: Outbound, board_url: str | None) -> str:
+    """Enough to judge without opening anything, and where to go if you want to."""
+    where = f"\n{board_url}" if board_url else ""
+    return f"**Nothing I can do with this**\n> {row.text}\n_in {row.conversation}_{where}"
 
 
 class _Buttons(discord.ui.View):

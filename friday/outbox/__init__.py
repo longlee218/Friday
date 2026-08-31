@@ -39,8 +39,12 @@ class Kind(StrEnum):
     #: The request for approval itself. Waiting for approval to send it would
     #: be a deadlock.
     APPROVAL_CARD = "approval_card"
-    #: The agent answering in the operator's name.
+    #: The agent answering in the operator's name. The only kind that waits:
+    #: the risk is in answering, not in asking.
     REPLY = "reply"
+    #: A task nobody can act on. Not a question — the operator is being told,
+    #: because a task in a column nobody watches is the same as a lost one.
+    HELP_WANTED = "help_wanted"
 
     @property
     def needs_approval(self) -> bool:

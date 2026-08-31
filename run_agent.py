@@ -131,7 +131,12 @@ async def run() -> None:
 
     bot_token = os.environ.get("DISCORD_BOT_TOKEN")
     bot = (
-        DiscordBot(bot_token, operator_id=config.operator_id, on_decision=decided)
+        DiscordBot(
+            bot_token,
+            operator_id=config.operator_id,
+            board_url=f"http://{config.board_host}:{config.board_port}",
+            on_decision=decided,
+        )
         if bot_token and config.operator_id
         else None
     )
