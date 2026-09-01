@@ -215,8 +215,24 @@ class Triage:
         capture = _Capture()
         # One extra turn: the answer arrives as a tool call, which is the call
         # and its result where a written answer would be one turn.
+        from datetime import datetime, timezone
+
+        from friday.instruction_prompt import (
+            ContextBundle,
+            conversation,
+            identity,
+            task,
+            base,
+        )
+
+        bundle = ContextBundle(
+            identity=identity("triage", "You classify mentions of the watched account."),
+            base=base(datetime.now(timezone.utc)),
+            conversation=conversation(list(context) + [event]),
+            task=task("classify", None, None),
+        )
         result = await self._run.run(
-            _prompt(event, context), context=capture, calls=calls, extra_turns=1
+            bundle, context=capture, calls=calls, extra_turns=1
         )
         if result is None:
             return NeedsHuman(f"triage failed: {self._run.last_error}")

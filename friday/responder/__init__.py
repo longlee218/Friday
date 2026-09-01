@@ -71,7 +71,26 @@ class Responder:
         message in someone else's name that the model was unsure of, and never
         silence either.
         """
-        result = await self._run.run(_prompt(asking, context, tone), calls=calls)
+        from datetime import datetime, timezone
+
+        from friday.instruction_prompt import (
+            ContextBundle,
+            base,
+            conversation,
+            identity,
+            task,
+        )
+
+        bundle = ContextBundle(
+            identity=identity(
+                "responder",
+                "You write chat replies as the watched account, in their voice.",
+            ),
+            base=base(datetime.now(timezone.utc)),
+            conversation=conversation(list(tone) + list(context)),
+            task=task("respond", None, asking),
+        )
+        result = await self._run.run(bundle, calls=calls)
         if result is None:
             log.warning("falling back to the template")
             return None

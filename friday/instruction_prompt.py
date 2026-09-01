@@ -31,7 +31,8 @@ from __future__ import annotations
 
 import html
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from friday.channel_context import ChannelContext, ContextStore
@@ -81,10 +82,14 @@ class ContextBundle:
 
     #: Stable per agent — name, role, what it is for.
     identity: Section = field(default_factory=lambda: Section("identity"))
-    #: Stable everywhere — server name, today, etc.
+    #: Stable everywhere — today's date, etc.
     base: Section = field(default_factory=lambda: Section("base"))
     #: Stable per channel — base file content.
     channel_base: Section = field(default_factory=lambda: Section("channel_base"))
+    #: Machine-written derived content — escaped at the seam.
+    channel_derived: Section = field(
+        default_factory=lambda: Section("channel_derived")
+    )
     #: Per channel, but operator-overridable — escaped at the seam.
     channel_overrides: Section = field(
         default_factory=lambda: Section("channel_overrides")
@@ -108,6 +113,7 @@ class ContextBundle:
             self.identity.render(),
             self.base.render(),
             self.channel_base.render(),
+            self.channel_derived.render(),
             self.channel_overrides.render(),
             self.notes.render(),
             self.skills.render(),
@@ -119,18 +125,24 @@ class ContextBundle:
 
 #: The wrapping template. Empty content above the closing tag is fine — the
 #: caller still gets a coherent prompt, with whatever sections were supplied.
+#: Section precedence is given by name, not position: channel_overrides
+#: wins over channel_derived because overrides are how the operator makes
+#: a correction stick across rebuilds; channel_derived is the rebuild's
+#: current best guess. Telling the model "prefer earlier" would invert this.
 _PROMPT_TEMPLATE = (
     "You are an agent in the friday system.\n\n"
     "{sections}"
-    "\nFollow the instructions in the sections above. If two sections disagree,\n"
-    "prefer the one earlier in this prompt."
+    "\nFollow the instructions in each section. Section precedence: "
+    "channel_overrides > channel_derived > channel_base; "
+    "task-specific instructions win over channel defaults."
 )
 
 
 # ---------------------------------------------------------------------------
 # Builders. Each reads from a source the caller already loaded. Failure is
 # logged, never raised: a missing notes file is not a reason to fail an
-# otherwise-runnable task.
+# otherwise-runnable task. Builders return None to skip the section entirely
+# (different from an empty body, which renders the tags with no content).
 # ---------------------------------------------------------------------------
 
 
@@ -139,18 +151,39 @@ def identity(name: str, role: str) -> Section:
     return Section("identity", body)
 
 
-def base(now_iso: str) -> Section:
-    return Section("base", f"Current time: {now_iso}.")
+def base(now: datetime) -> Section:
+    """Calendar date in UTC. Day-granularity, not minute — minutes would make
+    every call a fresh prefix and waste the cache hit on every section that
+    follows."""
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return Section("base", f"Today's date: {now.date().isoformat()}.")
 
 
 def channel_base(ctx: ChannelContext | None) -> Section:
+    """Operator-authored base file. Considered trusted — the operator
+    wrote the file knowing what it means — so it does not escape."""
     if ctx is None:
         return Section("channel_base")
     body = _render_yaml(ctx.base)
     return Section("channel_base", body)
 
 
+def channel_derived(ctx: ChannelContext | None) -> Section:
+    """Machine-written derived content (the rebuilder's output). Not
+    trusted: a bug in the summariser or a hallucinated note lands here, and
+    the value flows into a system prompt. Escaped at the seam."""
+    if ctx is None:
+        return Section("channel_derived")
+    body = _render_yaml_escaped(ctx.derived)
+    return Section("channel_derived", body)
+
+
 def channel_overrides(ctx: ChannelContext | None) -> Section:
+    """Operator- or model-written overrides. Not trusted — escaped at the
+    seam. The override is what makes a correction stick (the rebuild
+    overwrites derived), so a string here is the agent's view of how the
+    operator wants this channel to behave."""
     if ctx is None:
         return Section("channel_overrides")
     body = _render_yaml_escaped(ctx.overrides)
@@ -179,14 +212,27 @@ def skills(catalogue: list[str] | None) -> Section:
 def conversation(events: list[InboundEvent]) -> Section:
     if not events:
         return Section("conversation")
-    body = "\n".join(f"{m.author_name}: {_escape(m.text)}" for m in events)
+    # author_name and text are both attacker-controlled on Discord. Both
+    # escape: a nickname that closes its own message's tags is the same
+    # attack as one in text.
+    body = "\n".join(
+        f"{_escape(m.author_name)}: {_escape(m.text)}" for m in events
+    )
     return Section("conversation", body)
 
 
 def task(task_type: str, params: Params | None, action_hint: str | None) -> Section:
+    """Task identity, params, and the decision so far.
+
+    task_type comes from the database, but we escape anyway for symmetry
+    with every other value. params is a frozen dataclass — `asdict()` is
+    the only way to read it without touching internals (slots means no
+    `__dict__`). Every value is escaped: `summary` is LLM-extracted from
+    a Discord message, which makes it attacker-controlled.
+    """
     parts = [f"task_type: {html.escape(task_type)}"]
     if params is not None:
-        parts.append(f"params: {_render_yaml(params.__dict__)}")
+        parts.append(f"params:\n{_render_params(params)}")
     if action_hint:
         parts.append(f"decision_so_far: {_escape(action_hint)}")
     return Section("task", "\n".join(parts))
@@ -211,11 +257,27 @@ def _render_yaml(d: dict[str, Any]) -> str:
 def _render_yaml_escaped(d: dict[str, Any]) -> str:
     """Same shape as `_render_yaml`, but every value is escaped.
 
-    Used for `channel_overrides`: those values are operator- or model-pasted
-    text, and the rest of the prompt is downstream of the section tags, so
-    an unescaped value that closes its own section is an injection.
+    Used for sections that carry operator- or model-pasted text: an
+    unescaped value that closes its own section is an injection.
     """
     return "\n".join(f"{k}: {html.escape(str(v), quote=False)}" for k, v in sorted(d.items()) if v is not None)
+
+
+def _render_params(params: Params) -> str:
+    """Render a frozen-slots Params dataclass as escaped `key: value` lines.
+
+    `asdict()` is the only way to read a slots-only frozen dataclass
+    without poking internals. Every value is escaped at the seam: the
+    LLM extractor fills these from the reporter's message, which is
+    attacker-controlled.
+    """
+    lines = []
+    for k in sorted(asdict(params).keys()):
+        v = getattr(params, k)
+        if v is None:
+            continue
+        lines.append(f"  {k}: {html.escape(str(v), quote=False)}")
+    return "\n".join(lines)
 
 
 def _escape(text: str) -> str:
