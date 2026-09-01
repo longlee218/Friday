@@ -305,3 +305,32 @@ def test_only_the_reasoning_nodes_of_a_graph_get_skills(tmp_path):
     # the same every call.
     assert "trace-a-request" in agents["analyze_stack"].agent.instructions
     assert "trace-a-request" not in agents["read_logs"].agent.instructions
+
+
+def test_a_file_saved_with_a_byte_order_mark_still_loads(tmp_path):
+    """UTF-8 with a BOM is what Notepad writes by default. Rejecting it tells
+    the operator their file has no frontmatter while they are looking at it."""
+    (tmp_path / "bom.md").write_text(
+        "---\nname: traced\ndescription: how to trace\n---\n\nBody.",
+        encoding="utf-8-sig",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert library.problems == []
+    assert "traced" in library
+    assert "Body." in library.fetch("traced")
+
+
+def test_something_unreadable_is_reported_rather_than_crashing_startup(tmp_path):
+    """A directory named `*.md` raises `IsADirectoryError`, which is an
+    `OSError` and not a `ValueError`. It used to reach the composition root
+    and stop the process from starting."""
+    (tmp_path / "adir.md").mkdir()
+    (tmp_path / "fine.md").write_text("---\nname: fine\ndescription: d\n---\nB")
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert len(library.problems) == 1
+    assert "adir.md" in library.problems[0]
+    assert "fine" in library, "one bad file stopped the good ones loading"

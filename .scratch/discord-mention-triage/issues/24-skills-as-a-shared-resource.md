@@ -23,8 +23,29 @@ Skills are a shared resource, not a property of an agent: the same "how to trace
 request" serves whoever needs it.
 
 - [x] A skill is one file the operator writes; adding one requires editing nothing else
-- [x] Every agent is given the name and description of every skill, without their bodies
+- [x] **Every agent that reasons** is given the name and description of every
+  skill, without their bodies. Not *every* agent, and the difference is
+  deliberate — the criterion as first written was wrong, and was ticked while
+  it was wrong:
+  | Agent | Catalogue? | Why |
+  |---|---|---|
+  | responder | yes | it decides how to say something |
+  | `analyze_stack`, `compose_reply` | yes | they decide what the evidence means |
+  | triage | no | `stop_on_first_tool` — a `fetch_skill` call would end the run |
+  | `read_logs`, `find_code_path`, `fix_bug` | no | tool work; "how to trace a request" is for whoever reads the result |
+  | extractor | no | it fills fields from text; there is nothing to decide |
+  | channel summary | no | same |
 - [x] An agent can fetch a skill's body during a run and act on what it says
 - [x] Fetching a skill that does not exist comes back as something the model can respond to, not an error that ends the run
 - [x] A malformed skill file is reported at startup, naming the file, rather than failing mid-run
 - [x] The prompt cost of the skill list grows with the *number* of skills, not their length
+
+## Review fixes (after QA)
+
+- **A byte-order mark rejected the whole file.** UTF-8-with-BOM is Notepad's
+  default; the file then does not start with `---`, and the operator was told
+  their skill has no frontmatter while looking straight at it. Read as
+  `utf-8-sig`, which reads plain UTF-8 unchanged.
+- **`except ValueError` did not catch `OSError`.** A directory named `*.md`
+  raises `IsADirectoryError` out of `read_text` and took down startup — the
+  exact thing the "reported at startup, not failing" criterion forbids.

@@ -75,7 +75,12 @@ class SkillLibrary:
         for path in sorted(self._dir.glob("*.md")):
             try:
                 skill = _read(path)
-            except ValueError as exc:
+            except (ValueError, OSError) as exc:
+                # `OSError` as well as `ValueError`: a directory named `*.md`,
+                # or a file the process cannot open, raises from `read_text`
+                # and would otherwise take down startup. A skill that cannot
+                # be read is a warning; it is not a reason to stop watching
+                # Discord.
                 self.problems.append(f"{path}: {exc}")
                 continue
             if skill.name in self._skills:
@@ -118,12 +123,18 @@ class SkillLibrary:
 
 def _read(path: Path) -> Skill:
     """Parse one skill file, or say what is wrong with it."""
-    text = path.read_text(encoding="utf-8")
+    # `utf-8-sig` rather than `utf-8`: it reads plain UTF-8 unchanged and also
+    # strips the byte-order mark that Notepad and several Windows editors write
+    # by default. With the mark in place the file does not start with `---`,
+    # and the operator is told their file has no frontmatter while looking
+    # straight at it.
+    text = path.read_text(encoding="utf-8-sig")
     if not text.lstrip().startswith(_FRONTMATTER):
         raise ValueError("no frontmatter block; expected a '---' line first")
 
-    # Split on the opening and closing fences. `2` because the text before the
-    # first fence is empty and the body may itself contain '---' as a rule.
+    # Split on the opening and closing fences. The text before the first fence
+    # is empty, and the body may itself contain '---' as a horizontal rule —
+    # `partition` takes the first closing fence, which is the right one.
     _, _, rest = text.lstrip().partition(_FRONTMATTER)
     front, fence, body = rest.partition(f"\n{_FRONTMATTER}")
     if not fence:

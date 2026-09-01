@@ -1,5 +1,7 @@
 # 28 (retired): a workflow that survives a restart
 
+**Status:** retired — superseded by 32 and 33
+
 This ticket is retired. The original framing — "ordered set of steps, each
 recording before the next begins" — is **subsumed by ticket 32** (DAG
 framework) and **ticket 33** (the first DAG, `api_issue`). The DAG's

@@ -57,6 +57,68 @@ agents:
       temperature: 0
     max_turns: 1
 
+  # ── The api_issue graph, one block per node ───────────────────────────────
+  # A node whose block is absent runs without an agent and skips. That is a
+  # working state, not a broken one: with none of these the graph ends where
+  # the old planner did, asking for a correlationId. But it means the whole
+  # investigation is off, silently, which is not something to discover from a
+  # week of logs where nothing was ever traced.
+  #
+  # `read_logs`, `find_code_path` and `fix_bug` also need their tool server —
+  # `loki` and `source` under mcp_servers below. An agent without its server
+  # skips too; one WITH a server and no agent block does nothing either. Both
+  # halves or neither.
+
+  # Fetches log lines for one request. Tool work, not reasoning — the cheap
+  # model, and `max_turns` high enough to page through a query.
+  dag_read_logs:
+    api_key: ${TRIAGE_API_KEY}
+    base_url: "https://api.minimax.io/v1"
+    model: "MiniMax-M3"
+    settings:
+      temperature: 0
+    max_turns: 6
+
+  # Follows a stack trace to the file and line it names. Also tool work.
+  dag_find_code:
+    api_key: ${TRIAGE_API_KEY}
+    base_url: "https://api.minimax.io/v1"
+    model: "MiniMax-M3"
+    settings:
+      temperature: 0
+    max_turns: 6
+
+  # Says why the request failed, and whether that is certain enough to act on.
+  # The one node whose answer decides whether code gets changed — temperature 0,
+  # and worth the better model when there is one.
+  dag_analyze:
+    api_key: ${RESPONDER_API_KEY}
+    base_url: "https://api.minimax.io/v1"
+    model: "MiniMax-M3"
+    settings:
+      temperature: 0
+    max_turns: 1
+
+  # Writes the patch. Commented out on purpose: this is the only agent in the
+  # system that edits a repository, and turning it on is a decision, not a
+  # default. It needs the `source` server as well.
+  # dag_fix:
+  #   api_key: ${RESPONDER_API_KEY}
+  #   base_url: "https://api.minimax.io/v1"
+  #   model: "MiniMax-M3"
+  #   settings:
+  #     temperature: 0
+  #   max_turns: 4
+
+  # Writes what goes back to the reporter. The draft still needs approval.
+  dag_compose:
+    api_key: ${RESPONDER_API_KEY}
+    base_url: "https://api.minimax.io/v1"
+    model: "MiniMax-M3"
+    settings:
+      temperature: 0.7
+    max_turns: 1
+
 # ── Workflows ──────────────────────────────────────────────────────────────
 # How often to say the process is alive and what it is holding.
 # Who is asked to approve a reply, by direct message from the bot.
@@ -86,12 +148,23 @@ keep_model_calls_days: 14
 # server offers — including its write tools, if it has any. A trace is a
 # read-only act, so name what it may use.
 mcp_servers: {}
+# The two the api_issue graph looks for, by name. `allow` is the filter — a
+# prompt is a request and a filter is not, so nothing about answering "why did
+# this request fail" is able to delete a log stream or write a file.
+#
 #  loki:
 #    command: npx
 #    args: ["-y", "<the loki mcp server>"]
 #    env:
 #      LOKI_URL: ${LOKI_URL}
 #    allow: [query_range, labels]
+#
+#  source:
+#    command: npx
+#    args: ["-y", "<a filesystem mcp server>", "/path/to/the/repo"]
+#    # Read-only until dag_fix is turned on. Adding a write tool here is the
+#    # other half of that decision, not a separate one.
+#    allow: [read_file, search_files]
 
 outbox:
   # How many times to try one message before handing it to a person.
