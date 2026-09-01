@@ -107,6 +107,15 @@ async def _run(stack: AsyncExitStack) -> None:
         ),
     )
 
+    # Connected here rather than by whoever uses them: a connection has a
+    # lifetime, and something has to close it. The stack unwinds with the run.
+    # Before the agents, because one of them is handed this list.
+    servers = build_mcp(config.mcp_servers)
+    for server in servers:
+        await stack.enter_async_context(server)
+    if servers:
+        log.info("mcp: %s", ", ".join(s.name for s in servers))
+
     promotion = Promotion(db=db)
     # Read once, at build time: a promotion takes effect on the next start
     # rather than invalidating a warm prompt cache mid-run.
@@ -240,14 +249,6 @@ async def _run(stack: AsyncExitStack) -> None:
         )
     # What is already in flight, so a restart does not look like a fresh start.
     log.info("picking up: %s", await heartbeat.summary())
-
-    # Connected here rather than by whoever uses them: a connection has a
-    # lifetime, and something has to close it. The stack unwinds with the run.
-    servers = build_mcp(config.mcp_servers)
-    for server in servers:
-        await stack.enter_async_context(server)
-    if servers:
-        log.info("mcp: %s", ", ".join(s.name for s in servers))
 
     # Claimed before any task starts. Refusing from inside the TaskGroup would
     # unwind as a traceback; from here it is a sentence.
