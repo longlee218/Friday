@@ -58,6 +58,11 @@ class DiscordUserProvider:
         # message id and the reactor without needing the cache at all.
         self._client.on_raw_reaction_add = self._handle_raw_reaction_add
         self._client.on_raw_reaction_remove = self._handle_raw_reaction_remove
+        self._client.on_typing = self._handle_typing
+        #: (channel id, author id) -> when they were last seen typing. In
+        #: memory on purpose: it says whether somebody is still mid-thought
+        #: *right now*, and nothing about a restart ago is still true.
+        self.typing: dict[tuple[str, str], datetime] = {}
 
     #: Called with `(provider_message_id, mark, by)` when the operator marks a
     #: classification, and with `mark=None` when they take the mark back.
@@ -84,6 +89,12 @@ class DiscordUserProvider:
         log.info("discord session resumed")
         self.down_since = None
         self.reconnected.set()
+
+    async def _handle_typing(self, channel, user, when) -> None:
+        self.typing[(str(channel.id), str(user.id))] = when
+
+    def typing_at(self, channel_id: str, author_id: str) -> datetime | None:
+        return self.typing.get((channel_id, author_id))
 
     async def _handle_raw_reaction_add(self, payload) -> None:
         """The operator saying a classification was right, or wrong.

@@ -127,7 +127,7 @@ async def _run(stack: AsyncExitStack) -> None:
 
     provider.on_verdict = marked
 
-    runner = await TriageRunner.build(config, db=db)
+    runner = await TriageRunner.build(config, db=db, still_typing=inbox.still_typing)
 
     # Connected here rather than by whoever uses them: a connection has a
     # lifetime, and something has to close it. The stack unwinds with the run.

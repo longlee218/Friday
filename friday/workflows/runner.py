@@ -61,7 +61,6 @@ class WorkflowRunner:
             responder=responder,
             auto_ask=config.workflows.auto_ask_for_details,
             max_asks=config.workflows.max_asks,
-            debounce_seconds=config.workflows.debounce_seconds,
         )
 
     def __init__(
@@ -71,10 +70,6 @@ class WorkflowRunner:
         auto_ask: bool,
         responder=None,
         max_asks: int = 3,
-        #: How long to let a burst settle. Three messages in ten seconds
-        #: each send the task back to be re-planned, and each would
-        #: otherwise get its own reply.
-        debounce_seconds: float = 45.0,
         sender: str = "discord_user",
         #: Which identity asks. Not the one that speaks: buttons are an
         #: application-only feature, so the question goes out as the bot.
@@ -88,7 +83,6 @@ class WorkflowRunner:
         # responder's knob; this loop only fetches what it is told to fetch.
         self._tone_examples = getattr(responder, "tone_examples", 8)
         self._max_asks = max_asks
-        self._debounce = debounce_seconds
         self._sender = sender
         self._approver = approver
         self._batch_size = batch_size
@@ -191,8 +185,6 @@ class WorkflowRunner:
             return await self._propose(task, action.text)
 
         if isinstance(action, Ask):
-            if await self._too_soon(task):
-                return task
             asked = await self._db.outbound_count(task.id, kind=Kind.ASK_FOR_DETAILS)
             if asked >= self._max_asks:
                 log.info(
@@ -246,24 +238,6 @@ class WorkflowRunner:
         # Waiting on the operator, not on the reporter. Different people,
         # different columns, different thing to chase.
         return await self._move(task, REVIEW)
-
-    async def _too_soon(self, task: Task) -> bool:
-        """Let a burst settle before answering it.
-
-        A pause, not a mute: the task stays pending and is asked on the next
-        pass once the burst has passed. Someone typing "vẫn lỗi", "alo", "?" in
-        ten seconds is one person waiting, not three questions.
-        """
-        if not self._debounce:
-            return False
-        last = await self._db.last_outbound_at(task.id, kind=Kind.ASK_FOR_DETAILS)
-        if last is None:
-            return False
-        quiet_for = (datetime.now(timezone.utc) - last).total_seconds()
-        if quiet_for >= self._debounce:
-            return False
-        log.debug("task %d: still settling (%.0fs)", task.id, quiet_for)
-        return True
 
     async def _say(self, task: Task, template: str) -> str:
         """The template, or the same thing in the operator's voice.

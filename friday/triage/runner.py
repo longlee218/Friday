@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import replace
+from datetime import datetime, timezone
 
 from friday.store.db import Database
 from friday.domain.tasks import TaskState
@@ -48,7 +49,9 @@ def _record(outcome: TriageOutcome) -> dict:
 
 class TriageRunner:
     @classmethod
-    async def build(cls, config, *, db: Database) -> "TriageRunner":
+    async def build(
+        cls, config, *, db: Database, still_typing=None
+    ) -> "TriageRunner":
         """Everything triage needs, read from configuration here.
 
         The composition root asks for a triage runner; it does not know that
@@ -100,6 +103,8 @@ class TriageRunner:
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)
             ),
+            turn_seconds=config.ingest.turn_seconds,
+            still_typing=still_typing,
         )
 
     def __init__(
@@ -110,10 +115,18 @@ class TriageRunner:
         confidence_threshold: float,
         batch_size: int = 50,
         poll_interval_seconds: float = 2.0,
+        #: How long the author has to be quiet before their turn is read.
+        turn_seconds: float = 0.0,
+        #: `(conversation, author_id) -> bool`, from the inbox. Keeps a turn
+        #: open past the window while they are still writing. Optional: the
+        #: recovery sweep has no typing signal, and neither do tests.
+        still_typing=None,
     ) -> None:
         self._db = db
         self._triage = triage
         self._threshold = confidence_threshold
+        self._turn_seconds = turn_seconds
+        self._still_typing = still_typing or (lambda conversation, author_id: False)
         self._batch_size = batch_size
         self._poll_interval = poll_interval_seconds
 
@@ -123,10 +136,20 @@ class TriageRunner:
                 await asyncio.sleep(self._poll_interval)
 
     async def run_once(self) -> list[Task]:
-        """Triage everything waiting. Returns the tasks created or updated."""
+        """Triage every finished turn. Returns the tasks created or updated.
+
+        The queue holds mentions. A mention opens a *turn* — everything the
+        same person went on to say — and it is the turn that is classified,
+        once, when they have stopped. A mention whose turn is still open is
+        left where it is and picked up next pass.
+        """
         touched: list[Task] = []
         for event in await self._db.untriaged_mentions(self._batch_size):
-            outcome = await self._decide(event)
+            turn, closed_by_someone_else = await self._db.turn_from(event)
+            if not closed_by_someone_else and self._still_open(turn):
+                continue
+            said = replace(event, text="\n".join(m.text for m in turn if m.text))
+            outcome = await self._decide(said)
             task = await self._apply(event, outcome)
             await self._db.mark_triaged(
                 event, task.id if task else None, decision=_record(outcome)
@@ -134,6 +157,14 @@ class TriageRunner:
             if task is not None:
                 touched.append(task)
         return touched
+
+    def _still_open(self, turn: list[InboundEvent]) -> bool:
+        """They may not be finished: too recent, or still typing."""
+        last = turn[-1]
+        quiet_for = (datetime.now(timezone.utc) - last.created_at).total_seconds()
+        if quiet_for < self._turn_seconds:
+            return True
+        return self._still_typing(last.conversation, last.author_id)
 
     async def _decide(self, event: InboundEvent) -> TriageOutcome:
         """Decide, and keep the call that decided it.

@@ -31,6 +31,10 @@ class IngestConfig:
     sweep_interval_seconds: float = 300.0
     # How many prior messages to pull in when a conversation first mentions us.
     context_messages: int = 20
+    #: How long somebody has to be quiet — not sending, not typing — before
+    #: what they said counts as finished and is read. People send one thought
+    #: in three messages; this is what makes it one input instead of three.
+    turn_seconds: float = 12.0
 
 
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -71,8 +75,6 @@ class WorkflowConfig:
     #: How many times to ask for the same missing detail before handing the
     #: task to a person. Asking forever is how a helpful question becomes noise.
     max_asks: int = 3
-    #: How long to let a burst of follow-ups settle before answering it.
-    debounce_seconds: float = 45.0
     #: Send the "which environment / correlationId?" question without waiting
     #: for approval. The only reply allowed out unreviewed: it is the same
     #: question every time, and a wrong classification costs the reporter one
@@ -188,9 +190,6 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
         persona=persona,
         workflows=WorkflowConfig(
             max_asks=int((raw.get("workflows") or {}).get("max_asks", 3)),
-            debounce_seconds=float(
-                (raw.get("workflows") or {}).get("debounce_seconds", 45.0)
-            ),
             use_responder=bool(
                 (raw.get("workflows") or {}).get("use_responder", False)
             ),
@@ -245,6 +244,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
                 ingest.get("sweep_interval_seconds", 300.0)
             ),
             context_messages=int(ingest.get("context_messages", 20)),
+            turn_seconds=float(ingest.get("turn_seconds", 12.0)),
         ),
     )
 

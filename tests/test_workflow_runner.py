@@ -84,7 +84,7 @@ async def test_a_task_stops_being_asked_after_a_few_tries(db):
     it becomes a human's problem, which is what a human is for."""
     opened = await make_task(db)
     # Debounce off: this is about the bound on asking, not about bursts.
-    runner = WorkflowRunner(db=db, auto_ask=True, max_asks=2, debounce_seconds=0)
+    runner = WorkflowRunner(db=db, auto_ask=True, max_asks=2)
 
     for _ in range(3):
         await db.move_task(opened.id, TaskState.PENDING)
@@ -190,29 +190,9 @@ async def test_the_operator_is_told_once(db):
     assert [r.kind for r in await db.outbound()] == ["help_wanted"]
 
 
-async def test_a_burst_of_messages_does_not_ask_three_times(db):
-    """Someone types "vẫn lỗi", then "alo", then "?" in ten seconds. Each sends
-    the task back to be re-planned, and without this each gets its own reply."""
-    task = await make_task(db)
-    runner = WorkflowRunner(db=db, auto_ask=True, debounce_seconds=60)
-
-    for _ in range(3):
-        await db.move_task(task.id, TaskState.PENDING)
-        await runner.run_once()
-
-    assert len([r for r in await db.outbound() if r.kind == "ask_for_details"]) == 1
-
-
-async def test_it_asks_again_once_the_burst_has_passed(db):
-    """Debounce is a pause, not a mute — an hour later they are still waiting."""
-    task = await make_task(db)
-    runner = WorkflowRunner(db=db, auto_ask=True, debounce_seconds=0)
-
-    await runner.run_once()
-    await db.move_task(task.id, TaskState.PENDING)
-    await runner.run_once()
-
-    assert len([r for r in await db.outbound() if r.kind == "ask_for_details"]) == 2
+# The two debounce tests that lived here are gone with the debounce. A burst is
+# absorbed before it reaches this loop now — see the turn tests in
+# `test_triage_runner.py` — so there is nothing here to settle.
 
 
 async def test_an_answer_from_a_workflow_waits_for_approval(db):

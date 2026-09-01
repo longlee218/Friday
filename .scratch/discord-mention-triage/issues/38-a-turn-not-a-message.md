@@ -6,7 +6,7 @@ once, classified once.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why
 
@@ -54,14 +54,35 @@ to patch the burst hole. It collapses into this rather than living beside it.
 
 ## Acceptance criteria
 
-- [ ] Messages from one person, uninterrupted and within the window, are
+- [x] Messages from one person, uninterrupted and within the window, are
       classified once and extracted from once
-- [ ] A typing signal from that person keeps the turn open past the window
-- [ ] Somebody else speaking closes the turn immediately
-- [ ] The recovery sweep produces the same turns as the live path — history has
+- [x] A typing signal from that person keeps the turn open past the window
+- [x] Somebody else speaking closes the turn immediately
+- [x] The recovery sweep produces the same turns as the live path — history has
       no typing signals, so the boundary there is timestamps alone
-- [ ] Each message still has its own row, its own id and its own reply target
-- [ ] The separate read-time grouping added for the burst is gone, not left
-      beside this
-- [ ] A test drives the burst above and asserts one classification, and that
+- [x] Each message still has its own row, its own id and its own reply target
+- [ ] ~~The separate read-time grouping added for the burst is gone~~ — **kept,
+      and the criterion was wrong.** `original_text_for` answers "everything
+      the reporter has said about this task", which spans turns: the answer to
+      our question is a later turn. `turn_from` answers "what did they say in
+      this one go". Both group at read time; they group different things. One
+      mechanism reading two windows would be the duplication, not two readers.
+- [x] A test drives the burst above and asserts one classification, and that
       the curl reaches the task
+
+## What it came to
+
+The queue is unchanged — it still says "there is work from this person in this
+conversation". What changed is that a mention now opens a *turn*, gathered when
+read, and triage waits for the turn to close: twelve seconds of neither sending
+nor typing, or somebody else speaking. The typing signal is a dict in the
+provider's memory and reaches the triage runner as one callable, so the runner
+never learns what a provider is.
+
+`debounce_seconds` and the workflow's `_too_soon` are gone. They existed to
+stop three messages producing three asks; three messages are one turn now, and
+one turn is one ask.
+
+Run for real: the two-message burst is one model call, and the extractor sees
+both messages.
+

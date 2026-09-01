@@ -210,8 +210,6 @@ workflows:
   # How many times to ask for the same missing detail before it becomes a
   # person's problem.
   max_asks: 3
-  # Let a burst of follow-ups settle before answering it.
-  debounce_seconds: 45
   # Let the responder phrase the ask in the operator's own voice, from the
   # conversation and their real messages, instead of the fixed template.
   # Still sent with no approval step (see auto_ask_for_details below): what
@@ -231,6 +229,14 @@ ingest:
   #   role   — a role the account holds is @d
   #   dm     — a one-to-one DM (always watched; not subject to the list below)
   mention_types: ["direct", "role", "dm"]
+
+  # How long somebody has to be quiet — not sending, not typing — before what
+  # they said is read as finished. People send one thought in three messages,
+  # three seconds apart; this is what makes it one input instead of three, and
+  # one model call instead of three. Discord repeats the typing signal about
+  # every ten seconds while somebody is still writing, so twelve seconds of
+  # silence means they have actually stopped.
+  turn_seconds: 12
 
   # How often the recovery sweep runs, in seconds. It also runs immediately
   # whenever the connection comes back.

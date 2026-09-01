@@ -249,6 +249,39 @@ class Database:
             .order_by(schema.Message.created_at, schema.Message.provider_message_id)
         )
 
+    async def turn_from(self, event: InboundEvent) -> tuple[list[InboundEvent], bool]:
+        """The turn this message opens: everything the same person said in the
+        same conversation from here on, up to the first message by somebody
+        else. Returns the messages and whether somebody else has since spoken.
+
+        Worked out when read, not stored. At the moment a message arrives it is
+        not known whether the turn is over — the next message is three seconds
+        away and has not happened — so a stored turn id would be wrong for as
+        long as the turn is still running.
+
+        What this process posted is left out: in a channel the operator tests
+        in, the account is both sides of the conversation.
+        """
+        ours = select(schema.Outbound.sent_message_id).where(
+            schema.Outbound.sent_message_id.is_not(None)
+        )
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                select(schema.Message)
+                .where(
+                    schema.Message.conversation_id == str(event.conversation),
+                    schema.Message.created_at >= event.created_at,
+                    schema.Message.provider_message_id.not_in(ours),
+                )
+                .order_by(schema.Message.created_at)
+            )
+            turn: list[InboundEvent] = []
+            for row in rows:
+                if row.author_id != event.author_id:
+                    return turn, True
+                turn.append(_event(row))
+            return turn, False
+
     async def untriaged_mentions(self, limit: int = 50) -> list[InboundEvent]:
         """The queue: work nobody has looked at, oldest first.
 

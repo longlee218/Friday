@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from collections.abc import AsyncIterator
 
 from friday.config import IngestConfig
@@ -127,6 +128,21 @@ class Inbox:
         if recovered:
             log.info("sweep recovered %d missed message(s)", len(recovered))
         return recovered
+
+    def still_typing(self, conversation: ConversationId, author_id: str) -> bool:
+        """Whether this person was seen typing within the turn window.
+
+        Handed to the triage runner as a callable so it never learns what a
+        provider is. A provider without a typing signal — the fake, a platform
+        that does not send one — simply never extends a turn.
+        """
+        seen = getattr(self._provider, "typing_at", lambda *_: None)(
+            conversation.channel_id, author_id
+        )
+        if seen is None:
+            return False
+        age = (datetime.now(timezone.utc) - seen).total_seconds()
+        return age < self._config.turn_seconds
 
     def tally(self) -> str:
         """One line: what arrived, and why most of it did not stay."""

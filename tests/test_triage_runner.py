@@ -7,6 +7,8 @@ database and the application is testable without a model.
 from __future__ import annotations
 
 from conftest import captured, make_event
+from datetime import datetime, timezone
+
 from friday.domain.conversation import ConversationId
 from friday.triage import Decided, NeedsHuman
 from friday.triage.runner import TriageRunner
@@ -382,3 +384,130 @@ async def test_a_reply_does_not_reopen_finished_work(inbox, provider, db):
     states = [(t.type, t.state) for t in await db.tasks()]
     assert ("api_issue", "done") in states
     assert len(states) == 2, "the thank-you opened its own task rather than reopening"
+
+
+# --- ticket 38: a turn, not a message ----------------------------------------
+
+
+def _typing(answer: bool):
+    return lambda conversation, author_id: answer
+
+
+async def test_three_messages_in_five_seconds_are_classified_once(inbox, provider, db):
+    """People send one thought in three messages. Only the first carries a
+    mention; the others are stored as context. Triage used to classify the
+    mention alone, so the curl in the second message never reached the task and
+    the system asked for what it had just been sent."""
+    from datetime import timedelta
+
+    t0 = datetime.now(timezone.utc) - timedelta(minutes=5)
+    provider.emit(make_event(message_id="1", text="@Lee API lỗi rồi a ơi", created_at=t0))
+    provider.emit(
+        make_event(
+            message_id="2",
+            text="curl -X POST /pay trả 500",
+            mention_type=None,
+            created_at=t0 + timedelta(seconds=3),
+        )
+    )
+    provider.emit(
+        make_event(
+            message_id="3",
+            text="trên production nhé",
+            mention_type=None,
+            created_at=t0 + timedelta(seconds=5),
+        )
+    )
+    await captured(inbox)
+    triage = StubTriage(api_issue())
+
+    await runner(db, triage).run_once()
+
+    (seen,) = triage.seen
+    assert "API lỗi rồi" in seen.text
+    assert "curl -X POST /pay" in seen.text
+    assert "trên production" in seen.text
+    assert len(await db.tasks()) == 1
+
+
+async def test_a_turn_still_open_is_left_for_the_next_pass(inbox, provider, db):
+    """Twelve seconds of silence means they have stopped. Three seconds does
+    not."""
+    provider.emit(make_event(message_id="1", created_at=datetime.now(timezone.utc)))
+    await captured(inbox)
+    triage = StubTriage(api_issue())
+    r = TriageRunner(db=db, triage=triage, confidence_threshold=0.7, turn_seconds=12)
+
+    await r.run_once()
+
+    assert triage.seen == [], "classified a turn that might not be finished"
+    assert await db.tasks() == []
+
+
+async def test_typing_keeps_a_turn_open_past_the_window(inbox, provider, db):
+    from datetime import timedelta
+
+    old = datetime.now(timezone.utc) - timedelta(seconds=30)
+    provider.emit(make_event(message_id="1", created_at=old))
+    await captured(inbox)
+    triage = StubTriage(api_issue())
+    r = TriageRunner(
+        db=db, triage=triage, confidence_threshold=0.7,
+        turn_seconds=12, still_typing=_typing(True),
+    )
+
+    await r.run_once()
+
+    assert triage.seen == [], "they are still typing"
+
+
+async def test_somebody_else_speaking_closes_the_turn_at_once(inbox, provider, db):
+    """No waiting out the window: the floor has changed hands."""
+    now = datetime.now(timezone.utc)
+    provider.emit(make_event(message_id="1", text="@Lee API lỗi", created_at=now))
+    provider.emit(
+        make_event(
+            message_id="2", text="ừ mình cũng thấy", author_id="u-other",
+            author_name="minh", mention_type=None, created_at=now,
+        )
+    )
+    await captured(inbox)
+    triage = StubTriage(api_issue())
+    r = TriageRunner(
+        db=db, triage=triage, confidence_threshold=0.7,
+        turn_seconds=12, still_typing=_typing(True),
+    )
+
+    await r.run_once()
+
+    (seen,) = triage.seen
+    assert seen.text == "@Lee API lỗi"
+    assert "mình cũng thấy" not in seen.text
+
+
+async def test_what_this_process_posted_is_not_part_of_their_turn(inbox, provider, db):
+    """In the channel the operator tests in, the account is both sides."""
+    from datetime import timedelta
+
+    from friday.outbox import Kind
+
+    t0 = datetime.now(timezone.utc) - timedelta(seconds=60)
+    row = await db.queue_outbound(
+        task_id=None, conversation=ConversationId("fake", "watched"),
+        kind=Kind.ASK_FOR_DETAILS, sender="discord_user", text="cho anh xin correlationId",
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id="ours")
+    provider.emit(make_event(message_id="1", text="@Lee API lỗi", created_at=t0))
+    provider.emit(
+        make_event(
+            message_id="ours", text="cho anh xin correlationId", mention_type=None,
+            created_at=t0 + timedelta(seconds=2),
+        )
+    )
+    await captured(inbox)
+    triage = StubTriage(api_issue())
+
+    await runner(db, triage).run_once()
+
+    (seen,) = triage.seen
+    assert "cho anh xin" not in seen.text
