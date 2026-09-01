@@ -244,9 +244,16 @@ class WorkflowRunner:
                 task.id, dag_name=dag.name, results=current.to_dict()
             )
 
+        from friday.dag.workflows import DAG_DEPS_EXTRA, DAG_SERVERS
+
         runner = DAGRunner(
             dag,
-            deps=DAGDeps(task=task, db=self._db),
+            deps=DAGDeps(
+                task=task,
+                db=self._db,
+                servers=dict(DAG_SERVERS),
+                extra=dict(DAG_DEPS_EXTRA.get(task.type, {})),
+            ),
             state=state,
             on_checkpoint=checkpoint,
         )

@@ -119,7 +119,15 @@ explicit.
 - [x] `friday/dag/api_issue.py` exists and registers `api_issue` with `EDGE_ROUTER`
 - [x] The DAG has five nodes and four edges (one of them conditional on `analyze_stack.actionable`)
 - [x] Each node is implemented as `async def node(state, deps) -> NodeResult`
-- [x] Loki MCP server is opened inside the DAG runner's `async with` block, not at module load
+- [ ] **Not done.** Loki MCP server is opened inside the DAG runner's `async with`
+  block, not at module load. Servers are still opened by the composition root
+  and handed to the graph through `DAGDeps.servers`. The graph never opens or
+  closes one, which is the half that matters — a node cannot leak a
+  subprocess. Moving the `async with` into the runner would mean spawning and
+  handshaking a server per task rather than per process, and at one task every
+  few minutes that is the wrong trade. **Revisit when a graph needs a server
+  the rest of the process should not have**, which is the only thing
+  per-run scoping actually buys.
 - [x] A test exercises the DAG with stub nodes for each of the five steps and verifies:
   - state accumulates across the run (each node reads + writes)
   - `fix_bug` is skipped when `analyze_stack.actionable is False`
