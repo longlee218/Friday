@@ -45,13 +45,26 @@ new `Params` is one file. The engine runs from the planner and refuses to let an
 - `_missing(params)` in `friday/workflows/__init__.py` becomes a thin wrapper
   around `validate`, plus the "what is None" logic it already has.
 
-**The one enforcement point:** `plan()` runs `validate(params)` before
-dispatching to the planner; if any problem exists, `Ask` with the joined problem
-messages and skip the planner entirely. Planners that do not want validation
-(very few; ask first) opt out by name. No other module may call `validate`.
+**The one enforcement point — and where the responsibility actually sits:**
 
-That is the seam. A second call site is a test failure, not a documentation
-issue.
+`validate(params)` does not live in `plan()`. It lives in the same place that
+already runs the "is anything missing" check today: `_missing()` and
+`plan_by_required_parameters()` in `friday/workflows/__init__.py`. That pair is
+already the gate every planner goes through, and it already decides between
+`Ask` (when something is missing) and the planner's verdict (when nothing is).
+The engine replaces the body of that check; it does not add a new one.
+
+Concretely: `_missing` reads `Optional[...]` annotations to find the fields
+that are allowed to be None. The new engine additionally walks `_RULES` and
+returns a `Problem` for each rule that fails. `_missing` returns "missing" +
+"invalid"; the caller — `plan_by_required_parameters` — joins them into a
+single `Ask`. A planner that wants to opt out does so by registering itself,
+not by skipping validation: if a planner returns anything other than `Ask`
+without going through `_missing`, it is using its own decision logic and the
+caller has no way to know a value is malformed.
+
+That is the seam. A second call site to `validate` outside `friday/workflows/`
+is a test failure, not a documentation issue.
 
 **Why it must be in the planner, not in triage:** triage's job is to extract
 plausible values from text; it cannot tell a real correlation id from a
@@ -68,8 +81,9 @@ keeps the type a data shape; the engine turns that shape into a verdict.
 - [ ] `friday/validation.py` exists with `Matches`, `InSet`, `OneOf`, `NonEmpty`, and `validate`
 - [ ] `validate(params)` runs every rule in `_RULES` and returns a list of `Problem`, one per failure, all of them (not stop-on-first)
 - [ ] A `Params` class with empty `_RULES` validates cleanly
-- [ ] `plan()` in `friday/workflows/__init__.py` runs `validate(params)` before dispatching and returns `Ask` with the joined messages if any problem exists
+- [ ] `_missing()` in `friday/workflows/__init__.py` calls `validate(params)` and merges its `Problem` list into the existing "what is None" output
+- [ ] `plan_by_required_parameters` returns `Ask` whenever `_missing` reports any problem (missing or invalid); the planner does not run in that case
 - [ ] No other module imports `friday.validation` — enforced by a grep test
-- [ ] The old "Optional means required check" path in `_missing` is still there as the underlying layer; new logic is layered on top, not replacing it
-- [ ] A test asserts that an invalid value never reaches a planner's body
+- [ ] The old "Optional means required check" path is preserved as one half of `_missing`; the new engine is the other half, not a replacement
+- [ ] A test asserts that an invalid value never reaches a planner's body, even when the field is non-Optional
 - [ ] No rules are written for `ApiIssueParams` or any other concrete type — that is a separate ticket (this one ships the engine only)
