@@ -47,8 +47,14 @@ parameters — and writes nothing. Every message gets exactly one of two outcome
 What to do about a task. Returns an **action** — `Ask`, `Reply` or `Park` —
 never a side effect.
 
-There are two ways a task type gets its action, and which one it uses is
-decided by the **edge router**: a task type with a **graph** goes to the graph,
+Every task takes the same first two steps, whatever its type: **fill in** what
+the original message carries that triage did not extract, then **check** the
+result against the type's rules. Both happen before a route is chosen, because
+they are about the parameters and not about what to do with them. What was
+filled in is written back to the task, so the route reads what was checked.
+
+After that, there are two ways a task type gets its action, and which one it
+uses is decided by the **edge router**: a task type with a **graph** goes to the graph,
 and one without takes the deterministic path — validate the parameters, ask for
 whatever is missing, park otherwise. Most types need nothing more than that.
 

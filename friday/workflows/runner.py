@@ -12,7 +12,15 @@ from friday.db import Database
 from friday.tasks import TaskState
 from friday.models import Task
 from friday.outbox import Kind
-from friday.workflows import PARAMS, Action, Ask, Park, Reply, plan
+from friday.workflows import (
+    PARAMS,
+    Action,
+    Ask,
+    Park,
+    Reply,
+    plan_by_required_parameters,
+    prepare,
+)
 
 __all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "REVIEW", "WorkflowRunner"]
 
@@ -222,24 +230,55 @@ class WorkflowRunner:
         return template if draft is None else draft.text
 
     async def _plan(self, task: Task) -> Action:
-        params = PARAMS.get(task.type)
-        if params is None:
+        """Fill in, check, then route. In that order, for every task type.
+
+        The order is the point. Extraction and validation used to live inside
+        `plan()`, which the graph route skips — so the one type that has both
+        an extractor and rules got neither, and a malformed correlationId
+        reached the graph looking findable.
+        """
+        params_type = PARAMS.get(task.type)
+        if params_type is None:
             return Park(f"unknown task type {task.type!r}")
 
-        dag = dag_for(task.type)
-        if dag is not None:
-            return await self._run_dag(dag, task)
-
         try:
-            return await plan(
-                task.type,
-                params(**task.params),
-                text=await self._db.original_text_for(task.id),
-            )
+            params = params_type(**task.params)
         except TypeError as exc:
             # Stored parameters that no longer fit their type — a schema change
             # landing on rows written before it. Work, not a crash.
             return Park(f"cannot read {task.type} parameters: {exc}")
+
+        params, problem = await prepare(
+            task.type, params, text=await self._db.original_text_for(task.id)
+        )
+        task = await self._remember(task, params)
+        if problem is not None:
+            return problem
+
+        dag = dag_for(task.type)
+        if dag is not None:
+            return await self._run_dag(dag, task)
+        return plan_by_required_parameters(task.type, params)
+
+    async def _remember(self, task: Task, params) -> Task:
+        """Write back what extraction filled in, if it filled anything in.
+
+        Persisted rather than recomputed, for three reasons that all point the
+        same way. The graph reads `task.params` and would otherwise never see
+        the extracted fields. The board shows what the system believes, and
+        that should be what it acted on. And the graph's state is keyed on a
+        fingerprint of these parameters — recomputing them from the model on
+        every poll would let a differently-worded extraction throw away a
+        run's work for no reason.
+        """
+        from dataclasses import asdict, replace
+
+        filled = {**task.params, **asdict(params)}
+        if filled == task.params:
+            return task
+        await self._db.set_task_params(task.id, filled)
+        log.info("task %d: parameters filled in from the original message", task.id)
+        return replace(task, params=filled)
 
     async def _run_dag(self, dag, task: Task) -> Action:
         """Run the graph registered for this task type.

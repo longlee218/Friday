@@ -40,6 +40,7 @@ __all__ = [
     "Park",
     "Reply",
     "plan",
+    "prepare",
 ]
 
 
@@ -94,32 +95,53 @@ _ASKED_AS = {
 }
 
 
-async def plan(
+async def prepare(
     task_type: str,
     params: Params,
     *,
     text: str | None = None,
-) -> Action:
-    """What to do about a task type that has no graph.
+) -> tuple[Params, Action | None]:
+    """Fill the parameters in, then check them. Before any route is chosen.
 
-    Pipeline:
-      1. Extract fields from the original text, if the type has an extractor.
-      2. Validate the merged result, both structural and rule-based.
-      3. Ask for whatever is wrong or missing; park when nothing is.
+    Returns the parameters to work with, and an `Ask` when they are not fit to
+    work with at all — a field missing, or one whose value the type's rules
+    reject.
+
+    **This runs ahead of the graph, not inside the branch that has no graph.**
+    It used to be the first two steps of `plan()`, which meant a task type with
+    a graph — `api_issue`, the only type that has an extractor *and* rules —
+    got neither. Its `_RULES` were unreachable in production, its configured
+    extractor could never run, and a `correlation_id` of "not-a-uuid" reached
+    the graph, looked findable, and parked to the operator instead of asking
+    the reporter to resend it. Nothing failed; it just quietly stopped
+    happening.
 
     Extraction runs before validation on purpose: validation is what stops a
     hallucinated field from being believed, so it has to see what the extractor
-    produced rather than only what triage wrote.
-
-    This is the whole of the simple path. A type that needs more than one
-    decision gets a graph (`friday/dag/`), and the runner routes to that first.
+    produced and not only what triage wrote.
     """
     if text is not None:
         extracted = await _extract(task_type, text)
         if extracted is not None:
             params = _merge(params, extracted)
 
-    return plan_by_required_parameters(task_type, params)
+    problems = _problems(params)
+    return params, Ask(_question(problems)) if problems else None
+
+
+async def plan(
+    task_type: str,
+    params: Params,
+    *,
+    text: str | None = None,
+) -> Action:
+    """The whole of the simple path, for a task type with no graph.
+
+    A type that needs more than one decision gets a graph (`friday/dag/`), and
+    the runner routes to that after `prepare` and instead of this.
+    """
+    params, problem = await prepare(task_type, params, text=text)
+    return problem or plan_by_required_parameters(task_type, params)
 
 
 def plan_by_required_parameters(task_type: str, params: Params) -> Action:

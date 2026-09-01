@@ -647,7 +647,7 @@ async def test_answering_the_question_re_runs_the_nodes_that_asked_it(db):
 
         # They answered. The task goes back to pending with the id filled in.
         await db.set_task_params(
-            task.id, {**task.params, "correlation_id": "abcdef01-2345"}
+            task.id, {**task.params, "correlation_id": "abcdef01-2345-6789-abcd-ef0123456789"}
         )
         await db.move_task(task.id, "pending")
 
@@ -655,7 +655,7 @@ async def test_answering_the_question_re_runs_the_nodes_that_asked_it(db):
     finally:
         EDGE_ROUTER.pop("api_issue", None)
 
-    assert looked_up == [None, "abcdef01-2345"], (
+    assert looked_up == [None, "abcdef01-2345-6789-abcd-ef0123456789"], (
         "the second pass reused conclusions drawn without the correlationId"
     )
 
@@ -690,7 +690,7 @@ async def test_state_survives_a_pass_that_changed_nothing(db):
         ),
     )
     try:
-        task = await make_task(db, correlation_id="abcdef01-2345")
+        task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
         await WorkflowRunner(db=db, auto_ask=True).run_once()
         await db.move_task(task.id, "pending")
         await WorkflowRunner(db=db, auto_ask=True).run_once()
@@ -722,7 +722,7 @@ async def test_a_pause_records_the_node_that_paused_not_the_graph(db):
         ),
     )
     try:
-        task = await make_task(db, correlation_id="abcdef01-2345")
+        task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
         await WorkflowRunner(db=db, auto_ask=True).run_once()
         assert await db.dag_pause(task.id) == ("fix_bug", "this needs a migration")
     finally:
@@ -742,7 +742,7 @@ async def test_the_question_a_graph_paused_on_reaches_the_operator(db):
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", DAG(name="pauses", nodes=(Node("fix_bug", stops),)))
     try:
-        await make_task(db, correlation_id="abcdef01-2345")
+        await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
         await WorkflowRunner(db=db, auto_ask=True).run_once()
     finally:
         EDGE_ROUTER.pop("api_issue", None)
@@ -789,10 +789,10 @@ async def test_a_second_pause_asks_a_second_question(db):
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", DAG(name="asks", nodes=(Node("triage_it", stops),)))
     try:
-        task = await make_task(db, correlation_id="abcdef01-2345")
+        task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
         await WorkflowRunner(db=db, auto_ask=True).run_once()
 
-        await db.set_task_params(task.id, {**task.params, "environment": "prod"})
+        await db.set_task_params(task.id, {**task.params, "environment": "production"})
         await db.move_task(task.id, "pending")
         await WorkflowRunner(db=db, auto_ask=True).run_once()
     finally:
@@ -816,7 +816,7 @@ async def test_the_same_question_is_not_asked_twice(db):
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", DAG(name="asks", nodes=(Node("triage_it", stops),)))
     try:
-        task = await make_task(db, correlation_id="abcdef01-2345")
+        task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
         await WorkflowRunner(db=db, auto_ask=True).run_once()
         await db.move_task(task.id, "pending")
         await WorkflowRunner(db=db, auto_ask=True).run_once()
@@ -826,3 +826,33 @@ async def test_the_same_question_is_not_asked_twice(db):
 
     told = [r.text for r in await db.outbound() if r.kind == "help_wanted"]
     assert len(told) == 1
+
+
+async def test_a_malformed_value_is_challenged_before_the_graph_runs(db):
+    """The graph route used to skip extraction and validation entirely, so
+    `api_issue` — the only type with both an extractor and rules — got
+    neither. A correlationId of "not-a-uuid" reached the graph, looked
+    findable, and parked to the operator instead of asking the reporter to
+    send a real one."""
+    from friday.workflows.runner import WorkflowRunner
+    from tests.test_workflow_runner import make_task
+
+    ran: list[str] = []
+
+    async def investigate(state: DAGState, deps: DAGDeps):
+        ran.append("investigate")
+        return None
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag(
+        "api_issue", DAG(name="graph", nodes=(Node("investigate", investigate),))
+    )
+    try:
+        await make_task(db, correlation_id="not-a-uuid")
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+
+    assert ran == [], "the graph ran on a value validation should have caught"
+    (asked,) = [r for r in await db.outbound() if r.kind == "ask_for_details"]
+    assert "uuid" in asked.text
