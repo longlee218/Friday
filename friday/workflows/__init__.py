@@ -1,14 +1,22 @@
-"""What to do about a task, decided by ordinary branching.
+"""What to do about a task, when there is only one decision to make.
 
-Deterministic on purpose. These rules are inspectable, free to run, and identical
-every time — which is what makes the first weeks of logs worth reading. A
-workflow is promoted to something agentic per type, once the deterministic one
-has proven itself.
+The simple path: fill in what the text carries, check it, and ask for whatever
+is wrong or missing. Deterministic and free to run, which is what makes the
+first weeks of logs worth reading.
+
+A task type that needs more than one decision gets a graph instead
+(`friday/dag/`), and the runner routes to that first. There used to be a third
+thing here — a registry of per-type planner functions, some of them agentic —
+and ticket 33 emptied it: `api_issue` was its only entry and became a graph.
+A dispatcher with nothing to dispatch to is not extensibility, it is a second
+way to do what the graphs already do, so it is gone.
+
+`Ask`, `Reply` and `Park` stay: they are the vocabulary every path speaks,
+graphs included.
 """
 
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass, fields
 from typing import get_args, get_type_hints
 
@@ -28,13 +36,11 @@ from friday.extraction import extract as _extract
 __all__ = [
     "Action",
     "Ask",
-    "COLLABORATORS",
     "PARAMS",
     "Park",
     "Reply",
     "plan",
-
-    "planner",
+    "plan_by_required_parameters",
 ]
 
 
@@ -89,113 +95,32 @@ _ASKED_AS = {
 }
 
 
-#: What a planner may ask to be handed, by name. A closed list, checked at
-#: import — three names is not worth a dependency-injection container, and the
-#: alternative is every planner accepting collaborators it does not use.
-COLLABORATORS = ("agent",)
-
-_PLANNERS: dict[str, "Planner"] = {}
-
-
-def planner(task_type: str, *, into: dict | None = None):
-    """Register a planner for a task type.
-
-    The reflection happens **here**, once, at import. That is Starlette's answer
-    to the same question — it decides sync-versus-async when a route is
-    registered rather than on every request — and FastAPI's, which resolves a
-    signature in the route's constructor so a bad one fails at import instead of
-    at three in the morning.
-
-    Two things therefore fail loudly rather than silently: a task type that does
-    not exist, which used to fall through to the generic rule with nobody able
-    to see why their planner never ran; and asking for a collaborator that
-    cannot be supplied.
-
-    The function is returned unchanged, so a deterministic planner is still a
-    plain function anyone can call in a test without a model or a database.
-    """
-    if task_type not in PARAMS:
-        raise KeyError(
-            f"no such task type {task_type!r}; known types are {sorted(PARAMS)}"
-        )
-
-    def register(fn):
-        (_PLANNERS if into is None else into)[task_type] = _adapt(fn)
-        return fn
-
-    return register
-
-
-def _adapt(fn):
-    """Wrap a planner so every one of them is called the same way.
-
-    Called with the parameters, plus whichever collaborators it names — so a
-    planner that decides by branching declares nothing it does not use, and
-    does not become a coroutine to keep company with one that does.
-    """
-    taken = list(inspect.signature(fn).parameters)[1:]
-    unknown = [name for name in taken if name not in COLLABORATORS]
-    if unknown:
-        raise TypeError(
-            f"planner {fn.__name__!r} asks for {unknown}, which nothing supplies; "
-            f"available: {list(COLLABORATORS)}"
-        )
-
-    async def call(params, **available):
-        result = fn(params, **{name: available[name] for name in taken})
-        return await result if inspect.isawaitable(result) else result
-
-    call.adapted = True
-    return call
-
-
 async def plan(
     task_type: str,
     params: Params,
     *,
-    agent=None,
-    planners: dict | None = None,
     text: str | None = None,
 ) -> Action:
-    """What to do about a task.
-
-    A planner that reads an external store is where a workflow becomes agentic,
-    per task type and on evidence. One that decides by branching is a pure
-    function and stays one.
+    """What to do about a task type that has no graph.
 
     Pipeline:
-      1. Extract fields from text (if a workflow registered an extractor).
+      1. Extract fields from the original text, if the type has an extractor.
       2. Validate the merged result, both structural and rule-based.
-      3. Dispatch to the planner.
+      3. Ask for whatever is wrong or missing; park when nothing is.
 
-    Validation runs first, before dispatch: a planner must not see a malformed
-    value, because every planner's correct behaviour for one is to ask again,
-    which is exactly what `_problems` does at the structural layer.
+    Extraction runs before validation on purpose: validation is what stops a
+    hallucinated field from being believed, so it has to see what the extractor
+    produced rather than only what triage wrote.
 
-    `planners` overrides the registry, which is how a step is tried before it is
-    registered and tested without reaching anything.
+    This is the whole of the simple path. A type that needs more than one
+    decision gets a graph (`friday/dag/`), and the runner routes to that first.
     """
     if text is not None:
         extracted = await _extract(task_type, text)
         if extracted is not None:
             params = _merge(params, extracted)
 
-    problems = _problems(params)
-    if problems:
-        return Ask(_question(problems))
-
-    if planners is not None and task_type in planners:
-        # Adapted here rather than at registration, so trying a step out takes
-        # exactly the shape it will finally be written in — sync or async, with
-        # or without collaborators.
-        found = planners[task_type]
-        if not getattr(found, "adapted", False):
-            found = _adapt(found)
-        return await found(params, agent=agent)
-    found = _PLANNERS.get(task_type)
-    if found is None:
-        return plan_by_required_parameters(task_type, params)
-    return await found(params, agent=agent)
+    return plan_by_required_parameters(task_type, params)
 
 
 def plan_by_required_parameters(task_type: str, params: Params) -> Action:
@@ -291,22 +216,6 @@ def _question(problems: list[Problem]) -> str:
         asked_as = _ASKED_AS.get(field, f"the {field.replace('_', ' ')}")
         parts.append(f"{asked_as} ({message})" if message else asked_as)
     return "Could you tell me " + " and ".join(parts) + "?"
-
-
-# ---- the planners ----------------------------------------------------
-#
-# Last, because a planner registers itself as it is defined and the machinery
-# that registers it has to exist first.
-#
-# `api_issue` used to live here as `plan_api_issue`. Ticket 33 moved it into
-# `friday/dag/api_issue.py`, where the same rule — an id or a curl makes a
-# request findable, an environment only narrows the search — is the last node
-# of a graph that can also read the logs, find the code, and say what broke.
-# The rule did not change; it gained four steps in front of it.
-#
-# Nothing is registered here today. A task type with neither a planner nor a
-# DAG falls to `plan_by_required_parameters`, which asks for whatever the type
-# says it cannot manage without.
 
 
 #: Rebuilding a task's stored parameters as the type that declares which of

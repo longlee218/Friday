@@ -237,10 +237,7 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
     from friday.validation import Matches
     from friday.workflows import (
         PARAMS,
-        _PLANNERS,
         plan,
-        plan_by_required_parameters,
-        planner,
     )
 
     @dataclass
@@ -248,26 +245,13 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
         cid: str
         _RULES = {"cid": Matches(r"^[a-f0-9-]{36}$", name="uuid")}
 
-    called = []
-
     PARAMS["strict_test_type"] = StrictParams
 
-    @planner("strict_test_type")
-    def strict_plan(params: StrictParams):
-        called.append(params)
-        return plan_by_required_parameters("strict_test_type", params)
-
     try:
-        action = await plan(
-            "strict_test_type",
-            StrictParams(cid="not-a-uuid"),
-            agent=None,
-            planners=_PLANNERS,
-        )
-        assert not called, "planner ran with invalid params"
+        action = await plan("strict_test_type", StrictParams(cid="not-a-uuid"))
         from friday.workflows import Ask
-        assert isinstance(action, Ask)
+
+        assert isinstance(action, Ask), "a malformed value was accepted"
         assert "uuid" in str(action.text)
     finally:
-        _PLANNERS.pop("strict_test_type", None)
         PARAMS.pop("strict_test_type", None)

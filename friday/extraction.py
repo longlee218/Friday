@@ -6,9 +6,9 @@ describes a field describes the rule for filling it. The model may
 hallucinate; that is the cost of LLM extraction, and ticket 30's validate
 engine catches what it gets wrong.
 
-Pattern mirrors `@planner(...)` in `friday/workflows/__init__.py` — registered
-at import time, looked up by task type, called by `plan()`. No central registry
-list: adding an extractor is adding a file, like adding a planner.
+Registered at import time, looked up by task type, called by `plan()`. No
+central list: adding an extractor is a block here, not a change to the
+composition root.
 """
 
 from __future__ import annotations

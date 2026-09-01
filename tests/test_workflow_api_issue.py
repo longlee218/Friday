@@ -16,7 +16,7 @@ from friday.dag.api_issue import _compose_reply
 from friday.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
 from types import SimpleNamespace
 
-from friday.workflows import Ask, Park, Reply, plan
+from friday.workflows import Ask, Park, plan
 
 
 def params(**kw):
@@ -140,69 +140,18 @@ async def test_a_malformed_correlation_id_is_caught_by_the_rule():
     assert "uuid" in action.text
 
 
-# ---- an agentic step -------------------------------------------------------
+# ---- the end of the simple path --------------------------------------------
 
 
-class StubHarness:
-    """Stands in for a Harness. The seam is what a planner is handed."""
-
-    def __init__(self, answer=None):
-        self.answer = answer
-        self.prompts: list[str] = []
-
-    async def run(self, prompt, **kw):
-        self.prompts.append(prompt)
-        return SimpleNamespace(final_output=self.answer) if self.answer else None
-
-
-async def test_a_planner_may_be_asynchronous_and_use_an_agent():
-    """Fetching is deterministic; reading is judgement. A planner that needs the
-    second gets a harness, and the deterministic ones stay pure functions."""
-    agent = StubHarness(answer="the upstream timed out")
-
-    async def looks_it_up(params, agent):
-        result = await agent.run(f"explain {params.correlation_id}")
-        return Reply(result.final_output)
-
+async def test_a_type_with_no_graph_parks_once_it_has_what_it_needs():
+    """The end of the simple path. Nothing here reaches a model: with every
+    required parameter present there is no question left to ask, and parking
+    is what "a human takes it from here" looks like."""
     action = await plan(
         "api_issue",
         ApiIssueParams(
             summary="s", correlation_id="abcdef01-2345-6789-abcd-ef0123456789"
         ),
-        agent=agent,
-        planners={"api_issue": looks_it_up},
-    )
-
-    assert action == Reply("the upstream timed out")
-    assert "abcdef01" in agent.prompts[0]
-
-
-async def test_a_deterministic_planner_needs_no_agent_and_gets_none():
-    action = await plan(
-        "api_issue",
-        ApiIssueParams(
-            summary="s", correlation_id="abcdef01-2345-6789-abcd-ef0123456789"
-        ),
-    )
-
-    assert isinstance(action, Park)
-
-
-async def test_an_agentic_planner_that_cannot_answer_parks():
-    """The harness hands back nothing when it fails. Parking is honest; an
-    invented answer in the operator's name is not."""
-
-    async def looks_it_up(params, agent):
-        result = await agent.run("explain")
-        return Park("nothing conclusive") if result is None else Reply(result.final_output)
-
-    action = await plan(
-        "api_issue",
-        ApiIssueParams(
-            summary="s", correlation_id="abcdef01-2345-6789-abcd-ef0123456789"
-        ),
-        agent=StubHarness(answer=None),
-        planners={"api_issue": looks_it_up},
     )
 
     assert isinstance(action, Park)

@@ -43,10 +43,6 @@ class WorkflowRunner:
         db: Database,
         auto_ask: bool,
         responder=None,
-        #: Handed to a planner that needs to look something up.
-        agent=None,
-        #: Overrides the registry — a step can be tried before it is registered.
-        planners: dict | None = None,
         tone_examples: int = 8,
         max_asks: int = 3,
         #: How long to let a burst settle. Three messages in ten seconds
@@ -62,8 +58,6 @@ class WorkflowRunner:
         self._db = db
         self._auto_ask = auto_ask
         self._responder = responder
-        self._agent = agent
-        self._planners = planners
         self._tone_examples = tone_examples
         self._max_asks = max_asks
         self._debounce = debounce_seconds
@@ -225,8 +219,6 @@ class WorkflowRunner:
             return await plan(
                 task.type,
                 params(**task.params),
-                agent=self._agent,
-                planners=self._planners,
                 text=await self._db.original_text_for(task.id),
             )
         except TypeError as exc:

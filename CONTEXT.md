@@ -52,6 +52,10 @@ decided by the **edge router**: a task type with a **graph** goes to the graph,
 and one without takes the deterministic path — validate the parameters, ask for
 whatever is missing, park otherwise. Most types need nothing more than that.
 
+There is no third way. A registry of per-type planner functions lived here
+until ticket 33 emptied it, and a dispatcher with nothing to dispatch to is not
+extensibility — it is a second way to do what the graphs already do.
+
 `Ask` is the agent's own decision. `Reply` waits for approval — asking for a
 correlationId costs a question if it is wrong, and asserting a cause costs the
 operator's credibility with their own team.

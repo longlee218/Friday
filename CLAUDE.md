@@ -105,7 +105,7 @@ What is actually on disk.
 | `friday/harness.py` | The only module that imports the agent SDK. Builds an agent, runs it, turns failure into work |
 | `friday/triage/` | Classification, its prefilter, parameter hygiene, and the loop that polls untriaged messages |
 | `friday/responder/` | Drafts a reply in the operator's voice |
-| `friday/workflows/` | `plan()` and the `Ask`/`Reply`/`Park` actions, plus the loop that acts on tasks |
+| `friday/workflows/` | The simple path — validate, ask, park — the `Ask`/`Reply`/`Park` actions, and the loop that acts on tasks |
 | `friday/dag/` | The graph framework — nodes, edges, checkpointed resume, `PauseForHuman`, and the edge router. `dag/api_issue.py` is the first graph; `dag/workflows.py` is what the composition root calls |
 | `friday/extraction.py` | Per-workflow field extraction: each workflow owns its prompt, schema and model |
 | `friday/skills.py` | Markdown skills the operator writes, offered to reasoning agents by catalogue and fetched on demand |

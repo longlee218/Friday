@@ -214,22 +214,26 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     """This is the producer the approval path never had. A workflow that can
     actually answer something says so, and the operator decides whether it goes
     out under their name."""
+    from friday.dag import DAG, Node
+    from friday.dag.router import EDGE_ROUTER, register_dag
     from friday.workflows import Reply
 
-    from friday.dag.router import EDGE_ROUTER
-
-    async def answers(params, agent):
+    async def answers(state, deps):
         return Reply("cache đầy thôi, anh clear rồi nhé")
 
-    # The `planners` override is the deterministic path. `api_issue` has a
-    # graph now, and the graph wins, so this test has to say which path it is
-    # about — it is about the approval machinery, not about routing.
+    # A graph standing in for the real one. This test is about the approval
+    # machinery, not about what `api_issue` investigates — it needs a route
+    # that produces a `Reply` and nothing more.
     EDGE_ROUTER.pop("api_issue", None)
+    register_dag("api_issue", DAG(name="answers", nodes=(Node("answer", answers),)))
 
     await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
-    runner = WorkflowRunner(db=db, auto_ask=True, planners={"api_issue": answers})
+    runner = WorkflowRunner(db=db, auto_ask=True)
 
-    acted = await runner.run_once()
+    try:
+        acted = await runner.run_once()
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
 
     reply, card = await db.outbound()
     assert reply.kind == "reply"

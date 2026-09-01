@@ -3,7 +3,7 @@
 One dict. Registering a workflow is adding an entry; nothing else in the
 system needs to change, which is the property ticket 32 exists to buy.
 
-A task type with no DAG is not an error — the deterministic planner in
+A task type with no DAG is not an error — the deterministic path in
 `friday.workflows` still handles it. The router answers "is there a graph for
 this?", and `None` means "no, use the simple path".
 """
@@ -36,5 +36,5 @@ def register_dag(task_type: str, dag: DAG) -> DAG:
 
 
 def dag_for(task_type: str) -> DAG | None:
-    """The DAG for this task type, or None to use the deterministic planner."""
+    """The DAG for this task type, or None to use the deterministic path."""
     return EDGE_ROUTER.get(task_type)
