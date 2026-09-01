@@ -172,21 +172,6 @@ class Inbox:
                 event.provider_message_id,
             )
             reason = None
-        if reason is None and event.is_own and await self._db.we_sent(
-            event.provider, event.provider_message_id, event.text
-        ):
-            # Unconditional, and deliberately not part of the sync check above:
-            # it needs the database. `capture_own_messages` turns off the rule
-            # that our own account's messages create no work, so the operator
-            # can test by mentioning themselves — and with it on, the agent's
-            # own replies came back through the gateway, opened a task each,
-            # and were answered. Every minute, in a real channel, under the
-            # operator's name.
-            #
-            # The flag was never meant to buy that. A message the operator
-            # typed and a message this process posted are different things, and
-            # only the first is a test.
-            reason = "posted by this agent"
         if reason:
             self.dropped[reason] = self.dropped.get(reason, 0) + 1
             if await self._db.conversation_is_tracked(event):
@@ -240,11 +225,12 @@ class Inbox:
         `_NO_MENTION` is the one reason `_handle` may overrule: a reply to
         something we posted addresses us without naming us.
         """
-        if event.is_own and not self._config.capture_own_messages:
-            # Never trigger work from our own messages: the agent would answer
-            # its own replies. It is still kept as context — a conversation
-            # missing one side of itself reads strangely, and the responder
-            # learns tone from these.
+        if event.is_own:
+            # Never work, always kept. The account's own messages create no
+            # task — the agent would answer its own replies, and did — but they
+            # are stored whenever the conversation is tracked, because the
+            # operator answering somebody is what *ends* a task, and the
+            # workflow reads that from here. Two questions, two answers.
             return "written by the watched account"
         if event.mention_type is None:
             return _NO_MENTION

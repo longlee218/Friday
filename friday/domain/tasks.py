@@ -34,6 +34,12 @@ class TaskState(StrEnum):
     #: Finished. Terminal, so a stray follow-up cannot reopen work someone
     #: deliberately closed.
     DONE = "done"
+    #: The operator answered it themselves. Not `done`: a person did the work
+    #: rather than the agent, it has to be reopenable because closing on "they
+    #: said something in this channel" will sometimes be wrong, and the share
+    #: of tasks that end here is the one number that says whether this system
+    #: is helping.
+    HANDLED_BY_OPERATOR = "handled_by_operator"
 
 
 ALLOWED: dict[TaskState, frozenset[TaskState]] = {
@@ -52,11 +58,14 @@ ALLOWED: dict[TaskState, frozenset[TaskState]] = {
         {TaskState.PENDING, TaskState.NEEDS_HUMAN, TaskState.DONE}
     ),
     TaskState.DONE: frozenset(),
+    TaskState.HANDLED_BY_OPERATOR: frozenset({TaskState.PENDING}),
 }
+for _state in (TaskState.PENDING, TaskState.WAITING_FOR_DETAILS, TaskState.NEEDS_HUMAN, TaskState.REVIEW):
+    ALLOWED[_state] = ALLOWED[_state] | {TaskState.HANDLED_BY_OPERATOR}
 
 #: States a task is still being worked in. `open_task_for` uses this, so adding
 #: a state does not silently make follow-ups open a second task.
-OPEN = frozenset(ALLOWED) - {TaskState.DONE}
+OPEN = frozenset(ALLOWED) - {TaskState.DONE, TaskState.HANDLED_BY_OPERATOR}
 
 
 def may_move(current: TaskState | str, target: TaskState | str) -> bool:
@@ -83,3 +92,6 @@ class OutboundState(StrEnum):
     #: Delivered by a person after we gave up. Kept apart from `failed` so the
     #: audit trail says "a human sent this" rather than "this was abandoned".
     SENT_MANUALLY = "sent_manually"
+    #: Withdrawn before it went out, because the operator answered first. Kept
+    #: rather than deleted so the board can show what was about to be said.
+    CANCELLED = "cancelled"

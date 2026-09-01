@@ -487,3 +487,119 @@ async def test_nothing_said_before_the_report_is_dragged_in(db):
     )
 
     assert "hôm qua deploy" not in (await db.original_text_for(task.id) or "")
+
+
+# --- ticket 37: the operator's own message ends the work ---------------------
+
+
+async def _operator_said(db, message_id, text, *, reply_to=None, secs=10, author="me"):
+    """The watched account typing in the channel. `is_own`, no mention."""
+    from datetime import timedelta
+
+    from friday.domain.models import InboundEvent
+
+    await db.record_message(
+        InboundEvent(
+            provider="fake",
+            provider_message_id=message_id,
+            channel_id="watched",
+            thread_id=None,
+            author_id=author,
+            author_name="Long",
+            text=text,
+            created_at=datetime.now(timezone.utc) + timedelta(seconds=secs),
+            mention_type=None,
+            is_own=True,
+            reply_to=reply_to,
+        ),
+        context_only=True,
+    )
+
+
+async def test_the_operator_answering_closes_the_task_and_withdraws_the_draft(db):
+    """A `reply` waits for approval with no expiry. Without this, approving it
+    two days later sends an answer that stopped being true when they typed."""
+    from friday.domain.tasks import OutboundState, TaskState
+    from friday.outbox import Kind
+
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    await db.queue_outbound(
+        task_id=task.id,
+        conversation=task.conversation,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="cache đầy thôi, anh clear rồi nhé",
+    )
+    await _operator_said(db, "op-1", "à cái này do cache, anh clear rồi")
+
+    await WorkflowRunner(db=db, auto_ask=True).run_once()
+
+    (closed,) = await db.tasks()
+    assert closed.state == TaskState.HANDLED_BY_OPERATOR
+    (draft,) = await db.outbound()
+    assert draft.state == OutboundState.CANCELLED
+    assert await db.sendable_outbound() == []
+
+
+async def test_a_message_this_process_posted_is_not_the_operator_answering(db):
+    """Same account, different author. Our own ask must not close the task it
+    is asking about."""
+    from friday.outbox import Kind
+
+    task = await make_task(db)
+    row = await db.queue_outbound(
+        task_id=task.id,
+        conversation=task.conversation,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="cho anh xin cái correlationId nhé",
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id="ours-1")
+    await _operator_said(db, "ours-1", "cho anh xin cái correlationId nhé")
+
+    await WorkflowRunner(db=db, auto_ask=False).run_once()
+
+    assert (await db.tasks())[0].state != "handled_by_operator"
+
+
+async def test_with_several_open_tasks_and_no_reply_nothing_closes(db):
+    """Guessing which one they meant loses work. When it is not clear, the
+    answer is a person, not a guess."""
+    a = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    b = await make_task(db, curl="curl -X GET /pay")
+    await _operator_said(db, "op-1", "để anh xem")
+
+    await WorkflowRunner(db=db, auto_ask=False).run_once()
+
+    states = {t.id: t.state for t in await db.tasks()}
+    assert "handled_by_operator" not in states.values()
+
+
+async def test_a_reply_picks_the_task_out_of_several(db):
+    """Their reply names what it answers — the reporter's message, which is
+    linked to a task."""
+    from friday.domain.tasks import TaskState
+
+    a = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    b = await make_task(db, curl="curl -X GET /pay")
+    await db.record_message(make_event(message_id="report-b", text="curl lỗi"))
+    await db.mark_triaged(make_event(message_id="report-b"), b.id, decision={"type": "api_issue"})
+    await _operator_said(db, "op-1", "cái curl đó thiếu header", reply_to="report-b")
+
+    await WorkflowRunner(db=db, auto_ask=False).run_once()
+
+    states = {t.id: t.state for t in await db.tasks()}
+    assert states[b.id] == TaskState.HANDLED_BY_OPERATOR
+    assert states[a.id] != TaskState.HANDLED_BY_OPERATOR
+
+
+async def test_a_handled_task_can_be_reopened_by_a_person(db):
+    """Closing on "they said something in this channel" will sometimes be
+    wrong, so it cannot be terminal."""
+    from friday.domain.tasks import TaskState
+
+    task = await make_task(db)
+    await db.move_task(task.id, TaskState.HANDLED_BY_OPERATOR)
+    await db.move_task(task.id, TaskState.PENDING)
+
+    assert (await db.tasks())[0].state == TaskState.PENDING

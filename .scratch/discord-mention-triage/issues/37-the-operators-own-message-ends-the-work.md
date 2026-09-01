@@ -6,7 +6,7 @@ already written and waiting for approval — never goes out.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why
 
@@ -54,15 +54,27 @@ good.
 
 ## Acceptance criteria
 
-- [ ] The operator answering by hand closes the task the answer belongs to
-- [ ] Queued outbound rows for that task never send, including a `reply` that
+- [x] The operator answering by hand closes the task the answer belongs to
+- [x] Queued outbound rows for that task never send, including a `reply` that
       was drafted and is waiting for approval
-- [ ] Nothing is sent to say a draft was cancelled — it is a message about
+- [x] Nothing is sent to say a draft was cancelled — it is a message about
       something that correctly did not happen
-- [ ] The operator's messages still create no work of their own
-- [ ] A message this process posted does not count as the operator answering
-- [ ] The new state is distinguishable from `done` on the board and can be
+- [x] The operator's messages still create no work of their own
+- [x] A message this process posted does not count as the operator answering
+- [x] The new state is distinguishable from `done` on the board and can be
       reopened
-- [ ] With several open tasks in one conversation and no reply, none close
-- [ ] `capture_own_messages` is gone, and the tests that relied on it now
+- [x] With several open tasks in one conversation and no reply, none close
+- [x] `capture_own_messages` is gone, and the tests that relied on it now
       exercise the split rule instead
+
+## What it came to
+
+Detection is one query in the store (`tasks_the_operator_handled`), the action
+is one loop at the top of every workflow pass (`_stand_down`), and the inbox
+change is a deletion: the `capture_own_messages` branch is gone and `is_own`
+means one thing. Each of the three guards — not what we posted, exactly one
+open task or a reply, withdraw the queue — was removed in turn and watched go
+red.
+
+Run for real: the operator types "à cái này anh biết rồi, do cache" with no
+mention and no reply, and the queued ask is `cancelled` before it sends.

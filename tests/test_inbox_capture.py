@@ -264,98 +264,39 @@ async def test_a_failure_leaves_the_cursor_where_it_was(inbox, provider, db):
     assert await db.cursor_for("fake", "watched") is None
 
 
-# --- answering yourself is a loop, not a test -------------------------------
+# --- the account's own messages: never work, always kept -------------------
 
 
-def _inbox_capturing_own(provider, db, config) -> Inbox:
-    """An inbox with `capture_own_messages` on — the flag that exists so a
-    self-mention can exercise the pipeline without a second person."""
-    from dataclasses import replace
-
-    return Inbox(
-        provider=provider, db=db, config=replace(config, capture_own_messages=True)
-    )
-
-
-async def _queued(db, text: str, *, sent_as: str | None = None):
-    from friday.outbox import Kind
-
-    row = await db.queue_outbound(
-        task_id=None,
-        conversation=ConversationId("fake", "watched"),
-        kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user",
-        text=text,
-    )
-    if sent_as is not None:
-        await db.mark_outbound_sent(row.id, sent_message_id=sent_as)
-
-
-async def test_the_agent_does_not_answer_its_own_reply(provider, db, config):
-    """Caught in production: 10:16, 10:17, 10:18 — the same sentence, under
-    the operator's name, in a real channel.
-
-    `capture_own_messages` turns off the rule that the watched account's own
-    messages create no work. It turned it off for the agent's own replies too,
-    which came back through the gateway, opened a task each, and were
-    answered. A message the operator typed and a message this process posted
-    are different things, and only the first is a test.
-    """
-    question = "Bạn gửi anh environment đang dùng với correlationId nhé?"
-    await _queued(db, question, sent_as="posted-1")
-    inbox = _inbox_capturing_own(provider, db, config)
-
-    kept = await inbox._handle(
-        make_event(message_id="posted-1", text=question, is_own=True)
-    )
+async def test_the_accounts_own_message_never_becomes_work(inbox, db):
+    """Whether the operator typed it or this process posted it. The agent once
+    answered its own replies every minute in a real channel; and a self-mention
+    is not a test worth keeping that door open for."""
+    kept = await inbox._handle(make_event(message_id="mine", is_own=True))
 
     assert kept is None
-    assert inbox.dropped == {"posted by this agent": 1}
+    assert inbox.dropped == {"written by the watched account": 1}
 
 
-async def test_our_own_text_is_recognised_before_the_id_comes_back(
-    provider, db, config
+async def test_the_accounts_own_message_is_stored_when_the_conversation_is_tracked(
+    inbox, provider, db
 ):
-    """The outbox posts, then records the id it got back, and the gateway can
-    deliver our own message in between. The text is written when the row is
-    queued, long before any of that — which is the half that closes the race.
-    """
-    question = "cho anh xin cái correlationId nhé"
-    await _queued(db, question)  # posted, id not recorded yet
-    inbox = _inbox_capturing_own(provider, db, config)
+    """It creates no task, but it is what *ends* one: the workflow reads the
+    operator's own messages to know they have answered somebody. Dropped from
+    scope and thrown away, that could never be known."""
+    provider.emit(make_event(message_id="m1"))
+    await captured(inbox)
 
+    await inbox._handle(make_event(message_id="mine", text="để anh xem", is_own=True))
+
+    stored = {m.provider_message_id for m in await db.messages()}
+    assert "mine" in stored
+
+
+async def test_a_colleague_repeating_our_sentence_is_still_a_mention(inbox, db):
+    """Somebody else quoting the agent's question back is a person asking, and
+    is not the account's own message."""
     kept = await inbox._handle(
-        make_event(message_id="not-yet-known", text=question, is_own=True)
-    )
-
-    assert kept is None
-
-
-async def test_the_operator_mentioning_themselves_is_still_a_test(
-    provider, db, config
-):
-    """The flag has to keep buying what it was for."""
-    inbox = _inbox_capturing_own(provider, db, config)
-
-    kept = await inbox._handle(
-        make_event(message_id="typed-by-hand", text="API lỗi nè", is_own=True)
-    )
-
-    assert kept is not None
-    assert inbox.dropped == {}
-
-
-async def test_a_colleague_repeating_our_sentence_is_not_dropped(
-    provider, db, config
-):
-    """The text match is scoped to the watched account. Someone else quoting
-    the agent's question back is a person asking, not the agent looping."""
-    question = "cho anh xin cái correlationId nhé"
-    await _queued(db, question, sent_as="posted-1")
-    inbox = _inbox_capturing_own(provider, db, config)
-
-    kept = await inbox._handle(
-        make_event(message_id="m9", text=question, author_name="dana")
+        make_event(message_id="m9", text="cho anh xin cái correlationId nhé", author_name="dana")
     )
 
     assert kept is not None

@@ -260,6 +260,21 @@ The only module that delivers. Holds outbound intents, dispatches each to the
 adapter its `sender` names, retries within a bound, and surfaces what it could
 not send. Nothing else calls a provider's `send()`.
 
+## Handled by the operator
+
+A task the operator answered themselves. Not `done` — a person did the work
+rather than the agent — and it is reopenable, because closing on "they said
+something in this channel" will sometimes be wrong. Everything queued about the
+task is withdrawn the moment it is noticed, silently: a message announcing a
+cancellation is noise about a thing that correctly did not happen.
+
+Which task their message closes follows the reply rule. A reply names what it
+answers, and that task closes; a message replying to nothing closes the
+conversation's task only when there is exactly one.
+
+The share of tasks that end here is the one number that says whether this
+system is helping.
+
 ## Approval
 
 A fact about a **task**, not about a message: who approved and when. An

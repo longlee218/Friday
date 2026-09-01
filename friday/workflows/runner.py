@@ -31,6 +31,7 @@ PENDING = TaskState.PENDING
 ASKED = TaskState.WAITING_FOR_DETAILS
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN
 REVIEW = TaskState.REVIEW
+HANDLED = TaskState.HANDLED_BY_OPERATOR
 
 
 class WorkflowRunner:
@@ -98,11 +99,33 @@ class WorkflowRunner:
                 await asyncio.sleep(poll_interval_seconds)
 
     async def run_once(self) -> list[Task]:
+        await self._stand_down()
         acted: list[Task] = []
         for task in await self._db.tasks_in_state(PENDING, self._batch_size):
             acted.append(await self._act(task))
         await self._raise_hands()
         return acted
+
+    async def _stand_down(self) -> None:
+        """The operator answered it themselves. Stop.
+
+        Before anything else in the pass, so a task they have just handled is
+        neither asked about nor drafted for. Whatever was queued about it is
+        withdrawn too — a `reply` waits for approval with no expiry, so without
+        this, approving it two days later sends an answer that stopped being
+        true the moment they typed.
+
+        Silent. A message saying "I cancelled something that should not have
+        gone out" is noise about a thing that correctly did not happen.
+        """
+        for task in await self._db.tasks_the_operator_handled():
+            withdrawn = await self._db.cancel_outbound_for(task.id)
+            await self._db.move_task(task.id, HANDLED)
+            log.info(
+                "task %d: the operator answered it — closing%s",
+                task.id,
+                f", {withdrawn} queued message(s) withdrawn" if withdrawn else "",
+            )
 
     async def _raise_hands(self) -> None:
         """Tell the operator about work nobody can act on.

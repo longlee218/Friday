@@ -230,11 +230,6 @@ async def _run(stack: AsyncExitStack) -> None:
             "auto_ask_for_details is ON — the request for a correlationId will "
             "be sent under your name with no approval step"
         )
-    if config.ingest.capture_own_messages:
-        log.warning(
-            "capture_own_messages is ON — testing only; turn it off before the "
-            "agent can reply, or it will answer itself"
-        )
     log.info(
         "watching %d channel(s) for %s",
         len(config.ingest.watched_channels),

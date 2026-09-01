@@ -895,6 +895,90 @@ class Database:
         )
         return found[0] if found else None
 
+    async def tasks_the_operator_handled(self) -> list[Task]:
+        """Open tasks the operator has answered themselves.
+
+        The operator's own messages never create work and are always stored,
+        so the record is already here; this reads it. For each open task: has
+        the watched account said anything in that conversation since the task
+        opened that this process did not post?
+
+        Which task a message closes follows the same rule as everything else
+        about replies. A reply names what it answers — the reporter's message,
+        which is linked to a task, or our own question, whose outbound row is —
+        so that task closes. A message that replies to nothing closes the
+        conversation's task only when there is exactly one; several open and no
+        reply means guessing, and guessing here loses work.
+        """
+        handled: list[Task] = []
+        for task in await self._tasks(
+            select(schema.Task).where(schema.Task.state.in_([str(s) for s in OPEN]))
+        ):
+            if await self._operator_answered(task):
+                handled.append(task)
+        return handled
+
+    async def _operator_answered(self, task: Task) -> bool:
+        ours = select(schema.Outbound.sent_message_id).where(
+            schema.Outbound.sent_message_id.is_not(None)
+        )
+        async with self._sessions() as session:
+            said = (
+                await session.execute(
+                    select(schema.Message.reply_to)
+                    .where(
+                        schema.Message.conversation_id == str(task.conversation),
+                        schema.Message.is_own.is_(True),
+                        schema.Message.created_at > task.created_at,
+                        schema.Message.provider_message_id.not_in(ours),
+                    )
+                )
+            ).all()
+            if not said:
+                return False
+
+            for (reply_to,) in said:
+                if reply_to is None:
+                    continue
+                # Did they reply to the reporter, or to our own question?
+                via_message = await session.scalar(
+                    select(schema.Message.task_id).where(
+                        schema.Message.provider_message_id == reply_to
+                    )
+                )
+                via_ours = await session.scalar(
+                    select(schema.Outbound.task_id).where(
+                        schema.Outbound.sent_message_id == reply_to
+                    )
+                )
+                if task.id in (via_message, via_ours):
+                    return True
+
+            # No reply pointing here. Theirs only if it is the one open task
+            # in this conversation.
+            open_here = await session.scalar(
+                select(func.count())
+                .select_from(schema.Task)
+                .where(
+                    schema.Task.conversation_id == str(task.conversation),
+                    schema.Task.state.in_([str(s) for s in OPEN]),
+                )
+            )
+            return open_here == 1 and any(r is None for (r,) in said)
+
+    async def cancel_outbound_for(self, task_id: int) -> int:
+        """Withdraw everything queued about a task. Returns how many."""
+        async with self._sessions.begin() as session:
+            result = await session.execute(
+                update(schema.Outbound)
+                .where(
+                    schema.Outbound.task_id == task_id,
+                    schema.Outbound.state == OUTBOUND_QUEUED,
+                )
+                .values(state=OutboundState.CANCELLED)
+            )
+            return result.rowcount
+
     async def open_task_for(self, conversation: ConversationId) -> Task | None:
         """The task this conversation is already working on, if any.
 
