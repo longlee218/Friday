@@ -9,7 +9,7 @@ rather than starting over.
 **Blocked by:** 31 (DAG framework reads `original_text` from `messages`, and
 depends on the seam that the extract/validate pipeline established)
 
-**Status:** ready-for-agent
+**Status:** done
 
 A planner that decides "trace this correlation id" by making five model calls
 in sequence is not a function — it is a graph. The shape:
@@ -173,11 +173,11 @@ interaction shape — buttons, threaded replies — is out of scope for ticket 3
 
 ## Acceptance criteria
 
-- [ ] `friday/dag/` exists with `DAG`, `DAGRunner`, `Node`, `Edge`, `DAGState`, `PauseForHuman`
-- [ ] `EDGE_ROUTER` is a `dict[str, DAG]` and is the one place to register a workflow for a task type
-- [ ] `WorkflowRunner._plan` delegates to `DAGRunner.run`, no longer calls `plan(task_type, params, text)` directly for tasks that have a DAG
-- [ ] `PauseForHuman` raised in a node surfaces as a `Park` action with the question in the outbound row
-- [ ] After every node, `db.save_dag_state(task.id, state)` runs; on restart, the runner picks up at the next node
-- [ ] A DAG with five nodes and one conditional edge runs end-to-end in a test (the test uses a stub for each node — no real MCP, no real LLM)
-- [ ] Ticket 28's old "checkpointed procedure" text is renamed and reframed in this ticket; ticket 34 will retire the old text
-- [ ] No new dependency on graph libraries (LangGraph, NetworkX) — the runner is the seam, ~150 lines
+- [x] `friday/dag/` exists with `DAG`, `DAGRunner`, `Node`, `Edge`, `DAGState`, `PauseForHuman`
+- [x] `EDGE_ROUTER` is a `dict[str, DAG]` and is the one place to register a workflow for a task type
+- [x] `WorkflowRunner._plan` delegates to `DAGRunner.run`, no longer calls `plan(task_type, params, text)` directly for tasks that have a DAG
+- [x] `PauseForHuman` raised in a node surfaces as a `Park` action with the question in the outbound row
+- [x] After every node, `db.save_dag_state(task.id, state)` runs; on restart, the runner picks up at the next node
+- [x] A DAG with five nodes and one conditional edge runs end-to-end in a test (the test uses a stub for each node — no real MCP, no real LLM)
+- [x] Ticket 28's old "checkpointed procedure" text is renamed and reframed in this ticket; ticket 34 will retire the old text
+- [x] No new dependency on graph libraries (LangGraph, NetworkX) — the runner is the seam, ~150 lines

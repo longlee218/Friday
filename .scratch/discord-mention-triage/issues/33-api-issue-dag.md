@@ -6,7 +6,7 @@ stack, optionally fixes the bug, and composes the reply.
 
 **Blocked by:** 32 (the framework this DAG runs on)
 
-**Status:** ready-for-agent
+**Status:** done
 
 The previous `plan_api_issue` was a 5-line conditional: do we have a
 correlation id or a curl? If yes, park; if no, ask. That fits a function.
@@ -116,14 +116,14 @@ explicit.
 
 ## Acceptance criteria
 
-- [ ] `friday/dag/api_issue.py` exists and registers `api_issue` with `EDGE_ROUTER`
-- [ ] The DAG has five nodes and four edges (one of them conditional on `analyze_stack.actionable`)
-- [ ] Each node is implemented as `async def node(state, deps) -> NodeResult`
-- [ ] Loki MCP server is opened inside the DAG runner's `async with` block, not at module load
-- [ ] A test exercises the DAG with stub nodes for each of the five steps and verifies:
+- [x] `friday/dag/api_issue.py` exists and registers `api_issue` with `EDGE_ROUTER`
+- [x] The DAG has five nodes and four edges (one of them conditional on `analyze_stack.actionable`)
+- [x] Each node is implemented as `async def node(state, deps) -> NodeResult`
+- [x] Loki MCP server is opened inside the DAG runner's `async with` block, not at module load
+- [x] A test exercises the DAG with stub nodes for each of the five steps and verifies:
   - state accumulates across the run (each node reads + writes)
   - `fix_bug` is skipped when `analyze_stack.actionable is False`
   - `PauseForHuman` from `fix_bug` lands as a Park with the question in `state["fix_bug_pause"]`
   - on resume after a `PauseForHuman`, the DAG starts from the paused node, not from the beginning
-- [ ] The previous `plan_api_issue` function is removed; the route is the DAG
-- [ ] Existing triage tests still pass; the route `api_issue → api_issue DAG` is what changes
+- [x] The previous `plan_api_issue` function is removed; the route is the DAG
+- [x] Existing triage tests still pass; the route `api_issue → api_issue DAG` is what changes
