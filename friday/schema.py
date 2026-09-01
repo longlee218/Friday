@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, String, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Base", "Conversation", "Cursor", "Message", "ModelCall", "Note", "Observation", "Outbound", "Task"]
+__all__ = ["Base", "Conversation", "Cursor", "DagState", "Message", "ModelCall", "Note", "Observation", "Outbound", "Task"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -106,6 +106,30 @@ class Task(Base):
     #: joins this rather than each caller checking it.
     approved_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
     approved_by: Mapped[str | None]
+
+
+class DagState(Base):
+    """What a task's workflow graph has produced so far.
+
+    One row per task, rewritten after every node. Its own table rather than a
+    column on `tasks` because the write rhythms differ: a task row changes at
+    state transitions, this changes every few seconds while a graph is
+    running, and mixing them means every checkpoint rewrites the row the board
+    and the outbox are reading.
+    """
+
+    __tablename__ = "dag_state"
+
+    task_id: Mapped[int] = mapped_column(primary_key=True)
+    #: Which DAG produced this. A state written by one graph is not readable
+    #: by another, and recording the name is how a rename is caught.
+    dag_name: Mapped[str]
+    #: Node name -> that node's result.
+    results: Mapped[dict] = mapped_column(JSON, default=dict)
+    #: Set when a node raised `PauseForHuman`. Cleared on resume.
+    paused_at_node: Mapped[str | None]
+    paused_question: Mapped[str | None]
+    updated_at: Mapped[datetime] = mapped_column(IsoDateTime)
 
 
 class Cursor(Base):

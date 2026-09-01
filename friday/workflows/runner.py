@@ -6,6 +6,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from friday.dag import DAGDeps, DAGRunner, DAGState, PauseForHuman
+from friday.dag.router import dag_for
 from friday.db import Database
 from friday.tasks import TaskState
 from friday.models import Task
@@ -209,6 +211,11 @@ class WorkflowRunner:
         params = PARAMS.get(task.type)
         if params is None:
             return Park(f"unknown task type {task.type!r}")
+
+        dag = dag_for(task.type)
+        if dag is not None:
+            return await self._run_dag(dag, task)
+
         try:
             return await plan(
                 task.type,
@@ -221,6 +228,64 @@ class WorkflowRunner:
             # Stored parameters that no longer fit their type — a schema change
             # landing on rows written before it. Work, not a crash.
             return Park(f"cannot read {task.type} parameters: {exc}")
+
+    async def _run_dag(self, dag, task: Task) -> Action:
+        """Run the graph registered for this task type.
+
+        The runner records each node before starting the next, so a crash
+        mid-graph resumes here rather than starting over. A node that cannot
+        decide raises `PauseForHuman`; that becomes a `Park` carrying the
+        question, which `_raise_hands` puts in front of the operator.
+        """
+        state = DAGState.from_dict(await self._db.load_dag_state(task.id))
+
+        async def checkpoint(current: DAGState) -> None:
+            await self._db.save_dag_state(
+                task.id, dag_name=dag.name, results=current.to_dict()
+            )
+
+        runner = DAGRunner(
+            dag,
+            deps=DAGDeps(task=task, db=self._db),
+            state=state,
+            on_checkpoint=checkpoint,
+        )
+
+        try:
+            final = await runner.run()
+        except PauseForHuman as pause:
+            await self._db.save_dag_state(
+                task.id,
+                dag_name=dag.name,
+                results=runner.state.to_dict(),
+                paused_at_node=pause.node or dag.name,
+                paused_question=str(pause),
+            )
+            log.info("task %d: %s paused — %s", task.id, dag.name, pause)
+            return Park(str(pause))
+        except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
+            log.warning("task %d: %s failed — %s", task.id, dag.name, exc)
+            return Park(f"{dag.name} failed: {exc}")
+
+        return self._outcome(dag, final)
+
+    @staticmethod
+    def _outcome(dag, final: DAGState) -> Action:
+        """What the graph produced, as an action.
+
+        A DAG whose last node returned an `Action` speaks for itself. One that
+        returned anything else has not said what to do with it, and parking is
+        the honest answer — better than inventing a reply out of a value the
+        graph never meant as one.
+        """
+        for node in reversed(dag.nodes):
+            if not final.has(node.name):
+                continue
+            result = final[node.name]
+            if isinstance(result, (Ask, Reply, Park)):
+                return result
+            break
+        return Park(f"{dag.name} finished without deciding what to send")
 
     async def _move(self, task: Task, state: str) -> Task:
         await self._db.move_task(task.id, state)

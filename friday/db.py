@@ -878,6 +878,64 @@ class Database:
                 )
             )
 
+    # ---- workflow graph state -------------------------------------------
+
+    async def save_dag_state(
+        self,
+        task_id: int,
+        *,
+        dag_name: str,
+        results: dict,
+        paused_at_node: str | None = None,
+        paused_question: str | None = None,
+    ) -> None:
+        """Record what a task's workflow graph has produced so far.
+
+        Upserted on `task_id`: one row per task, rewritten after every node.
+        This is what makes a restart resume rather than start over, so it is
+        written before the next node begins rather than at the end of the run.
+        """
+        statement = insert(schema.DagState).values(
+            task_id=task_id,
+            dag_name=dag_name,
+            results=results,
+            paused_at_node=paused_at_node,
+            paused_question=paused_question,
+            updated_at=_now(),
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[schema.DagState.task_id],
+                    set_={
+                        "dag_name": statement.excluded.dag_name,
+                        "results": statement.excluded.results,
+                        "paused_at_node": statement.excluded.paused_at_node,
+                        "paused_question": statement.excluded.paused_question,
+                        "updated_at": statement.excluded.updated_at,
+                    },
+                )
+            )
+
+    async def load_dag_state(self, task_id: int) -> dict | None:
+        """What the graph recorded, or None if it has not run.
+
+        Returns the raw results mapping; rebuilding it into a `DAGState` is
+        the caller's business, so this module keeps knowing nothing about the
+        graph.
+        """
+        async with self._sessions() as session:
+            row = await session.get(schema.DagState, task_id)
+            return dict(row.results or {}) if row else None
+
+    async def dag_pause(self, task_id: int) -> tuple[str, str] | None:
+        """The node that paused and the question it asked, if any."""
+        async with self._sessions() as session:
+            row = await session.get(schema.DagState, task_id)
+            if row is None or not row.paused_at_node:
+                return None
+            return row.paused_at_node, row.paused_question or ""
+
     async def tasks_in_state(self, state: str, limit: int = 20) -> list[Task]:
         return await self._tasks(
             select(schema.Task)
