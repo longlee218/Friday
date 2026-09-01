@@ -477,3 +477,126 @@ async def test_a_dag_that_finishes_without_an_action_parks_rather_than_inventing
         assert sent == [], "a value the graph never meant as a reply was sent"
     finally:
         EDGE_ROUTER.pop("api_issue", None)
+
+
+# --- what the graph decided, vs what was declared last ---------------------
+
+
+async def test_a_bookkeeping_node_declared_last_does_not_discard_the_reply():
+    """Declaration order is not execution order. A graph that ends with an
+    audit line or a cleanup still decided something, and answering from the
+    node tuple instead of the path throws that decision away — then parks
+    with a reason that is not true."""
+    from friday.workflows import Reply
+    from friday.workflows.runner import WorkflowRunner
+
+    async def compose(s, d):
+        return Reply("the real answer")
+
+    async def audit(s, d):
+        return "audit note, not an action"
+
+    dag = DAG(
+        name="t",
+        nodes=(Node("compose", compose), Node("audit", audit)),
+        edges=(Edge("compose", "audit"),),
+    )
+    runner = DAGRunner(dag)
+    final = await runner.run()
+
+    assert WorkflowRunner._outcome(dag, final, runner.trail) == Reply(
+        "the real answer"
+    )
+
+
+async def test_a_node_returning_none_after_the_decision_does_not_discard_it():
+    """`None` means "nothing to record", which the node docstring encourages.
+    It must not also mean "forget what the graph decided"."""
+    from friday.workflows import Reply
+    from friday.workflows.runner import WorkflowRunner
+
+    async def compose(s, d):
+        return Reply("answer")
+
+    async def cleanup(s, d):
+        return None
+
+    dag = DAG(
+        name="t",
+        nodes=(Node("compose", compose), Node("cleanup", cleanup)),
+        edges=(Edge("compose", "cleanup"),),
+    )
+    runner = DAGRunner(dag)
+    final = await runner.run()
+
+    assert WorkflowRunner._outcome(dag, final, runner.trail) == Reply("answer")
+
+
+async def test_the_trail_records_resumed_nodes_too():
+    """A resumed run must be able to answer "what did this decide?" the same
+    way a fresh one does, even though it re-ran nothing."""
+    from friday.workflows import Reply
+    from friday.workflows.runner import WorkflowRunner
+
+    async def compose(s, d):
+        return Reply("answer")
+
+    dag = DAG(name="t", nodes=(Node("compose", compose),))
+    finished = DAGState.empty().with_result("compose", Reply("answer"))
+
+    runner = DAGRunner(dag, state=finished)
+    final = await runner.run()
+
+    assert runner.trail == ["compose"]
+    assert WorkflowRunner._outcome(dag, final, runner.trail) == Reply("answer")
+
+
+async def test_a_conditional_edge_reading_a_dropped_marker_reruns_the_node(db):
+    """The node whose result did not survive storage runs again, so the
+    predicate reads a real value rather than a marker it cannot index."""
+
+    class Verdict:
+        def __getitem__(self, key):
+            return True
+
+    ran: list[str] = []
+
+    async def check(s, d):
+        ran.append("check")
+        return Verdict()
+
+    async def fix(s, d):
+        ran.append("fix")
+        return "fixed"
+
+    dag = DAG(
+        name="markers",
+        nodes=(Node("check", check), Node("fix", fix)),
+        edges=(Edge("check", "fix", when=lambda s: s["check"]["actionable"]),),
+    )
+
+    first = DAGRunner(dag)
+    await first.run()
+    stored = first.state.to_dict()
+    assert stored["check"] == {UNSTORABLE: "Verdict"}
+
+    ran.clear()
+    await DAGRunner(dag, state=DAGState.from_dict(stored)).run()
+
+    assert ran == ["check"], "the predicate could not read a marker"
+
+
+async def test_state_from_a_different_graph_is_not_applied(db):
+    """Node names only mean something inside the graph that defined them.
+    Handing a rewritten graph its predecessor's results makes it skip nodes on
+    the strength of work that was never done."""
+    await db.save_dag_state(
+        1, dag_name="the_old_graph", results={"read_logs": "stale lines"}
+    )
+
+    assert await db.load_dag_state(1, dag_name="the_new_graph") is None
+    assert await db.load_dag_state(1, dag_name="the_old_graph") == {
+        "read_logs": "stale lines"
+    }
+    # No name asked, no opinion offered — the raw row comes back.
+    assert await db.load_dag_state(1) == {"read_logs": "stale lines"}

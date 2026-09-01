@@ -10,6 +10,7 @@ stalls ingestion.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
@@ -47,6 +48,8 @@ from friday.redact import scrub
 from friday.tasks import OPEN, IllegalTransition, TaskState, may_move
 
 __all__ = ["Database"]
+
+log = logging.getLogger(__name__)
 
 _OLDEST_FIRST = (schema.Message.created_at, schema.Message.provider_message_id)
 #: Ties break on the id cast as a number — two messages can share a timestamp,
@@ -917,8 +920,18 @@ class Database:
                 )
             )
 
-    async def load_dag_state(self, task_id: int) -> dict | None:
+    async def load_dag_state(
+        self, task_id: int, *, dag_name: str | None = None
+    ) -> dict | None:
         """What the graph recorded, or None if it has not run.
+
+        `dag_name` is the graph asking. When it does not match the one that
+        wrote the row, nothing is returned and the graph starts over: node
+        names are only meaningful inside the graph that defined them, and
+        handing a renamed or rewritten graph its predecessor's results makes
+        it skip nodes on the strength of work that was never done. A restart
+        costs a few tool calls; a reply composed from another graph's
+        findings is wrong in a way nobody can see.
 
         Returns the raw results mapping; rebuilding it into a `DAGState` is
         the caller's business, so this module keeps knowing nothing about the
@@ -926,7 +939,17 @@ class Database:
         """
         async with self._sessions() as session:
             row = await session.get(schema.DagState, task_id)
-            return dict(row.results or {}) if row else None
+            if row is None:
+                return None
+            if dag_name is not None and row.dag_name != dag_name:
+                log.info(
+                    "task %d: discarding state from %r, this is %r",
+                    task_id,
+                    row.dag_name,
+                    dag_name,
+                )
+                return None
+            return dict(row.results or {})
 
     async def dag_pause(self, task_id: int) -> tuple[str, str] | None:
         """The node that paused and the question it asked, if any."""

@@ -187,10 +187,22 @@ class DAGRunner:
         #: A cycle in the edges would otherwise spin forever. The graph is
         #: meant to be acyclic; this is the guard that says so out loud.
         self._max_steps = max_steps
+        self._trail: list[str] = []
 
     @property
     def state(self) -> DAGState:
         return self._state
+
+    @property
+    def trail(self) -> list[str]:
+        """The nodes this run walked, in the order it walked them.
+
+        Declaration order is not execution order, and a caller asking "what
+        did the graph end up deciding?" needs the second. Reading it off the
+        node tuple instead means a bookkeeping node declared last — an audit
+        line, a cleanup — silently answers for the node that actually decided.
+        """
+        return list(self._trail)
 
     async def run(self) -> DAGState:
         """Run to the end, or to the first node that pauses.
@@ -211,12 +223,16 @@ class DAGRunner:
 
             if self._state.has(current):
                 # Already done in an earlier run; walk past it without
-                # re-running. This is what makes resume cheap.
+                # re-running. This is what makes resume cheap. It still counts
+                # as part of the path, so a resumed run can answer "what did
+                # this graph decide?" the same way a fresh one does.
+                self._trail.append(current)
                 current = self._dag.next_after(current, self._state)
                 continue
 
             node = self._dag.node(current)
             log.info("dag %s: running %s", self._dag.name, node.name)
+            self._trail.append(node.name)
             result = await node.run(self._state, self._deps)
 
             self._state = self._state.with_result(node.name, result)

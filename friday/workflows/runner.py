@@ -237,7 +237,9 @@ class WorkflowRunner:
         decide raises `PauseForHuman`; that becomes a `Park` carrying the
         question, which `_raise_hands` puts in front of the operator.
         """
-        state = DAGState.from_dict(await self._db.load_dag_state(task.id))
+        state = DAGState.from_dict(
+            await self._db.load_dag_state(task.id, dag_name=dag.name)
+        )
 
         async def checkpoint(current: DAGState) -> None:
             await self._db.save_dag_state(
@@ -274,24 +276,28 @@ class WorkflowRunner:
             log.warning("task %d: %s failed — %s", task.id, dag.name, exc)
             return Park(f"{dag.name} failed: {exc}")
 
-        return self._outcome(dag, final)
+        return self._outcome(dag, final, runner.trail)
 
     @staticmethod
-    def _outcome(dag, final: DAGState) -> Action:
-        """What the graph produced, as an action.
+    def _outcome(dag, final: DAGState, trail: list[str]) -> Action:
+        """What the graph decided, as an action.
 
-        A DAG whose last node returned an `Action` speaks for itself. One that
-        returned anything else has not said what to do with it, and parking is
-        the honest answer — better than inventing a reply out of a value the
-        graph never meant as one.
+        Read backwards along the path the run actually took, not along the
+        order the nodes were declared in. A graph often ends with bookkeeping
+        — an audit line, a cleanup — declared after the node that decides, and
+        letting declaration order answer means that bookkeeping silently
+        discards the reply.
+
+        A graph that walked its whole path without producing an `Action` has
+        not said what to send, and parking is the honest answer. Inventing a
+        reply out of a value the graph never meant as one is not.
         """
-        for node in reversed(dag.nodes):
-            if not final.has(node.name):
+        for name in reversed(trail):
+            if not final.has(name):
                 continue
-            result = final[node.name]
+            result = final[name]
             if isinstance(result, (Ask, Reply, Park)):
                 return result
-            break
         return Park(f"{dag.name} finished without deciding what to send")
 
     async def _move(self, task: Task, state: str) -> Task:
