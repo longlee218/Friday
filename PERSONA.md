@@ -86,12 +86,14 @@ no longer refers to anything.
 | `language` | Who you are · Language | agents that fill in structured fields, some of which are free text |
 | `none` | — | agents whose output is log lines, file paths or a diff, read only by another agent |
 
-`language` exists because of a concrete failure, not as a precaution. Triage
-fills in `environment` through a tool call, and `friday/validation.py` requires
-it to be one of `production`, `staging`, `dev`. An agent told to answer in
-Vietnamese writes `sản xuất`, validation rejects it, and the reporter is asked
-to confirm an environment they already stated. The voice section is what would
-push it there, so a classifier does not get the voice section.
+`language` exists because of a concrete failure, not as a precaution. The
+`api_issue` extractor fills in `environment`, and `friday/domain/validation.py`
+requires it to be one of `production`, `staging`, `dev`. An agent told to write
+in Vietnamese *in the operator's voice* writes `sản xuất`, validation rejects
+it, and the reporter is asked to confirm an environment they already stated.
+The voice section is what would push it there, so an agent filling in a
+validated field does not get the voice section — it keeps the rule about what
+is never translated, which is the half that protects the value.
 
 `none` exists for the same kind of reason from the other end: a node asked for
 a `path:line` and a diff has nothing to say in anyone's voice, and a persona in

@@ -157,12 +157,7 @@ class DocQuestionParams:
     doc_ref: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SkipParams:
-    reason: str
-
-
-Params = ApiIssueParams | AccessRequestParams | DocQuestionParams | SkipParams
+Params = ApiIssueParams | AccessRequestParams | DocQuestionParams
 
 
 @dataclass(frozen=True, slots=True)
