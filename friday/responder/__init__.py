@@ -79,6 +79,7 @@ class Responder:
             conversation,
             identity,
             task,
+            tone_examples,
         )
 
         bundle = ContextBundle(
@@ -87,7 +88,8 @@ class Responder:
                 "You write chat replies as the watched account, in their voice.",
             ),
             base=base(datetime.now(timezone.utc)),
-            conversation=conversation(list(tone) + list(context)),
+            tone=tone_examples(list(tone)),
+            conversation=conversation(list(context)),
             task=task("respond", None, asking),
         )
         result = await self._run.run(bundle, calls=calls)

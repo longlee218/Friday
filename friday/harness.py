@@ -120,9 +120,15 @@ class Harness:
         """Run it. `None` means it did not answer.
 
         Accepts a plain string (the scripted-test seam — unchanged) or a
-        `ContextBundle` (ticket 27) whose `.render()` produces the system
-        prompt. The bundle is the one place every section of an agent's
-        knowledge is assembled; this method does not assemble it.
+        `ContextBundle` (ticket 27) whose `.render()` produces text appended
+        to the user turn. The bundle is the one place every section of an
+        agent's knowledge is assembled; this method does not assemble it.
+
+        Note: a bundle is NOT a system prompt. The agent's role and tone
+        live in `instructions` (set at `Harness.__init__`); the bundle
+        contributes the per-call context. Mixing them here would put
+        "You are triage" into the user turn, which is what the bundle
+        was designed to avoid.
 
         Every agent turns that into its own kind of work — a task for a human,
         or a fall back to a template — so none of them has to catch anything.

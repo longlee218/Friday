@@ -46,11 +46,11 @@ log = logging.getLogger(__name__)
 class Section:
     """One named piece of the prompt.
 
-    `body` may be empty: the section still appears in the rendered prompt
-    as its opening and closing tags, so the agent sees "no <skills> here"
-    rather than "what is <skills>?". An empty body is the default for
-    sources that are missing or skipped, and that is the right shape — the
-    agent's contract is the template, not the data.
+    `body` may be empty: the section contributes nothing — neither
+    opening tag, body, nor closing tag — so the agent sees neither a
+    placeholder nor an instruction to read from. An empty body is the
+    default for sources that are missing or skipped, and that is the
+    right shape: absence of a section is its own signal.
     """
 
     name: str
@@ -76,6 +76,12 @@ class ContextBundle:
     The bundle does not call the database itself; the caller resolves the
     pieces and hands them in. That keeps this module free of async and
     free of the `Database` import cycle.
+
+    Order is significant: identity -> base -> channel_* -> notes ->
+    skills -> tone -> conversation -> task. Stable sections first, volatile
+    last. The bundle's `render()` is appended to the agent's user turn
+    (alongside the actual question); identity/base/system-prompt-shaped
+    material still lives in `instructions`.
     """
 
     #: Stable per agent — name, role, what it is for.
@@ -96,16 +102,20 @@ class ContextBundle:
     notes: Section = field(default_factory=lambda: Section("notes"))
     #: Catalogue of skills the agent can ask for (ticket 24 fills this).
     skills: Section = field(default_factory=lambda: Section("skills"))
+    #: Operator's past messages, as style reference. Kept apart from
+    #: conversation so the agent sees them labelled.
+    tone: Section = field(default_factory=lambda: Section("tone"))
     #: The conversation so far, oldest first.
     conversation: Section = field(default_factory=lambda: Section("conversation"))
     #: Per-call section: the task, its params, what is missing, the decision.
     task: Section = field(default_factory=lambda: Section("task"))
 
     def render(self) -> str:
-        """Build the system prompt. Stable prefix first, volatile last.
+        """Render the bundle as a string suitable for the user turn.
 
-        Each section is its own tag. Empty sections are skipped so the agent
-        does not see what was deliberately left out.
+        Each section is its own tag. Empty sections contribute nothing.
+        Returns text that is appended to the caller's question, NOT the
+        agent's system prompt — that lives in `instructions`.
         """
         parts = [
             self.identity.render(),
@@ -115,6 +125,7 @@ class ContextBundle:
             self.channel_overrides.render(),
             self.notes.render(),
             self.skills.render(),
+            self.tone.render(),
             self.conversation.render(),
             self.task.render(),
         ]
@@ -219,20 +230,36 @@ def conversation(events: list[InboundEvent]) -> Section:
     return Section("conversation", body)
 
 
-def task(task_type: str, params: Params | None, action_hint: str | None) -> Section:
-    """Task identity, params, and the decision so far.
+def tone_examples(events: list[InboundEvent]) -> Section:
+    """Past messages in the operator's voice — kept apart from
+    `conversation` so the agent can see them labelled as style reference
+    rather than as ongoing context. Without the label, the two merge
+    into one indistinguishable stream."""
+    if not events:
+        return Section("tone")
+    body = "\n".join(f"- {_escape(m.text)}" for m in events)
+    return Section("tone", body)
+
+
+def task(task_type: str, params: Params | None, asking: str | None) -> Section:
+    """Task identity, params, and the question for the agent.
 
     task_type comes from the database, but we escape anyway for symmetry
     with every other value. params is a frozen dataclass — `asdict()` is
     the only way to read it without touching internals (slots means no
     `__dict__`). Every value is escaped: `summary` is LLM-extracted from
     a Discord message, which makes it attacker-controlled.
+
+    `asking` is the thing the model has to do — what to classify, what
+    to reply, what to extract. For Responder it is the missing-detail
+    question; for Triage it is None (the message itself is the input,
+    not a question).
     """
     parts = [f"task_type: {html.escape(task_type)}"]
     if params is not None:
         parts.append(f"params:\n{_render_params(params)}")
-    if action_hint:
-        parts.append(f"decision_so_far: {_escape(action_hint)}")
+    if asking:
+        parts.append(f"asking: {_escape(asking)}")
     return Section("task", "\n".join(parts))
 
 

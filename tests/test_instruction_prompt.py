@@ -361,3 +361,39 @@ def test_no_dead_prompt_assemblers_remain_in_triage_or_responder():
         assert not hasattr(m, "_prompt"), (
             f"{module}._prompt is back — the bundle should be the only path"
         )
+
+
+def test_tone_section_is_separate_from_conversation():
+    """The bundle has both `tone` (style reference) and `conversation`
+    (current messages) sections. Without the separation, the agent sees
+    one merged stream and loses the label that tells it which is which.
+    """
+    from friday.models import InboundEvent, MentionType
+
+    event = InboundEvent(
+        provider="fake",
+        provider_message_id="m1",
+        channel_id="c",
+        thread_id=None,
+        author_id="u",
+        author_name="operator",
+        text="ok để anh xem",
+        created_at=datetime(2026, 8, 30, tzinfo=timezone.utc),
+        mention_type=MentionType.DIRECT,
+    )
+    from friday.instruction_prompt import tone_examples
+
+    out = tone_examples([event]).render()
+    assert "<tone>" in out
+    assert "</tone>" in out
+    assert "ok để anh xem" in out
+
+
+def test_task_section_calls_the_field_asking_not_decision_so_far():
+    """Ticket 27 review caught a mislabel: `asking` was being rendered as
+    `decision_so_far`, which inverted the meaning. The field name in the
+    prompt must match what the caller put in."""
+    out = task("respond", None, "what does the user need?").render()
+    assert "asking:" in out
+    assert "what does the user need?" in out
+    assert "decision_so_far" not in out
