@@ -8,7 +8,7 @@ report.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why this is not already true
 
@@ -42,14 +42,22 @@ with work in flight. It is the wrong question for an answer.
 
 ## Acceptance criteria
 
-- [ ] A reply to a message the agent sent is worked as a follow-up of that
+- [x] A reply to a message the agent sent is worked as a follow-up of that
       message's task, whatever type triage assigns it
-- [ ] A reply whose target belongs to no task (a liveness alert, the daily
+- [x] A reply whose target belongs to no task (a liveness alert, the daily
       summary) falls back to today's behaviour rather than erroring
-- [ ] An unprompted message in a conversation with work in flight still goes
+- [x] An unprompted message in a conversation with work in flight still goes
       through the type check — this narrows when the type check applies, it
       does not remove it
-- [ ] A message replying to somebody else is unaffected
-- [ ] A test drives the three-message thread above with triage forced to
+- [x] A message replying to somebody else is unaffected
+- [x] A test drives the three-message thread above with triage forced to
       classify the question as `doc_question`, and the bug report stays open
       with no second task
+
+One criterion was added while building: **a reply does not reopen work
+somebody closed.** The lookup only returns an open task — a "cảm ơn anh" on a
+finished thread opens its own task rather than resurrecting the old one.
+
+Each of the three guards was checked by removing it and watching the suite go
+red: the lookup itself, the open-task filter, and the branch that skips the
+type check.

@@ -864,6 +864,37 @@ class Database:
             session.add(row)
         return _task(row)
 
+    async def task_answered_by(self, provider_message_id: str | None) -> Task | None:
+        """The open task a reply is answering, if it is answering one of ours.
+
+        A reply names the message it responds to. When that message is one this
+        system sent, the outbound row that produced it already records which
+        task it was about — so which task a reply belongs to has an answer that
+        is looked up rather than classified.
+
+        `None` when the reply points at something we did not send, at an
+        outbound row belonging to no task (a liveness alert, the daily
+        summary), or at a task that has since finished. A reply is not a reason
+        to reopen work somebody closed.
+        """
+        if not provider_message_id:
+            return None
+        async with self._sessions() as session:
+            task_id = await session.scalar(
+                select(schema.Outbound.task_id).where(
+                    schema.Outbound.sent_message_id == provider_message_id
+                )
+            )
+        if task_id is None:
+            return None
+        found = await self._tasks(
+            select(schema.Task).where(
+                schema.Task.id == task_id,
+                schema.Task.state.in_([str(s) for s in OPEN]),
+            )
+        )
+        return found[0] if found else None
+
     async def open_task_for(self, conversation: ConversationId) -> Task | None:
         """The task this conversation is already working on, if any.
 

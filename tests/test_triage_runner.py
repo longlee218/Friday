@@ -7,6 +7,7 @@ database and the application is testable without a model.
 from __future__ import annotations
 
 from conftest import captured, make_event
+from friday.domain.conversation import ConversationId
 from friday.triage import Decided, NeedsHuman
 from friday.triage.runner import TriageRunner
 from friday.domain.tasks import TaskState
@@ -244,3 +245,140 @@ async def test_a_follow_up_without_the_details_asks_again(inbox, provider, db):
     await runner(db, StubTriage(api_issue())).run_once()
 
     assert (await db.tasks())[0].state == "pending"  # the workflow will re-ask
+
+
+# --- ticket 34: a reply belongs to the task it answers -----------------------
+
+
+async def _we_asked(db, task_id: int, *, sent_as: str) -> None:
+    """The question we sent about a task, and the id it became."""
+    from friday.outbox import Kind
+
+    row = await db.queue_outbound(
+        task_id=task_id,
+        conversation=ConversationId("fake", "watched"),
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="cho anh xin cái correlationId nhé",
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id=sent_as)
+
+
+async def test_a_question_back_does_not_close_the_report(inbox, provider, db):
+    """The thread this ticket came from, with triage doing the thing it is
+    entitled to do:
+
+        them:  a Long ơi a kiểm tra API giúp e e thấy bị 500
+        us:    em gửi anh cái correlationId hoặc curl em gọi được không?
+        them:  correlationId là cái gì a nhỉ, e ko biết   → doc_question
+
+    Live, triage called that third message `api_issue` and everything worked.
+    It is not obliged to. Called `doc_question` it used to push the report to
+    `needs_human` and open a second task — for a question that is about the
+    first one.
+    """
+    provider.emit(make_event(message_id="10"))
+    await captured(inbox)
+    await runner(db, StubTriage(api_issue())).run_once()
+    task_id = (await db.tasks())[0].id
+    await _we_asked(db, task_id, sent_as="ours-1")
+    await db.move_task(task_id, TaskState.WAITING_FOR_DETAILS)
+
+    provider.emit(
+        make_event(
+            message_id="20",
+            text="correlationId là cái gì a nhỉ",
+            mention_type=None,
+            reply_to="ours-1",
+        )
+    )
+    await captured(inbox)
+    other = Decided(type="doc_question", confidence=0.9)
+    await runner(db, StubTriage(other)).run_once()
+
+    tasks = await db.tasks()
+    assert [(t.type, t.state) for t in tasks] == [("api_issue", "pending")]
+
+
+async def test_the_answer_reaches_the_task_that_asked_for_it(inbox, provider, db):
+    """Same rule, the case it exists for: they answer, and the answer is worked
+    as part of the task that asked — not as a report of its own."""
+    provider.emit(make_event(message_id="10"))
+    await captured(inbox)
+    await runner(db, StubTriage(api_issue())).run_once()
+    task_id = (await db.tasks())[0].id
+    await _we_asked(db, task_id, sent_as="ours-1")
+    await db.move_task(task_id, TaskState.WAITING_FOR_DETAILS)
+
+    provider.emit(
+        make_event(
+            message_id="20",
+            text="đây a: abcdef01-2345-6789-abcd-ef0123456789",
+            mention_type=None,
+            reply_to="ours-1",
+        )
+    )
+    await captured(inbox)
+    await runner(db, StubTriage(Decided(type="access_request", confidence=0.9))).run_once()
+
+    assert [(t.type, t.state) for t in await db.tasks()] == [("api_issue", "pending")]
+
+
+async def test_an_unprompted_message_is_still_checked_by_type(inbox, provider, db):
+    """This narrows when the type check applies; it does not remove it. A
+    conversation that drifts into something else must still not be relabelled
+    without somebody noticing."""
+    provider.emit(make_event(message_id="10"))
+    provider.emit(make_event(message_id="20", text="actually give me repo access"))
+    await captured(inbox)
+    access = Decided(type="access_request", confidence=0.9)
+
+    await runner(db, StubTriage(api_issue(), access)).run_once()
+
+    assert [(t.type, t.state) for t in await db.tasks()] == [
+        ("api_issue", "needs_human"),
+        ("access_request", "pending"),
+    ]
+
+
+async def test_a_reply_to_a_message_of_ours_that_had_no_task(inbox, provider, db):
+    """The daily summary and an outage alert belong to no task. Replying to one
+    falls back to the ordinary path rather than erroring."""
+    from friday.outbox import Kind
+
+    row = await db.queue_outbound(
+        task_id=None,
+        conversation=ConversationId("fake", "watched"),
+        kind=Kind.ALERT,
+        sender="discord_bot",
+        text="Alive. 27 messages held.",
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id="alert-1")
+
+    provider.emit(make_event(message_id="10", text="ok anh", reply_to="alert-1"))
+    await captured(inbox)
+
+    await runner(db, StubTriage(api_issue())).run_once()
+
+    assert [t.type for t in await db.tasks()] == ["api_issue"]
+
+
+async def test_a_reply_does_not_reopen_finished_work(inbox, provider, db):
+    """A reply is not a reason to reopen work somebody closed."""
+    provider.emit(make_event(message_id="10"))
+    await captured(inbox)
+    await runner(db, StubTriage(api_issue())).run_once()
+    task_id = (await db.tasks())[0].id
+    await _we_asked(db, task_id, sent_as="ours-1")
+    await db.move_task(task_id, TaskState.REVIEW)
+    await db.move_task(task_id, TaskState.DONE)
+
+    provider.emit(
+        make_event(message_id="20", text="cảm ơn anh", reply_to="ours-1")
+    )
+    await captured(inbox)
+    await runner(db, StubTriage(api_issue())).run_once()
+
+    states = [(t.type, t.state) for t in await db.tasks()]
+    assert ("api_issue", "done") in states
+    assert len(states) == 2, "the thank-you opened its own task rather than reopening"

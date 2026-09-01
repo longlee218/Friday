@@ -170,6 +170,16 @@ class TriageRunner:
             log.debug("skipped %s", event.provider_message_id)
             return None
 
+        # Did they answer something we asked? A reply names the message it
+        # responds to, and if we sent that message we already know which task
+        # it was about. That answer is looked up, not classified — the
+        # classifier does not agree with itself between runs, and "what type is
+        # this message" is the wrong question to ask of an answer to our own
+        # question anyway.
+        answered = await self._db.task_answered_by(event.reply_to)
+        if answered is not None:
+            return await self._follow_up(answered, outcome, answers_us=True)
+
         existing = await self._db.open_task_for(event.conversation)
         if existing is not None:
             followed = await self._follow_up(existing, outcome)
@@ -188,7 +198,9 @@ class TriageRunner:
             )
         return await self._open(event, outcome.type, outcome.confidence, {}, state)
 
-    async def _follow_up(self, task: Task, outcome: Decided) -> Task | None:
+    async def _follow_up(
+        self, task: Task, outcome: Decided, *, answers_us: bool = False
+    ) -> Task | None:
         """A later message in a conversation already being worked on.
 
         Two things can arrive in a follow-up. A change of subject — a bug report
@@ -206,7 +218,19 @@ class TriageRunner:
         Returns `None` when the message turns out not to belong to this task at
         all, which is the caller's cue to open one for it.
         """
-        if outcome.type != task.type:
+        if answers_us:
+            # They replied to a question we asked, so this belongs to that task
+            # whatever it looks like. The type check below is for an unprompted
+            # message in a conversation with work in flight — a report that has
+            # drifted into something else. An answer has not drifted; it may
+            # not even be an answer ("correlationId là cái gì a nhỉ"), and that
+            # is still about this task.
+            log.info(
+                "task %d: a reply to something we asked (triage said %s)",
+                task.id,
+                outcome.type,
+            )
+        elif outcome.type != task.type:
             # Two things are true and only one used to be acted on. The task in
             # flight has changed subject and a person should look — *and* this
             # message is a report of its own, which used to be absorbed: it was
