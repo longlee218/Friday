@@ -674,11 +674,11 @@ async def test_the_stranger_line_reaches_the_prompt_and_only_then(tmp_path):
 # --- ticket 35: tell the operator what they were asked -----------------------
 
 
-async def _reporter_said(db, message_id, text, *, secs, task_id=None):
+async def _reporter_said(db, message_id, text, *, secs, task_id=None, reply_to=None):
     from datetime import timedelta
 
     event = make_event(
-        message_id=message_id, text=text, mention_type=None,
+        message_id=message_id, text=text, mention_type=None, reply_to=reply_to,
         created_at=datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc) + timedelta(seconds=secs),
     )
     await db.record_message(event, context_only=task_id is None)
@@ -693,7 +693,7 @@ async def test_the_operator_is_told_what_the_reporter_asked(db):
     waiting on a sentence they could type in five seconds."""
     task = await make_task(db)
     await _reporter_said(db, "m1", "API lỗi rồi", secs=0, task_id=task.id)
-    await _reporter_said(db, "m2", "correlationId là cái gì a nhỉ?", secs=30)
+    await _reporter_said(db, "m2", "correlationId là cái gì a nhỉ?", secs=30, reply_to="m1")
     await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
     await WorkflowRunner(db=db, auto_ask=False).run_once()
@@ -723,10 +723,25 @@ async def test_our_own_question_is_not_what_they_last_said(db):
         sender="discord_user", text="cho anh xin correlationId",
     )
     await db.mark_outbound_sent(row.id, sent_message_id="ours")
-    await _reporter_said(db, "ours", "cho anh xin correlationId", secs=10)
+    await _reporter_said(db, "ours", "cho anh xin correlationId", secs=10, reply_to="m1")
     await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
     await WorkflowRunner(db=db, auto_ask=False).run_once()
 
     (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
     assert "they last said" not in told.text
+
+
+async def test_talking_about_something_else_is_not_about_this_task(db):
+    """One person filing four reports in one channel produced a new
+    announcement for every task each time they typed. What they said about
+    something else is not about this; a reply names what it is about."""
+    task = await make_task(db)
+    await _reporter_said(db, "m1", "API lỗi rồi", secs=0, task_id=task.id)
+    await _reporter_said(db, "m2", "trưa nay ăn gì mọi người", secs=30)
+    await db.move_task(task.id, TaskState.NEEDS_HUMAN)
+
+    await WorkflowRunner(db=db, auto_ask=False).run_once()
+
+    (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
+    assert "trưa nay" not in told.text

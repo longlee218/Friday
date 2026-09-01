@@ -943,30 +943,43 @@ class Database:
         return (row[0], row[1]) if row else None
 
     async def last_said_by_reporter(self, task_id: int) -> str | None:
-        """The most recent thing the person who opened this task has said in
-        that conversation — the question they asked, the detail they added.
-        None when they have said nothing since the report itself."""
+        """The most recent thing the reporter said *into this task's thread* —
+        a reply to a message linked to it, or to our own question about it.
+
+        Not their latest message anywhere in the channel. That was the first
+        version, and one person filing four reports in one channel produced a
+        new announcement for every task each time they typed: the text changed,
+        so it was "a new thing to say". What they said about something else is
+        not about this. A reply names what it is about; that is the rule used
+        for everything else here and it is the rule used here.
+        """
         who = await self.reporter_of(task_id)
         if who is None:
             return None
         author_id, _ = who
-        ours = select(schema.Outbound.sent_message_id).where(
+        linked = select(schema.Message.provider_message_id).where(
+            schema.Message.task_id == task_id
+        )
+        ours_about_it = select(schema.Outbound.sent_message_id).where(
+            schema.Outbound.task_id == task_id,
+            schema.Outbound.sent_message_id.is_not(None),
+        )
+        ours_anywhere = select(schema.Outbound.sent_message_id).where(
             schema.Outbound.sent_message_id.is_not(None)
         )
         async with self._sessions() as session:
-            opening = await session.scalar(
-                select(schema.Message)
-                .where(schema.Message.task_id == task_id)
-                .order_by(schema.Message.created_at)
-                .limit(1)
-            )
             latest = await session.scalar(
                 select(schema.Message)
                 .where(
-                    schema.Message.conversation_id == opening.conversation_id,
                     schema.Message.author_id == author_id,
-                    schema.Message.created_at > opening.created_at,
-                    schema.Message.provider_message_id.not_in(ours),
+                    # In the channel the operator tests in, the account is
+                    # both sides — so "same author" alone would quote our own
+                    # question back at them.
+                    schema.Message.provider_message_id.not_in(ours_anywhere),
+                    or_(
+                        schema.Message.reply_to.in_(linked),
+                        schema.Message.reply_to.in_(ours_about_it),
+                    ),
                 )
                 .order_by(schema.Message.created_at.desc())
                 .limit(1)
