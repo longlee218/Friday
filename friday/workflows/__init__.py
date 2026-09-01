@@ -235,14 +235,23 @@ def _question(problems: list[Problem]) -> str:
     The field name drives which natural-language form to use; the message is
     appended only when it carries information the form does not (i.e. when it
     came from the validation engine, not the structural check).
+
+    Deduplicates by field: a single field reported by both layers (or by two
+    rules in `_RULES`) should not appear twice in the sentence. When the same
+    field carries both a structural and a semantic problem, the semantic one
+    wins because it carries more information.
     """
-    parts: list[str] = []
+    assert problems, "_question called with empty problems"
+    seen: dict[str, str] = {}
     for problem in problems:
-        asked_as = _ASKED_AS.get(problem.field, f"the {problem.field.replace('_', ' ')}")
-        if problem.message:
-            parts.append(f"{asked_as} ({problem.message})")
-        else:
-            parts.append(asked_as)
+        existing = seen.get(problem.field, "")
+        if existing and problem.message:
+            continue
+        seen[problem.field] = problem.message
+    parts: list[str] = []
+    for field, message in seen.items():
+        asked_as = _ASKED_AS.get(field, f"the {field.replace('_', ' ')}")
+        parts.append(f"{asked_as} ({message})" if message else asked_as)
     return "Could you tell me " + " and ".join(parts) + "?"
 
 

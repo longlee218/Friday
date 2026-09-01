@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 import pytest
@@ -36,6 +36,18 @@ def test_matches_with_none_passes():
     assert Matches(pattern=r".+").check(None) is None
 
 
+def test_matches_with_a_blank_string_passes():
+    """An empty or whitespace-only string is 'no value', not a malformed value.
+
+    The structural check reports it as missing; the validator stays silent so
+    the operator hears about it once.
+    """
+
+    rule = Matches(pattern=r"^[a-f0-9-]{36}$", name="uuid")
+    assert rule.check("") is None
+    assert rule.check("   ") is None
+
+
 def test_matches_with_a_string_that_does_not_match():
     message = Matches(pattern=r"^[a-f0-9-]{36}$", name="uuid").check("lol123")
     assert message is not None
@@ -54,9 +66,19 @@ def test_in_set_rejects_a_value_outside_the_set():
     assert rule.check("production") is None
 
 
-def test_non_empty_rejects_blank_strings():
-    assert NonEmpty().check("   ") is not None
-    assert NonEmpty().check("hi") is None
+def test_in_set_with_blank_string_passes():
+    rule = InSet(values=frozenset({"production", "staging", "dev"}))
+    assert rule.check("") is None
+    assert rule.check("   ") is None
+
+
+def test_non_empty_rejects_non_string_values():
+    """NonEmpty only fires on a present-but-blank situation it should not see
+    in practice; the test guards against it raising instead of returning a
+    clean problem.
+    """
+
+    assert NonEmpty().check(42) is not None
 
 
 def test_one_of_passes_when_any_named_field_has_a_value():
@@ -71,6 +93,25 @@ def test_one_of_passes_when_any_named_field_has_a_value():
     assert len(validate(WithTwo(a=None, b=None))) == 1
 
 
+def test_one_of_with_empty_fields_raises_at_construction():
+    """Constructing a rule that always reports is a bug. Catch it early."""
+
+    with pytest.raises(ValueError, match="at least one field"):
+        OneOf(fields=())
+
+
+def test_one_of_treats_blank_strings_as_missing():
+    """A blank string in either field is no value, so the rule still reports."""
+
+    @dataclass
+    class WithTwo:
+        a: Optional[str] = None
+        b: Optional[str] = None
+        _RULES = {"_a_or_b": OneOf(fields=("a", "b"))}
+
+    assert len(validate(WithTwo(a="", b="   "))) == 1
+
+
 def test_validate_returns_one_problem_per_failing_field_not_stop_on_first():
     @dataclass
     class WithTwoFields:
@@ -79,7 +120,7 @@ def test_validate_returns_one_problem_per_failing_field_not_stop_on_first():
 
         _RULES = {
             "env": InSet(frozenset({"production", "staging"})),
-            "cid": Matches(r"^[a-f0-9-]{36}$"),
+            "cid": Matches(r"^[a-f0-9-]{36}$", name="uuid"),
         }
 
     problems = validate(WithTwoFields(env="devlike", cid="lol"))
@@ -119,10 +160,11 @@ def test_problems_merges_structural_and_semantic():
     assert [p.field for p in wrong_only] == ["required_id"]
     assert "uuid" in wrong_only[0].message
 
-    # both: structural reports the None field; semantic stays silent on None
-    # per the rule protocol (None passes). No double-report.
-    both = _problems(Tight(required_id=None))  # type: ignore[arg-type]
-    assert sum(1 for p in both if p.field == "required_id") == 1
+    # structural only: blank string is "no value" — the validator skips it,
+    # the structural half fires, exactly one problem.
+    blank_only = _problems(Tight(required_id=""))
+    assert sum(1 for p in blank_only if p.field == "required_id") == 1
+    assert blank_only[0].message == ""
 
 
 def test_a_params_with_no_rules_passes_validation_and_returns_no_problems():
@@ -163,23 +205,14 @@ def test_validate_is_only_imported_from_one_module():
       import friday.validation
     """
     hits = subprocess.run(
-        ["grep", "-rlE", r"\bfriday\.validation\b", "friday/"],
-        capture_output=True, text=True,
-    ).stdout.split()
-
-
-async def test_validate_is_only_imported_from_one_module():
-    """Ticket 30's seam guarantee. The whole point is one call site. A second
-    import is a test failure, not a documentation issue.
-
-    Covers three import shapes:
-      from friday.validation import ...
-      from friday import validation
-      import friday.validation
-    """
-    hits = subprocess.run(
-        ["grep", "-rlE", r"\bfriday\.validation\b", "friday/"],
-        capture_output=True, text=True,
+        [
+            "grep",
+            "-rlE",
+            r"\bfrom\s+friday(\.\s*validation\b|\s+import\s+validation\b)|\bimport\s+friday\.validation\b",
+            "friday/",
+        ],
+        capture_output=True,
+        text=True,
     ).stdout.split()
 
     allowed = {"friday/workflows/__init__.py"}

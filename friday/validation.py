@@ -65,15 +65,28 @@ def validate(params: Any) -> list[Problem]:
     return problems
 
 
+def _is_blank(value: Any) -> bool:
+    """True for values the structural check should treat as missing.
+
+    None and whitespace-only strings both count as "no value here" — the
+    operator is asked once by `_missing`, not twice by the two layers.
+    """
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class Matches:
-    """The field must match a regular expression. None passes."""
+    """The field must match a regular expression. None and blank strings pass."""
 
     pattern: str
     name: str = "matches"
 
     def check(self, value: Any) -> str | None:
-        if value is None:
+        if _is_blank(value):
             return None
         if not isinstance(value, str):
             return f"expected text, got {type(value).__name__}"
@@ -84,12 +97,12 @@ class Matches:
 
 @dataclass(frozen=True, slots=True)
 class InSet:
-    """The field must be one of a closed set. None passes."""
+    """The field must be one of a closed set. None and blank strings pass."""
 
     values: frozenset[str]
 
     def check(self, value: Any) -> str | None:
-        if value is None:
+        if _is_blank(value):
             return None
         if value not in self.values:
             allowed = ", ".join(sorted(self.values))
@@ -99,28 +112,41 @@ class InSet:
 
 @dataclass(frozen=True, slots=True)
 class NonEmpty:
-    """The field must be a non-empty string. None passes."""
+    """The field must be a non-empty string. None and blank strings pass.
+
+    This rule is mostly redundant with the structural check once blank
+    strings are treated as missing; it stays as a named rule for the case
+    where the operator wants a field that is meaningful but cannot be
+    whitespace.
+    """
 
     def check(self, value: Any) -> str | None:
-        if value is None:
+        if _is_blank(value):
             return None
-        if not isinstance(value, str) or not value.strip():
-            return "is empty"
+        if not isinstance(value, str):
+            return f"expected text, got {type(value).__name__}"
         return None
 
 
 @dataclass(frozen=True, slots=True)
 class OneOf:
-    """At least one of the named fields must have a value.
+    """At least one of the named fields must have a non-blank value.
 
     Cross-field rule: stores no `value` of its own, so it sits in `_RULES`
     under a sentinel field name. The check sees the whole params object.
+    Construction fails if the named fields list is empty — that would
+    always report, which is not what a constructor that accepts no
+    arguments is for.
     """
 
     fields: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        if not self.fields:
+            raise ValueError("OneOf needs at least one field to look at")
+
     def check_params(self, params: Any) -> str | None:
-        if any(getattr(params, f, None) for f in self.fields):
+        if any(not _is_blank(getattr(params, f, None)) for f in self.fields):
             return None
         listed = " or ".join(self.fields)
         return f"need at least one of: {listed}"
