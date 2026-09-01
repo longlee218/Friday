@@ -14,8 +14,8 @@ composition root.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, fields
-from typing import Any, Callable
+from dataclasses import fields
+from typing import Any
 
 from friday.agent.harness import Harness
 from friday.domain.models import Params

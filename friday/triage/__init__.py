@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
 
 from friday.config import AgentConfig
 from friday.agent.harness import Harness, ToolContext, tool

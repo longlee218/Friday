@@ -34,6 +34,18 @@ REVIEW = TaskState.REVIEW
 
 
 class WorkflowRunner:
+    """Turns a pending task into an action.
+
+    Produces outbound intents; it never delivers one. Deciding what to say and
+    knowing where to put it are different jobs, and the Outbox is the only
+    module that talks to a provider.
+
+    Only one message is allowed out without review: the request for missing
+    details. It completes the task's own required parameters rather than
+    speaking for the operator, and being wrong about it costs the reporter one
+    unnecessary question.
+    """
+
     @classmethod
     def build(cls, config, *, db: Database, responder=None) -> "WorkflowRunner":
         """The loop, built from the `workflows:` block.
@@ -50,18 +62,6 @@ class WorkflowRunner:
             max_asks=config.workflows.max_asks,
             debounce_seconds=config.workflows.debounce_seconds,
         )
-
-    """Turns a pending task into an action.
-
-    Produces outbound intents; it never delivers one. Deciding what to say and
-    knowing where to put it are different jobs, and the Outbox is the only
-    module that talks to a provider.
-
-    Only one message is allowed out without review: the request for missing
-    details. It completes the task's own required parameters rather than
-    speaking for the operator, and being wrong about it costs the reporter one
-    unnecessary question.
-    """
 
     def __init__(
         self,

@@ -18,16 +18,18 @@ from friday.domain.tasks import TaskState
 
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN
 
-__all__ = ["ASKED", "FAILED", "Kind", "Outbox", "QUEUED", "SENT", "SENT_MANUALLY"]
+__all__ = ["FAILED", "Kind", "Outbox", "QUEUED"]
 
 log = logging.getLogger(__name__)
 
+#: The two states a *reader* asks about — the board, the API and the liveness
+#: line all want "what is waiting" and "what gave up". The full set of four
+#: lives in `friday/store/db.py` as `OUTBOUND_*`, because there it is a `WHERE`
+#: clause. Two names for one string in two places is a duplication worth
+#: collapsing, and collapsing it means giving an outbound state a home in
+#: `friday/domain/` beside `TaskState`.
 QUEUED = "queued"
-SENT = "sent"
 FAILED = "failed"
-#: Delivered by a person after we gave up. Kept apart from `failed` so the
-#: audit trail says "a human sent this" rather than "this was abandoned".
-SENT_MANUALLY = "sent_manually"
 
 
 class Kind(StrEnum):
