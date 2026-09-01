@@ -132,6 +132,7 @@ class Database:
             author_id=event.author_id,
             author_name=event.author_name,
             text=event.text,
+            original_text=event.text,
             created_at=event.created_at,
             is_own=event.is_own,
             mention_type=event.mention_type.value if event.mention_type else None,
@@ -862,6 +863,20 @@ class Database:
             .order_by(schema.Task.id)
             .limit(limit)
         )
+
+    async def original_text_for(self, task_id: int) -> str | None:
+        """The reporter's original message, for the workflow that opened this task.
+
+        Looked up via `messages.task_id` because the workflow no longer has
+        access to the inbound event — by the time a task is ready to be
+        planned, the inbox has long since moved on.
+        """
+        async with self._sessions() as session:
+            return await session.scalar(
+                select(schema.Message.original_text).where(
+                    schema.Message.task_id == task_id
+                )
+            )
 
     async def tasks_in_state(self, state: str, limit: int = 20) -> list[Task]:
         return await self._tasks(

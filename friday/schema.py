@@ -71,6 +71,11 @@ class Message(Base):
     author_id: Mapped[str]
     author_name: Mapped[str]
     text: Mapped[str]
+    #: The raw text the reporter wrote. Stored so the workflow's extraction
+    #: agent can read it without re-fetching from Discord; the extraction
+    #: pass moved from triage to workflow in ticket 31, and the workflow needs
+    #: the text to extract from.
+    original_text: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(IsoDateTime)
     is_own: Mapped[bool] = mapped_column(default=False)
     mention_type: Mapped[str | None]

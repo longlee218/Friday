@@ -215,6 +215,7 @@ class WorkflowRunner:
                 params(**task.params),
                 agent=self._agent,
                 planners=self._planners,
+                text=await self._db.original_text_for(task.id),
             )
         except TypeError as exc:
             # Stored parameters that no longer fit their type — a schema change

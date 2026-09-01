@@ -150,12 +150,18 @@ async def plan(
     *,
     agent=None,
     planners: dict | None = None,
+    text: str | None = None,
 ) -> Action:
     """What to do about a task.
 
     A planner that reads an external store is where a workflow becomes agentic,
     per task type and on evidence. One that decides by branching is a pure
     function and stays one.
+
+    Pipeline:
+      1. Extract fields from text (if a workflow registered an extractor).
+      2. Validate the merged result, both structural and rule-based.
+      3. Dispatch to the planner.
 
     Validation runs first, before dispatch: a planner must not see a malformed
     value, because every planner's correct behaviour for one is to ask again,
@@ -164,6 +170,13 @@ async def plan(
     `planners` overrides the registry, which is how a step is tried before it is
     registered and tested without reaching anything.
     """
+    if text is not None:
+        from friday.extraction import extract as _extract
+
+        extracted = await _extract(task_type, text)
+        if extracted is not None:
+            params = extracted
+
     problems = _problems(params)
     if problems:
         return Ask(_question(problems))
