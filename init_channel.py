@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import sys
 
+from dotenv import load_dotenv
+
 from friday.channel_context import ContextStore
 from friday.config import load_config
 
@@ -17,6 +19,7 @@ from friday.config import load_config
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit("usage: init_channel.py <channel_id>")
+    load_dotenv()
     config = load_config()
     store = ContextStore(config.context.directory)
     channel_id = sys.argv[1]

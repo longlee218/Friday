@@ -21,7 +21,6 @@ from typing import Any
 import yaml
 
 from friday.config import AgentConfig
-from friday.conversation import ConversationId
 from friday.db import Database
 from friday.harness import Harness
 from friday.notes import Promotion
@@ -185,7 +184,7 @@ class ContextRebuilder:
     async def _maybe_summarize(self, channel_id: str) -> str | None:
         if self._summary_config is None:
             return None
-        messages = await self._db.relevant_messages(ConversationId("discord", channel_id))
+        messages = await self._db.relevant_messages_in_channel("discord", channel_id)
         if not messages:
             return None
         # A rough count, not an exact one: the threshold it is compared

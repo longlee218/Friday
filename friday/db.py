@@ -175,19 +175,42 @@ class Database:
         so a message once relevant stays part of the prefix forever and only
         the tail grows as the conversation continues.
         """
-        own = select(schema.Message.provider_message_id).where(
-            schema.Message.conversation_id == str(conversation),
-            schema.Message.is_own.is_(True),
+        return await self._events(
+            self._relevant(schema.Message.conversation_id == str(conversation))
+            .order_by(*_OLDEST_FIRST)
         )
-        query = select(schema.Message).where(
-            schema.Message.conversation_id == str(conversation),
+
+    async def relevant_messages_in_channel(
+        self, provider: str, channel_id: str
+    ) -> list[InboundEvent]:
+        """The same filter, scoped to a whole channel rather than one
+        conversation.
+
+        A thread is its own conversation (see `friday.conversation`) — reading
+        by `conversation_id` alone would miss every reply happening inside one.
+        A channel-level summary needs everything under the channel, threads
+        included, which is what `channel_id` — a separate column every message
+        under it shares — gives directly.
+        """
+        return await self._events(
+            self._relevant(
+                schema.Message.provider == provider,
+                schema.Message.channel_id == channel_id,
+            ).order_by(*_OLDEST_FIRST)
+        )
+
+    def _relevant(self, *scope):
+        own = select(schema.Message.provider_message_id).where(
+            *scope, schema.Message.is_own.is_(True)
+        )
+        return select(schema.Message).where(
+            *scope,
             or_(
                 schema.Message.mention_type.is_not(None),
                 schema.Message.is_own.is_(True),
                 schema.Message.reply_to.in_(own),
             ),
         )
-        return await self._events(query.order_by(*_OLDEST_FIRST))
 
     async def page_messages(
         self, *, limit: int = 50, before: str | None = None

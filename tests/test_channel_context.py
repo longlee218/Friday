@@ -155,3 +155,26 @@ async def test_a_summary_is_written_only_once_the_conversation_is_large_enough(d
 
     await rebuilder.rebuild_all()
     assert store.load("100").derived["summary"] == "short conversation about checkout"
+
+
+async def test_a_summary_covers_the_channels_threads_too(db, tmp_path):
+    """A thread is its own conversation (`friday.conversation`), not part of
+    its parent channel — reading by conversation id alone would silently drop
+    every message inside one from the channel's summary."""
+    store = ContextStore(tmp_path)
+    store.init_channel("100")
+    promotion = Promotion(db=db)
+
+    rebuilder = ContextRebuilder(
+        store=store, db=db, promotion=promotion,
+        summary_config=SUMMARY_CONFIG, summary_share=0.5,
+        model=ScriptedModel([[assistant_message("checkout is broken")]]),
+    )
+    await db.record_message(make_event(
+        provider="discord", channel_id="100", thread_id="t1", message_id="m1",
+        text="x" * 300,
+    ))
+
+    await rebuilder.rebuild_all()
+
+    assert store.load("100").derived["summary"] == "checkout is broken"
