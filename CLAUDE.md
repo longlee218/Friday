@@ -56,6 +56,14 @@ uv run alembic upgrade head                                # apply to the real o
 uv run alembic current                                     # where this db is
 ```
 
+Migrations run **transactionally** (`transactional_ddl=True` in
+`migrations/env.py`). Alembic assumes SQLite cannot do DDL in a transaction;
+SQLite can, and the difference is not academic — a migration that added a
+column and then failed before stamping left the schema ahead of the version,
+and `alembic upgrade head` died on `duplicate column name` at every subsequent
+start. `run_agent.py` migrates before anything opens the database, so that is
+a boot loop, not a warning.
+
 **Always autogenerate against a freshly migrated throwaway database, never the
 live one.** `data/friday.db` was built by hand-written DDL before Alembic existed
 and then stamped, so reflecting it yields ~27 cosmetic differences — `TEXT` vs

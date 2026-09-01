@@ -97,6 +97,16 @@ def do_run_migrations(connection: Connection) -> None:
         target_metadata=target_metadata,
         render_as_batch=True,
         render_item=render_item,
+        # Alembic assumes SQLite cannot do DDL in a transaction. SQLite can,
+        # and the difference is not academic: a migration that added a column,
+        # then failed before stamping, left the schema ahead of the version
+        # and `upgrade head` died on `duplicate column name` at every
+        # subsequent start. The service runs this before anything opens the
+        # database, so that is a boot loop, not a warning.
+        #
+        # With this on, a migration either lands whole or leaves nothing
+        # behind, and the stamp cannot disagree with the schema.
+        transactional_ddl=True,
     )
 
     with context.begin_transaction():

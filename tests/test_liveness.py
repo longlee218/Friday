@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from conftest import captured, make_event
 from friday.conversation import ConversationId
 from friday.liveness import Heartbeat
@@ -49,3 +51,43 @@ async def test_it_reports_how_many_arrived_since_the_last_beat(inbox, provider, 
     await captured(inbox)
 
     assert "(+1)" in await beat.summary()
+
+
+async def test_the_daily_summary_survives_a_restart(db):
+    """The guard was an attribute, so every start of the process was a fresh
+    day: restart four times and the operator gets four "Alive." messages —
+    and with `capture_own_messages` on, four model calls classifying them. A
+    crash loop would have sent one per attempt.
+
+    SQLite is the only state store. The outbox row is already the record of
+    having said it, so the question is asked of the row.
+    """
+    from datetime import datetime, timezone
+
+    from friday.liveness import Liveness
+    from friday.outbox import Kind
+
+    noon = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+
+    def fresh_process():
+        return Liveness(db=db, gateway=SimpleNamespace(down_since=None))
+
+    await fresh_process()._summary(noon)
+    await fresh_process()._summary(noon)
+    await fresh_process()._summary(noon)
+
+    summaries = [r for r in await db.outbound() if r.kind == Kind.SUMMARY]
+    assert len(summaries) == 1, "a restart sent the day's summary again"
+
+
+async def test_a_new_day_is_summarised_again(db):
+    from datetime import datetime, timezone
+
+    from friday.liveness import Liveness
+    from friday.outbox import Kind
+
+    liveness = Liveness(db=db, gateway=SimpleNamespace(down_since=None))
+    await liveness._summary(datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc))
+    await liveness._summary(datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc))
+
+    assert len([r for r in await db.outbound() if r.kind == Kind.SUMMARY]) == 2

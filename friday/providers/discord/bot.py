@@ -77,8 +77,15 @@ class DiscordBot:
             content=_asking(row) if asking else _stuck(row, self._board_url),
             view=_Buttons(row.task_id, self.handle) if asking else None,
         )
-        log.info("%s the operator about task %d",
-                 "asked" if asking else "told", row.task_id)
+        # `%s`, not `%d`: an outbound row does not have to belong to a task.
+        # A liveness alert and the daily summary belong to none — there is a
+        # migration named for it — and `%d` on None raises inside logging,
+        # which prints a traceback for a message that was delivered fine.
+        log.info(
+            "%s the operator about %s",
+            "asked" if asking else "told",
+            f"task {row.task_id}" if row.task_id else f"{row.kind}, which has no task",
+        )
         return str(message.id)
 
     async def handle(self, custom_id: str, *, by: str) -> None:

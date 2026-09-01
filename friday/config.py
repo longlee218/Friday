@@ -184,9 +184,13 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
     # two are the same when run from the repository and are not the same in a
     # container, and the file that names it is the one it sits beside.
     persona_path = (raw.get("persona") or {}).get("file", "PERSONA.md")
+    # Debug, not info: `load_config` runs twice at startup — once from the
+    # Alembic environment for the database path, once by the composition root
+    # — so anything said here is said twice. What the operator needs to know
+    # about the persona is which agents took which mode, and that belongs in
+    # the startup summary, not here.
     persona = load_persona(path.parent / persona_path)
-    if len(persona):
-        log.info("persona loaded from %s", persona_path)
+    log.debug("persona: %d section(s) from %s", len(persona), persona_path)
 
     ingest = raw.get("ingest") or {}
     return Config(

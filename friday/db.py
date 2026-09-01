@@ -723,6 +723,26 @@ class Database:
                 )
             )
 
+    async def said_since(self, kind: str, *, since) -> bool:
+        """Whether a message of this kind has been queued since `since`.
+
+        For the things the system says about itself, which belong to no task
+        and so cannot be counted per task. The outbox row is the record of
+        having said something — the same reasoning as `announced` — and it is
+        the only record that survives a restart.
+        """
+        async with self._sessions() as session:
+            return bool(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(schema.Outbound)
+                    .where(
+                        schema.Outbound.kind == str(kind),
+                        schema.Outbound.created_at >= since,
+                    )
+                )
+            )
+
     async def last_outbound_at(self, task_id: int, *, kind: str):
         """When we last said this kind of thing about a task."""
         async with self._sessions() as session:

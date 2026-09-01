@@ -143,3 +143,26 @@ async def test_it_says_where_to_look():
     await bot.send(stuck())
 
     assert "localhost:8086" in recipient.sent[0]["content"]
+
+
+async def test_telling_the_operator_about_a_row_that_belongs_to_no_task(caplog):
+    """A liveness alert and the daily summary belong to no task — there is a
+    migration named for that. The log line rendered `row.task_id` with `%d`,
+    which raises inside logging on None: the message was delivered, and a
+    traceback was printed anyway. A traceback nobody can act on is how the
+    real ones stop being read."""
+    import logging
+
+    recipient = Recipient()
+    bot = DiscordBot("token", operator_id=OPERATOR, client=stub_client(recipient))
+    alert = Outbound(
+        id=4, task_id=None, conversation=ConversationId("discord", "999"),
+        kind=Kind.ALERT, sender="discord_bot", text="Alive. 27 messages held.",
+    )
+
+    with caplog.at_level(logging.INFO, logger="friday.providers.discord.bot"):
+        assert await bot.send(alert) == "555"
+
+    (line,) = [r.getMessage() for r in caplog.records]
+    assert "None" not in line
+    assert str(Kind.ALERT) in line

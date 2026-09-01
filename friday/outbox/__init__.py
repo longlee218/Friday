@@ -42,9 +42,15 @@ class Kind(StrEnum):
     #: The agent answering in the operator's name. The only kind that waits:
     #: the risk is in answering, not in asking.
     REPLY = "reply"
-    #: The system talking about itself: a connection that died, or a day's
-    #: summary. Belongs to no task.
+    #: The system talking about itself: a connection that died, or came back.
+    #: Belongs to no task.
     ALERT = "alert"
+    #: The once-a-day "still here, this is what I am holding". Its own kind
+    #: rather than an `ALERT`, because the two differ in the only way that
+    #: matters here: an outage is reported whenever it is true, and this is
+    #: reported once. Telling them apart is what lets the row itself answer
+    #: "was one sent today?" — and that question has to survive a restart.
+    SUMMARY = "summary"
     #: A task nobody can act on. Not a question — the operator is being told,
     #: because a task in a column nobody watches is the same as a lost one.
     HELP_WANTED = "help_wanted"

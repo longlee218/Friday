@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from friday.db import Database
 from friday.conversation import ConversationId
@@ -158,7 +158,6 @@ class Liveness:
         self._down_after = down_after_seconds
         self._summary_hour = summary_at_hour
         self._told_about: datetime | None = None
-        self._summarised_on: date | None = None
 
     async def check(self, *, now: datetime | None = None) -> None:
         now = now or datetime.now(timezone.utc)
@@ -188,23 +187,34 @@ class Liveness:
         )
 
     async def _summary(self, now: datetime) -> None:
+        """Once a day, and once a day across restarts.
+
+        The guard used to be an attribute, which meant every start of the
+        process was a fresh day: restart it four times and the operator gets
+        four "Alive." messages — and with `capture_own_messages` on, four
+        classifications of them. A crash loop would have sent one per attempt.
+
+        SQLite is the only state store, and the outbox row is already the
+        record of having said it. So the question is asked of the row.
+        """
         if self._summary_hour is None or now.hour < self._summary_hour:
             return
-        if self._summarised_on == now.date():
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if await self._db.said_since(Kind.SUMMARY, since=midnight):
             return
-        self._summarised_on = now.date()
         counts = await self._db.counts()
         tasks = sum(counts["tasks"].values())
         await self._say(
             f"Alive. {counts['messages']} messages held, {tasks} tasks, "
-            f"{counts['untriaged']} waiting to be looked at."
+            f"{counts['untriaged']} waiting to be looked at.",
+            kind=Kind.SUMMARY,
         )
 
-    async def _say(self, text: str) -> None:
+    async def _say(self, text: str, *, kind: Kind = Kind.ALERT) -> None:
         await self._db.queue_outbound(
             task_id=None,
             conversation=NOWHERE,
-            kind=Kind.ALERT,
+            kind=kind,
             sender=self._operator,
             text=text,
         )
