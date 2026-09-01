@@ -8,7 +8,7 @@ being asked of them gets told, without waiting for a person.
 
 **Blocked by:** 35 (tell the operator what they were asked)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## The line this ticket draws
 
@@ -52,15 +52,28 @@ draw on is not demoable.
 
 ## Acceptance criteria
 
-- [ ] The request for a missing detail draws on a skill when one covers that
+- [x] The request for a missing detail draws on a skill when one covers that
       detail, and the skill's content reaches the message
-- [ ] With no skill covering it, the ask is exactly what it is today — the
+- [x] With no skill covering it, the ask is exactly what it is today — the
       absence of knowledge is never filled in by the model
-- [ ] After the cap on re-asking, the task goes to the operator carrying the
+- [x] After the cap on re-asking, the task goes to the operator carrying the
       question, per ticket 35
-- [ ] A skill exists for finding a correlationId, written for the person being
+- [x] A skill exists for finding a correlationId, written for the person being
       asked rather than for the agent
-- [ ] The extra prompt cost is paid once, not per call: the catalogue is
+- [x] The extra prompt cost is paid once, not per call: the catalogue is
       already in the stable front of the prompt and this must not move it
-- [ ] A test proves that with the skill library empty the message is unchanged,
+- [x] A test proves that with the skill library empty the message is unchanged,
       and with it populated the guidance appears
+
+## What it came to
+
+The mechanism already existed — the responder had `fetch_skill` and the
+catalogue — so the ticket was one skill, one paragraph and one guard. Verified
+on the live provider, five samples each way:
+
+    no skill:    chưa trace được, em gửi anh correlationId hoặc cái curl em gọi nhé
+    with skill:  anh gửi mình correlationId nhé — nó nằm ở response header `x-request-id`
+
+No invented location without a skill; the skill's words with one. Ticket 41's
+stranger rule was found to hold about half the time while it lived only in the
+persona, and every time once restated beside the ask — so it lives in both.

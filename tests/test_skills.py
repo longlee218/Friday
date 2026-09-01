@@ -334,3 +334,30 @@ def test_something_unreadable_is_reported_rather_than_crashing_startup(tmp_path)
     assert len(library.problems) == 1
     assert "adir.md" in library.problems[0]
     assert "fine" in library, "one bad file stopped the good ones loading"
+
+
+# --- ticket 36: the ask explains itself, from a skill -----------------------
+
+
+def test_a_skill_written_for_the_reporter_exists_and_loads():
+    """The mechanism is only demoable with something to draw on. This one is
+    written for the person being asked — where the id is, what to send
+    instead — not for the agent."""
+    from pathlib import Path
+
+    from friday.agent.skills import SkillLibrary
+
+    library = SkillLibrary(Path(__file__).resolve().parents[1] / "skills").load()
+
+    assert library.problems == []
+    assert "where-to-find-a-correlation-id" in library
+    assert "x-request-id" in library.fetch("where-to-find-a-correlation-id")
+
+
+def test_the_responder_is_told_not_to_invent_a_location():
+    """With no skill covering it, the ask is exactly what it is today. The
+    guard is a sentence in the instructions; the live provider honoured it in
+    every sample, and the test pins the sentence so it does not quietly go."""
+    from friday.responder import INSTRUCTIONS
+
+    assert "If no skill covers it, ask plainly and add nothing" in INSTRUCTIONS

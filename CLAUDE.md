@@ -16,12 +16,12 @@ one is wrong, raise it rather than quietly building something else.
 Work is broken into tickets under `.scratch/discord-mention-triage/issues/`,
 derived from `docs/SPEC.md`. Tickets 01–17 and 23–27 and 29–33 are done; 07
 was superseded and reopened as 28, and 28 is now retired in favour of 32 and
-33. **Open: 18–20** — the board's own repo and its UI, deferred by choice — **35
-and 36**, and **37–41**. Everything from 34 on came out of watching real
-threads rather than reading code: the reporter replied and nothing could hear
-the answer, sent the details in a second message and nothing read it, asked
-what a correlationId is and nothing could explain, and the operator answered by
-hand while the agent went on asking. Each ticket names what blocks it; work the frontier.
+33. **Open: 18–20 only** — the board's own repo and its UI, deferred by choice.
+34–41 are done. All of them came out of watching real threads rather than
+reading code: the reporter replied and nothing could hear the answer, sent the
+details in a second message and nothing read it, asked what a correlationId is
+and nothing could explain, and the operator answered by hand while the agent
+went on asking. Each ticket names what blocks it; work the frontier.
 
 This line goes stale faster than anything else in this file. Check it against
 the `**Status:**` line in each ticket before trusting it.
@@ -245,6 +245,20 @@ not an implementation detail:
   degraded: it opens tasks with no parameters and asks the reporter for what
   they already said. `friday/extraction/`'s `EXTRACTS` and `PARAMS` must
   agree, and a test says so.
+- **The unit is a turn, not a message.** A mention opens a turn — everything
+  the same person goes on to say — and triage reads it once, when they have
+  been quiet for `turn_seconds` and are not typing, or somebody else spoke.
+  Turns are computed when read, never stored: when a message arrives it is not
+  yet known whether the turn is over.
+- **The operator's own message ends the work.** Their messages never create a
+  task and are always kept, because them answering is what closes one. The
+  task goes to `handled_by_operator` — not `done`, so it is reopenable and
+  countable — and everything queued about it is withdrawn.
+- **Four prompt families, no shared text.** Triage gets the messages; an
+  extractor gets the schema and the messages; a graph node gets its own
+  instructions and the Node persona; the responder and the composing node get
+  the Responder persona, the room's context, examples, conversation and task.
+  Escaping is the one shared piece, in one module, and a test says so.
 - **Silence is not approval.** Only a classification the operator marked
   *right* becomes a few-shot example, and only a classifiable type at that. An
   unmarked classification is one nobody read.
