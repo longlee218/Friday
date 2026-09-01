@@ -170,7 +170,9 @@ async def _run(stack: AsyncExitStack) -> None:
     # effect of importing, so a test can choose the path it exercises.
     from friday.dag.workflows import register_dags
 
-    register_dags(config, servers={s.name: s for s in servers})
+    register_dags(
+        config, servers={s.name: s for s in servers}, skills=skills
+    )
 
     promotion = Promotion(db=db)
     # Read once, at build time: a promotion takes effect on the next start
@@ -179,7 +181,7 @@ async def _run(stack: AsyncExitStack) -> None:
 
     responder_config = config.agents.get("responder")
     responder = (
-        Responder(config=responder_config, notes=learned)
+        Responder(config=responder_config, notes=learned, skills=skills)
         if config.workflows.use_responder and responder_config
         else None
     )

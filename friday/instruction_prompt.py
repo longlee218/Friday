@@ -206,16 +206,24 @@ def notes(text: str | None) -> Section:
 
 
 def skills(catalogue: list[str] | None) -> Section:
-    """Catalogue of skills the agent can fetch on demand.
+    """One line per skill: the name, and what it is for.
 
-    Ticket 24 will fill this with the real skill system. For now an empty
-    section is fine — agents that do not need skills see no skill block at
-    all.
+    Never the bodies. The agent reads this to decide whether any of them is
+    worth having, then calls `fetch_skill` for the one it wants — which is
+    what keeps a hundred skills affordable. A hundred descriptions is a page;
+    a hundred bodies is a context window.
+
+    An install with no skills gets no section at all, rather than a heading
+    with nothing under it.
     """
     if not catalogue:
         return Section("skills")
-    body = "\n".join(f"- {html.escape(name)}" for name in catalogue)
-    return Section("skills", body)
+    lines = [
+        "Call fetch_skill(name) to read one in full before acting on it.",
+        "",
+    ]
+    lines += [f"- {_escape(line)}" for line in catalogue]
+    return Section("skills", "\n".join(lines))
 
 
 def conversation(events: list[InboundEvent]) -> Section:

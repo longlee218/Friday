@@ -24,6 +24,7 @@ from dataclasses import dataclass
 
 from friday.config import AgentConfig
 from friday.harness import Harness
+from friday.skills import fetch_skill_tool
 from friday.models import InboundEvent
 
 __all__ = ["Draft", "Responder"]
@@ -52,9 +53,26 @@ class Draft:
 
 
 class Responder:
-    def __init__(self, *, config: AgentConfig, model=None, notes: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        config: AgentConfig,
+        model=None,
+        notes: str = "",
+        skills=None,
+    ) -> None:
+        #: The operator's written-down knowledge. The responder gets it
+        #: because how they write to their team is exactly the kind of thing
+        #: they write down — which technical words stay in English, how short
+        #: is short enough. Triage does not: it stops on its first tool call
+        #: by design, so a fetch there would end the run before it classified.
+        self._skills = skills
         self._run = Harness(
-            config=config, instructions=INSTRUCTIONS, model=model, notes=notes
+            config=config,
+            instructions=INSTRUCTIONS,
+            model=model,
+            notes=notes,
+            tools=[fetch_skill_tool(skills)] if skills is not None else [],
         )
 
     async def draft(
@@ -81,6 +99,7 @@ class Responder:
             task,
             tone_examples,
         )
+        from friday.instruction_prompt import skills as skills_section
 
         bundle = ContextBundle(
             identity=identity(
@@ -88,11 +107,19 @@ class Responder:
                 "You write chat replies as the watched account, in their voice.",
             ),
             base=base(datetime.now(timezone.utc)),
+            skills=skills_section(
+                self._skills.catalogue() if self._skills is not None else None
+            ),
             tone=tone_examples(list(tone)),
             conversation=conversation(list(context)),
             task=task("respond", None, asking),
         )
-        result = await self._run.run(bundle, calls=calls)
+        # Two extra turns when a skill can be fetched: the call and its
+        # answer both land before the reply is started, and without the room
+        # asking for a skill would mean never writing anything.
+        result = await self._run.run(
+            bundle, calls=calls, extra_turns=2 if self._skills is not None else 0
+        )
         if result is None:
             log.warning("falling back to the template")
             return None

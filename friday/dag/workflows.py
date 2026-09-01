@@ -34,7 +34,7 @@ _API_ISSUE_AGENTS = {
 }
 
 
-def agents_for_api_issue(config: Any) -> dict[str, Any]:
+def agents_for_api_issue(config: Any, skills: Any = None) -> dict[str, Any]:
     """Build one agent per node that has a configuration block.
 
     Instructions come from the graph module, so the prompt lives beside the
@@ -43,6 +43,7 @@ def agents_for_api_issue(config: Any) -> dict[str, Any]:
     """
     from friday.dag import api_issue as graph
     from friday.harness import Harness
+    from friday.skills import fetch_skill_tool
 
     instructions = {
         "read_logs": graph.READ_LOGS,
@@ -52,18 +53,53 @@ def agents_for_api_issue(config: Any) -> dict[str, Any]:
         "compose_reply": graph.COMPOSE,
     }
 
+    # The nodes that reason get the skill library; the ones that only call a
+    # tool do not. "How to trace a request" is written down for whoever is
+    # deciding what the logs mean, not for the thing fetching them.
+    reasoning = {"analyze_stack", "compose_reply"}
+
     built: dict[str, Any] = {}
     for node, block in _API_ISSUE_AGENTS.items():
         agent_config = config.agents.get(block)
         if agent_config is None:
             continue
+        tools = (
+            [fetch_skill_tool(skills)]
+            if skills is not None and node in reasoning
+            else []
+        )
         built[node] = Harness(
-            config=agent_config, instructions=instructions[node]
+            config=agent_config,
+            instructions=instructions[node] + _skills_block(skills, node, reasoning),
+            tools=tools,
         )
     return built
 
 
-def register_dags(config: Any, *, servers: dict[str, Any] | None = None) -> None:
+def _skills_block(skills: Any, node: str, reasoning: set[str]) -> str:
+    """The catalogue, appended to a reasoning node's instructions.
+
+    In the instructions rather than the per-call bundle because it is the
+    stable part: the same list every call, so it costs one cache entry rather
+    than one per task.
+    """
+    if skills is None or node not in reasoning or not len(skills):
+        return ""
+    lines = [
+        "",
+        "",
+        "Skills you can read in full with fetch_skill(name):",
+    ]
+    lines += [f"- {line}" for line in skills.catalogue()]
+    return "\n".join(lines)
+
+
+def register_dags(
+    config: Any,
+    *,
+    servers: dict[str, Any] | None = None,
+    skills: Any = None,
+) -> None:
     """Register every graph this build knows about.
 
     Idempotent: re-registering the same task type replaces it rather than
@@ -73,7 +109,7 @@ def register_dags(config: Any, *, servers: dict[str, Any] | None = None) -> None
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", build_api_issue_dag())
 
-    agents = agents_for_api_issue(config)
+    agents = agents_for_api_issue(config, skills)
     if agents:
         log.info("api_issue graph: agents for %s", ", ".join(sorted(agents)))
     else:

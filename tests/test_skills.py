@@ -218,3 +218,90 @@ def test_the_tool_is_bound_to_one_library(tmp_path):
     assert tool.name == "fetch_skill"
     # The description is what the model reads to decide whether to call it.
     assert "skill" in (tool.description or "").lower()
+
+
+# --- the wiring: reaching an agent, not just sitting on disk ----------------
+
+
+def _library(tmp_path):
+    write(tmp_path, "trace.md", SKILL)
+    return SkillLibrary(tmp_path).load()
+
+
+def test_the_responder_is_given_the_catalogue_and_the_tool(tmp_path):
+    """Loading the library and never handing it to anyone is the failure this
+    guards: the ticket's promise is that an agent can *reach* a skill, not
+    that the files parse."""
+    from friday.config import AgentConfig
+    from friday.responder import Responder
+
+    cfg = AgentConfig(
+        name="responder",
+        api_key="sk-x",
+        base_url="https://example.invalid/v1",
+        model="m",
+    )
+
+    responder = Responder(config=cfg, skills=_library(tmp_path))
+
+    assert [t.name for t in responder._run.agent.tools] == ["fetch_skill"]
+
+
+def test_the_responder_without_skills_carries_no_tool():
+    from friday.config import AgentConfig
+    from friday.responder import Responder
+
+    cfg = AgentConfig(
+        name="responder",
+        api_key="sk-x",
+        base_url="https://example.invalid/v1",
+        model="m",
+    )
+
+    assert Responder(config=cfg)._run.agent.tools == []
+
+
+def test_the_catalogue_reaches_the_prompt_the_responder_builds(tmp_path):
+    from friday.instruction_prompt import skills as skills_section
+
+    rendered = skills_section(_library(tmp_path).catalogue()).render()
+
+    assert "trace-a-request" in rendered
+    assert "fetch_skill" in rendered
+    # The body stays out. That is the whole economy of the thing.
+    assert "Query the log store" not in rendered
+
+
+def test_only_the_reasoning_nodes_of_a_graph_get_skills(tmp_path):
+    """"How to trace a request" is written down for whoever decides what the
+    logs mean, not for the thing fetching them."""
+    from types import SimpleNamespace
+
+    from friday.config import AgentConfig
+    from friday.dag.workflows import agents_for_api_issue
+
+    def block(name):
+        return AgentConfig(
+            name=name,
+            api_key="sk-x",
+            base_url="https://example.invalid/v1",
+            model="m",
+        )
+
+    config = SimpleNamespace(
+        agents={
+            "dag_read_logs": block("read"),
+            "dag_analyze": block("analyze"),
+            "dag_compose": block("compose"),
+        }
+    )
+
+    agents = agents_for_api_issue(config, _library(tmp_path))
+
+    assert [t.name for t in agents["analyze_stack"].agent.tools] == ["fetch_skill"]
+    assert [t.name for t in agents["compose_reply"].agent.tools] == ["fetch_skill"]
+    assert agents["read_logs"].agent.tools == []
+    # And the catalogue is in the reasoning node's instructions, where it is
+    # the same every call.
+    assert "trace-a-request" in agents["analyze_stack"].agent.instructions
+    assert "trace-a-request" not in agents["read_logs"].agent.instructions
