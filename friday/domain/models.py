@@ -157,6 +157,10 @@ class DocQuestionParams:
     doc_ref: str | None = None
 
 
+#: Note there is no `SkipParams`. A skip opens no task, so it has no
+#: parameters to carry — triage says `skip` and the message is recorded as
+#: having been looked at. There was one, holding a `reason`, until triage
+#: stopped producing anything but a type and a confidence.
 Params = ApiIssueParams | AccessRequestParams | DocQuestionParams
 
 
