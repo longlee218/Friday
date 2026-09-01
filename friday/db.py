@@ -881,6 +881,100 @@ class Database:
                 )
             )
 
+    # ---- what the operator said about a classification -------------------
+
+    async def record_verdict(
+        self,
+        *,
+        provider: str,
+        provider_message_id: str,
+        mark: str,
+        by: str,
+    ) -> None:
+        """Record that the operator marked this classification right or wrong.
+
+        Upserted, so changing their mind replaces rather than accumulates.
+        Marking the same thing twice leaves one row saying what they currently
+        think, which is the only thing anything downstream wants to know.
+        """
+        statement = insert(schema.Verdict).values(
+            provider=provider,
+            provider_message_id=provider_message_id,
+            mark=mark,
+            marked_by=by,
+            marked_at=_now(),
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[
+                        schema.Verdict.provider,
+                        schema.Verdict.provider_message_id,
+                    ],
+                    set_={
+                        "mark": statement.excluded.mark,
+                        "marked_by": statement.excluded.marked_by,
+                        "marked_at": statement.excluded.marked_at,
+                    },
+                )
+            )
+
+    async def clear_verdict(
+        self, *, provider: str, provider_message_id: str
+    ) -> None:
+        """The operator took the mark back. The row goes with it.
+
+        Deleted rather than recorded as a third state, because "unmarked" and
+        "never marked" mean the same thing to everything downstream: nobody
+        is vouching for this one.
+        """
+        async with self._sessions.begin() as session:
+            await session.execute(
+                delete(schema.Verdict).where(
+                    schema.Verdict.provider == provider,
+                    schema.Verdict.provider_message_id == provider_message_id,
+                )
+            )
+
+    async def verdict_for(
+        self, *, provider: str, provider_message_id: str
+    ) -> tuple[str, str] | None:
+        """The mark and who left it, or None if nobody has."""
+        async with self._sessions() as session:
+            row = await session.get(
+                schema.Verdict, (provider, provider_message_id)
+            )
+            return (row.mark, row.marked_by) if row else None
+
+    async def confirmed_classifications(
+        self, *, limit: int = 20
+    ) -> list[tuple[str, str]]:
+        """Message text and the type it was marked *right* as, newest first.
+
+        The join is the guarantee: only a classification the operator marked
+        right appears here. One they never looked at is absent, and so cannot
+        become an example the classifier learns its own habits from.
+        """
+        async with self._sessions() as session:
+            rows = await session.execute(
+                select(schema.Message.text, schema.Message.decision_type)
+                .join(
+                    schema.Verdict,
+                    (schema.Verdict.provider == schema.Message.provider)
+                    & (
+                        schema.Verdict.provider_message_id
+                        == schema.Message.provider_message_id
+                    ),
+                )
+                .where(
+                    schema.Verdict.mark == "right",
+                    schema.Message.decision_type.is_not(None),
+                )
+                .order_by(schema.Verdict.marked_at.desc())
+                .limit(limit)
+            )
+            return [(text, kind) for text, kind in rows]
+
     # ---- workflow graph state -------------------------------------------
 
     async def save_dag_state(

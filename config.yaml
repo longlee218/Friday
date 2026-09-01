@@ -159,3 +159,22 @@ ingest:
 
     # # ── Group chat ──
     # - "1536991232931135488"
+
+# ── Triage examples ────────────────────────────────────────────────────────
+# Classifications you wrote by hand. These are used whether or not anything
+# has been marked in Discord — a fresh install has nothing marked, and waiting
+# for the first reaction before the classifier sees any example is a worse
+# start than none.
+#
+# The other source is what you marked ✅ on in Discord. Nothing else: a
+# classification you never looked at is one nobody read, and an agent that
+# learns from its own unreviewed output drifts with no floor.
+#
+#   ✅ ☑️ 👍  — that was right, use it as an example
+#   ❌ ✖️ 👎  — that was wrong
+#   remove the reaction to take the mark back
+triage_examples: []
+  # - "the checkout api is 500ing on prod": api_issue
+  # - "can I get write access to the payments repo": access_request
+  # - "where's the spec for the refund flow": doc_question
+  # - "anyone want lunch": skip

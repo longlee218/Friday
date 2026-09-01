@@ -127,6 +127,11 @@ class Config:
     outbox: OutboxConfig = field(default_factory=OutboxConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     mcp_servers: tuple[MCPServerConfig, ...] = ()
+    #: Classifications the operator wrote by hand, as `(message, task type)`.
+    #: Used whether or not anything has been marked in Discord — a fresh
+    #: install has nothing marked, and waiting for the first reaction before
+    #: the classifier sees any example at all is a worse start than none.
+    triage_examples: tuple[tuple[str, str], ...] = ()
     #: How often to say the process is alive and what it is holding. A
     #: working agent on a quiet day is otherwise indistinguishable from a
     #: dead one.
@@ -203,6 +208,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
         ),
         keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
         mcp_servers=_mcp_servers(_expand(raw.get("mcp_servers") or {})),
+        triage_examples=_triage_examples(raw.get("triage_examples") or []),
         database_path=raw.get("database_path", "./data/friday.db"),
         ingest=IngestConfig(
             # Coerced to str: an unquoted id in YAML parses as an int and
@@ -302,3 +308,34 @@ def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
             )
         )
     return tuple(servers)
+
+
+def _triage_examples(raw) -> tuple[tuple[str, str], ...]:
+    """Hand-written classifications, as `(message, task type)` pairs.
+
+    Written as a list of one-key mappings so the file reads as examples
+    rather than as configuration:
+
+        triage_examples:
+          - "the checkout api is 500ing": api_issue
+          - "can I get access to the payments repo": access_request
+
+    A malformed entry is refused rather than skipped. An example the operator
+    believes they wrote, and which silently is not there, is worse than a
+    startup that says which line is wrong.
+    """
+    examples: list[tuple[str, str]] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict) or len(entry) != 1:
+            raise ConfigError(
+                f"triage_examples[{index}] should be one 'message: task_type' "
+                f"pair, got {entry!r}"
+            )
+        (message, kind), = entry.items()
+        if not isinstance(message, str) or not isinstance(kind, str):
+            raise ConfigError(
+                f"triage_examples[{index}]: both the message and the task "
+                f"type must be text, got {entry!r}"
+            )
+        examples.append((message, kind))
+    return tuple(examples)

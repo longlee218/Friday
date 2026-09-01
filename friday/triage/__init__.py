@@ -176,10 +176,22 @@ class Triage:
     `response_format: json_schema` outright.
     """
 
-    def __init__(self, *, config: AgentConfig, model=None) -> None:
+    def __init__(
+        self,
+        *,
+        config: AgentConfig,
+        model=None,
+        examples: Sequence[tuple[str, str]] = (),
+    ) -> None:
+        #: Message text and the type it was classified as, for the ones the
+        #: operator marked right plus any they wrote by hand. Read once at
+        #: build time: they go at the front of the instructions, which is the
+        #: stable part, and a list that changed per call would cost the cache
+        #: hit on everything after it.
+        self._examples = tuple(examples)
         self._run = Harness(
             config=config,
-            instructions=INSTRUCTIONS,
+            instructions=INSTRUCTIONS + _examples_block(examples),
             tools=TOOLS,
             model=model,
             context_type=_Capture,
@@ -265,3 +277,19 @@ def _hygiene(params: Params, text: str) -> Params:
         for f in fields(params)
     }
     return type(params)(**cleaned)
+
+
+def _examples_block(examples: Sequence[tuple[str, str]]) -> str:
+    """Past classifications the operator vouched for, as few-shot examples.
+
+    Empty when nobody has vouched for anything, which is the state a fresh
+    install is in and the state it stays in until somebody reacts. That is
+    deliberate: an example nobody looked at teaches the classifier its own
+    habits, and the drift has no floor because every generation of examples
+    is drawn from the last one's output.
+    """
+    if not examples:
+        return ""
+    lines = ["", "", "Past messages, and what they turned out to be:"]
+    lines += [f"  {text!r} -> {kind}" for text, kind in examples]
+    return "\n".join(lines)

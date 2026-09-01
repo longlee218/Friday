@@ -1,0 +1,54 @@
+"""The operator saying a classification was right, or wrong.
+
+The agent may interrupt them for two things: it needs help, and it wants a
+reply approved. Judging a classification is neither. A notification per
+classification is one they would answer fifty times a day and then stop
+reading — at which point the signal is dead and the examples keep growing
+from things nobody looked at.
+
+So the signal is one they give when they feel like it. A reaction is already
+how people say things on Discord, it arrives over a connection that is
+already open, and it costs nothing when unused.
+
+**Silence is not approval.** This is the fourth place in this system where an
+agent would otherwise learn from its own unreviewed output — after the voice
+it writes in, the observations it records, and the facts it might extract.
+Only a classification marked *right* becomes an example. One that was never
+marked is one nobody read.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+__all__ = ["EMOJI", "Mark", "mark_for"]
+
+
+class Mark(StrEnum):
+    """What the operator said. A closed set — there is no "maybe"."""
+
+    RIGHT = "right"
+    WRONG = "wrong"
+
+
+#: Which reaction means what. Two obvious ones rather than a configurable
+#: set: the operator has to remember these without looking them up, and
+#: anything they have to look up they will not use.
+EMOJI: dict[str, Mark] = {
+    "✅": Mark.RIGHT,
+    "☑️": Mark.RIGHT,
+    "👍": Mark.RIGHT,
+    "❌": Mark.WRONG,
+    "✖️": Mark.WRONG,
+    "👎": Mark.WRONG,
+}
+
+
+def mark_for(emoji: str) -> Mark | None:
+    """The mark this reaction means, or None if it means nothing to us.
+
+    Unrecognised reactions are ignored in silence. People react to messages
+    for their own reasons, and a system that answered every one of them would
+    be reading intent into a shrug.
+    """
+    return EMOJI.get(emoji.strip())

@@ -6,7 +6,7 @@ marked, never from what they simply have not looked at.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 The agent may interrupt the operator for exactly two things: it needs help, and it
 wants a reply approved. Judging a classification is neither, and a notification per
@@ -23,9 +23,9 @@ would otherwise learn from its own unreviewed output — after the voice it writ
 the observations it records, and the facts it might extract. Only a classification
 marked *right* becomes an example. One that was never marked is one nobody read.
 
-- [ ] The operator can mark a classification wrong, and can mark one right, from Discord
-- [ ] Marking one has no effect on the message it concerns — nothing is re-sent or undone
-- [ ] What was marked, by whom and when is recorded
-- [ ] Examples given to the classifier come only from ones marked right, never from ones merely unmarked
-- [ ] The operator can supply examples by hand, and those are used whether or not anything has been marked
-- [ ] Marking the same thing twice, or unmarking, leaves a sensible record rather than a duplicate
+- [x] The operator can mark a classification wrong, and can mark one right, from Discord
+- [x] Marking one has no effect on the message it concerns — nothing is re-sent or undone
+- [x] What was marked, by whom and when is recorded
+- [x] Examples given to the classifier come only from ones marked right, never from ones merely unmarked
+- [x] The operator can supply examples by hand, and those are used whether or not anything has been marked
+- [x] Marking the same thing twice, or unmarking, leaves a sensible record rather than a duplicate

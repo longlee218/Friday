@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, String, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Base", "Conversation", "Cursor", "DagState", "Message", "ModelCall", "Note", "Observation", "Outbound", "Task"]
+__all__ = ["Base", "Conversation", "Cursor", "DagState", "Message", "ModelCall", "Note", "Observation", "Outbound", "Task", "Verdict"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -106,6 +106,29 @@ class Task(Base):
     #: joins this rather than each caller checking it.
     approved_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
     approved_by: Mapped[str | None]
+
+
+class Verdict(Base):
+    """What the operator said about one classification.
+
+    One row per message, replaced when they change their mind and deleted
+    when they take the mark back — so the table says what they currently
+    think rather than accumulating a history of reactions nobody reads.
+
+    Its absence is the important state: a classification nobody marked is
+    one nobody read, and it is never used as an example. Silence is not
+    approval.
+    """
+
+    __tablename__ = "verdicts"
+
+    provider: Mapped[str] = mapped_column(primary_key=True)
+    provider_message_id: Mapped[str] = mapped_column(primary_key=True)
+    #: "right" or "wrong". A closed set; see `friday.verdicts.Mark`.
+    mark: Mapped[str]
+    #: Who marked it, as the platform names them.
+    marked_by: Mapped[str]
+    marked_at: Mapped[datetime] = mapped_column(IsoDateTime)
 
 
 class DagState(Base):

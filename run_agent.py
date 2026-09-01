@@ -99,9 +99,40 @@ async def _run(stack: AsyncExitStack) -> None:
 
     provider = DiscordUserProvider(token=token)
     inbox = Inbox(provider=provider, db=db, config=config.ingest)
+
+    async def marked(*, provider_message_id: str, mark, by: str) -> None:
+        """The operator reacted to a classification. Record it; change nothing.
+
+        Marking one has no effect on the message it concerns — nothing is
+        re-sent, nothing is undone. It only decides whether that
+        classification is ever shown back to the classifier as an example.
+        """
+        if mark is None:
+            await db.clear_verdict(
+                provider=provider.name, provider_message_id=provider_message_id
+            )
+            return
+        await db.record_verdict(
+            provider=provider.name,
+            provider_message_id=provider_message_id,
+            mark=str(mark),
+            by=by,
+        )
+
+    provider.on_verdict = marked
+
+    # Read once, at build time. Examples belong in the stable front of the
+    # prompt, and a list that changed per call would cost the cache hit on
+    # everything after it — a mark made now takes effect on the next start.
+    examples = list(config.triage_examples) + await db.confirmed_classifications(
+        limit=int(triage_config.options.get("examples", 8))
+    )
+    if examples:
+        log.info("triage: %d example(s) the operator vouched for", len(examples))
+
     runner = TriageRunner(
         db=db,
-        triage=Triage(config=triage_config),
+        triage=Triage(config=triage_config, examples=examples),
         confidence_threshold=float(
             triage_config.options.get("confidence_threshold", 0.7)
         ),

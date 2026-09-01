@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import discord_self
 
@@ -11,6 +11,7 @@ from friday.conversation import ConversationId
 from friday.models import InboundEvent, Outbound
 from friday.providers import CredentialRejected
 from friday.providers.discord.normalise import normalise
+from friday.verdicts import mark_for
 
 __all__ = ["DiscordUserProvider", "is_credential_rejected"]
 
@@ -48,6 +49,14 @@ class DiscordUserProvider:
         self._client.on_ready = self._handle_ready
         self._client.on_resumed = self._handle_resumed
         self._client.on_disconnect = self._handle_disconnect
+        self._client.on_reaction_add = self._handle_reaction_add
+        self._client.on_reaction_remove = self._handle_reaction_remove
+
+    #: Called with `(provider_message_id, mark, by)` when the operator marks a
+    #: classification, and with `mark=None` when they take the mark back.
+    #: Set by the composition root; a provider that stored this itself would
+    #: be the only one reaching past the inbox into the database.
+    on_verdict: Callable[..., object] | None = None
 
     async def _handle_disconnect(self) -> None:
         """The library fires this on every reconnection attempt, so the first
@@ -68,6 +77,43 @@ class DiscordUserProvider:
         log.info("discord session resumed")
         self.down_since = None
         self.reconnected.set()
+
+    async def _handle_reaction_add(self, reaction, user) -> None:
+        """The operator saying a classification was right, or wrong.
+
+        Only the watched account's own reactions count. Anyone else in the
+        channel reacting to a message is reacting for their own reasons, and
+        reading their thumbs-up as a judgement on our classification would be
+        putting words in their mouth.
+        """
+        await self._verdict(reaction, user, taking_back=False)
+
+    async def _handle_reaction_remove(self, reaction, user) -> None:
+        """They took the mark back. Absence is the state that matters."""
+        await self._verdict(reaction, user, taking_back=True)
+
+    async def _verdict(self, reaction, user, *, taking_back: bool) -> None:
+        if self.on_verdict is None:
+            return
+        me = self._client.user
+        if me is None or getattr(user, "id", None) != me.id:
+            return
+
+        mark = mark_for(str(getattr(reaction, "emoji", "")))
+        if mark is None:
+            return  # a reaction that means nothing to us means nothing to us
+
+        message_id = str(reaction.message.id)
+        log.info(
+            "operator marked %s as %s", message_id, "unmarked" if taking_back else mark
+        )
+        result = self.on_verdict(
+            provider_message_id=message_id,
+            mark=None if taking_back else mark,
+            by=str(user),
+        )
+        if hasattr(result, "__await__"):
+            await result
 
     async def _handle_message(self, message) -> None:
         me = self._client.user
