@@ -23,6 +23,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from friday.config import AgentConfig
+from friday.agent.persona import Family
 from friday.agent.harness import Harness
 from friday.agent.skills import fetch_skill_tool
 from friday.domain.models import Params, InboundEvent
@@ -43,6 +44,9 @@ The `params` section is what this task actually knows. It is the truth about
 this request; the conversation is a whole channel and may hold values from
 somebody else's. Never say we have something the params show as null, and never
 say what you will do next — you are asking a question, not making a promise.
+
+Sections named channel_overrides, channel_derived and channel_base describe the
+room you are writing in; where they disagree, that is their order of precedence.
 
 Do not address anyone by @-mention. The message is posted as a reply to
 theirs, so it is already attached to them.
@@ -68,7 +72,16 @@ class Responder:
         settings = config.agents.get("responder")
         if not (config.workflows.use_responder and settings):
             return None
-        built = cls(config=settings, notes=notes, skills=skills)
+        built = cls(
+            config=settings,
+            notes=notes,
+            skills=skills,
+            persona=(
+                config.persona.render(Family.RESPONDER)
+                if getattr(config, "persona", None)
+                else ""
+            ),
+        )
         log.info(
             "responder on %s — its drafts need approval before they go out",
             settings.model,
@@ -82,6 +95,7 @@ class Responder:
         model=None,
         notes: str = "",
         skills=None,
+        persona: str = "",
     ) -> None:
         #: How many of the operator's real messages to show as tone examples.
         #: The responder's knob, read where the responder is built — the
@@ -95,7 +109,7 @@ class Responder:
         self._skills = skills
         self._run = Harness(
             config=config,
-            instructions=INSTRUCTIONS,
+            instructions=(f"{persona}\n\n" if persona else "") + INSTRUCTIONS,
             model=model,
             notes=notes,
             tools=[fetch_skill_tool(skills)] if skills is not None else [],
@@ -130,17 +144,12 @@ class Responder:
             ContextBundle,
             base,
             conversation,
-            identity,
             task,
             tone_examples,
         )
         from friday.agent.instruction_prompt import skills as skills_section
 
         bundle = ContextBundle(
-            identity=identity(
-                "responder",
-                "You write chat replies as the watched account, in their voice.",
-            ),
             base=base(datetime.now(timezone.utc)),
             skills=skills_section(
                 self._skills.catalogue() if self._skills is not None else None

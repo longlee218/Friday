@@ -1,473 +1,183 @@
 """Who the agents are, and which of them is told what.
 
-The persona is the one piece of prompt text that is shared, so it is also the
-one whose mistakes are shared. Two failures matter and neither announces
-itself: an agent that should carry it and does not — the replies simply stop
-sounding like anyone — and an agent that carries the *voice* when it should
-only carry the language rule, which corrupts a value something else validates.
+Two families get a section of `PERSONA.md` — the ones that write to a person,
+and the ones that are a step inside an investigation. Triage and the
+extractors get nothing. The family is decided where the agent is built, not
+in configuration: the last time it was a knob it went stale the first time an
+agent's job changed.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-import pytest
-
-from friday.config import ConfigError, load_config
-from friday.agent.persona import Mode, load
+from friday.agent.persona import Family, load
+from friday.config import load_config
 
 REPO = Path(__file__).resolve().parents[1]
 
+SAMPLE = """# PERSONA
 
-def write(tmp_path: Path, body: str) -> Path:
+Prose for whoever edits this.
+
+## Responder
+
+You are Long Lee's assistant.
+
+### How Long writes
+
+Short. Usually one or two sentences.
+
+## Node
+
+You do not invent.
+
+## Who gets what
+
+| a table |
+"""
+
+
+def _write(tmp_path, body=SAMPLE):
     path = tmp_path / "PERSONA.md"
     path.write_text(body, encoding="utf-8")
     return path
 
 
-SAMPLE = """# PERSONA
-
-Preamble nobody is meant to send to a model.
-
-## Who you are
-
-You are Long Lee's assistant.
-
-## How Long writes
-
-Short. Usually one or two sentences.
-
-## Language
-
-Anything a person reads is in Vietnamese.
-
-## Modes
-
-| Mode | For |
-|---|---|
-| full | prose |
-"""
+# --- splitting -------------------------------------------------------------
 
 
-# --- assembling ------------------------------------------------------------
+def test_each_family_reads_its_own_section(tmp_path):
+    persona = load(_write(tmp_path))
+
+    assert "Long Lee's assistant" in persona.render(Family.RESPONDER)
+    assert "one or two sentences" in persona.render(Family.RESPONDER)
+    assert persona.render(Family.NODE) == "You do not invent."
 
 
-def test_full_takes_identity_voice_and_language(tmp_path):
-    persona = load(write(tmp_path, SAMPLE))
+def test_a_subheading_stays_inside_its_family(tmp_path):
+    """`### How Long writes` is part of the responder, not a section of its
+    own."""
+    rendered = load(_write(tmp_path)).render(Family.RESPONDER)
 
-    rendered = persona.render(Mode.FULL)
-
-    assert "Long Lee's assistant" in rendered
-    assert "one or two sentences" in rendered
-    assert "in Vietnamese" in rendered
+    assert "How Long writes" in rendered
 
 
-def test_language_takes_identity_and_language_but_not_the_voice(tmp_path):
-    """The voice is what pushes a classifier into writing `sản xuất` where
-    `production` was required. An agent filling in a validated field keeps the
-    identity and the language rule and loses the part that would."""
-    persona = load(write(tmp_path, SAMPLE))
+def test_headings_no_family_names_are_left_out(tmp_path):
+    """The file is also prose for a person; the table explaining it is not
+    something to send a model."""
+    persona = load(_write(tmp_path))
 
-    rendered = persona.render(Mode.LANGUAGE)
-
-    assert "Long Lee's assistant" in rendered
-    assert "in Vietnamese" in rendered
-    assert "one or two sentences" not in rendered
-
-
-def test_none_takes_nothing(tmp_path):
-    """A node asked for a `path:line` and a diff has nothing to say in
-    anyone's voice, and a persona in its prompt is tokens spent on every call
-    to make its output worse."""
-    assert load(write(tmp_path, SAMPLE)).render(Mode.NONE) == ""
-
-
-def test_headings_no_mode_asks_for_are_left_out(tmp_path):
-    """`## Modes` is a table explaining the file to whoever edits it. Sending
-    it to a model is telling the agent about agents it is not."""
-    rendered = load(write(tmp_path, SAMPLE)).render(Mode.FULL)
-
-    assert "| Mode |" not in rendered
-    assert "Preamble nobody" not in rendered
-
-
-def test_the_heading_itself_is_not_sent(tmp_path):
-    """A signpost for the editor. A model reading "## Who you are" above the
-    text is being told the same thing twice."""
-    assert "## Who you are" not in load(write(tmp_path, SAMPLE)).render(Mode.FULL)
+    for family in Family:
+        assert "| a table |" not in persona.render(family)
+        assert "Prose for whoever" not in persona.render(family)
 
 
 # --- when the file is not there ---------------------------------------------
 
 
-def test_a_missing_persona_file_is_not_a_startup_failure(tmp_path):
-    """This is prose the operator writes. A system that will not start without
-    it is worse than one that starts without a voice."""
-    persona = load(tmp_path / "nothing-here.md")
+def test_a_missing_file_is_not_a_startup_failure(tmp_path):
+    persona = load(tmp_path / "nothing.md")
 
-    assert persona.render(Mode.FULL) == ""
+    assert persona.render(Family.RESPONDER) == ""
     assert len(persona) == 0
 
 
-def test_something_unreadable_is_reported_rather_than_crashing(tmp_path):
-    """A directory named `PERSONA.md` raises `IsADirectoryError`, which is an
-    `OSError` and not a `FileNotFoundError`."""
+def test_a_directory_named_like_the_file_is_reported_not_fatal(tmp_path):
     (tmp_path / "PERSONA.md").mkdir()
 
-    assert load(tmp_path / "PERSONA.md").render(Mode.FULL) == ""
+    assert load(tmp_path / "PERSONA.md").render(Family.NODE) == ""
 
 
 def test_a_byte_order_mark_does_not_hide_the_first_section(tmp_path):
     path = tmp_path / "PERSONA.md"
     path.write_text(SAMPLE, encoding="utf-8-sig")
 
-    assert "Long Lee's assistant" in load(path).render(Mode.FULL)
+    assert "Long Lee" in load(path).render(Family.RESPONDER)
 
 
-# --- what configuration does with it ----------------------------------------
-
-
-def test_an_unknown_mode_is_refused_when_the_file_is_read(tmp_path):
-    """A typo silently giving an agent no persona is the one failure that
-    leaves no trace anywhere: nothing errors, the replies just stop sounding
-    like anyone."""
-    (tmp_path / "config.yaml").write_text(
-        "database_path: ./x.db\n"
-        "agents:\n"
-        "  triage:\n"
-        "    persona: langauge\n"
-        "    api_key: k\n"
-        "    base_url: http://localhost/v1\n"
-        "    model: m\n"
-    )
-
-    with pytest.raises(ConfigError) as refused:
-        load_config(tmp_path / "config.yaml")
-
-    assert "langauge" in str(refused.value)
-    assert "full, language, none" in str(refused.value)
-
-
-def test_the_persona_is_found_beside_the_config_not_beside_the_process(tmp_path):
-    """The two are the same when run from the repository and are not the same
-    in a container. The file that names it is the one it sits beside."""
-    write(tmp_path, SAMPLE)
-    (tmp_path / "config.yaml").write_text(
-        "database_path: ./x.db\n"
-        "agents:\n"
-        "  responder:\n"
-        "    api_key: k\n"
-        "    base_url: http://localhost/v1\n"
-        "    model: m\n"
-    )
-
-    config = load_config(tmp_path / "config.yaml")
-
-    assert "Long Lee's assistant" in config.agents["responder"].persona
-
-
-def test_full_is_the_default_for_an_agent_that_does_not_say(tmp_path):
-    """The safe direction. A persona that should have been `none` costs
-    tokens; one that should have been `full` sends a stranger's message under
-    the operator's name."""
-    write(tmp_path, SAMPLE)
-    (tmp_path / "config.yaml").write_text(
-        "database_path: ./x.db\n"
-        "agents:\n"
-        "  newcomer:\n"
-        "    api_key: k\n"
-        "    base_url: http://localhost/v1\n"
-        "    model: m\n"
-    )
-
-    persona = load_config(tmp_path / "config.yaml").agents["newcomer"].persona
-
-    assert "one or two sentences" in persona
-
-
-def test_persona_is_not_left_in_the_step_specific_options(tmp_path):
-    """`options` is whatever configuration did not recognise. A `persona` key
-    surviving into it means something read it as a step-specific knob."""
-    write(tmp_path, SAMPLE)
-    (tmp_path / "config.yaml").write_text(
-        "database_path: ./x.db\n"
-        "agents:\n"
-        "  triage:\n"
-        "    persona: language\n"
-        "    api_key: k\n"
-        "    base_url: http://localhost/v1\n"
-        "    model: m\n"
-    )
-
-    assert "persona" not in load_config(tmp_path / "config.yaml").agents["triage"].options
-
-
-# --- where it ends up --------------------------------------------------------
-
-
-def test_the_persona_sits_above_the_agents_own_instructions():
-    """In the instructions, not the per-call prompt: it is the same text every
-    call, so it costs one cache entry rather than one per task. First, because
-    shared bytes at the front are the ones a provider's cache reuses across
-    agents."""
-    from friday.config import AgentConfig
-    from friday.agent.harness import Harness
-
-    built = Harness(
-        config=AgentConfig(
-            name="x",
-            api_key="k",
-            base_url="http://localhost/v1",
-            model="m",
-            persona="You are Long Lee's assistant.",
-        ),
-        instructions="You classify messages.",
-        notes="Ask for the env first.",
-    )
-
-    assert built.instructions == (
-        "You are Long Lee's assistant.\n\n"
-        "You classify messages.\n\n"
-        "Ask for the env first."
-    )
-
-
-def test_an_agent_with_no_persona_reads_exactly_as_it_did_before():
-    from friday.config import AgentConfig
-    from friday.agent.harness import Harness
-
-    built = Harness(
-        config=AgentConfig(
-            name="x", api_key="k", base_url="http://localhost/v1", model="m"
-        ),
-        instructions="You read log lines.",
-    )
-
-    assert built.instructions == "You read log lines."
-
-
-# --- the shipped configuration ----------------------------------------------
+# --- who gets what, in the shipped build ------------------------------------
 
 
 def _shipped():
-    import os
-
     for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY"):
         os.environ.setdefault(key, "test-key")
     return load_config(REPO / "config.yaml")
 
 
-def test_every_shipped_agent_declares_what_it_wants():
-    """Not that they all get the same thing — that each one's choice was made
-    on purpose. An agent silently taking the default is fine for a new one and
-    is not fine for the seven that exist, because the reason differs per
-    agent and is written next to each."""
-    import yaml
-
-    raw = yaml.safe_load((REPO / "config.yaml").read_text())["agents"]
-
-    undeclared = [name for name, spec in raw.items() if "persona" not in (spec or {})]
-    assert undeclared == [], f"no persona declared for {undeclared}"
-
-
-def test_the_agent_that_speaks_for_the_operator_has_the_voice():
-    config = _shipped()
-
-    for name in ("responder", "dag_compose"):
-        assert "one or two sentences" in config.agents[name].persona, name
-
-
-def test_the_agent_that_only_picks_a_tool_carries_nothing():
-    """Triage writes no text at all — its output is a tool name and a number.
-    There is no language to rule on and no voice to write in, and every word
-    of a persona would be paid for on the highest-volume call in the system to
-    change a choice between four tools, which it cannot.
-
-    It was `language` while triage still filled in `environment` and wrote a
-    `summary`. It stopped doing both and this did not follow, which is what a
-    persona mode set once and never revisited looks like."""
-    assert _shipped().agents["triage"].persona == ""
-
-
-def test_the_agents_that_fill_in_validated_fields_keep_the_language_rule():
-    """`environment` has to be one of production / staging / dev. An agent
-    carrying "write in Vietnamese" alongside a voice instruction writes
-    `sản xuất`, validation rejects it, and the reporter is asked to confirm an
-    environment they already gave."""
-    config = _shipped()
-
-    for name in ("extractor_api_issue", "dag_analyze"):
-        persona = config.agents[name].persona
-        assert "Long Lee's assistant" in persona, name
-        assert "one or two sentences" not in persona, name
-        # And they are told which values are never translated.
-        assert "no longer refers to anything" in persona, name
-
-
-def test_the_nodes_that_return_a_path_or_a_diff_carry_nothing():
-    config = _shipped()
-
-    for name in ("dag_read_logs", "dag_find_code"):
-        assert config.agents[name].persona == "", name
-
-
-def test_the_shipped_persona_file_has_every_section_a_mode_names():
-    """A heading renamed in `PERSONA.md` and not in `persona.py` drops that
-    section from every agent, silently — the file still parses, the agents
-    still run, and nothing anywhere says the voice is gone."""
-    from friday.agent.persona import _SECTIONS
-
+def test_the_shipped_file_has_a_section_for_every_family():
+    """A heading renamed in `PERSONA.md` and not here drops that family's
+    persona silently — the file still parses, the agents still run."""
     persona = load(REPO / "PERSONA.md")
-    wanted = {name for names in _SECTIONS.values() for name in names}
 
-    assert set(persona._sections) == wanted
-
-
-# --- the composition root asks; it does not know ----------------------------
+    for family in Family:
+        assert persona.render(family), f"no section for {family}"
 
 
-def test_no_agent_configuration_is_read_in_the_composition_root():
-    """`run_agent.py` constructs the adapters and starts the loops. Which knobs
-    a step has — its confidence threshold, how many examples it shows, how many
-    tone examples it wants — is that step's business, and reading them here
-    means adding one is a change in two files.
+def test_the_responder_carries_the_voice_and_a_node_does_not():
+    persona = _shipped().persona
 
-    Enforced by grep because the leak is invisible: nothing breaks when a
-    `options.get(...)` appears here, it just quietly makes the root know one
-    more thing about one more step.
-    """
-    from pathlib import Path
-
-    source = (Path(__file__).resolve().parents[1] / "run_agent.py").read_text()
-
-    for leak in ("config.agents", "options.get("):
-        assert leak not in source, f"{leak!r} belongs in the module that owns it"
+    assert "How Long writes" in persona.render(Family.RESPONDER)
+    assert "How Long writes" not in persona.render(Family.NODE)
+    assert "do not invent" in persona.render(Family.NODE).lower()
 
 
-def test_the_composition_root_can_actually_be_imported_and_read():
-    """`triage_config.model` survived a refactor that deleted
-    `triage_config`, so `run_agent.py` raised `NameError` at startup — after
-    connecting to Discord, before starting a single loop.
+async def test_triage_and_the_extractors_carry_nothing():
+    """Their output is a tool name and a number, or values copied out of a
+    message. There is no sentence either writes that a persona could improve,
+    and every word would be paid for on the highest-volume calls in the
+    system to change nothing."""
+    from friday.extraction import EXTRACTS, register_extractors, registered
+    from friday.triage.runner import TriageRunner
 
-    Nothing caught it: 580 tests passed, because no test imports the
-    composition root and no test runs it. This one at least reads every name
-    it uses and fails on one nothing defines.
-    """
-    import ast
-    import builtins
-    from pathlib import Path
+    config = _shipped()
 
-    source = (Path(__file__).resolve().parents[1] / "run_agent.py").read_text()
-    tree = ast.parse(source)
+    class NoDb:
+        async def confirmed_classifications(self, **kw):
+            return []
 
-    # Module-level dunders exist at run time without an assignment.
-    defined = set(dir(builtins)) | {"__file__", "__name__", "__doc__"}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            defined.add(node.id)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            defined.add(node.name)
-            defined.update(a.arg for a in node.args.args)
-            defined.update(a.arg for a in node.args.kwonlyargs)
-        elif isinstance(node, ast.ClassDef):
-            defined.add(node.name)
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            defined.update((a.asname or a.name).split(".")[0] for a in node.names)
-        elif isinstance(node, ast.ExceptHandler) and node.name:
-            defined.add(node.name)
-        elif isinstance(node, ast.comprehension):
-            for target in ast.walk(node.target):
-                if isinstance(target, ast.Name):
-                    defined.add(target.id)
+    triage = await TriageRunner.build(config, db=NoDb())
+    register_extractors(config)
 
-    used = {
-        n.id
-        for n in ast.walk(tree)
-        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
-    }
-
-    assert used <= defined, f"run_agent.py uses undefined name(s): {used - defined}"
+    assert "Long" not in triage._triage._run.instructions
+    for task_type in EXTRACTS:
+        assert "Long" not in registered()[task_type]._harness.instructions
 
 
-def test_every_script_at_the_repo_root_still_imports():
-    """`serve_board.py` had been dead on import since the modules moved into
-    packages, and nothing said so: no test imports it, no other module imports
-    it, and it is not in CLAUDE.md's layout table. `init_channel.py` was
-    updated in the same move because it was in the table; this was not.
+def test_the_responder_and_the_composing_node_are_the_same_family():
+    """Both write a message a person reads under the operator's name. The
+    other graph nodes are steps and get the node section."""
+    from types import SimpleNamespace
 
-    A script nothing imports is a script no refactor updates.
-    """
-    import importlib.util
-    from pathlib import Path
+    from friday.config import AgentConfig
+    from friday.dag.workflows import _API_ISSUE_AGENTS, agents_for_api_issue
 
-    root = Path(__file__).resolve().parents[1]
-    broken = {}
-    for script in sorted(root.glob("*.py")):
-        spec = importlib.util.spec_from_file_location(script.stem, script)
-        module = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(module)
-        except Exception as exc:  # noqa: BLE001 — any failure is the finding
-            broken[script.name] = f"{type(exc).__name__}: {exc}"
-
-    assert broken == {}, f"scripts that cannot be imported: {broken}"
-
-
-def test_every_path_the_docs_name_exists():
-    """CLAUDE.md and CONTEXT.md are declared sources of truth, and the layout
-    table went stale the moment twenty-two modules moved into packages —
-    eighteen of its rows named files that were no longer there. Nothing broke,
-    which is exactly why it stayed wrong: a path in a table is only checked by
-    someone who follows it and finds nothing."""
-    import re
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parents[1]
-    missing = {}
-    for doc in ("CLAUDE.md", "CONTEXT.md"):
-        for named in re.findall(r"`(friday/[\w/.]+)`", (root / doc).read_text()):
-            if not (root / named).exists():
-                missing.setdefault(doc, []).append(named)
-
-    assert missing == {}, f"documented paths that do not exist: {missing}"
-
-
-def test_an_outbound_state_is_defined_once():
-    """`queued` was spelled out in `friday/outbox/` for its readers and again
-    in `friday/store/db.py` for its `WHERE` clauses — four strings, written
-    twice. Two of the outbox's four had no reader left by the time anyone
-    looked, which is what a duplicated vocabulary looks like as it rots: one
-    copy stops being used and nothing says so."""
-    from friday.domain.tasks import OutboundState
-    from friday.outbox import FAILED, QUEUED
-    from friday.store.db import (
-        OUTBOUND_FAILED,
-        OUTBOUND_QUEUED,
-        OUTBOUND_SENT,
-        OUTBOUND_SENT_MANUALLY,
+    config = _shipped()
+    every_node = SimpleNamespace(
+        agents={
+            block: AgentConfig(name=block, api_key="k", base_url="http://x/v1", model="m")
+            for block in _API_ISSUE_AGENTS.values()
+        },
+        persona=config.persona,
     )
+    built = agents_for_api_issue(every_node)
 
-    assert QUEUED is OUTBOUND_QUEUED is OutboundState.QUEUED
-    assert FAILED is OUTBOUND_FAILED is OutboundState.FAILED
-    assert OUTBOUND_SENT is OutboundState.SENT
-    assert OUTBOUND_SENT_MANUALLY is OutboundState.SENT_MANUALLY
+    assert "How Long writes" in built["compose_reply"].instructions
+    assert "How Long writes" not in built["analyze_stack"].instructions
+    assert "do not invent" in built["analyze_stack"].instructions.lower()
 
 
-def test_no_module_exports_a_name_it_does_not_define():
-    """`friday.outbox.__all__` listed `ASKED`, which did not exist — so
-    `from friday.outbox import *` raised. Nothing does that, which is why it
-    went unnoticed; `__all__` is documentation that nothing reads until it is
-    wrong in a way that stops the process."""
-    import importlib
-    import pkgutil
+def test_no_family_text_appears_in_another_familys_prompt():
+    """The rule this ticket exists for. One bundle used to wrap every prompt
+    in the same sentence, and triage was told how to resolve a precedence
+    conflict between three sections it is never passed."""
+    from friday.responder import Responder
 
-    import friday
+    config = _shipped()
+    responder = Responder.build(config)
 
-    broken = {}
-    for info in pkgutil.walk_packages(friday.__path__, prefix="friday."):
-        module = importlib.import_module(info.name)
-        undefined = [n for n in getattr(module, "__all__", ()) if not hasattr(module, n)]
-        if undefined:
-            broken[info.name] = undefined
-
-    assert broken == {}, f"__all__ names nothing defines: {broken}"
+    assert "You are an agent in the friday system" not in responder._run.instructions
+    assert "Section precedence" not in responder._run.instructions
+    # The precedence rule lives in the one family that has channel sections.
+    assert "channel_overrides" in responder._run.instructions

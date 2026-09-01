@@ -5,7 +5,7 @@ is there because a different agent needed it.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why
 
@@ -52,15 +52,29 @@ escaping to it. Four copies would be four chances for one to forget.
 
 ## Acceptance criteria
 
-- [ ] Each family's prompt is assembled by something that knows only that
+- [x] Each family's prompt is assembled by something that knows only that
       family; no closing line, identity or section reaches an agent that has no
       use for it
-- [ ] `PERSONA.md` is organised by family rather than by mode, and the one
+- [x] `PERSONA.md` is organised by family rather than by mode, and the one
       sentence that is genuinely common — *you are not Long, and everything you
       write goes out under his name* — is written once
-- [ ] `persona: full | language | none` is gone from `config.yaml`
-- [ ] Values that reach a prompt are still escaped at one seam, and a test
+- [x] `persona: full | language | none` is gone from `config.yaml`
+- [x] Values that reach a prompt are still escaped at one seam, and a test
       fails if a second renderer appears
-- [ ] A test prints all four prompts and asserts no family's text appears in
+- [x] A test prints all four prompts and asserts no family's text appears in
       another's
-- [ ] Triage's prompt contains nothing about sections, channels or voice
+- [x] Triage's prompt contains nothing about sections, channels or voice
+
+## What it came to
+
+| | before | after |
+|---|---|---|
+| triage prompt | 2030 chars, 79% persona | 418 chars, the job and the examples |
+| shared wrapper | every agent | none |
+| `persona:` in config | per agent, three modes | gone |
+| `PERSONA.md` | three modes cutting across jobs | two families: Responder, Node |
+
+Escaping stays in one module, and a grep test fails if a second one appears.
+The precedence sentence for the channel sections moved into the responder's
+own instructions — the one family that receives them. `dag_compose` will need
+it too once ticket 40 hands it the sections.

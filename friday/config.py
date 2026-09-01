@@ -65,12 +65,6 @@ class AgentConfig:
     #: confidence threshold for triage or the tone-example count for the
     #: responder.
     options: dict[str, Any] = field(default_factory=dict)
-    #: Who this agent is, before it is told what its job is. The same text for
-    #: every agent that asked for the same mode, stamped here rather than
-    #: threaded through every construction site: `Harness` already receives
-    #: this object, and the alternative is a new argument on the responder, on
-    #: every extractor, and on every graph node.
-    persona: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +138,9 @@ class Config:
     #: install has nothing marked, and waiting for the first reaction before
     #: the classifier sees any example at all is a worse start than none.
     triage_examples: tuple[tuple[str, str], ...] = ()
+    #: `PERSONA.md`, read once. Each builder asks for its family's section;
+    #: which family an agent is in is decided there, not here.
+    persona: Any = None
     #: Words that keep a message away from the model. The operator adds to
     #: this as they notice things, so it is a line in `config.yaml` and a
     #: restart rather than a commit.
@@ -183,22 +180,16 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
 
     from friday.agent.persona import load as load_persona
 
-    # Read before the agents, because every one of them is stamped with it.
-    # Relative to the configuration file, not to the working directory: the
-    # two are the same when run from the repository and are not the same in a
-    # container, and the file that names it is the one it sits beside.
+    # Relative to the configuration file, not the working directory: the two
+    # differ in a container, and the file that names it is the one it sits
+    # beside.
     persona_path = (raw.get("persona") or {}).get("file", "PERSONA.md")
-    # Debug, not info: `load_config` runs twice at startup — once from the
-    # Alembic environment for the database path, once by the composition root
-    # — so anything said here is said twice. What the operator needs to know
-    # about the persona is which agents took which mode, and that belongs in
-    # the startup summary, not here.
     persona = load_persona(path.parent / persona_path)
-    log.debug("persona: %d section(s) from %s", len(persona), persona_path)
 
     ingest = raw.get("ingest") or {}
     return Config(
-        agents=_agents(_expand(raw.get("agents") or {}), persona),
+        agents=_agents(_expand(raw.get("agents") or {})),
+        persona=persona,
         workflows=WorkflowConfig(
             max_asks=int((raw.get("workflows") or {}).get("max_asks", 3)),
             debounce_seconds=float(
@@ -289,7 +280,7 @@ def _expand(value: Any) -> Any:
     return value
 
 
-def _agents(raw: dict[str, Any], persona: "Persona | None" = None) -> dict:
+def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
     agents = {}
     for name, spec in raw.items():
         spec = dict(spec or {})
@@ -306,30 +297,9 @@ def _agents(raw: dict[str, Any], persona: "Persona | None" = None) -> dict:
             settings=spec.pop("settings", None) or {},
             max_turns=int(spec.pop("max_turns", 1)),
             context_window=int(spec.pop("context_window", 128_000)),
-            persona=_persona_for(name, spec.pop("persona", "full"), persona),
             options=spec,  # whatever is left is step-specific
         )
     return agents
-
-
-def _persona_for(agent: str, mode: Any, persona: "Persona | None") -> str:
-    """Resolve one agent's `persona:` setting into the text it will carry.
-
-    The mode is validated here, when the file is read, rather than where it is
-    used. A typo silently giving an agent no persona is the one failure that
-    leaves no trace anywhere — nothing errors, the replies just stop sounding
-    like anyone.
-    """
-    from friday.agent.persona import Mode
-
-    try:
-        wanted = Mode(str(mode))
-    except ValueError as exc:
-        known = ", ".join(m.value for m in Mode)
-        raise ConfigError(
-            f"Agent {agent!r} has persona: {mode!r}. Known modes: {known}"
-        ) from exc
-    return persona.render(wanted) if persona is not None else ""
 
 
 def _mention_type(value: str) -> MentionType:

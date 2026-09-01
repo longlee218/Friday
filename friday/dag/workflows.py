@@ -38,6 +38,16 @@ _API_ISSUE_AGENTS = {
 def agents_for_api_issue(
     config: Any, skills: Any = None, servers: dict[str, Any] | None = None
 ) -> dict[str, Any]:
+    from friday.agent.persona import Family
+
+    def persona(node: str) -> str:
+        # Only compose_reply writes to a person; everything else is a step.
+        if getattr(config, "persona", None) is None:
+            return ""
+        family = Family.RESPONDER if node == "compose_reply" else Family.NODE
+        text = config.persona.render(family)
+        return f"{text}\n\n" if text else ""
+
     """Build one agent per node that has a configuration block.
 
     Instructions come from the graph module, so the prompt lives beside the
@@ -77,7 +87,8 @@ def agents_for_api_issue(
         mcp = [available[wanted]] if wanted in available else []
         built[node] = Harness(
             config=agent_config,
-            instructions=instructions[node]
+            instructions=persona(node)
+            + instructions[node]
             + (_skills_block(skills) if wants_skills else ""),
             tools=tools,
             mcp_servers=mcp,

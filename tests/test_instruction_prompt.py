@@ -24,7 +24,6 @@ from friday.agent.instruction_prompt import (
     channel_derived,
     channel_overrides,
     conversation,
-    identity,
     notes,
     skills,
     task,
@@ -123,12 +122,12 @@ def test_two_renders_with_only_conversation_changed_share_a_prefix():
     """Two calls that differ only in the conversation share a byte-identical
     prefix up to the conversation section. This is the cache hit."""
     bundle1 = ContextBundle(
-        identity=identity("triage", "you triage mentions"),
+        base=base(datetime(2026, 9, 2, tzinfo=timezone.utc)),
         conversation=conversation(_events(["a", "b"])),
         task=task("api_issue", None, None),
     )
     bundle2 = ContextBundle(
-        identity=identity("triage", "you triage mentions"),
+        base=base(datetime(2026, 9, 2, tzinfo=timezone.utc)),
         conversation=conversation(_events(["a", "b", "c", "d"])),
         task=task("api_issue", None, None),
     )
@@ -146,7 +145,7 @@ def test_two_renders_with_only_conversation_changed_share_a_prefix():
 def test_the_same_bundle_rendered_twice_is_byte_identical():
     """The deterministic property: no time-of-day, no random IDs, no
     thread-locals leak into the prompt."""
-    bundle = ContextBundle(identity=identity("triage", "you triage"))
+    bundle = ContextBundle(task=task("classify", None, None))
     assert bundle.render() == bundle.render()
 
 
@@ -285,7 +284,6 @@ def test_a_missing_channel_context_renders_empty_sections():
     it are empty - no opening or closing tag, since an empty body
     contributes nothing."""
     bundle = ContextBundle(
-        identity=identity("triage", "you triage"),
         channel_base=channel_base(None),
         channel_derived=channel_derived(None),
         channel_overrides=channel_overrides(None),
@@ -310,7 +308,6 @@ def test_a_three_layer_channel_context_is_split_by_provenance():
         overrides={"tone": "terse"},
     )
     bundle = ContextBundle(
-        identity=identity("triage", "you triage"),
         base=base(datetime(2026, 9, 1, tzinfo=timezone.utc)),
         channel_base=channel_base(ctx),
         channel_derived=channel_derived(ctx),

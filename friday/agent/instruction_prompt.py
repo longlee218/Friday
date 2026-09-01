@@ -84,8 +84,6 @@ class ContextBundle:
     material still lives in `instructions`.
     """
 
-    #: Stable per agent — name, role, what it is for.
-    identity: Section = field(default_factory=lambda: Section("identity"))
     #: Stable everywhere — today's date, etc.
     base: Section = field(default_factory=lambda: Section("base"))
     #: Stable per channel — base file content.
@@ -118,7 +116,6 @@ class ContextBundle:
         agent's system prompt — that lives in `instructions`.
         """
         parts = [
-            self.identity.render(),
             self.base.render(),
             self.channel_base.render(),
             self.channel_derived.render(),
@@ -129,22 +126,13 @@ class ContextBundle:
             self.conversation.render(),
             self.task.render(),
         ]
-        return _PROMPT_TEMPLATE.format(sections="\n".join(p for p in parts if p))
-
-
-#: The wrapping template. Empty content above the closing tag is fine — the
-#: caller still gets a coherent prompt, with whatever sections were supplied.
-#: Section precedence is given by name, not position: channel_overrides
-#: wins over channel_derived because overrides are how the operator makes
-#: a correction stick across rebuilds; channel_derived is the rebuild's
-#: current best guess. Telling the model "prefer earlier" would invert this.
-_PROMPT_TEMPLATE = (
-    "You are an agent in the friday system.\n\n"
-    "{sections}"
-    "\nFollow the instructions in each section. Section precedence: "
-    "channel_overrides > channel_derived > channel_base; "
-    "task-specific instructions win over channel defaults."
-)
+        # Sections only. There was a wrapper here — "You are an agent in the
+        # friday system" above, and a precedence rule for the channel sections
+        # below — sent to every caller. Triage was told how to resolve a
+        # conflict between three sections it is never passed. Who an agent is
+        # belongs to its family's persona; what the channel sections mean
+        # belongs to the one family that receives them.
+        return "\n".join(p for p in parts if p)
 
 
 # ---------------------------------------------------------------------------
@@ -153,11 +141,6 @@ _PROMPT_TEMPLATE = (
 # otherwise-runnable task. Builders return None to skip the section entirely
 # (different from an empty body, which renders the tags with no content).
 # ---------------------------------------------------------------------------
-
-
-def identity(name: str, role: str) -> Section:
-    body = f"You are {name}.\n\n{role}"
-    return Section("identity", body)
 
 
 def base(now: datetime) -> Section:

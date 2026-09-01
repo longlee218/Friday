@@ -153,10 +153,10 @@ async def test_run_accepts_a_context_bundle():
     """Ticket 27 widens the seam: a bundle's rendered string is the prompt,
     and nothing else about the call changes. Plain string still works."""
     from agents.testing import ScriptedModel, assistant_message
-    from friday.agent.instruction_prompt import ContextBundle, identity, notes
+    from friday.agent.instruction_prompt import ContextBundle, notes, task
 
     bundle = ContextBundle(
-        identity=identity("triage", "you triage mentions"),
+        task=task("classify", None, None),
         notes=notes(None),  # empty section, no body
     )
     h = harness([assistant_message("done")])

@@ -2,28 +2,10 @@
 database_path: ./data/friday.db
 
 # ── Persona ────────────────────────────────────────────────────────────────
-# Who every agent is, before it is told what its job is. Prose rather than
-# YAML, because it is a page of writing meant to be read and edited as writing.
-# Resolved relative to this file, so a container that mounts both finds it.
-#
-# Each agent below declares how much of it to take, with `persona:`:
-#
-#   full      identity + how Long writes + language.  Its output is prose a
-#             person reads.
-#   language  identity + language, without the voice.  It fills in structured
-#             fields, some of which are free text.
-#   none      nothing.  It returns a path, a log line or a diff.
-#
-# `language` is not caution: triage fills in `environment` through a tool call
-# and `friday/validation.py` requires it to be one of production / staging /
-# dev. An agent carrying "write in Vietnamese" writes `sản xuất`, validation
-# rejects it, and the reporter is asked to confirm an environment they already
-# gave. See `## Modes` in PERSONA.md.
-#
-# The default is `full`, so a new agent is in the operator's voice unless
-# someone says otherwise — the safe direction, since a persona that should
-# have been `none` costs tokens, and one that should have been `full` sends a
-# stranger's message under their name.
+# Who every agent is, before it is told its job. Prose, because it is a page of
+# writing meant to be edited as writing. Which agents get which section is
+# decided where each agent is built — it is not a knob, and the last time it
+# was one it went stale the first time an agent's job changed.
 persona:
   file: PERSONA.md
 
@@ -45,14 +27,6 @@ agents:
   # high-volume path needs the better model here, which inverts the usual
   # assumption — do not 'optimise' this down without re-running the probe.
   triage:
-    # Nothing. Its output is a tool name and a number — it writes no text at
-    # all, so there is no language to rule on and no voice to write in. Every
-    # word of a persona here is paid for on the highest-volume call in the
-    # system to change a choice between four tools, which it cannot.
-    #
-    # It was `language` while triage still filled in `environment` and wrote a
-    # `summary`. It stopped doing both, and this line did not follow.
-    persona: none
     api_key: ${TRIAGE_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"
@@ -70,10 +44,6 @@ agents:
   # Runs only on tasks that reached a reply. Low volume, and the output goes out
   # under your name — worth a better model and some warmth.
   responder:
-    # The one agent whose output goes out under Long's name. Real examples of
-    # his replies are supplied per call and outrank the written description —
-    # PERSONA.md says so itself.
-    persona: full
     api_key: ${RESPONDER_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"
@@ -97,9 +67,6 @@ agents:
   # it gets wrong. Cheap models on purpose: the job is copying values out of
   # text, not reasoning.
   extractor_api_issue:
-    # Copies values out of the reporter's message. Same reasoning as triage:
-    # a translated `environment` is a value that no longer validates.
-    persona: language
     api_key: ${TRIAGE_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"
@@ -108,7 +75,6 @@ agents:
     max_turns: 1
 
   extractor_access_request:
-    persona: language
     api_key: ${TRIAGE_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"
@@ -117,7 +83,6 @@ agents:
     max_turns: 1
 
   extractor_doc_question:
-    persona: language
     api_key: ${TRIAGE_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"
@@ -140,8 +105,6 @@ agents:
   # Fetches log lines for one request. Tool work, not reasoning — the cheap
   # model, and `max_turns` high enough to page through a query.
   dag_read_logs:
-    # Returns log lines verbatim. Nobody reads its output but the next node.
-    persona: none
     api_key: ${TRIAGE_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"
@@ -151,8 +114,6 @@ agents:
 
   # Follows a stack trace to the file and line it names. Also tool work.
   dag_find_code:
-    # Returns `path:line` and ten lines of source.
-    persona: none
     api_key: ${TRIAGE_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"
@@ -164,10 +125,6 @@ agents:
   # The one node whose answer decides whether code gets changed — temperature 0,
   # and worth the better model when there is one.
   dag_analyze:
-    # Answers in JSON, but `cause` is one sentence a person reads on the board
-    # and in the reply. Language, not voice — the voice belongs to whoever
-    # writes the message, which is dag_compose.
-    persona: language
     api_key: ${RESPONDER_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"
@@ -180,7 +137,6 @@ agents:
   # default. It needs the `source` server as well.
   # dag_fix:
   #   # Returns a diff, or the words CANNOT FIX.
-  #   persona: none
   #   api_key: ${RESPONDER_API_KEY}
   #   base_url: "https://api.minimax.io/v1"
   #   model: "MiniMax-M3"
@@ -190,8 +146,6 @@ agents:
 
   # Writes what goes back to the reporter. The draft still needs approval.
   dag_compose:
-    # Writes the message the reporter reads. Same standing as the responder.
-    persona: full
     api_key: ${RESPONDER_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"
@@ -281,7 +235,7 @@ ingest:
   # TESTING ONLY. Lets you trigger the pipeline by tagging yourself.
   # Must be false once the agent can reply as you (ticket 06), or it will
   # answer its own messages forever.
-  capture_own_messages: false
+  capture_own_messages: true
 
   # How often the recovery sweep runs, in seconds. It also runs immediately
   # whenever the connection comes back.
