@@ -387,3 +387,27 @@ def test_the_composition_root_can_actually_be_imported_and_read():
     }
 
     assert used <= defined, f"run_agent.py uses undefined name(s): {used - defined}"
+
+
+def test_every_script_at_the_repo_root_still_imports():
+    """`serve_board.py` had been dead on import since the modules moved into
+    packages, and nothing said so: no test imports it, no other module imports
+    it, and it is not in CLAUDE.md's layout table. `init_channel.py` was
+    updated in the same move because it was in the table; this was not.
+
+    A script nothing imports is a script no refactor updates.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    broken = {}
+    for script in sorted(root.glob("*.py")):
+        spec = importlib.util.spec_from_file_location(script.stem, script)
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except Exception as exc:  # noqa: BLE001 — any failure is the finding
+            broken[script.name] = f"{type(exc).__name__}: {exc}"
+
+    assert broken == {}, f"scripts that cannot be imported: {broken}"

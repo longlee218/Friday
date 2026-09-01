@@ -147,3 +147,72 @@ def test_a_string_where_a_list_belongs_is_refused():
 
     with pytest.raises(ConfigError, match="list of words"):
         _sensitive_words("lương")
+
+
+# --- the wiring, not just the function ---------------------------------------
+
+
+def _discord_message(text: str, *, files=()):
+    """The shape `normalise` reads, with nothing it does not read."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id=1,
+        content="",
+        clean_content=text,
+        author=SimpleNamespace(id=9, display_name="dana"),
+        created_at=datetime.now(timezone.utc),
+        mentions=[],
+        role_mentions=[],
+        channel=SimpleNamespace(id=5),
+        guild=None,
+        reference=None,
+        attachments=[
+            SimpleNamespace(filename=name, content_type=kind) for name, kind in files
+        ],
+    )
+
+
+def test_the_provider_actually_calls_the_transform():
+    """Both halves were removed from `normalise` and the whole suite still
+    passed. Every test here drove `transform()` directly, so the layer was
+    covered and its one call site was not — which is the only part that
+    decides whether any of it runs.
+    """
+    from friday.providers.discord.normalise import normalise
+
+    event = normalise(
+        _discord_message("API lỗi nè 😭😭   anh xem giúp em với  "),
+        me_id=9,
+        my_role_ids=frozenset(),
+    )
+
+    assert event.text == "API lỗi nè anh xem giúp em với"
+
+
+def test_the_provider_carries_the_code_it_found():
+    from friday.providers.discord.normalise import normalise
+
+    event = normalise(
+        _discord_message("lỗi rồi\n```\ncurl -X GET /pay\n```"),
+        me_id=9,
+        my_role_ids=frozenset(),
+    )
+
+    assert event.code == ("curl -X GET /pay",)
+    assert "curl -X GET /pay" in event.text
+
+
+def test_the_provider_names_the_attachments():
+    """They were dropped here, at this exact call, and nowhere else."""
+    from friday.providers.discord.normalise import normalise
+
+    event = normalise(
+        _discord_message("cái này nè", files=[("error.png", "image/png")]),
+        me_id=9,
+        my_role_ids=frozenset(),
+    )
+
+    assert event.attachments[0].filename == "error.png"
+    assert "[attached: error.png (image/png)]" in event.text

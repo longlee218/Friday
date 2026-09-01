@@ -12,10 +12,10 @@ import asyncio
 import uvicorn
 from dotenv import load_dotenv
 
-from friday.api import bind, build_api
+from friday.ops.api import bind, build_api
 from friday.board import build_board
 from friday.config import load_config
-from friday.db import Database
+from friday.store.db import Database
 
 
 async def main() -> None:

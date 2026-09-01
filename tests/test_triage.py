@@ -131,28 +131,54 @@ def test_no_triage_tool_asks_for_anything_but_confidence():
 
 
 class NeverCalled(Model):
-    """A model that fails the test if it is reached."""
+    """A model that records being reached, and refuses to answer.
+
+    It **counts** rather than only raising, and the difference is the whole
+    reason this class is written down. Raising looks like it fails the test —
+    it does not: `Harness` turns any failure into `None`, and the caller turns
+    that into `NeedsHuman`, which is the *same outcome the prefilter produces*.
+    A test asserting only on the outcome cannot tell "held before the call"
+    from "sent, and the provider exploded", and the whole point of the
+    prefilter is which of those two happened.
+
+    Verified: with `Sensitive.found` stubbed to `return None`, eight tests here
+    still passed and this was reached eight times.
+    """
+
+    def __init__(self) -> None:
+        self.reached = 0
 
     async def get_response(self, *a, **kw):
+        self.reached += 1
         raise AssertionError("the model was called")
 
     def stream_response(self, *a, **kw):
+        self.reached += 1
         raise AssertionError("the model was called")
 
 
 WORDS = Sensitive(["lương", "thưởng", "salary", "bonus", "mật khẩu", "xin api key"])
 
 
-def guarded() -> Triage:
-    """A triage whose model fails the test if it is reached."""
-    return Triage(config=CONFIG, model=NeverCalled(), sensitive=WORDS)
+def guarded() -> tuple[Triage, NeverCalled]:
+    """A triage and the model it must not reach. Both are returned, because
+    the outcome alone does not say whether it was reached."""
+    model = NeverCalled()
+    return Triage(config=CONFIG, model=model, sensitive=WORDS), model
 
 
 async def test_a_sensitive_message_never_reaches_the_model():
     """The harm is in the sending, so the decision is made before the call —
-    by a rule a persuasive message cannot argue with."""
-    outcome = await decide(guarded(), "lương tháng này về chưa")
+    by a rule a persuasive message cannot argue with.
 
+    Asserted on the *model*, not on the outcome. The outcome is `NeedsHuman`
+    either way: that is what the prefilter produces, and it is also what a
+    failed call produces."""
+    triage, model = guarded()
+
+    outcome = await decide(triage, "lương tháng này về chưa")
+
+    assert model.reached == 0, "the message was sent to the model"
     assert isinstance(outcome, NeedsHuman)
 
 
@@ -162,8 +188,11 @@ async def test_it_is_held_for_the_operator_and_not_dropped():
     staging" is an access request — and skipping them would be losing real
     mentions on the strength of one word. The guarantee is that the *model*
     does not see it."""
-    outcome = await decide(guarded(), "cho em xin api key của staging")
+    triage, model = guarded()
 
+    outcome = await decide(triage, "cho em xin api key của staging")
+
+    assert model.reached == 0
     assert isinstance(outcome, NeedsHuman)
     assert "xin api key" in outcome.reason
 
@@ -189,7 +218,10 @@ def test_the_reason_names_the_word_and_not_the_message():
     ],
 )
 async def test_every_phrasing_of_a_listed_word_is_caught(text):
-    assert isinstance(await decide(guarded(), text), NeedsHuman)
+    triage, model = guarded()
+
+    assert isinstance(await decide(triage, text), NeedsHuman)
+    assert model.reached == 0, f"{text!r} was sent to the model"
 
 
 @pytest.mark.parametrize(
