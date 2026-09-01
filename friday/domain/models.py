@@ -42,6 +42,12 @@ class InboundEvent:
     #: three structural signals a relevant-context filter reads — the other two
     #: are `mention_type` and `is_own` itself.
     reply_to: str | None = None
+    #: Code the message carried, verbatim: a curl, a stack trace, a payload.
+    #: Already inside `text` too — this is the same content addressable as
+    #: itself, for anything that wants the code without the prose around it.
+    code: tuple[str, ...] = ()
+    #: Files posted with the message. Named, never fetched.
+    attachments: tuple = ()
 
     @property
     def conversation(self) -> ConversationId:

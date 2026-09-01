@@ -126,6 +126,7 @@ What is actually on disk.
 | `friday/conversation.py` | `ConversationId` — what counts as one exchange, and why a thread is its own |
 | `friday/inbox/` | Deep module: `stream()`, `sweep_once()`, `tally()`. Gateway, backfill, cursors and dedup are implementation |
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py` (the account), `bot.py` (approval cards) and `normalise.py`. Its `__init__.py` is empty on purpose |
+| `friday/text/` | Turning what someone typed into something usable — `transform.py` splits code out before cleaning the prose, `param_hygiene.py` cleans a value. Decides nothing |
 | `friday/harness.py` | The only module that imports the agent SDK. Builds an agent, runs it, turns failure into work |
 | `friday/triage/` | Classification, its prefilter, parameter hygiene, and the loop that polls untriaged messages |
 | `friday/responder/` | Drafts a reply in the operator's voice |

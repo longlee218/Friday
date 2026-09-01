@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection
 
 from friday.domain.models import InboundEvent, MentionType
+from friday.text.transform import Attachment, render_attachments, transform
 
 
 def normalise(
@@ -15,6 +16,17 @@ def normalise(
     included in a group.
     """
     channel_id, thread_id = _location(message.channel)
+    attachments = tuple(
+        Attachment(filename=a.filename, content_type=getattr(a, "content_type", None))
+        for a in getattr(message, "attachments", ()) or ()
+    )
+    # clean_content resolves <@1234> into readable names. The raw markup is
+    # noise to a model, and worse in the tone examples the responder learns
+    # from. `transform` takes it from there: prose cleaned, code untouched.
+    cleaned = transform(getattr(message, "clean_content", None) or message.content)
+    said = "\n\n".join(
+        part for part in (cleaned.text, render_attachments(attachments)) if part
+    )
     return InboundEvent(
         provider="discord",
         provider_message_id=str(message.id),
@@ -22,14 +34,13 @@ def normalise(
         thread_id=thread_id,
         author_id=str(message.author.id),
         author_name=message.author.display_name,
-        # clean_content resolves <@1234> into readable names. The raw markup
-        # is noise to a model, and worse in tone examples the responder
-        # learns from.
-        text=getattr(message, "clean_content", None) or message.content,
+        text=said,
         created_at=message.created_at,
         mention_type=_mention_type(message, me_id, my_role_ids),
         is_own=is_own,
         reply_to=_reply_to(message),
+        code=cleaned.code,
+        attachments=attachments,
     )
 
 

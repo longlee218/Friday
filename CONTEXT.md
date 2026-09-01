@@ -16,6 +16,20 @@ it is kept because a conversation missing half of itself does not read.
 One table holds both. The mention type is what separates the triage queue from
 the surrounding context, not a second table.
 
+## Transform
+
+Turning a platform message into something worth reading: prose cleaned, code
+left exactly as it was, attachments named.
+
+**Split before cleaning** is the whole of it. Stripping an emoji or collapsing
+whitespace inside a `curl` or a stack trace corrupts the one part of the
+message that has to survive verbatim — and it is the part a value is lifted
+out of. So code comes out first, is never touched, and goes back where it was.
+
+Distinct from the **prefilter**, which is not cleaning: pay talk between
+colleagues must not reach a third-party API at all, and a rule that runs before
+the call cannot be talked out of by a persuasive message.
+
 ## Conversation
 
 Where an exchange is happening: a channel, a thread, or a DM. Identity is
