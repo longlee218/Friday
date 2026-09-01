@@ -118,6 +118,39 @@ async def extract(task_type: str, text: str) -> Params | None:
     return await ext.run(text)
 
 
+#: Instructions shared by every extraction agent. The schema and the text vary
+#: per call; the rule about not inventing is constant.
+EXTRACTION_INSTRUCTIONS = """You fill structured fields from a chat message.
+
+You are shown the field schema (names and what each is for) and the message
+itself. For each field, copy the matching value verbatim from the message
+when you can find one. Pass null when the value is genuinely absent — never
+invent one. The triage step already produced a first pass; your job is to
+look for what it missed, not to repeat what it got right.
+
+Reply in JSON only, with the schema fields as keys."""
+
+
+def register_api_issue_extractor(config: "AgentConfig") -> None:  # type: ignore[name-defined]  # noqa: F821
+    """Register the `api_issue` extractor from configuration.
+
+    Called by the composition root after config is loaded. Skipped silently if
+    the configuration has no `extractor_api_issue` block — the workflow then
+    runs without an extractor, which is the same behaviour as the no-
+    extractor registration path. Registration is idempotent: re-running it
+    replaces the previous registration.
+    """
+    from friday.harness import Harness
+    from friday.models import ApiIssueParams
+
+    api_ext = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=Harness(config=config, instructions=EXTRACTION_INSTRUCTIONS),
+        name="api_issue_extractor",
+    )
+    _EXTRACTORS["api_issue"] = api_ext
+
+
 def _prompt(text: str, params_cls: type[Params]) -> str:
     """The extractor prompt: the schema first, the text second.
 

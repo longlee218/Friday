@@ -98,10 +98,29 @@ async def test_the_summary_is_never_asked_for():
 
 async def test_api_issue_keeps_its_own_rule():
     """A correlationId makes a request findable; its type cannot say that."""
-    traceable = ApiIssueParams(summary="s", environment=None,
-                               correlation_id="abc-123", curl=None)
+    traceable = ApiIssueParams(
+        summary="s",
+        environment=None,
+        correlation_id="abcdef01-2345-6789-abcd-ef0123456789",
+        curl=None,
+    )
 
     assert isinstance(await plan("api_issue", traceable), Park)
+
+
+async def test_a_malformed_correlation_id_is_caught_by_the_rule():
+    """A value that does not look like a uuid is rejected before dispatch.
+
+    Ticket 31 adds InSet/Matches rules to ApiIssueParams; ticket 30 wired
+    validate into plan(). Together they catch what triage left through that
+    the structural check did not: not 'field is missing', but 'field is
+    wrong'."""
+    bad = ApiIssueParams(summary="s", correlation_id="abc-123")
+
+    action = await plan("api_issue", bad)
+
+    assert isinstance(action, Ask)
+    assert "uuid" in action.text
 
 
 # ---- an agentic step -------------------------------------------------------
@@ -130,18 +149,23 @@ async def test_a_planner_may_be_asynchronous_and_use_an_agent():
 
     action = await plan(
         "api_issue",
-        ApiIssueParams(summary="s", correlation_id="abc-123"),
+        ApiIssueParams(
+            summary="s", correlation_id="abcdef01-2345-6789-abcd-ef0123456789"
+        ),
         agent=agent,
         planners={"api_issue": looks_it_up},
     )
 
     assert action == Reply("the upstream timed out")
-    assert "abc-123" in agent.prompts[0]
+    assert "abcdef01" in agent.prompts[0]
 
 
 async def test_a_deterministic_planner_needs_no_agent_and_gets_none():
     action = await plan(
-        "api_issue", ApiIssueParams(summary="s", correlation_id="abc-123")
+        "api_issue",
+        ApiIssueParams(
+            summary="s", correlation_id="abcdef01-2345-6789-abcd-ef0123456789"
+        ),
     )
 
     assert isinstance(action, Park)
@@ -157,7 +181,9 @@ async def test_an_agentic_planner_that_cannot_answer_parks():
 
     action = await plan(
         "api_issue",
-        ApiIssueParams(summary="s", correlation_id="abc-123"),
+        ApiIssueParams(
+            summary="s", correlation_id="abcdef01-2345-6789-abcd-ef0123456789"
+        ),
         agent=StubHarness(answer=None),
         planners={"api_issue": looks_it_up},
     )

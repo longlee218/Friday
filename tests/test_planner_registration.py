@@ -14,7 +14,9 @@ from friday.models import ApiIssueParams, DocQuestionParams
 from friday.workflows import Park, Reply, plan, planner
 
 BROKEN = ApiIssueParams(summary="s")
-TRACEABLE = ApiIssueParams(summary="s", correlation_id="abc-123")
+TRACEABLE = ApiIssueParams(
+    summary="s", correlation_id="abcdef01-2345-6789-abcd-ef0123456789"
+)
 
 
 class StubHarness:

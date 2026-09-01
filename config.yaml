@@ -41,6 +41,18 @@ agents:
     # How many of your past replies to show it as tone examples.
     tone_examples: 8
 
+  # Runs after triage classifies a task as `api_issue`, to fill the fields
+  # triage left blank. The model is allowed to hallucinate; ticket 30's
+  # validate engine catches what it gets wrong. Cheap model on purpose — the
+  # job is pattern matching, not reasoning.
+  extractor_api_issue:
+    api_key: ${TRIAGE_API_KEY}
+    base_url: "https://api.minimax.io/v1"
+    model: "MiniMax-M3"
+    settings:
+      temperature: 0
+    max_turns: 1
+
 # ── Workflows ──────────────────────────────────────────────────────────────
 # How often to say the process is alive and what it is holding.
 # Who is asked to approve a reply, by direct message from the bot.

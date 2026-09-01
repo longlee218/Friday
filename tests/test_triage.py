@@ -136,25 +136,12 @@ async def test_triage_needs_no_database():
     assert "db" not in inspect.signature(Triage.__init__).parameters
 
 
-async def test_parameters_the_model_left_out_are_recovered_from_the_message():
-    """The most valuable fields are the most mechanically detectable ones."""
-    triage = triage_with([
-        function_call("create_api_issue_task", {
-            "confidence": 0.6, "summary": "api broken",
-            "environment": None, "correlation_id": None, "curl": None,
-        }, call_id="1")
-    ])
-
-    outcome = await decide(
-        triage, text="/checkout returns 500 on production, correlationId 7f3a91c2"
-    )
-
-    assert outcome.params.environment == "production"
-    assert outcome.params.correlation_id == "7f3a91c2"
-
-
-async def test_the_message_wins_when_the_model_disagrees_with_it():
-    """A value copied from the text cannot be a hallucination; the model's can."""
+async def test_triage_passes_text_through_without_extracting_fields():
+    """Ticket 31 moved field extraction out of triage. Triage now leaves the
+    model's first-pass values alone — extraction is the workflow's job, and
+    the workflow's extractor uses the LLM, not the regex that used to live
+    here. The values the model produced are what triage ships; whatever the
+    workflow extracts overlays on top in plan()."""
     triage = triage_with([
         function_call("create_api_issue_task", {
             "confidence": 0.9, "summary": "api broken",
@@ -164,7 +151,7 @@ async def test_the_message_wins_when_the_model_disagrees_with_it():
 
     outcome = await decide(triage, text="failing on staging since noon")
 
-    assert outcome.params.environment == "staging"
+    assert outcome.params.environment == "production"
 
 
 async def test_the_string_null_is_treated_as_absent():

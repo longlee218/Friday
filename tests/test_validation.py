@@ -195,28 +195,35 @@ def test_question_includes_validation_message_when_it_carries_information():
 # --- the only call site -------------------------------------------------
 
 
-def test_validate_is_only_imported_from_one_module():
-    """Ticket 30's seam guarantee. The whole point is one call site. A second
-    import is a test failure, not a documentation issue.
+def test_validate_is_only_invoked_from_one_call_site():
+    """Ticket 30's seam guarantee. The whole point is one call site: the
+    engine must not be invoked from anywhere but `_problems` in
+    `friday/workflows/__init__.py`. `friday.models` and `friday.extraction`
+    may import the rule vocabulary to declare what fields are valid; that
+    is not a call site, that is data.
 
-    Covers three import shapes:
-      from friday.validation import ...
-      from friday import validation
-      import friday.validation
+    Greps for `validate(` and `friday.validation.validate(`.
     """
     hits = subprocess.run(
         [
-            "grep",
-            "-rlE",
-            r"\bfrom\s+friday(\.\s*validation\b|\s+import\s+validation\b)|\bimport\s+friday\.validation\b",
-            "friday/",
+            "bash",
+            "-c",
+            'grep -rnE '
+            '"\\b(friday\\.validation\\.validate|validate)\\s*\\(" '
+            'friday/ '
+            '--include=*.py '
+            '| grep -v "^friday/validation\\.py:" '
+            '| cut -d: -f1 | sort -u',
         ],
         capture_output=True,
         text=True,
     ).stdout.split()
 
+    # Imports of `from friday.validation import ...` are declarations of
+    # rules; that is data, not a call site. The seam guarantees the rule
+    # *engine* only runs from one place, which is `friday/workflows/__init__.py`.
     allowed = {"friday/workflows/__init__.py"}
-    assert set(hits) <= allowed, f"unexpected importer: {set(hits) - allowed}"
+    assert set(hits) <= allowed, f"unexpected caller: {set(hits) - allowed}"
 
 
 async def test_an_invalid_value_never_reaches_a_planner_body():

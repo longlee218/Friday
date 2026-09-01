@@ -58,7 +58,7 @@ async def test_a_task_is_acted_on_only_once(db):
 
 async def test_a_report_that_can_be_traced_waits_for_a_human(db):
     """Tracing is not built. Parking is honest; replying would not be."""
-    await make_task(db, correlation_id="7f3a91c2")
+    await make_task(db, correlation_id="7f3a91c2-dead-beef-cafe-1234567890ab")
 
     await WorkflowRunner(db=db, auto_ask=True).run_once()
 
@@ -161,7 +161,7 @@ async def test_asking_for_details_is_the_agents_own_decision(db):
 
 async def test_a_task_it_cannot_handle_is_brought_to_the_operator(db):
     """Otherwise it sits in a column nobody is watching."""
-    task = await make_task(db, correlation_id="abc-123")  # traceable, unactionable
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")  # traceable, unactionable
     runner = WorkflowRunner(db=db, auto_ask=True)
 
     await runner.run_once()
@@ -170,12 +170,12 @@ async def test_a_task_it_cannot_handle_is_brought_to_the_operator(db):
     (card,) = await db.outbound()
     assert card.kind == "help_wanted"
     assert card.sender == "discord_bot"
-    assert "abc-123" in card.text
+    assert "abcdef01-2345-6789-abcd-ef0123456789" in card.text
 
 
 async def test_the_operator_is_told_once(db):
     """A card per poll is a notification that trains you to ignore it."""
-    await make_task(db, correlation_id="abc-123")
+    await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     runner = WorkflowRunner(db=db, auto_ask=True)
 
     await runner.run_once()
@@ -219,7 +219,7 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     async def answers(params, agent):
         return Reply("cache đầy thôi, anh clear rồi nhé")
 
-    await make_task(db, correlation_id="abc-123")
+    await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     runner = WorkflowRunner(db=db, auto_ask=True, planners={"api_issue": answers})
 
     acted = await runner.run_once()
@@ -244,7 +244,7 @@ async def test_finding_what_to_announce_takes_one_query(db):
 
     db.tasks_needing_announcement = counted
     for _ in range(5):
-        task = await make_task(db, correlation_id="abc-123")
+        task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
         await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
     await WorkflowRunner(db=db, auto_ask=True).run_once()

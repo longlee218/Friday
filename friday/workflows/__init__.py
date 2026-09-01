@@ -175,7 +175,7 @@ async def plan(
 
         extracted = await _extract(task_type, text)
         if extracted is not None:
-            params = extracted
+            params = _merge(params, extracted)
 
     problems = _problems(params)
     if problems:
@@ -218,6 +218,28 @@ def _problems(params: Params) -> list[Problem]:
     and parsed back, which lost the structure the caller needs.
     """
     return [*_missing(params), *validate(params)]
+
+
+def _merge(triage_params: Params, extracted: Params) -> Params:
+    """Overlay the extractor's fields on top of triage's.
+
+    Only fields that are not None in `extracted` win — a hallucinated null
+    would silently drop triage's value. Same dataclass type is required: the
+    extractor returns the same Params class that triage wrote, so this is a
+    shape-preserving overlay.
+    """
+    if not isinstance(extracted, type(triage_params)):
+        # Defensive: a misregistered extractor cannot silently rewrite the
+        # task type's params. Drop the extracted result and keep triage's.
+        return triage_params
+    overlay = {
+        f.name: getattr(extracted, f.name)
+        for f in fields(extracted)
+        if getattr(extracted, f.name) is not None
+    }
+    from dataclasses import replace as _replace
+
+    return _replace(triage_params, **overlay)
 
 
 def _missing(params: Params) -> list[Problem]:

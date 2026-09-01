@@ -6,6 +6,7 @@ from typing import Any, Literal
 from enum import StrEnum
 
 from friday.conversation import ConversationId, resolve
+from friday.validation import InSet, Matches
 
 
 class MentionType(StrEnum):
@@ -108,6 +109,17 @@ class ApiIssueParams:
     environment: str | None = None
     correlation_id: str | None = None
     curl: str | None = None
+
+    #: Validate catches what the LLM extractor got wrong. `environment` has to
+    #: be one of the three environments we actually serve; `correlation_id`
+    #: has to look like a uuid for Loki's query_range filter to find it.
+    _RULES = {
+        "environment": InSet(frozenset({"production", "staging", "dev"})),
+        "correlation_id": Matches(
+            r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",
+            name="uuid",
+        ),
+    }
 
 
 @dataclass(frozen=True, slots=True)

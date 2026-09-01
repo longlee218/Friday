@@ -17,12 +17,7 @@ from friday.models import (
     TaskType,
 )
 from friday.triage.prefilter import is_compensation_talk
-from friday.triage.params import (
-    clean,
-    find_correlation_id,
-    find_curl,
-    find_environment,
-)
+from friday.triage.params import clean
 
 __all__ = [
     "AccessRequestParams",
@@ -253,14 +248,6 @@ def _hygiene(params: Params, text: str) -> Params:
         else getattr(params, f.name)
         for f in fields(params)
     }
-    if isinstance(params, ApiIssueParams):
-        for name, found in (
-            ("environment", find_environment(text)),
-            ("correlation_id", find_correlation_id(text)),
-            ("curl", find_curl(text)),
-        ):
-            if found is not None:
-                cleaned[name] = found
     return type(params)(**cleaned)
 
 
