@@ -7,6 +7,9 @@ from __future__ import annotations
 import pytest
 
 from friday.domain.models import Task
+from datetime import datetime, timezone
+
+from conftest import make_event
 from friday.domain.conversation import ConversationId
 from friday.workflows.runner import ASKED, WorkflowRunner
 from friday.domain.tasks import TaskState
@@ -386,3 +389,101 @@ async def test_the_responder_is_told_what_this_task_actually_knows(db):
     assert isinstance(given, ApiIssueParams)
     assert given.environment == "production"
     assert given.correlation_id is None, "it must be able to see what is absent"
+
+
+# --- a burst is one thought sent in three messages ---------------------------
+
+
+async def _said(db, message_id, text, *, secs, mention=None, author="u-reporter"):
+    from datetime import timedelta
+
+    from friday.domain.models import InboundEvent, MentionType
+
+    await db.record_message(
+        InboundEvent(
+            provider="fake",
+            provider_message_id=message_id,
+            channel_id="watched",
+            thread_id=None,
+            author_id=author,
+            author_name="dana",
+            text=text,
+            created_at=BURST_START + timedelta(seconds=secs),
+            mention_type=MentionType.DIRECT if mention else None,
+        ),
+        context_only=not mention,
+    )
+
+
+BURST_START = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
+
+
+async def test_the_extractor_reads_the_rest_of_the_burst(db):
+    """Discord lets you send three messages in five seconds, and people do: a
+    mention saying the API is broken, then the curl, then the environment.
+
+    Only the first carries a mention, so only the first is in scope and the
+    rest are stored as context with no task on them. The extractor read the
+    linked rows, saw one line, and the system asked for a correlationId the
+    reporter had sent three seconds earlier.
+    """
+    task = await make_task(db)
+    await _said(db, "m1", "@Lee API lỗi rồi a ơi", secs=0, mention=True)
+    await db.mark_triaged(
+        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+    )
+    await _said(db, "m2", "curl -X POST /pay trả 500, trên production", secs=3)
+
+    said = await db.original_text_for(task.id)
+
+    assert "API lỗi rồi" in said
+    assert "curl -X POST /pay" in said
+
+
+async def test_somebody_else_talking_is_not_part_of_it(db):
+    """Same conversation, different person. A channel is shared."""
+    task = await make_task(db)
+    await _said(db, "m1", "@Lee API lỗi rồi", secs=0, mention=True)
+    await db.mark_triaged(
+        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+    )
+    await _said(db, "m2", "trưa nay ăn gì mọi người", secs=3, author="someone-else")
+
+    assert "trưa nay" not in (await db.original_text_for(task.id) or "")
+
+
+async def test_what_we_posted_is_not_read_back(db):
+    """With `capture_own_messages` on, the operator is both the reporter and
+    the account, so "same author" would otherwise feed our own questions back
+    into the extractor."""
+    from friday.outbox import Kind
+
+    task = await make_task(db)
+    await _said(db, "m1", "@Lee API lỗi rồi", secs=0, mention=True, author="me")
+    await db.mark_triaged(
+        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+    )
+    row = await db.queue_outbound(
+        task_id=task.id,
+        conversation=ConversationId("fake", "watched"),
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="cho anh xin cái correlationId nhé",
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id="ours-1")
+    await _said(db, "ours-1", "cho anh xin cái correlationId nhé", secs=5, author="me")
+
+    assert "cho anh xin" not in (await db.original_text_for(task.id) or "")
+
+
+async def test_nothing_said_before_the_report_is_dragged_in(db):
+    """Context seeded from before the conversation involved us is context, not
+    part of the report."""
+    task = await make_task(db)
+    await _said(db, "earlier", "hôm qua deploy xong rồi nhé", secs=-3600)
+    await _said(db, "m1", "@Lee API lỗi rồi", secs=0, mention=True)
+    await db.mark_triaged(
+        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+    )
+
+    assert "hôm qua deploy" not in (await db.original_text_for(task.id) or "")

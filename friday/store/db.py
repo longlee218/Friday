@@ -1030,27 +1030,60 @@ class Database:
                 if (fingerprint or "") == fingerprints[task_id]
             }
 
-    async def original_text_for(self, task_id: int) -> str | None:
+    async def original_text_for(self, task_id: int, limit: int = 20) -> str | None:
         """Everything the reporter has said about this task, oldest first.
 
-        Every message, not the first one. The answer to a question we asked
-        arrives as an ordinary follow-up — "correlationId là abc-123" — and
-        triage no longer lifts values out of it, so the only thing that reads
-        it is the extractor. Handing the extractor the opening message alone
-        would mean the reporter answers and the task never learns.
+        Not the messages *linked* to the task — the ones they wrote. Discord
+        lets you send three messages in five seconds, and people do: a mention
+        saying the API is broken, then the curl, then which environment. Only
+        the first carries a mention, so only the first is in scope, and the
+        rest are stored as context with no task on them. The extractor read the
+        linked rows and saw one line, and the system asked for a correlationId
+        the reporter had sent three seconds earlier.
 
-        Looked up via `messages.task_id` because the workflow has no access to
-        the inbound event: by the time a task is ready to be planned, the inbox
-        has long since moved on.
+        So: same conversation, same author as the message that opened the task,
+        from that message onwards. Their answer to a question we asked is in
+        there too, and so is the second half of their first thought.
+
+        Excluded: anything this system posted. In a self-test the operator is
+        both the reporter and the account, so "same author" would otherwise
+        include our own questions.
+
+        Bounded, because a task that stays open in a busy channel would
+        otherwise grow its own prompt without limit.
         """
         async with self._sessions() as session:
-            rows = await session.scalars(
-                select(schema.Message.original_text)
-                .where(schema.Message.task_id == task_id)
-                .order_by(schema.Message.created_at)
+            opening = (
+                await session.execute(
+                    select(
+                        schema.Message.conversation_id,
+                        schema.Message.author_id,
+                        schema.Message.created_at,
+                    )
+                    .where(schema.Message.task_id == task_id)
+                    .order_by(schema.Message.created_at)
+                    .limit(1)
+                )
+            ).first()
+            if opening is None:
+                return None
+            conversation_id, author_id, opened_at = opening
+
+            ours = select(schema.Outbound.sent_message_id).where(
+                schema.Outbound.sent_message_id.is_not(None)
             )
-            said = [text for text in rows if text]
-        return "\n".join(said) or None
+            said = await session.scalars(
+                select(schema.Message.original_text)
+                .where(
+                    schema.Message.conversation_id == conversation_id,
+                    schema.Message.author_id == author_id,
+                    schema.Message.created_at >= opened_at,
+                    schema.Message.provider_message_id.not_in(ours),
+                )
+                .order_by(schema.Message.created_at)
+                .limit(limit)
+            )
+            return "\n".join(text for text in said if text) or None
 
     # ---- what the operator said about a classification -------------------
 
