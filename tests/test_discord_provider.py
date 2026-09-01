@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from friday.conversation import ConversationId
-from friday.providers.discord import DiscordUserProvider
+from friday.providers.discord.user import DiscordUserProvider
 
 
 def test_the_message_handler_is_bound_where_dispatch_will_find_it():
@@ -199,3 +199,26 @@ async def test_a_second_drop_does_not_restart_the_clock():
     await client.on_disconnect()
 
     assert provider.down_since == first
+
+
+def test_the_unofficial_library_stays_in_one_module():
+    """`docs/DESIGN.md` records `discord-self` as an accepted risk and names the
+    mitigation: "isolating the user-side in one module". A mitigation nothing
+    checks is a mitigation on paper — this is the same enforcement ticket 23
+    used for the agent SDK, for a dependency with a worse prognosis.
+
+    `__init__.py` must stay empty for it to hold. Importing any submodule runs
+    the parent's `__init__.py` first, and a re-export there is eager, so a
+    convenience import would pull the library back into `bot.py` — the
+    *official* identity — and into normalisation, which touches no Discord type
+    at all.
+    """
+    import subprocess
+
+    allowed = {"friday/providers/discord/user.py"}
+    hits = subprocess.run(
+        ["grep", "-rlE", r"^\s*(from discord_self|import discord_self)\b", "friday/"],
+        capture_output=True, text=True,
+    ).stdout.split()
+
+    assert set(hits) <= allowed, f"unexpected importer: {set(hits) - allowed}"

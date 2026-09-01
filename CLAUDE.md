@@ -101,7 +101,7 @@ What is actually on disk.
 | `friday/schema.py`, `db.py` | Mapped classes; the only store. `db.py` converts at the edge, so nothing above it knows SQLAlchemy exists |
 | `friday/conversation.py` | `ConversationId` — what counts as one exchange, and why a thread is its own |
 | `friday/inbox/` | Deep module: `stream()`, `sweep_once()`, `tally()`. Gateway, backfill, cursors and dedup are implementation |
-| `friday/providers/` | `Provider` protocol; `providers/discord/` holds the user client, the bot, and normalisation |
+| `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py` (the account), `bot.py` (approval cards) and `normalise.py`. Its `__init__.py` is empty on purpose |
 | `friday/harness.py` | The only module that imports the agent SDK. Builds an agent, runs it, turns failure into work |
 | `friday/triage/` | Classification, its prefilter, parameter hygiene, and the loop that polls untriaged messages |
 | `friday/responder/` | Drafts a reply in the operator's voice |
@@ -150,10 +150,14 @@ not an implementation detail:
   not persisted: the library owns it, and cursors plus the sweep cover restarts. **DB access must be async**
   (`aiosqlite` or a thread executor) — a blocking call on the event loop stalls
   the Discord gateways.
-- **Two Discord identities in one process.** `discord.py` for the bot,
-  `discord-self` (namespaced `discord_self`) for the user account. Keep the
-  user-side isolated in its own module — it depends on a private API and is
-  expected to break.
+- **Two Discord identities in one process.** `discord.py` for the bot
+  (`providers/discord/bot.py`), `discord-self` for the user account
+  (`providers/discord/user.py`). The user side depends on a private API and is
+  expected to break, so `discord_self` may be imported in that one module and
+  nowhere else — a test enforces it. `providers/discord/__init__.py` stays
+  **empty** for that to hold: importing any submodule runs it first, and a
+  re-export there is eager, so one convenience import would pull the unofficial
+  library back into the official bot and into normalisation.
 - **Inbound messages are deduplicated on `(provider, provider_message_id)`.**
   Two delivery paths (gateway and REST backfill) feed the same pipeline, so
   every handler must be idempotent on that key.

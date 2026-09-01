@@ -25,7 +25,7 @@ from friday.notes import Promotion
 from friday.redact import Redacting, install_excepthook
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
-from friday.providers.discord import DiscordUserProvider
+from friday.providers.discord.user import DiscordUserProvider
 from friday.providers.discord.bot import DiscordBot
 from friday.responder import Responder
 from friday.tasks import TaskState
