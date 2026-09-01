@@ -109,18 +109,32 @@ async def _run(stack: AsyncExitStack) -> None:
     provider = DiscordUserProvider(token=token)
     inbox = Inbox(provider=provider, db=db, config=config.ingest)
 
-    async def marked(*, provider_message_id: str, mark, by: str) -> None:
+    async def marked(
+        *, provider_message_id: str, mark, by: str, taking_back: bool
+    ) -> None:
         """The operator reacted to a classification. Record it; change nothing.
 
         Marking one has no effect on the message it concerns — nothing is
         re-sent, nothing is undone. It only decides whether that
         classification is ever shown back to the classifier as an example.
         """
-        if mark is None:
-            await db.clear_verdict(
-                provider=provider.name, provider_message_id=provider_message_id
-            )
+        current = await db.verdict_for(
+            provider=provider.name, provider_message_id=provider_message_id
+        )
+
+        if taking_back:
+            # Only if the reaction they removed is the one currently on
+            # record. Discord leaves an old reaction in place when a new one
+            # is added, so ✅ then ❌ then remove-the-✅ is the natural order —
+            # and clearing unconditionally would throw away the ❌ that is
+            # still sitting on the message.
+            if current is not None and current[0] == str(mark):
+                await db.clear_verdict(
+                    provider=provider.name,
+                    provider_message_id=provider_message_id,
+                )
             return
+
         await db.record_verdict(
             provider=provider.name,
             provider_message_id=provider_message_id,

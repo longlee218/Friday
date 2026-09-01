@@ -51,6 +51,10 @@ __all__ = ["Database"]
 
 log = logging.getLogger(__name__)
 
+#: The types the classifier can actually produce — one per tool it has.
+#: Anything else in `decision_type` is a state, not a classification.
+CLASSIFIABLE = ("api_issue", "access_request", "doc_question", "skip")
+
 _OLDEST_FIRST = (schema.Message.created_at, schema.Message.provider_message_id)
 #: Ties break on the id cast as a number — two messages can share a timestamp,
 #: and a snowflake is the platform's own answer to which came first.
@@ -968,7 +972,13 @@ class Database:
                 )
                 .where(
                     schema.Verdict.mark == "right",
-                    schema.Message.decision_type.is_not(None),
+                    # A closed set, not merely "not null". `mark_triaged`
+                    # also writes the *state* a message ended in — a
+                    # low-confidence one is recorded as `needs_human` — and
+                    # marking that right is a perfectly sensible thing for
+                    # the operator to do. Showing it back as an example
+                    # would teach the classifier a label it has no tool for.
+                    schema.Message.decision_type.in_(CLASSIFIABLE),
                 )
                 .order_by(schema.Verdict.marked_at.desc())
                 .limit(limit)

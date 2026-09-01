@@ -183,12 +183,10 @@ class Triage:
         model=None,
         examples: Sequence[tuple[str, str]] = (),
     ) -> None:
-        #: Message text and the type it was classified as, for the ones the
-        #: operator marked right plus any they wrote by hand. Read once at
-        #: build time: they go at the front of the instructions, which is the
-        #: stable part, and a list that changed per call would cost the cache
-        #: hit on everything after it.
-        self._examples = tuple(examples)
+        # Examples are appended to the instructions rather than passed per
+        # call: the instructions are the stable prefix, and a list that
+        # changed per call would cost the cache hit on everything after it.
+        # A mark made now therefore takes effect at the next start.
         self._run = Harness(
             config=config,
             instructions=INSTRUCTIONS + _examples_block(examples),

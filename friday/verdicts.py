@@ -39,11 +39,15 @@ class Mark(StrEnum):
 EMOJI: dict[str, Mark] = {
     "✅": Mark.RIGHT,
     "☑": Mark.RIGHT,
-    "👍": Mark.RIGHT,
     "❌": Mark.WRONG,
     "✖": Mark.WRONG,
-    "👎": Mark.WRONG,
 }
+
+#: 👍 and 👎 were here and are deliberately not. A thumbs-up is the most
+#: ordinary reaction on Discord — "ok anh nhé" to a colleague — and every one
+#: of them landing on a classified message would quietly become a training
+#: example. That is exactly what this ticket's guarantee exists to prevent, so
+#: the marks are ones nobody reaches for by habit.
 
 #: U+FE0F, the emoji variation selector. Discord clients disagree about
 #: whether to send it: the same ☑ arrives as U+2611 from one and

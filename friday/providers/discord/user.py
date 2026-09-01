@@ -49,8 +49,15 @@ class DiscordUserProvider:
         self._client.on_ready = self._handle_ready
         self._client.on_resumed = self._handle_resumed
         self._client.on_disconnect = self._handle_disconnect
-        self._client.on_reaction_add = self._handle_reaction_add
-        self._client.on_reaction_remove = self._handle_reaction_remove
+        # The *raw* events, not the rich ones. The library only dispatches
+        # `reaction_add` when the message is still in its in-memory cache — a
+        # deque that starts empty at every restart and is filled only by live
+        # MESSAGE_CREATE. Marking anything older than the last restart, or
+        # anything that arrived through the recovery sweep, would silently do
+        # nothing: no handler, no log, no error. The raw payload carries the
+        # message id and the reactor without needing the cache at all.
+        self._client.on_raw_reaction_add = self._handle_raw_reaction_add
+        self._client.on_raw_reaction_remove = self._handle_raw_reaction_remove
 
     #: Called with `(provider_message_id, mark, by)` when the operator marks a
     #: classification, and with `mark=None` when they take the mark back.
@@ -78,7 +85,7 @@ class DiscordUserProvider:
         self.down_since = None
         self.reconnected.set()
 
-    async def _handle_reaction_add(self, reaction, user) -> None:
+    async def _handle_raw_reaction_add(self, payload) -> None:
         """The operator saying a classification was right, or wrong.
 
         Only the watched account's own reactions count. Anyone else in the
@@ -86,31 +93,40 @@ class DiscordUserProvider:
         reading their thumbs-up as a judgement on our classification would be
         putting words in their mouth.
         """
-        await self._verdict(reaction, user, taking_back=False)
+        await self._verdict(payload, taking_back=False)
 
-    async def _handle_reaction_remove(self, reaction, user) -> None:
+    async def _handle_raw_reaction_remove(self, payload) -> None:
         """They took the mark back. Absence is the state that matters."""
-        await self._verdict(reaction, user, taking_back=True)
+        await self._verdict(payload, taking_back=True)
 
-    async def _verdict(self, reaction, user, *, taking_back: bool) -> None:
+    async def _verdict(self, payload, *, taking_back: bool) -> None:
         if self.on_verdict is None:
             return
         me = self._client.user
-        if me is None or getattr(user, "id", None) != me.id:
+        if me is None or getattr(payload, "user_id", None) != me.id:
             return
 
-        mark = mark_for(str(getattr(reaction, "emoji", "")))
+        mark = mark_for(str(getattr(payload, "emoji", "")))
         if mark is None:
             return  # a reaction that means nothing to us means nothing to us
 
-        message_id = str(reaction.message.id)
+        message_id = str(payload.message_id)
         log.info(
-            "operator marked %s as %s", message_id, "unmarked" if taking_back else mark
+            "operator %s %s as %s",
+            "unmarked" if taking_back else "marked",
+            message_id,
+            mark,
         )
         result = self.on_verdict(
             provider_message_id=message_id,
-            mark=None if taking_back else mark,
-            by=str(user),
+            # The mark is reported either way. On a removal the caller needs
+            # to know *which* reaction went, because a ✅ removed after a ❌
+            # was added must not delete the ❌ — Discord leaves both on the
+            # message, and adding the new one before removing the old is the
+            # natural order to do it in.
+            mark=mark,
+            by=str(me),
+            taking_back=taking_back,
         )
         if hasattr(result, "__await__"):
             await result

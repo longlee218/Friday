@@ -18,12 +18,12 @@ from friday.verdicts import Mark, mark_for
 # --- what a reaction means --------------------------------------------------
 
 
-@pytest.mark.parametrize("emoji", ["✅", "☑️", "👍"])
+@pytest.mark.parametrize("emoji", ["✅", "☑️"])
 def test_the_agreeing_reactions_mean_right(emoji):
     assert mark_for(emoji) is Mark.RIGHT
 
 
-@pytest.mark.parametrize("emoji", ["❌", "✖️", "👎"])
+@pytest.mark.parametrize("emoji", ["❌", "✖️"])
 def test_the_disagreeing_reactions_mean_wrong(emoji):
     assert mark_for(emoji) is Mark.WRONG
 
@@ -41,6 +41,15 @@ def test_a_reaction_we_do_not_recognise_means_nothing():
     putting words in their mouth."""
     assert mark_for("🎉") is None
     assert mark_for("") is None
+
+
+@pytest.mark.parametrize("everyday", ["👍", "👎"])
+def test_the_everyday_reactions_are_deliberately_not_marks(everyday):
+    """A thumbs-up is the most ordinary reaction on Discord — "ok anh nhé" to
+    a colleague. If it counted, every one of them landing on a classified
+    message would quietly become a training example, which is the exact thing
+    this ticket's guarantee exists to prevent."""
+    assert mark_for(everyday) is None
 
 
 # --- recording --------------------------------------------------------------
@@ -174,58 +183,72 @@ def _provider():
     return DiscordUserProvider("token", client=FakeClient())
 
 
-def _reaction(emoji: str, message_id: str = "m1"):
-    return SimpleNamespace(emoji=emoji, message=SimpleNamespace(id=message_id))
+def _payload(emoji: str, message_id: str = "m1", user_id: int = 1):
+    """The raw gateway payload. Raw rather than the rich event because the
+    rich one only fires for messages still in the library's memory cache,
+    which is empty at every restart."""
+    return SimpleNamespace(
+        emoji=emoji, message_id=message_id, user_id=user_id, channel_id="watched"
+    )
 
 
 async def test_the_operators_reaction_is_reported():
-    seen: list[tuple] = []
+    seen: list[dict] = []
     provider = _provider()
     provider.on_verdict = lambda **kw: seen.append(kw)
 
-    await provider._handle_reaction_add(
-        _reaction("✅"), SimpleNamespace(id=1, __str__=lambda _: "operator")
-    )
+    await provider._handle_raw_reaction_add(_payload("✅"))
 
     assert seen[0]["provider_message_id"] == "m1"
     assert seen[0]["mark"] is Mark.RIGHT
+    assert seen[0]["taking_back"] is False
 
 
-async def test_removing_a_reaction_reports_no_mark():
-    seen: list[tuple] = []
+async def test_removing_a_reaction_reports_which_one_went():
+    """Not just "something was unmarked". Discord leaves an old reaction in
+    place when a new one is added, so ✅ then ❌ then remove-the-✅ is the
+    natural order — and the caller has to know it was the ✅ that went, or it
+    throws away the ❌ still sitting on the message."""
+    seen: list[dict] = []
     provider = _provider()
     provider.on_verdict = lambda **kw: seen.append(kw)
 
-    await provider._handle_reaction_remove(
-        _reaction("✅"), SimpleNamespace(id=1, __str__=lambda _: "operator")
-    )
+    await provider._handle_raw_reaction_remove(_payload("✅"))
 
-    assert seen[0]["mark"] is None
+    assert seen[0]["mark"] is Mark.RIGHT
+    assert seen[0]["taking_back"] is True
+
+
+async def test_the_raw_event_is_what_is_listened_for():
+    """The rich `reaction_add` only fires when the message is still in the
+    library's in-memory cache — a deque that starts empty at every restart and
+    is filled only by live traffic. Marking anything older, or anything that
+    arrived through the recovery sweep, would silently do nothing."""
+    provider = _provider()
+
+    assert provider._client.on_raw_reaction_add is not None
+    assert not hasattr(provider._client, "on_reaction_add")
 
 
 async def test_somebody_elses_reaction_is_not_a_judgement():
     """Anyone in the channel reacts for their own reasons. Reading a
     colleague's thumbs-up as a verdict on our classification would be putting
     words in their mouth."""
-    seen: list[tuple] = []
+    seen: list[dict] = []
     provider = _provider()
     provider.on_verdict = lambda **kw: seen.append(kw)
 
-    await provider._handle_reaction_add(
-        _reaction("✅"), SimpleNamespace(id=999, __str__=lambda _: "someone else")
-    )
+    await provider._handle_raw_reaction_add(_payload("✅", user_id=999))
 
     assert seen == []
 
 
 async def test_an_unrecognised_reaction_is_ignored():
-    seen: list[tuple] = []
+    seen: list[dict] = []
     provider = _provider()
     provider.on_verdict = lambda **kw: seen.append(kw)
 
-    await provider._handle_reaction_add(
-        _reaction("🎉"), SimpleNamespace(id=1, __str__=lambda _: "operator")
-    )
+    await provider._handle_raw_reaction_add(_payload("🎉"))
 
     assert seen == []
 
@@ -235,9 +258,7 @@ async def test_nothing_happens_when_nobody_is_listening():
     is nothing to do and nothing to fail."""
     provider = _provider()
 
-    await provider._handle_reaction_add(
-        _reaction("✅"), SimpleNamespace(id=1, __str__=lambda _: "operator")
-    )
+    await provider._handle_raw_reaction_add(_payload("✅"))
 
 
 # --- the examples the classifier is given -----------------------------------
@@ -258,3 +279,72 @@ def test_examples_are_rendered_with_what_they_turned_out_to_be():
 
     assert "checkout is 500ing" in block
     assert "api_issue" in block
+
+
+# --- the marks that must not cancel each other ------------------------------
+
+
+async def test_removing_an_old_reaction_does_not_delete_the_newer_mark(db):
+    """The order that actually happens: ✅, change of mind, add ❌, then tidy
+    up by removing the ✅. Discord does not remove the old one for you. A
+    clear-on-any-removal would throw away the ❌ that is still on the message
+    and leave the classification unmarked while it visibly is not."""
+    from friday.verdicts import Mark
+
+    async def marked(*, provider_message_id, mark, by, taking_back):
+        current = await db.verdict_for(
+            provider="fake", provider_message_id=provider_message_id
+        )
+        if taking_back:
+            if current is not None and current[0] == str(mark):
+                await db.clear_verdict(
+                    provider="fake", provider_message_id=provider_message_id
+                )
+            return
+        await db.record_verdict(
+            provider="fake",
+            provider_message_id=provider_message_id,
+            mark=str(mark),
+            by=by,
+        )
+
+    await marked(
+        provider_message_id="m1", mark=Mark.RIGHT, by="op", taking_back=False
+    )
+    await marked(
+        provider_message_id="m1", mark=Mark.WRONG, by="op", taking_back=False
+    )
+    await marked(
+        provider_message_id="m1", mark=Mark.RIGHT, by="op", taking_back=True
+    )
+
+    assert await db.verdict_for(provider="fake", provider_message_id="m1") == (
+        "wrong",
+        "op",
+    )
+
+
+async def test_a_state_recorded_as_a_decision_never_becomes_an_example(db):
+    """`mark_triaged` also records the state a message ended in — a
+    low-confidence one is stored as `needs_human`. Marking that right is a
+    sensible thing for the operator to do ("yes, a person should see this"),
+    and showing it back as an example would teach the classifier a label it
+    has no tool for."""
+    await _classified(db, "m1", "needs_human", "something ambiguous")
+    await db.record_verdict(
+        provider="fake", provider_message_id="m1", mark="right", by="operator"
+    )
+
+    assert await db.confirmed_classifications() == []
+
+
+@pytest.mark.parametrize("kind", ["api_issue", "access_request", "doc_question", "skip"])
+async def test_every_type_the_classifier_can_produce_can_become_an_example(db, kind):
+    """Including `skip`. The hardest thing a classifier learns is when *not*
+    to open a task, and a negative example is the only thing that teaches it."""
+    await _classified(db, "m1", kind, "some message")
+    await db.record_verdict(
+        provider="fake", provider_message_id="m1", mark="right", by="operator"
+    )
+
+    assert await db.confirmed_classifications() == [("some message", kind)]

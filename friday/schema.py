@@ -147,6 +147,12 @@ class DagState(Base):
     #: Which DAG produced this. A state written by one graph is not readable
     #: by another, and recording the name is how a rename is caught.
     dag_name: Mapped[str]
+    #: A fingerprint of the task parameters the graph ran against. Results
+    #: are only meaningful for the inputs that produced them: when the
+    #: reporter supplies the correlationId the graph asked for, every
+    #: conclusion drawn without it is stale, including the ones that
+    #: concluded "nothing to look up".
+    params_fingerprint: Mapped[str] = mapped_column(default="")
     #: Node name -> that node's result.
     results: Mapped[dict] = mapped_column(JSON, default=dict)
     #: Set when a node raised `PauseForHuman`. Cleared on resume.
