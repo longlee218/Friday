@@ -379,6 +379,12 @@ def _fingerprint(params: dict) -> str:
     absence for a `str | None` field, and discarding a graph's work over that
     distinction would cost tool calls for nothing.
 
+    That is true of every parameter type there is today, and stops being true
+    the first time one is a bool or a number: `False`, `0` and `[]` would then
+    read as "not supplied", and answering a question with `False` would not
+    invalidate the state computed without it. Revisit this line when a
+    `Params` field is not `str | None`.
+
     What is left is serialised as JSON with sorted keys rather than joined
     into a string. Joining `f"{key}={value}"` made `{"a": "b=c"}` and
     `{"a=b": "c"}` the same fingerprint, and `1` the same as `"1"` — both

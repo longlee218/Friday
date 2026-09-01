@@ -231,7 +231,7 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
     records when it runs; pass params whose rule should fail; assert the
     planner never saw the call.
 
-    Uses `_PLANNERS` directly because that is the registry plan() dispatches
+    Driven through `plan` because that is the registry plan() dispatches
     through — testing it is testing the seam itself.
     """
     from friday.validation import Matches

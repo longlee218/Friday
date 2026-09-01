@@ -902,3 +902,24 @@ async def test_a_pause_computed_against_other_parameters_is_not_announced(db):
 
     current = {task.id: _fingerprint(task.params)}
     assert await db.dag_pauses(current) == {}
+
+
+def test_a_value_that_changes_shape_in_storage_is_marked_not_stored():
+    """`json.dumps` succeeds on a tuple and on integer dict keys, and they
+    come back as a list and as string keys. A node checking
+    `isinstance(x, tuple)` then works until the first restart and fails after
+    it, with nothing in between to say why — which is the class of bug the
+    marker exists to prevent, arriving through a value that serialises."""
+    stored = (
+        DAGState.empty()
+        .with_result("tupled", ("x", "y"))
+        .with_result("int_keys", {1: "v"})
+        .with_result("plain", {"ok": [1, 2]})
+        .to_dict()
+    )
+
+    assert stored["tupled"] == {UNSTORABLE: "tuple"}
+    assert stored["int_keys"] == {UNSTORABLE: "dict"}
+    assert stored["plain"] == {"ok": [1, 2]}
+    # And the marked ones run again rather than coming back a different shape.
+    assert list(DAGState.from_dict(stored).results) == ["plain"]

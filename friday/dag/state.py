@@ -84,20 +84,26 @@ class DAGState:
         *this* run; the stored value is only ever read to decide whether a
         node still needs to run.
 
-        A value that will not serialise is replaced by a marker naming its
-        type. The node still counts as complete — that is the point, since
-        re-running it is what the checkpoint exists to avoid — and a
-        downstream node that needed the real value gets a shape it visibly
-        did not expect rather than a silent `None`.
+        A value that will not survive storage is replaced by a marker naming
+        its type. `from_dict` drops markers, so the node runs again — which is
+        the honest outcome for a result that cannot be carried across a
+        restart, and better than handing the next node a shape it did not
+        expect.
+
+        **Survive**, not merely serialise. `json.dumps` succeeds on a tuple
+        and on a dict with integer keys, and they come back as a list and as
+        string keys: a node checking `isinstance(x, tuple)` then works until
+        the first restart and fails after it, with nothing in between to say
+        why. The round trip is the test, because the round trip is what
+        actually happens.
         """
         safe: dict[str, Any] = {}
         for name, value in self.results.items():
             try:
-                json.dumps(value, allow_nan=False)
+                survives = json.loads(json.dumps(value, allow_nan=False)) == value
             except (TypeError, ValueError):
-                safe[name] = {UNSTORABLE: type(value).__name__}
-            else:
-                safe[name] = value
+                survives = False
+            safe[name] = value if survives else {UNSTORABLE: type(value).__name__}
         return safe
 
     def has(self, node: str) -> bool:

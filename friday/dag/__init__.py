@@ -223,9 +223,15 @@ class DAGRunner:
 
             if self._state.has(current):
                 # Already done in an earlier run; walk past it without
-                # re-running. This is what makes resume cheap. It still counts
-                # as part of the path, so a resumed run can answer "what did
-                # this graph decide?" the same way a fresh one does.
+                # re-running, and still count it as part of the path, so a
+                # resumed run can answer "what did this graph decide?" the
+                # same way a fresh one does.
+                #
+                # `_resume_point` normally walks past these before the loop
+                # starts, so this branch is reached only when the state was
+                # written by a differently-shaped graph — a node that used to
+                # be skipped now sitting on the path. Which is exactly when
+                # counting it matters.
                 self._trail.append(current)
                 current = self._dag.next_after(current, self._state)
                 continue
