@@ -99,8 +99,10 @@ What is actually on disk.
 | --- | --- |
 | `run_agent.py` | Composition root — the only place adapters are constructed, and the only place the asyncio tasks are started |
 | `init_channel.py` | One-off: create a channel's context file for the operator to fill in |
-| `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers |
-| `friday/config.py` | Loads `config.yaml`, resolves `${VAR}` from the environment |
+| `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, and each agent's persona mode |
+| `PERSONA.md` | Who every agent is, before it is told its job. Prose, read once at startup, prepended to each agent's instructions |
+| `friday/config.py` | Loads `config.yaml`, resolves `${VAR}` from the environment, stamps each `AgentConfig` with its persona |
+| `friday/persona.py` | Reads `PERSONA.md` and assembles the part each agent asked for |
 | `friday/models.py` | Every domain dataclass. No persistence, no SDK |
 | `friday/schema.py`, `db.py` | Mapped classes; the only store. `db.py` converts at the edge, so nothing above it knows SQLAlchemy exists |
 | `friday/conversation.py` | `ConversationId` — what counts as one exchange, and why a thread is its own |
@@ -196,6 +198,16 @@ not an implementation detail:
   message is a row; one loop delivers it. Approval is enforced as a predicate
   in the query that selects sendable rows, not as a check each caller must
   remember — see `_NEEDS_APPROVAL` in `friday/db.py`.
+- **One persona, three modes, and the mode is per agent.** `PERSONA.md` says
+  who the agents are and that people read Vietnamese; `config.yaml` says how
+  much of it each agent takes. `full` for the two agents whose output a person
+  reads, `language` for the ones filling in structured fields, `none` for the
+  ones returning a path or a diff. This is not caution: triage fills in
+  `environment` by tool call and `friday/validation.py` requires
+  `production` / `staging` / `dev`, so an agent carrying the voice writes
+  `sản xuất` and the reporter is asked to confirm what they already said. It
+  goes in `instructions`, never the per-call bundle — shared bytes at the
+  front of a prompt are the ones a provider's cache reuses across agents.
 - **Silence is not approval.** Only a classification the operator marked
   *right* becomes a few-shot example, and only a classifiable type at that. An
   unmarked classification is one nobody read.

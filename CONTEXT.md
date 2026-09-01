@@ -114,6 +114,21 @@ agent's instructions: a prompt is a request and a filter is not. A log server
 offers whatever it offers, and nothing about answering "why did this request
 fail" should be able to delete a log stream.
 
+## Persona
+
+Who an agent is, as distinct from what it does. One file for the whole system,
+because "you are Long Lee's assistant, and people read Vietnamese" is not a
+fact any single agent owns.
+
+Three **modes**, chosen per agent: the full thing, the identity and language
+rule without the voice, or nothing. The middle one exists because an agent
+filling in a field something else validates must not also be told to write in
+Vietnamese — `environment` has to be `production`, not `sản xuất`.
+
+Distinct from **tone**: the persona is written by hand and describes the shape,
+the tone examples are real messages the operator sent and are the evidence.
+Where they disagree the examples win, and the persona says so itself.
+
 ## Harness
 
 The one place an agent is *run*. Takes a declared agent and an input, returns an

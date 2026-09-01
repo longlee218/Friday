@@ -97,9 +97,19 @@ class Harness:
         self._config = config
         self.last_error: str | None = None
         agent_class = Agent[context_type] if context_type else Agent
+        # Persona, then the job, then what has been learned. All three are the
+        # stable prefix — identity changes at a restart, instructions are
+        # code, notes are promoted between runs — so the per-call prompt still
+        # begins where the cache ends.
+        #
+        # Persona first because it is the same text for many agents: shared
+        # bytes at the front of a prompt are the ones a provider's cache can
+        # actually reuse across them.
+        preamble = f"{config.persona}\n\n" if config.persona else ""
         self.agent = agent_class(
             name=config.name,
-            instructions=f"{instructions}\n\n{notes}" if notes else instructions,
+            instructions=preamble
+            + (f"{instructions}\n\n{notes}" if notes else instructions),
             model=model or _chat_model(config),
             tools=tools or [],
             mcp_servers=mcp_servers or [],
