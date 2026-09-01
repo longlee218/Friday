@@ -36,8 +36,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from friday.channel_context import ChannelContext
-from friday.models import InboundEvent, Params
+from friday.memory.channel_context import ChannelContext
+from friday.domain.models import InboundEvent, Params
 
 log = logging.getLogger(__name__)
 

@@ -24,12 +24,12 @@ from typing import Any
 from fastapi import FastAPI, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from friday.conversation import ConversationId
-from friday.db import Database
-from friday.models import InboundEvent, Outbound, Task
+from friday.domain.conversation import ConversationId
+from friday.store.db import Database
+from friday.domain.models import InboundEvent, Outbound, Task
 from friday.outbox import FAILED
-from friday.redact import scrub
-from friday.tasks import TaskState
+from friday.ops.redact import scrub
+from friday.domain.tasks import TaskState
 
 log = logging.getLogger(__name__)
 

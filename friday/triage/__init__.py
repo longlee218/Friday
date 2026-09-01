@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from friday.config import AgentConfig
-from friday.harness import Harness, ToolContext, tool
-from friday.models import InboundEvent, TaskType
+from friday.agent.harness import Harness, ToolContext, tool
+from friday.domain.models import InboundEvent, TaskType
 from friday.triage.prefilter import is_compensation_talk
 
 __all__ = ["Decided", "NeedsHuman", "TaskType", "Triage", "TriageOutcome"]
@@ -175,7 +175,7 @@ class Triage:
         # and its result where a written answer would be one turn.
         from datetime import datetime, timezone
 
-        from friday.instruction_prompt import (
+        from friday.agent.instruction_prompt import (
             ContextBundle,
             conversation,
             identity,

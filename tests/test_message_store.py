@@ -7,10 +7,10 @@ queue from the surrounding context is a column, not a second table.
 from __future__ import annotations
 
 from conftest import FakeProvider, captured, make_event
-from friday.conversation import ConversationId
+from friday.domain.conversation import ConversationId
 from friday.config import IngestConfig
 from friday.inbox import Inbox
-from friday.models import MentionType
+from friday.domain.models import MentionType
 
 
 def context(**kw):

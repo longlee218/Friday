@@ -45,8 +45,8 @@ def agents_for_api_issue(
     what it costs.
     """
     from friday.dag import api_issue as graph
-    from friday.harness import Harness
-    from friday.skills import fetch_skill_tool
+    from friday.agent.harness import Harness
+    from friday.agent.skills import fetch_skill_tool
 
     instructions = {
         "read_logs": graph.READ_LOGS,
@@ -100,7 +100,7 @@ def _skills_block(skills: Any) -> str:
     """
     if skills is None or not len(skills):
         return ""
-    from friday.instruction_prompt import skills as skills_section
+    from friday.agent.instruction_prompt import skills as skills_section
 
     return "\n\n" + skills_section(skills.catalogue()).render()
 

@@ -15,9 +15,9 @@ import asyncio
 import logging
 from dataclasses import replace
 
-from friday.db import Database
-from friday.tasks import TaskState
-from friday.models import InboundEvent, Task
+from friday.store.db import Database
+from friday.domain.tasks import TaskState
+from friday.domain.models import InboundEvent, Task
 from friday.triage import Decided, NeedsHuman, TriageOutcome
 
 __all__ = ["PENDING", "NEEDS_HUMAN", "TriageRunner"]

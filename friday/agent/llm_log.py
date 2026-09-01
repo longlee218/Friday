@@ -13,9 +13,9 @@ from __future__ import annotations
 import json
 import logging
 
-from friday.harness import Hooks
-from friday.models import ModelCall
-from friday.redact import scrub
+from friday.agent.harness import Hooks
+from friday.domain.models import ModelCall
+from friday.ops.redact import scrub
 
 __all__ = ["LogHooks"]
 

@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from enum import StrEnum
 
-from friday.conversation import ConversationId, resolve
-from friday.validation import InSet, Matches, OneOf
+from friday.domain.conversation import ConversationId, resolve
+from friday.domain.validation import InSet, Matches, OneOf
 
 
 class MentionType(StrEnum):

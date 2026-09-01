@@ -340,7 +340,7 @@ def test_a_skill_description_cannot_break_out_of_its_section(tmp_path):
     description containing a closing tag ended the section and everything
     after it read as instructions."""
     from friday.dag.workflows import agents_for_api_issue
-    from friday.skills import SkillLibrary
+    from friday.agent.skills import SkillLibrary
 
     (tmp_path / "evil.md").write_text(
         "---\n"

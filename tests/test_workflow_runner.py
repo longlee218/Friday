@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import pytest
 
-from friday.models import Task
-from friday.conversation import ConversationId
+from friday.domain.models import Task
+from friday.domain.conversation import ConversationId
 from friday.workflows.runner import ASKED, WorkflowRunner
-from friday.tasks import TaskState
+from friday.domain.tasks import TaskState
 
 
 
@@ -282,17 +282,17 @@ async def test_extraction_runs_when_a_message_is_linked(db):
 
     from sqlalchemy import update as sa_update
 
-    from friday import schema
+    from friday.store import schema
     from friday.config import AgentConfig
-    from friday.conversation import ConversationId
+    from friday.domain.conversation import ConversationId
     from friday.dag.router import EDGE_ROUTER
     from friday.extraction import (
         _EXTRACTORS,
         build_extractor,
         extractor,
     )
-    from friday.harness import Harness
-    from friday.models import ApiIssueParams, InboundEvent, MentionType
+    from friday.agent.harness import Harness
+    from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
 
     class StubResult:
         # The model has to repeat every field, including ones triage already

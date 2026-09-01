@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from friday.models import MentionType
+from friday.domain.models import MentionType
 
 log = logging.getLogger(__name__)
 
@@ -177,7 +177,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
     except yaml.YAMLError as exc:
         raise ConfigError(f"Could not parse {path}: {exc}") from exc
 
-    from friday.persona import load as load_persona
+    from friday.agent.persona import load as load_persona
 
     # Read before the agents, because every one of them is stamped with it.
     # Relative to the configuration file, not to the working directory: the
@@ -315,7 +315,7 @@ def _persona_for(agent: str, mode: Any, persona: "Persona | None") -> str:
     leaves no trace anywhere — nothing errors, the replies just stop sounding
     like anyone.
     """
-    from friday.persona import Mode
+    from friday.agent.persona import Mode
 
     try:
         wanted = Mode(str(mode))

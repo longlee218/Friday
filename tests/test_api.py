@@ -11,10 +11,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import captured, make_event
-from friday.api import build_api
-from friday.conversation import ConversationId
+from friday.ops.api import build_api
+from friday.domain.conversation import ConversationId
 from friday.outbox import Kind
-from friday.tasks import TaskState
+from friday.domain.tasks import TaskState
 
 WATCHED = ConversationId("fake", "watched")
 
@@ -129,7 +129,7 @@ def test_binding_beyond_loopback_without_a_credential_is_refused():
     """The board exposes every captured message and every model prompt. It has
     no authentication because it only ever answered on loopback — so binding
     wider has to bring one, or not happen."""
-    from friday.api import check_exposure
+    from friday.ops.api import check_exposure
 
     check_exposure("127.0.0.1", token=None)
     check_exposure("0.0.0.0", token="a-real-token")
@@ -145,7 +145,7 @@ def test_a_taken_port_is_reported_in_one_line():
     matters — something else is already on the port — is buried in it."""
     import socket
 
-    from friday.api import bind
+    from friday.ops.api import bind
 
     held = bind("127.0.0.1", 0)
     port = held.getsockname()[1]
@@ -161,7 +161,7 @@ def test_a_taken_port_is_reported_in_one_line():
 def test_binding_hands_back_a_listening_socket():
     """Bound before the server starts, so the failure happens where it can be
     reported rather than deep inside uvicorn's startup."""
-    from friday.api import bind
+    from friday.ops.api import bind
 
     sock = bind("127.0.0.1", 0)
     try:
@@ -174,7 +174,7 @@ def test_a_container_may_bind_its_own_network(tmp_path, monkeypatch):
     """Inside a container, loopback is unreachable from outside it — the port
     mapping never arrives. `0.0.0.0` there means "this container", and what
     restricts who can reach it is the publish rule, one layer out."""
-    from friday import api
+    from friday.ops import api
 
     marker = tmp_path / ".dockerenv"
     marker.write_text("")
@@ -184,7 +184,7 @@ def test_a_container_may_bind_its_own_network(tmp_path, monkeypatch):
 
 
 def test_a_host_still_may_not(tmp_path, monkeypatch):
-    from friday import api
+    from friday.ops import api
 
     monkeypatch.setattr(api, "_CONTAINER_MARKER", tmp_path / "absent")
 

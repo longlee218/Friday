@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from friday.dag import DAGDeps, DAGState
 from friday.dag.api_issue import _compose_reply
-from friday.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
+from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
 from types import SimpleNamespace
 
 from friday.workflows import Ask, Park, plan

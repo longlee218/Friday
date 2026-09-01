@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_event
-from friday.conversation import ConversationId
+from friday.domain.conversation import ConversationId
 from friday.outbox import Kind, Outbox
 
 WATCHED = ConversationId("fake", "watched")

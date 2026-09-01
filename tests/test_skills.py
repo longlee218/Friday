@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.skills import Skill, SkillLibrary
+from friday.agent.skills import Skill, SkillLibrary
 
 
 def write(directory, name: str, text: str) -> None:
@@ -210,7 +210,7 @@ def test_the_skills_that_ship_with_the_repo_all_parse():
 
 def test_the_tool_is_bound_to_one_library(tmp_path):
     """What an agent can reach is composition, not something it declares."""
-    from friday.skills import fetch_skill_tool
+    from friday.agent.skills import fetch_skill_tool
 
     write(tmp_path, "trace.md", SKILL)
     tool = fetch_skill_tool(SkillLibrary(tmp_path).load())
@@ -262,7 +262,7 @@ def test_the_responder_without_skills_carries_no_tool():
 
 
 def test_the_catalogue_reaches_the_prompt_the_responder_builds(tmp_path):
-    from friday.instruction_prompt import skills as skills_section
+    from friday.agent.instruction_prompt import skills as skills_section
 
     rendered = skills_section(_library(tmp_path).catalogue()).render()
 

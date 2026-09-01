@@ -33,9 +33,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
-from friday import schema
-from friday.conversation import ConversationId
-from friday.models import (
+from friday.store import schema
+from friday.domain.conversation import ConversationId
+from friday.domain.models import (
     InboundEvent,
     MentionType,
     ModelCall,
@@ -44,8 +44,8 @@ from friday.models import (
     Outbound,
     Task,
 )
-from friday.redact import scrub
-from friday.tasks import OPEN, IllegalTransition, TaskState, may_move
+from friday.ops.redact import scrub
+from friday.domain.tasks import OPEN, IllegalTransition, TaskState, may_move
 
 __all__ = ["Database"]
 

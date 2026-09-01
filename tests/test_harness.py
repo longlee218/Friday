@@ -16,7 +16,7 @@ from agents.models.interface import Model
 from agents.testing import ScriptedModel, assistant_message
 
 from friday.config import AgentConfig
-from friday.harness import Harness
+from friday.agent.harness import Harness
 
 CONFIG = AgentConfig(
     name="an-agent", api_key="sk-secret", base_url="https://example.invalid/v1",
@@ -124,7 +124,7 @@ async def test_an_agent_can_be_given_servers_it_did_not_have_to_know_about():
     """Which servers an agent gets is composition, not something it declares —
     the same reason its model and base_url are configuration."""
     from friday.config import MCPServerConfig
-    from friday.mcp import build
+    from friday.agent.mcp import build
 
     servers = build([MCPServerConfig(name="loki", command="npx", allow=("q",))])
 
@@ -140,7 +140,7 @@ async def test_this_is_the_only_module_that_imports_the_sdk():
     every agent written after it."""
     import subprocess
 
-    allowed = {"friday/harness.py"}
+    allowed = {"friday/agent/harness.py"}
     hits = subprocess.run(
         ["grep", "-rlE", r"^\s*(from agents|import agents)\b", "friday/"],
         capture_output=True, text=True,
@@ -153,7 +153,7 @@ async def test_run_accepts_a_context_bundle():
     """Ticket 27 widens the seam: a bundle's rendered string is the prompt,
     and nothing else about the call changes. Plain string still works."""
     from agents.testing import ScriptedModel, assistant_message
-    from friday.instruction_prompt import ContextBundle, identity, notes
+    from friday.agent.instruction_prompt import ContextBundle, identity, notes
 
     bundle = ContextBundle(
         identity=identity("triage", "you triage mentions"),

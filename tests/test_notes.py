@@ -8,9 +8,9 @@ approved task said the same thing.
 
 from __future__ import annotations
 
-from friday.conversation import ConversationId
-from friday.notes import Promotion
-from friday.tasks import TaskState
+from friday.domain.conversation import ConversationId
+from friday.memory.notes import Promotion
+from friday.domain.tasks import TaskState
 
 WATCHED = ConversationId("fake", "watched")
 
@@ -136,7 +136,7 @@ async def test_notes_reach_an_agent_through_its_instructions(db):
     cache hit on everything after it. Built once, so a promotion takes effect
     on the next start rather than invalidating a warm cache mid-run."""
     from friday.config import AgentConfig
-    from friday.harness import Harness
+    from friday.agent.harness import Harness
 
     await note(db, approved=True, text="ask for the env first")
     await Promotion(db=db).run_once()

@@ -12,7 +12,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from friday.channel_context import ContextStore
+from friday.memory.channel_context import ContextStore
 from friday.config import load_config
 
 

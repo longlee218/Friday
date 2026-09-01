@@ -10,9 +10,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from conftest import captured, make_event
-from friday.conversation import ConversationId
+from friday.domain.conversation import ConversationId
 from friday.outbox import Kind
-from friday.tasks import TaskState
+from friday.domain.tasks import TaskState
 
 WATCHED = ConversationId("fake", "watched")
 

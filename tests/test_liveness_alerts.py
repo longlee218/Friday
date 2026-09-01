@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from friday.liveness import Liveness
+from friday.ops.liveness import Liveness
 from friday.outbox import Kind
 
 NOW = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)

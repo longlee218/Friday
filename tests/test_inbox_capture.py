@@ -9,8 +9,8 @@ import pytest
 from conftest import captured, make_event
 from friday.config import IngestConfig
 from friday.inbox import Inbox
-from friday.conversation import ConversationId
-from friday.models import MentionType
+from friday.domain.conversation import ConversationId
+from friday.domain.models import MentionType
 
 
 async def test_direct_mention_in_watched_channel_is_captured(inbox, provider):
@@ -199,7 +199,7 @@ async def test_an_unknown_channel_has_no_cursor(db):
 
 
 async def test_cursors_survive_a_restart(tmp_path, provider, config):
-    from friday.db import Database
+    from friday.store.db import Database
     from friday.inbox import Inbox
 
     path = str(tmp_path / "friday.db")

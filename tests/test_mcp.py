@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from friday.config import ConfigError, MCPServerConfig, load_config
-from friday.mcp import build
+from friday.agent.mcp import build
 
 
 def test_a_server_is_configuration_not_code(tmp_path):

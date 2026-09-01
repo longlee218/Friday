@@ -11,7 +11,7 @@ from alembic import context
 
 from dotenv import load_dotenv
 
-from friday import schema
+from friday.store import schema
 from friday.config import load_config
 
 # config.yaml interpolates secrets from .env, so they have to be present
@@ -50,7 +50,7 @@ target_metadata = schema.Base.metadata
 def render_item(type_, obj, autogen_context):
     """Render a custom column type as the type it actually stores.
 
-    Otherwise autogenerate emits `friday.schema.IsoDateTime()` into a migration
+    Otherwise autogenerate emits `friday.store.schema.IsoDateTime()` into a migration
     that never imports it — and worse, ties a migration to a class that may be
     renamed or deleted later. A migration should describe the database, not the
     code that happened to be there when it was written.

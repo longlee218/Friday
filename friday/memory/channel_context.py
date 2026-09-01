@@ -21,9 +21,9 @@ from typing import Any
 import yaml
 
 from friday.config import AgentConfig
-from friday.db import Database
-from friday.harness import Harness
-from friday.notes import Promotion
+from friday.store.db import Database
+from friday.agent.harness import Harness
+from friday.memory.notes import Promotion
 
 __all__ = ["ChannelContext", "ContextRebuilder", "ContextStore"]
 

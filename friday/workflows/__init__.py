@@ -20,13 +20,13 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from typing import get_args, get_type_hints
 
-from friday.models import (
+from friday.domain.models import (
     AccessRequestParams,
     ApiIssueParams,
     DocQuestionParams,
     Params,
 )
-from friday.validation import Problem, validate
+from friday.domain.validation import Problem, validate
 
 #: Imported lazily inside `plan()` would only save a sys.modules lookup; it
 #: does not break a cycle (extraction.py imports harness and models, not

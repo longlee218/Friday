@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from friday.conversation import ConversationId
-from friday.observations import Category, remember_tool
-from friday.tasks import TaskState
+from friday.domain.conversation import ConversationId
+from friday.memory.observations import Category, remember_tool
+from friday.domain.tasks import TaskState
 
 WATCHED = ConversationId("fake", "watched")
 
@@ -87,7 +87,7 @@ async def test_only_two_things_read_them_and_neither_prompts_with_them(db):
     """
     import subprocess
 
-    allowed = {"friday/db.py", "friday/notes.py"}
+    allowed = {"friday/store/db.py", "friday/memory/notes.py"}
     hits = subprocess.run(
         ["grep", "-rln", r"\.observations(", "friday/"],
         capture_output=True, text=True,
@@ -100,7 +100,7 @@ async def test_a_step_can_be_given_it_as_a_tool(db):
     """The shape a planner uses: bound to its task, handed to the agent."""
     from agents import function_tool
 
-    from friday.harness import Harness
+    from friday.agent.harness import Harness
     from friday.config import AgentConfig
 
     opened = await task(db)

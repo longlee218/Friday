@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import make_event
 
-from friday.verdicts import Mark, mark_for
+from friday.memory.verdicts import Mark, mark_for
 
 
 # --- what a reaction means --------------------------------------------------
@@ -289,7 +289,7 @@ async def test_removing_an_old_reaction_does_not_delete_the_newer_mark(db):
     up by removing the ✅. Discord does not remove the old one for you. A
     clear-on-any-removal would throw away the ❌ that is still on the message
     and leave the classification unmarked while it visibly is not."""
-    from friday.verdicts import Mark
+    from friday.memory.verdicts import Mark
 
     async def marked(*, provider_message_id, mark, by, taking_back):
         current = await db.verdict_for(

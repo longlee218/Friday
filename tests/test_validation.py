@@ -8,8 +8,8 @@ from typing import Optional
 
 import pytest
 
-from friday.models import ApiIssueParams
-from friday.validation import (
+from friday.domain.models import ApiIssueParams
+from friday.domain.validation import (
     InSet,
     Matches,
     NonEmpty,
@@ -171,7 +171,7 @@ def test_a_params_with_no_rules_passes_validation_and_returns_no_problems():
     """`AccessRequestParams` declares no `_RULES`. `ApiIssueParams` used to be
     the example here and no longer can be: it has a cross-field rule, and a
     report with neither a correlationId nor a curl is not usable."""
-    from friday.models import AccessRequestParams
+    from friday.domain.models import AccessRequestParams
 
     good = AccessRequestParams(project="payments", permission="write", summary="x")
     assert _problems(good) == []
@@ -225,7 +225,7 @@ def test_validate_is_only_invoked_from_one_call_site():
     may import the rule vocabulary to declare what fields are valid; that
     is not a call site, that is data.
 
-    Greps for `validate(` and `friday.validation.validate(`.
+    Greps for `validate(` and `friday.domain.validation.validate(`.
     """
     hits = subprocess.run(
         [
@@ -235,14 +235,14 @@ def test_validate_is_only_invoked_from_one_call_site():
             '"\\b(friday\\.validation\\.validate|validate)\\s*\\(" '
             'friday/ '
             '--include=*.py '
-            '| grep -v "^friday/validation\\.py:" '
+            '| grep -v "^friday/domain/validation\\.py:" '
             '| cut -d: -f1 | sort -u',
         ],
         capture_output=True,
         text=True,
     ).stdout.split()
 
-    # Imports of `from friday.validation import ...` are declarations of
+    # Imports of `from friday.domain.validation import ...` are declarations of
     # rules; that is data, not a call site. The seam guarantees the rule
     # *engine* only runs from one place, which is `friday/workflows/__init__.py`.
     allowed = {"friday/workflows/__init__.py"}
@@ -257,7 +257,7 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
     Driven through `plan` because that is the registry plan() dispatches
     through — testing it is testing the seam itself.
     """
-    from friday.validation import Matches
+    from friday.domain.validation import Matches
     from friday.workflows import (
         PARAMS,
         plan,

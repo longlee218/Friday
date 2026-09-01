@@ -12,23 +12,23 @@ from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
 
-from friday.channel_context import ContextRebuilder, ContextStore
+from friday.memory.channel_context import ContextRebuilder, ContextStore
 from friday.config import ConfigError, load_config
-from friday.db import Database
+from friday.store.db import Database
 from friday.inbox import Inbox
-from friday.api import bind, build_api, check_exposure
+from friday.ops.api import bind, build_api, check_exposure
 from friday.board import build_board
-from friday.liveness import Heartbeat, Liveness
-from friday.mcp import build as build_mcp
-from friday.notes import Promotion
-from friday.redact import Redacting, install_excepthook
+from friday.ops.liveness import Heartbeat, Liveness
+from friday.agent.mcp import build as build_mcp
+from friday.memory.notes import Promotion
+from friday.ops.redact import Redacting, install_excepthook
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
 from friday.providers.discord.user import DiscordUserProvider
 from friday.providers.discord.bot import DiscordBot
 from friday.responder import Responder
-from friday.skills import SkillLibrary
-from friday.tasks import TaskState
+from friday.agent.skills import SkillLibrary
+from friday.domain.tasks import TaskState
 from friday.triage import Triage
 from friday.triage.runner import TriageRunner
 from friday.workflows.runner import WorkflowRunner

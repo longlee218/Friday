@@ -13,8 +13,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 
-from friday.models import Outbound
-from friday.tasks import TaskState
+from friday.domain.models import Outbound
+from friday.domain.tasks import TaskState
 
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN
 

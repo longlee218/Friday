@@ -45,7 +45,7 @@ from agents.mcp import (
 from openai import AsyncOpenAI
 
 from friday.config import AgentConfig
-from friday.redact import scrub
+from friday.ops.redact import scrub
 
 __all__ = [
     "Harness",
@@ -165,14 +165,14 @@ class Harness:
         `extra_turns` is for an agent whose answer arrives as a tool call: the
         call and its result are two turns where a written answer is one.
         """
-        from friday.instruction_prompt import ContextBundle
+        from friday.agent.instruction_prompt import ContextBundle
 
         if isinstance(prompt, ContextBundle):
             prompt = prompt.render()
 
         # Deferred: `llm_log` reaches `Hooks` through this module, so importing
         # it at module load time would be a cycle.
-        from friday.llm_log import LogHooks
+        from friday.agent.llm_log import LogHooks
 
         self.last_error = None
         self.agent.hooks = LogHooks(calls, model=self._config.model)

@@ -5,8 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from conftest import captured, make_event
-from friday.conversation import ConversationId
-from friday.liveness import Heartbeat
+from friday.domain.conversation import ConversationId
+from friday.ops.liveness import Heartbeat
 from friday.outbox import Kind
 
 
@@ -64,7 +64,7 @@ async def test_the_daily_summary_survives_a_restart(db):
     """
     from datetime import datetime, timezone
 
-    from friday.liveness import Liveness
+    from friday.ops.liveness import Liveness
     from friday.outbox import Kind
 
     noon = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
@@ -83,7 +83,7 @@ async def test_the_daily_summary_survives_a_restart(db):
 async def test_a_new_day_is_summarised_again(db):
     from datetime import datetime, timezone
 
-    from friday.liveness import Liveness
+    from friday.ops.liveness import Liveness
     from friday.outbox import Kind
 
     liveness = Liveness(db=db, gateway=SimpleNamespace(down_since=None))

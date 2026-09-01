@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from friday.conversation import ConversationId
-from friday.models import Outbound
+from friday.domain.conversation import ConversationId
+from friday.domain.models import Outbound
 from friday.outbox import Kind
 from friday.providers.discord.bot import DiscordBot
 

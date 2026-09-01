@@ -28,7 +28,7 @@ from collections.abc import Callable
 
 import discord
 
-from friday.models import Outbound
+from friday.domain.models import Outbound
 from friday.outbox import Kind
 
 __all__ = ["DiscordBot"]

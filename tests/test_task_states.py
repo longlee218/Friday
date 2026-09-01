@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from friday.conversation import ConversationId
-from friday.tasks import IllegalTransition, TaskState, may_move
+from friday.domain.conversation import ConversationId
+from friday.domain.tasks import IllegalTransition, TaskState, may_move
 
 WATCHED = ConversationId("fake", "watched")
 

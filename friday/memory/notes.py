@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import logging
 
-from friday.db import Database
-from friday.observations import Category
+from friday.store.db import Database
+from friday.memory.observations import Category
 
 __all__ = ["CORROBORATION", "Promotion"]
 

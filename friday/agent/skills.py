@@ -167,7 +167,7 @@ def fetch_skill_tool(library: SkillLibrary):
     shape `remember_tool` uses: what an agent can reach is composition, not
     something the agent declares.
     """
-    from friday.harness import tool
+    from friday.agent.harness import tool
 
     @tool
     def fetch_skill(name: str) -> str:

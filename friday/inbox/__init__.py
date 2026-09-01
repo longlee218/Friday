@@ -5,8 +5,8 @@ import logging
 from collections.abc import AsyncIterator
 
 from friday.config import IngestConfig
-from friday.db import Database
-from friday.models import InboundEvent, MentionType
+from friday.store.db import Database
+from friday.domain.models import InboundEvent, MentionType
 
 __all__ = ["Inbox"]
 

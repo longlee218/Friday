@@ -18,7 +18,7 @@ import logging
 from collections.abc import Sequence
 
 from friday.config import MCPServerConfig
-from friday.harness import (
+from friday.agent.harness import (
     MCPServer,
     MCPServerSse,
     MCPServerStdio,

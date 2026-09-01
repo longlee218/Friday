@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from friday.models import InboundEvent, MentionType
+from friday.domain.models import InboundEvent, MentionType
 
 
 def normalise(

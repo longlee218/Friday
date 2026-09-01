@@ -18,7 +18,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import MetaData, create_engine
 
-from friday import schema
+from friday.store import schema
 
 ROOT = Path(__file__).resolve().parent.parent
 

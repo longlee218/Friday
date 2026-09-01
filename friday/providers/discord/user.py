@@ -7,11 +7,11 @@ from collections.abc import AsyncIterator, Callable
 
 import discord_self
 
-from friday.conversation import ConversationId
-from friday.models import InboundEvent, Outbound
+from friday.domain.conversation import ConversationId
+from friday.domain.models import InboundEvent, Outbound
 from friday.providers import CredentialRejected
 from friday.providers.discord.normalise import normalise
-from friday.verdicts import mark_for
+from friday.memory.verdicts import mark_for
 
 __all__ = ["DiscordUserProvider", "is_credential_rejected"]
 

@@ -10,7 +10,7 @@ arrived since is stable at the front and short at the back.
 from __future__ import annotations
 
 from conftest import make_event
-from friday.conversation import ConversationId
+from friday.domain.conversation import ConversationId
 
 WATCHED = ConversationId("fake", "watched")
 

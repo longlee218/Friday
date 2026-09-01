@@ -17,8 +17,8 @@ import logging
 from dataclasses import asdict, fields
 from typing import Any, Callable
 
-from friday.harness import Harness
-from friday.models import Params
+from friday.agent.harness import Harness
+from friday.domain.models import Params
 
 __all__ = ["Extractor", "build_extractor", "extract", "registered"]
 
@@ -157,7 +157,7 @@ def register(task_type: str, params_cls: type[Params], config: "AgentConfig") ->
     at runtime, in the middle of a task, where the only symptom is fields that
     never fill in. Refusing at startup costs a restart.
     """
-    from friday.harness import Harness
+    from friday.agent.harness import Harness
     from friday.workflows import PARAMS
 
     if PARAMS.get(task_type) is not params_cls:
@@ -182,7 +182,7 @@ def _hygiene(params: Params) -> Params:
     real one — and a workflow that believes it has a correlationId will never
     ask for the one it needs.
     """
-    from friday.param_hygiene import clean
+    from friday.text.param_hygiene import clean
 
     return type(params)(
         **{
@@ -266,7 +266,7 @@ def register_extractors(config: "Config") -> None:  # type: ignore[name-defined]
     install that starts and says what is wrong beats one that will not start.
     It is a loud warning: nothing else fills those fields.
     """
-    from friday import models
+    from friday.domain import models
 
     for task_type, params_name in EXTRACTS.items():
         block = f"extractor_{task_type}"

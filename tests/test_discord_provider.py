@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from friday.conversation import ConversationId
+from friday.domain.conversation import ConversationId
 from friday.providers.discord.user import DiscordUserProvider
 
 

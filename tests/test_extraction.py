@@ -22,7 +22,7 @@ from friday.extraction import (
     extractor,
     registered,
 )
-from friday.validation import Matches
+from friday.domain.validation import Matches
 
 
 # --- parse helpers ----------------------------------------------------
@@ -229,7 +229,7 @@ def test_the_string_null_is_treated_as_absent():
     workflow that believes it has a correlationId never asks for the one it
     needs. The check used to live in triage, which no longer produces values."""
     from friday.extraction import _hygiene
-    from friday.models import ApiIssueParams
+    from friday.domain.models import ApiIssueParams
 
     cleaned = _hygiene(ApiIssueParams("s", "null", "N/A", "   "))
 
@@ -240,7 +240,7 @@ def test_the_string_null_is_treated_as_absent():
 
 def test_values_are_trimmed():
     from friday.extraction import _hygiene
-    from friday.models import DocQuestionParams
+    from friday.domain.models import DocQuestionParams
 
     assert _hygiene(DocQuestionParams("  is it optional?  ")).question == (
         "is it optional?"

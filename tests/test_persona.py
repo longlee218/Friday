@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from friday.config import ConfigError, load_config
-from friday.persona import Mode, load
+from friday.agent.persona import Mode, load
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -211,7 +211,7 @@ def test_the_persona_sits_above_the_agents_own_instructions():
     shared bytes at the front are the ones a provider's cache reuses across
     agents."""
     from friday.config import AgentConfig
-    from friday.harness import Harness
+    from friday.agent.harness import Harness
 
     built = Harness(
         config=AgentConfig(
@@ -234,7 +234,7 @@ def test_the_persona_sits_above_the_agents_own_instructions():
 
 def test_an_agent_with_no_persona_reads_exactly_as_it_did_before():
     from friday.config import AgentConfig
-    from friday.harness import Harness
+    from friday.agent.harness import Harness
 
     built = Harness(
         config=AgentConfig(
@@ -303,7 +303,7 @@ def test_the_shipped_persona_file_has_every_section_a_mode_names():
     """A heading renamed in `PERSONA.md` and not in `persona.py` drops that
     section from every agent, silently — the file still parses, the agents
     still run, and nothing anywhere says the voice is gone."""
-    from friday.persona import _SECTIONS
+    from friday.agent.persona import _SECTIONS
 
     persona = load(REPO / "PERSONA.md")
     wanted = {name for names in _SECTIONS.values() for name in names}

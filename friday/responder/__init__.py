@@ -23,9 +23,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from friday.config import AgentConfig
-from friday.harness import Harness
-from friday.skills import fetch_skill_tool
-from friday.models import InboundEvent
+from friday.agent.harness import Harness
+from friday.agent.skills import fetch_skill_tool
+from friday.domain.models import InboundEvent
 
 __all__ = ["Draft", "Responder"]
 
@@ -91,7 +91,7 @@ class Responder:
         """
         from datetime import datetime, timezone
 
-        from friday.instruction_prompt import (
+        from friday.agent.instruction_prompt import (
             ContextBundle,
             base,
             conversation,
@@ -99,7 +99,7 @@ class Responder:
             task,
             tone_examples,
         )
-        from friday.instruction_prompt import skills as skills_section
+        from friday.agent.instruction_prompt import skills as skills_section
 
         bundle = ContextBundle(
             identity=identity(

@@ -4,8 +4,8 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
-from friday.conversation import ConversationId
-from friday.models import InboundEvent
+from friday.domain.conversation import ConversationId
+from friday.domain.models import InboundEvent
 
 __all__ = ["CredentialRejected", "Provider"]
 

@@ -124,7 +124,7 @@ class Verdict(Base):
 
     provider: Mapped[str] = mapped_column(primary_key=True)
     provider_message_id: Mapped[str] = mapped_column(primary_key=True)
-    #: "right" or "wrong". A closed set; see `friday.verdicts.Mark`.
+    #: "right" or "wrong". A closed set; see `friday.memory.verdicts.Mark`.
     mark: Mapped[str]
     #: Who marked it, as the platform names them.
     marked_by: Mapped[str]

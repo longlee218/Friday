@@ -9,12 +9,12 @@ from __future__ import annotations
 import pytest
 from agents.testing import ScriptedModel, assistant_message
 
-from friday.channel_context import ContextRebuilder, ContextStore
+from friday.memory.channel_context import ContextRebuilder, ContextStore
 from friday.config import AgentConfig
-from friday.conversation import ConversationId
-from friday.liveness import Heartbeat
-from friday.notes import Promotion
-from friday.tasks import TaskState
+from friday.domain.conversation import ConversationId
+from friday.ops.liveness import Heartbeat
+from friday.memory.notes import Promotion
+from friday.domain.tasks import TaskState
 from tests.conftest import make_event
 
 SUMMARY_CONFIG = AgentConfig(

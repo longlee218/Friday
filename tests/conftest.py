@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 import pytest
 
 from friday.config import IngestConfig
-from friday.db import Database
+from friday.store.db import Database
 from friday.inbox import Inbox
-from friday.models import InboundEvent, MentionType
+from friday.domain.models import InboundEvent, MentionType
 
 
 class FakeProvider:
