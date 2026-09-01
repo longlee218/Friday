@@ -74,13 +74,13 @@ The alternative — fetching text back from Discord per plan — costs an API ca
 and breaks for messages older than what the gateway remembers. Storing is the
 right call here; the column is small.
 
-- [ ] `friday/extraction.py` exists with `@extractor(task_type)` registration and a single `extract(extractor, text) -> Params` entry point
-- [ ] An extractor is built from a `FramingConfig` block in `config.yaml` — separate from `triage` and `responder`
-- [ ] `messages.original_text` column exists; `Inbox._accept` writes it on first recording; `WorkflowRunner._plan` reads it
-- [ ] `plan(task_type, params, text, agent)` runs extraction, merges, validates, then dispatches to the planner
-- [ ] Extraction only runs for non-`skip` triage outcomes (no work, no extraction)
-- [ ] An `api_issue` extractor is registered that fills `environment`, `correlation_id`, `curl` from the text
-- [ ] Triage no longer calls `find_environment`, `find_correlation_id`, `find_curl`; those functions move to the extractor's prompt + schema
-- [ ] The old `params` field is no longer mutated after triage — the merge is the only place fields are filled
-- [ ] A test asserts that a hallucinated correlation_id from the extractor is caught by validate before the planner runs
-- [ ] Existing tests for triage still pass without modification
+- [x] `friday/extraction.py` exists with `@extractor(task_type)` registration and a single `extract(extractor, text) -> Params` entry point
+- [x] An extractor is built from a `FramingConfig` block in `config.yaml` — separate from `triage` and `responder`
+- [x] `messages.original_text` column exists; `Inbox._accept` writes it on first recording; `WorkflowRunner._plan` reads it
+- [x] `plan(task_type, params, text, agent)` runs extraction, merges, validates, then dispatches to the planner
+- [x] Extraction only runs for non-`skip` triage outcomes (no work, no extraction)
+- [x] An `api_issue` extractor is registered that fills `environment`, `correlation_id`, `curl` from the text
+- [x] Triage no longer calls `find_environment`, `find_correlation_id`, `find_curl`; those functions move to the extractor's prompt + schema
+- [x] The old `params` field is no longer mutated after triage — the merge is the only place fields are filled
+- [x] A test asserts that a hallucinated correlation_id from the extractor is caught by validate before the planner runs
+- [x] Existing tests for triage still pass without modification
