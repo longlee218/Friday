@@ -155,3 +155,53 @@ async def test_a_type_with_no_graph_parks_once_it_has_what_it_needs():
     )
 
     assert isinstance(action, Park)
+
+
+# --- extraction fills blanks; it does not reword what is there ---------------
+
+
+def test_extraction_does_not_overwrite_what_triage_already_wrote():
+    """`summary` is written by triage on every task. Re-extracting reworded it
+    every pass, and a reworded parameter is a *changed* parameter: it moved the
+    graph's fingerprint so the work was discarded and redone, and it moved the
+    text of "this task needs you" so the operator was messaged again. Nineteen
+    direct messages about one unchanged report."""
+    from friday.workflows import _merge
+
+    merged = _merge(
+        ApiIssueParams(summary="checkout is 500ing", environment="production"),
+        ApiIssueParams(summary="User reports the API is failing", environment="prod"),
+    )
+
+    assert merged.summary == "checkout is 500ing"
+    assert merged.environment == "production"
+
+
+def test_extraction_still_fills_in_what_triage_left_out():
+    """Which is the whole reason it runs."""
+    from friday.workflows import _merge
+
+    merged = _merge(
+        ApiIssueParams(summary="checkout is 500ing"),
+        ApiIssueParams(
+            summary="ignored",
+            correlation_id="abcdef01-2345-6789-abcd-ef0123456789",
+            environment="production",
+        ),
+    )
+
+    assert merged.correlation_id == "abcdef01-2345-6789-abcd-ef0123456789"
+    assert merged.environment == "production"
+    assert merged.summary == "checkout is 500ing"
+
+
+def test_an_empty_string_counts_as_a_blank():
+    """A field the model wrote as "" is not a value someone supplied."""
+    from friday.workflows import _merge
+
+    merged = _merge(
+        ApiIssueParams(summary="s", environment=""),
+        ApiIssueParams(summary="s", environment="production"),
+    )
+
+    assert merged.environment == "production"

@@ -654,6 +654,35 @@ class Database:
             )
             return [_outbound(row) for row in rows]
 
+    async def we_sent(self, provider: str, provider_message_id: str, text: str) -> bool:
+        """Whether this message is one this agent put there itself.
+
+        Not the same question as "is it from the watched account". The operator
+        types from that account too, and a self-mention is how the pipeline is
+        tested without a second person. What must never create work is a
+        message *this process posted* — answering that is answering itself, and
+        it does not stop.
+
+        Matched on the id **or** the text. The id is the precise answer and it
+        is not always available in time: the outbox posts, then records the id
+        it got back, and the gateway can deliver our own message in between. The
+        text is written when the row is queued, long before any of that, so it
+        is the half that closes the race. A false positive costs one dropped
+        message that repeated our own sentence word for word, from our own
+        account.
+        """
+        async with self._sessions() as session:
+            return bool(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(schema.Outbound)
+                    .where(
+                        (schema.Outbound.sent_message_id == provider_message_id)
+                        | (schema.Outbound.text == text)
+                    )
+                )
+            )
+
     async def mark_outbound_sent(
         self, outbound_id: int, *, sent_message_id: str | None = None
     ) -> None:

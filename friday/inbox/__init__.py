@@ -153,6 +153,21 @@ class Inbox:
 
     async def _handle(self, event: InboundEvent) -> InboundEvent | None:
         reason = self._out_of_scope_reason(event)
+        if reason is None and event.is_own and await self._db.we_sent(
+            event.provider, event.provider_message_id, event.text
+        ):
+            # Unconditional, and deliberately not part of the sync check above:
+            # it needs the database. `capture_own_messages` turns off the rule
+            # that our own account's messages create no work, so the operator
+            # can test by mentioning themselves — and with it on, the agent's
+            # own replies came back through the gateway, opened a task each,
+            # and were answered. Every minute, in a real channel, under the
+            # operator's name.
+            #
+            # The flag was never meant to buy that. A message the operator
+            # typed and a message this process posted are different things, and
+            # only the first is a test.
+            reason = "posted by this agent"
         if reason:
             self.dropped[reason] = self.dropped.get(reason, 0) + 1
             if await self._db.conversation_is_tracked(event):

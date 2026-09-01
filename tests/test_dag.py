@@ -923,3 +923,30 @@ def test_a_value_that_changes_shape_in_storage_is_marked_not_stored():
     assert stored["plain"] == {"ok": [1, 2]}
     # And the marked ones run again rather than coming back a different shape.
     assert list(DAGState.from_dict(stored).results) == ["plain"]
+
+
+async def test_the_operator_is_not_told_the_same_thing_nineteen_times(db):
+    """What production did: one task, nineteen direct messages, thirty-three
+    model calls. Extraction reworded `summary` on every pass, a reworded
+    parameter is a changed parameter, and the announcement text is built from
+    the parameters.
+
+    The rewording is fixed at its source — extraction fills blanks and does
+    not overwrite. This is the bound underneath it, for whatever moves the
+    text next.
+    """
+    from friday.workflows.runner import WorkflowRunner
+    from tests.test_workflow_runner import make_task
+
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    await db.move_task(task.id, "needs_human")
+
+    runner = WorkflowRunner(db=db, auto_ask=True, max_asks=3)
+    for reworded in range(8):
+        await db.set_task_params(
+            task.id, {**task.params, "summary": f"API is broken, take {reworded}"}
+        )
+        await runner.run_once()
+
+    told = [r for r in await db.outbound() if r.kind == "help_wanted"]
+    assert len(told) == 3, f"told the operator {len(told)} times"

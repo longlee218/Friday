@@ -114,12 +114,25 @@ class WorkflowRunner:
         )
 
         for task in tasks:
+            already = said.get(task.id, ())
+            if len(already) >= self._max_asks:
+                # A bound, not a rule. Told-once-per-thing-to-say is the rule,
+                # and it holds as long as the thing to say is stable. It was
+                # not: a reworded parameter made a new text, and the operator
+                # got nineteen direct messages about one task. Whatever makes
+                # the text move next, it stops here.
+                log.debug(
+                    "task %d: %d announcements already, saying no more",
+                    task.id,
+                    len(already),
+                )
+                continue
             # A graph that stopped to ask something asked a *specific*
             # question. Announcing only the task's type and parameters sends
             # the operator to the board to find out what was actually wanted,
             # which is the one thing this message exists to save them.
             text = _stuck(task, pauses.get(task.id))
-            if text in said.get(task.id, ()):
+            if text in already:
                 continue
             await self._db.queue_outbound(
                 task_id=task.id,

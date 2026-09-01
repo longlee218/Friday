@@ -170,12 +170,28 @@ def _problems(params: Params) -> list[Problem]:
 
 
 def _merge(triage_params: Params, extracted: Params) -> Params:
-    """Overlay the extractor's fields on top of triage's.
+    """Fill in the blanks the extractor found. Never overwrite a filled one.
 
-    Only fields that are not None in `extracted` win — a hallucinated null
-    would silently drop triage's value. Same dataclass type is required: the
-    extractor returns the same Params class that triage wrote, so this is a
-    shape-preserving overlay.
+    Extraction exists to recover what triage left out, and that is all it may
+    do. Letting it overwrite a field that already has a value looks harmless —
+    the extractor has a dedicated prompt, triage does not — and it cost this:
+
+        summary: Người dùng báo API có vấn đề, phản hồi chậm
+        summary: API được báo lỗi nhiều lần liên tiếp
+        summary: API có vấn đề, phản hồi chậm
+        summary: User reports API is failing / responding very slowly
+        ... nineteen of them, one task
+
+    `summary` is written by triage on every task. Re-extracting reworded it
+    every pass, and a reworded parameter is a *changed* parameter: it changed
+    the fingerprint, so the graph threw away its work and ran again; and it
+    changed the text of "this task needs you", so the operator was direct-
+    messaged again. Nineteen DMs and thirty-three model calls about one
+    unchanged report.
+
+    A model asked the same question twice does not give the same answer, so
+    anything that re-runs a model must not treat its output as a value that
+    changed. Blanks only.
     """
     if not isinstance(extracted, type(triage_params)):
         # Defensive: a misregistered extractor cannot silently rewrite the
@@ -185,6 +201,7 @@ def _merge(triage_params: Params, extracted: Params) -> Params:
         f.name: getattr(extracted, f.name)
         for f in fields(extracted)
         if getattr(extracted, f.name) is not None
+        and not getattr(triage_params, f.name)
     }
     from dataclasses import replace as _replace
 

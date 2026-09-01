@@ -250,7 +250,7 @@ ingest:
   # TESTING ONLY. Lets you trigger the pipeline by tagging yourself.
   # Must be false once the agent can reply as you (ticket 06), or it will
   # answer its own messages forever.
-  capture_own_messages: true
+  capture_own_messages: false
 
   # How often the recovery sweep runs, in seconds. It also runs immediately
   # whenever the connection comes back.
