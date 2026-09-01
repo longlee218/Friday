@@ -135,3 +135,25 @@ explicit.
   - on resume after a `PauseForHuman`, the DAG starts from the paused node, not from the beginning
 - [x] The previous `plan_api_issue` function is removed; the route is the DAG
 - [x] Existing triage tests still pass; the route `api_issue → api_issue DAG` is what changes
+
+## Review fixes (after QA)
+
+Four defects the QA pass found, all now fixed with a test each:
+
+- **State outlived its inputs.** The graph asked for a correlationId, the
+  reporter supplied it, and the second pass reused the conclusions drawn
+  without it — including `read_logs` returning `None` because there was
+  nothing to look up. That is a regression against the planner this graph
+  replaced, which had no state and so re-planned correctly every time.
+  `dag_state` now records a fingerprint of the parameters the graph ran
+  against, and state written for different parameters is discarded.
+- **`bool("false")` is `True`.** A model that answered `{"actionable":
+  "false"}` was read as permission to change code. `_is_yes` now accepts only
+  a recognisable yes; everything else resolves towards not touching the code.
+- **`fix_bug` was given `find_code_path`'s instructions** — told to locate a
+  file, then asked for a diff. It has its own prompt now, with the refusals
+  spelled out.
+- **Tool servers were only ever an on/off gate.** `read_logs` checked that a
+  log server existed and then ran an agent with no tools, which can only
+  invent the lines it was asked to look up. Each node's agent is now handed
+  the server it needs, and only that one.

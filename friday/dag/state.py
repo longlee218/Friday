@@ -93,7 +93,7 @@ class DAGState:
         safe: dict[str, Any] = {}
         for name, value in self.results.items():
             try:
-                json.dumps(value)
+                json.dumps(value, allow_nan=False)
             except (TypeError, ValueError):
                 safe[name] = {UNSTORABLE: type(value).__name__}
             else:

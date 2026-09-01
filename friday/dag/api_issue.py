@@ -66,6 +66,18 @@ Answer in JSON with exactly these keys:
 Set actionable to false when you are guessing. A wrong "true" here spends a
 code change on a guess."""
 
+FIX = """You apply one small, obvious fix.
+
+You are given a cause and the code it points at. Make the smallest change
+that addresses that cause and nothing else. Return the diff you applied.
+
+Refuse, by saying exactly CANNOT FIX and why, when: the change would touch a
+test, a migration, a schema, or anything holding a credential; the fix is not
+obvious from what you were shown; or it would take more than a few lines.
+Refusing costs a question. Guessing costs a wrong change in someone's
+repository."""
+
+
 COMPOSE = """You write the reply to whoever reported this.
 
 You are given whatever the investigation found. Write what you would tell a
@@ -275,7 +287,25 @@ def _as_analysis(text: str) -> dict[str, Any]:
             if isinstance(data, dict):
                 return {
                     "cause": data.get("cause"),
-                    "actionable": bool(data.get("actionable")),
+                    "actionable": _is_yes(data.get("actionable")),
                     "evidence": data.get("evidence") or [],
                 }
     return {"cause": stripped or None, "actionable": False, "evidence": []}
+
+
+def _is_yes(value: Any) -> bool:
+    """Whether the analyst actually said yes.
+
+    `bool("false")` is `True`, and a model asked for JSON returns the string
+    "false" often enough that taking the truthiness would read a refusal as
+    permission. The prompt says a wrong "true" here spends a code change on a
+    guess; this is the line where that would have happened.
+
+    Anything that is not recognisably a yes is a no. Uncertainty resolves
+    towards not touching the code.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "y", "1"}
+    return value is True

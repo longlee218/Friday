@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from friday.dag import api_issue as graph_names
 from friday.dag.api_issue import build_api_issue_dag
 from friday.dag.router import EDGE_ROUTER, register_dag
 
@@ -34,7 +35,18 @@ _API_ISSUE_AGENTS = {
 }
 
 
-def agents_for_api_issue(config: Any, skills: Any = None) -> dict[str, Any]:
+#: Which tool server each node's agent needs handed to it. Without this the
+#: agent is asked to query logs with no log tool and can only invent them.
+_NODE_SERVERS = {
+    "read_logs": graph_names.LOKI,
+    "find_code_path": graph_names.SOURCE,
+    "fix_bug": graph_names.SOURCE,
+}
+
+
+def agents_for_api_issue(
+    config: Any, skills: Any = None, servers: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Build one agent per node that has a configuration block.
 
     Instructions come from the graph module, so the prompt lives beside the
@@ -49,7 +61,7 @@ def agents_for_api_issue(config: Any, skills: Any = None) -> dict[str, Any]:
         "read_logs": graph.READ_LOGS,
         "find_code_path": graph.FIND_CODE,
         "analyze_stack": graph.ANALYZE,
-        "fix_bug": graph.FIND_CODE,
+        "fix_bug": graph.FIX,
         "compose_reply": graph.COMPOSE,
     }
 
@@ -68,10 +80,13 @@ def agents_for_api_issue(config: Any, skills: Any = None) -> dict[str, Any]:
             if skills is not None and node in reasoning
             else []
         )
+        wanted = _NODE_SERVERS.get(node)
+        mcp = [(servers or {})[wanted]] if wanted and wanted in (servers or {}) else []
         built[node] = Harness(
             config=agent_config,
             instructions=instructions[node] + _skills_block(skills, node, reasoning),
             tools=tools,
+            mcp_servers=mcp,
         )
     return built
 
@@ -109,7 +124,7 @@ def register_dags(
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", build_api_issue_dag())
 
-    agents = agents_for_api_issue(config, skills)
+    agents = agents_for_api_issue(config, skills, servers)
     if agents:
         log.info("api_issue graph: agents for %s", ", ".join(sorted(agents)))
     else:
@@ -122,6 +137,11 @@ def register_dags(
     # than closed over inside the graph so the graph stays testable without
     # either a model or a tool server.
     DAG_DEPS_EXTRA["api_issue"] = agents
+    # Replaced, not merged. Merging means a second call — a test, a restart in
+    # the same process — leaves the previous run's servers reachable, and a
+    # closed connection that is still in the dict is worse than an absent one:
+    # the node stops skipping and starts failing.
+    DAG_SERVERS.clear()
     DAG_SERVERS.update(servers or {})
 
 

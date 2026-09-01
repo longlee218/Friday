@@ -101,7 +101,12 @@ class WorkflowRunner:
                 conversation=task.conversation,
                 kind=Kind.HELP_WANTED,
                 sender=self._approver,
-                text=_stuck(task),
+                # A graph that stopped to ask something asked a *specific*
+                # question. Announcing only the task's type and parameters
+                # sends the operator to the board to find out what was
+                # actually wanted, which is the one thing this message exists
+                # to save them.
+                text=_stuck(task, await self._db.dag_pause(task.id)),
             )
             log.info("task %d: asked the operator to look", task.id)
 
@@ -237,13 +242,19 @@ class WorkflowRunner:
         decide raises `PauseForHuman`; that becomes a `Park` carrying the
         question, which `_raise_hands` puts in front of the operator.
         """
+        fingerprint = _fingerprint(task.params)
         state = DAGState.from_dict(
-            await self._db.load_dag_state(task.id, dag_name=dag.name)
+            await self._db.load_dag_state(
+                task.id, dag_name=dag.name, params_fingerprint=fingerprint
+            )
         )
 
         async def checkpoint(current: DAGState) -> None:
             await self._db.save_dag_state(
-                task.id, dag_name=dag.name, results=current.to_dict()
+                task.id,
+                dag_name=dag.name,
+                results=current.to_dict(),
+                params_fingerprint=fingerprint,
             )
 
         from friday.dag.workflows import DAG_DEPS_EXTRA, DAG_SERVERS
@@ -267,7 +278,12 @@ class WorkflowRunner:
                 task.id,
                 dag_name=dag.name,
                 results=runner.state.to_dict(),
-                paused_at_node=pause.node or dag.name,
+                params_fingerprint=fingerprint,
+                # The node, not the graph. The trail's last entry is the node
+                # that was running when it raised — appended before the node
+                # runs, precisely so a pause can be attributed.
+                paused_at_node=pause.node
+                or (runner.trail[-1] if runner.trail else dag.name),
                 paused_question=str(pause),
             )
             log.info("task %d: %s paused — %s", task.id, dag.name, pause)
@@ -307,8 +323,27 @@ class WorkflowRunner:
         return replace(task, state=state)
 
 
-def _stuck(task: Task) -> str:
+def _fingerprint(params: dict) -> str:
+    """A stable digest of the parameters a graph ran against.
+
+    Sorted keys and a fixed separator, so the same parameters produce the same
+    string whatever order they were written in. Empty values are dropped: a
+    parameter that went from absent to `None` is the same absence, and
+    discarding a graph's work over that would cost tool calls for nothing.
+    """
+    from hashlib import blake2b
+
+    material = "\u0000".join(
+        f"{key}={value}" for key, value in sorted(params.items()) if value
+    )
+    return blake2b(material.encode(), digest_size=16).hexdigest()
+
+
+def _stuck(task: Task, pause: tuple[str, str] | None = None) -> str:
     """What it is, and enough of what it knows to judge without opening
     anything."""
     known = ", ".join(f"{k}: {v}" for k, v in sorted(task.params.items()) if v)
-    return f"{task.type} #{task.id} — {known or 'nothing extracted'}"
+    line = f"{task.type} #{task.id} — {known or 'nothing extracted'}"
+    if pause is not None and pause[1]:
+        line += f"\n{pause[0]}: {pause[1]}"
+    return line

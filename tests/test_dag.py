@@ -600,3 +600,161 @@ async def test_state_from_a_different_graph_is_not_applied(db):
     }
     # No name asked, no opinion offered — the raw row comes back.
     assert await db.load_dag_state(1) == {"read_logs": "stale lines"}
+
+
+# --- state is only good for the inputs that produced it --------------------
+
+
+async def test_answering_the_question_re_runs_the_nodes_that_asked_it(db):
+    """The regression this guards against is the whole point of asking.
+
+    The graph runs, finds no correlationId, and every node concludes "nothing
+    to look up" — a legitimate result, checkpointed like any other. The
+    reporter then supplies the id. Without a check on the inputs the runner
+    reads that state back, sees `read_logs` is done, and parks having read no
+    logs at all: the system asked a question, got the answer, and ignored it.
+    """
+    from friday.workflows import Ask, Park
+    from friday.workflows.runner import WorkflowRunner
+    from tests.test_workflow_runner import make_task
+
+    looked_up: list[str | None] = []
+
+    async def read_logs(state: DAGState, deps: DAGDeps):
+        given = deps.task.params.get("correlation_id")
+        looked_up.append(given)
+        return "500 at checkout" if given else None
+
+    async def decide(state: DAGState, deps: DAGDeps):
+        return Park("traced") if state.get("read_logs") else Ask("correlationId?")
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag(
+        "api_issue",
+        DAG(
+            name="trace",
+            nodes=(Node("read_logs", read_logs), Node("decide", decide)),
+            edges=(Edge("read_logs", "decide"),),
+        ),
+    )
+    try:
+        task = await make_task(db)
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        assert looked_up == [None]
+
+        # They answered. The task goes back to pending with the id filled in.
+        await db.set_task_params(
+            task.id, {**task.params, "correlation_id": "abcdef01-2345"}
+        )
+        await db.move_task(task.id, "pending")
+
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+
+    assert looked_up == [None, "abcdef01-2345"], (
+        "the second pass reused conclusions drawn without the correlationId"
+    )
+
+
+async def test_state_survives_a_pass_that_changed_nothing(db):
+    """The other half: unchanged parameters must not throw the work away.
+
+    A fingerprint that discarded state on every pass would be safe and
+    useless — every resume would re-run every node and the checkpoint would
+    buy nothing.
+    """
+    from friday.workflows import Park
+    from friday.workflows.runner import WorkflowRunner
+    from tests.test_workflow_runner import make_task
+
+    ran: list[str] = []
+
+    async def expensive(state: DAGState, deps: DAGDeps):
+        ran.append("expensive")
+        return "log lines"
+
+    async def decide(state: DAGState, deps: DAGDeps):
+        return Park("traced")
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag(
+        "api_issue",
+        DAG(
+            name="stable",
+            nodes=(Node("expensive", expensive), Node("decide", decide)),
+            edges=(Edge("expensive", "decide"),),
+        ),
+    )
+    try:
+        task = await make_task(db, correlation_id="abcdef01-2345")
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await db.move_task(task.id, "pending")
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+
+    assert ran == ["expensive"], "unchanged parameters re-ran a finished node"
+
+
+async def test_a_pause_records_the_node_that_paused_not_the_graph(db):
+    """`paused_at_node` is read by a human deciding where to look. Storing
+    the graph's name there answers a question nobody asked."""
+    from friday.workflows.runner import WorkflowRunner
+    from tests.test_workflow_runner import make_task
+
+    async def fine(state: DAGState, deps: DAGDeps):
+        return "ok"
+
+    async def stops(state: DAGState, deps: DAGDeps):
+        raise PauseForHuman("this needs a migration")
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag(
+        "api_issue",
+        DAG(
+            name="pauses",
+            nodes=(Node("fine", fine), Node("fix_bug", stops)),
+            edges=(Edge("fine", "fix_bug"),),
+        ),
+    )
+    try:
+        task = await make_task(db, correlation_id="abcdef01-2345")
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        assert await db.dag_pause(task.id) == ("fix_bug", "this needs a migration")
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+
+
+async def test_the_question_a_graph_paused_on_reaches_the_operator(db):
+    """A pause asks something specific. The message that tells the operator
+    there is work must carry it, or they open the board to find out what the
+    system already knew."""
+    from friday.workflows.runner import WorkflowRunner
+    from tests.test_workflow_runner import make_task
+
+    async def stops(state: DAGState, deps: DAGDeps):
+        raise PauseForHuman("the cause mentions a migration, I have not touched it")
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag("api_issue", DAG(name="pauses", nodes=(Node("fix_bug", stops),)))
+    try:
+        await make_task(db, correlation_id="abcdef01-2345")
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+
+    (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
+    assert "migration" in told.text
+    assert "fix_bug" in told.text
+
+
+def test_the_composition_root_registers_the_graphs():
+    """The graphs only exist because startup asks for them. Nothing else
+    imports `register_dags`, so if this call goes the router stays empty, no
+    test notices, and every api_issue task quietly takes the deterministic
+    path again."""
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1] / "run_agent.py"
+    assert "register_dags(" in source.read_text()

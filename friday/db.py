@@ -993,6 +993,7 @@ class Database:
         *,
         dag_name: str,
         results: dict,
+        params_fingerprint: str = "",
         paused_at_node: str | None = None,
         paused_question: str | None = None,
     ) -> None:
@@ -1005,6 +1006,7 @@ class Database:
         statement = insert(schema.DagState).values(
             task_id=task_id,
             dag_name=dag_name,
+            params_fingerprint=params_fingerprint,
             results=results,
             paused_at_node=paused_at_node,
             paused_question=paused_question,
@@ -1016,6 +1018,9 @@ class Database:
                     index_elements=[schema.DagState.task_id],
                     set_={
                         "dag_name": statement.excluded.dag_name,
+                        "params_fingerprint": (
+                            statement.excluded.params_fingerprint
+                        ),
                         "results": statement.excluded.results,
                         "paused_at_node": statement.excluded.paused_at_node,
                         "paused_question": statement.excluded.paused_question,
@@ -1025,7 +1030,11 @@ class Database:
             )
 
     async def load_dag_state(
-        self, task_id: int, *, dag_name: str | None = None
+        self,
+        task_id: int,
+        *,
+        dag_name: str | None = None,
+        params_fingerprint: str | None = None,
     ) -> dict | None:
         """What the graph recorded, or None if it has not run.
 
@@ -1036,6 +1045,14 @@ class Database:
         it skip nodes on the strength of work that was never done. A restart
         costs a few tool calls; a reply composed from another graph's
         findings is wrong in a way nobody can see.
+
+        `params_fingerprint` is the same argument about the *inputs*. A node
+        concluded what it concluded from the parameters it was given, and the
+        whole point of asking the reporter for a correlationId is that the
+        answer changes. State written before they answered says "there was
+        nothing to look up", which is true of the old parameters and false of
+        the new ones — and believing it means the graph asks a question,
+        receives an answer, and then reads not one log line.
 
         Returns the raw results mapping; rebuilding it into a `DAGState` is
         the caller's business, so this module keeps knowing nothing about the
@@ -1051,6 +1068,16 @@ class Database:
                     task_id,
                     row.dag_name,
                     dag_name,
+                )
+                return None
+            if (
+                params_fingerprint is not None
+                and (row.params_fingerprint or "") != params_fingerprint
+            ):
+                log.info(
+                    "task %d: parameters changed since the graph last ran, "
+                    "discarding what it concluded from the old ones",
+                    task_id,
                 )
                 return None
             return dict(row.results or {})

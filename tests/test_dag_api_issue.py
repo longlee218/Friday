@@ -250,3 +250,85 @@ async def test_an_analyst_that_ignores_the_format_is_not_treated_as_certain():
     assert state["analyze_stack"]["actionable"] is False
     assert state["analyze_stack"]["cause"] == "I think the cache is full, probably"
     assert not state.has("fix_bug")
+
+
+# --- reading the analyst's answer ------------------------------------------
+
+
+def test_the_string_false_is_not_permission_to_change_code():
+    """`bool("false")` is True. A model answering in JSON writes the string
+    often enough that taking the truthiness would read a refusal as a yes,
+    and the thing on the other side of that yes edits someone's repository."""
+    from friday.dag.api_issue import _as_analysis
+
+    analysis = _as_analysis('{"cause": "off by one", "actionable": "false"}')
+    assert analysis["actionable"] is False
+
+
+def test_an_explicit_yes_is_taken_at_its_word():
+    from friday.dag.api_issue import _as_analysis
+
+    for said in ("true", "True", "yes", True):
+        import json
+
+        analysis = _as_analysis(json.dumps({"cause": "x", "actionable": said}))
+        assert analysis["actionable"] is True, said
+
+
+def test_anything_unrecognised_resolves_towards_not_touching_the_code():
+    from friday.dag.api_issue import _as_analysis
+
+    analysis = _as_analysis('{"cause": "x", "actionable": "probably"}')
+    assert analysis["actionable"] is False
+
+
+# --- what each node is actually told to do ---------------------------------
+
+
+def _every_node_configured():
+    """A config block for every `api_issue` node, so the wiring is visible."""
+    from types import SimpleNamespace
+
+    from friday.config import AgentConfig
+    from friday.dag.workflows import _API_ISSUE_AGENTS
+
+    return SimpleNamespace(
+        agents={
+            block: AgentConfig(
+                name=block,
+                api_key="k",
+                base_url="http://localhost/v1",
+                model="m",
+            )
+            for block in _API_ISSUE_AGENTS.values()
+        }
+    )
+
+
+def test_the_node_that_writes_a_patch_is_not_given_the_find_the_file_prompt():
+    """They were the same string. `fix_bug` was instructed to locate code and
+    then asked to return a diff, which is a prompt that cannot be obeyed."""
+    from friday.dag import api_issue as graph
+    from friday.dag.workflows import agents_for_api_issue
+
+    built = agents_for_api_issue(_every_node_configured())
+    assert built["fix_bug"].agent.instructions == graph.FIX
+    assert built["find_code_path"].agent.instructions == graph.FIND_CODE
+
+
+def test_a_node_is_handed_the_tool_server_it_needs():
+    """`deps.servers` was only ever read as an on/off gate: the node checked
+    that a log server existed and then ran an agent with no tools, which can
+    only invent the lines it was asked to look up."""
+    from types import SimpleNamespace
+
+    from friday.dag.workflows import agents_for_api_issue
+
+    loki = SimpleNamespace(name="loki")
+    built = agents_for_api_issue(_every_node_configured(), None, {"loki": loki})
+
+    assert built["read_logs"].agent.mcp_servers == [loki]
+    # And only the ones it needs: the composer has nothing to look up.
+    assert built["compose_reply"].agent.mcp_servers == []
+    # A server that is not configured is not an error — the node skips.
+    assert built["find_code_path"].agent.mcp_servers == []

@@ -181,3 +181,21 @@ interaction shape — buttons, threaded replies — is out of scope for ticket 3
 - [x] A DAG with five nodes and one conditional edge runs end-to-end in a test (the test uses a stub for each node — no real MCP, no real LLM)
 - [x] Ticket 28's old "checkpointed procedure" text is renamed and reframed in this ticket; ticket 34 will retire the old text
 - [x] No new dependency on graph libraries (LangGraph, NetworkX) — the runner is the seam, ~150 lines
+
+## Review fixes (after QA)
+
+- **The pause question never reached the operator.** A node that stopped to
+  ask something specific produced a `help_wanted` message naming only the task
+  type and its parameters, sending the operator to the board to find out what
+  the system already knew. The announcement now carries the question and the
+  node that asked it.
+- **`paused_at_node` stored the graph's name**, not the node's. The trail's
+  last entry is the node that was running when it raised — appended before the
+  node runs, precisely so a pause can be attributed.
+- **`json.dumps` accepted NaN and Infinity**, which are not JSON and which
+  SQLite stores as text no reader can parse back. Serialisation is strict now,
+  so such a value is stored as `UNSTORABLE` and its node re-runs.
+- **`DAG_SERVERS` merged rather than replaced.** A second `register_dags` left
+  the previous run's servers reachable, and a closed connection still in the
+  dict is worse than an absent one: the node stops skipping and starts
+  failing.
