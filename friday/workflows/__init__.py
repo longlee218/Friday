@@ -18,6 +18,7 @@ from friday.models import (
     DocQuestionParams,
     Params,
 )
+from friday.validation import Problem, validate
 
 __all__ = [
     "Action",
@@ -174,27 +175,47 @@ async def plan(
 
 
 def plan_by_required_parameters(task_type: str, params: Params) -> Action:
-    """Ask for whatever the type says is not optional and is not there.
+    """Ask for whatever the type says is not optional and is not there, or
+    whatever `validate` says is wrong.
 
     Required-ness is read off the annotations rather than declared a second
     time: `project: str` is required, `doc_ref: str | None` says outright that
     we can manage without it. A list kept by hand would drift from the schema
     the model is actually asked to fill.
     """
-    missing = _missing(params)
-    if not missing:
+    problems = _problems(params)
+    if not problems:
         return Park(f"no workflow for {task_type} yet")
-    return Ask(_question(missing))
+    return Ask(_question(problems))
 
 
-def _missing(params: Params) -> list[str]:
+def _problems(params: Params) -> list[str]:
+    """What is wrong with the params, in the order the operator should hear it.
+
+    Merges the structural "is anything None that should not be" check with the
+    validation engine's "is anything there but wrong" check. Both run from this
+    one place, so no other module has to remember to call them.
+    """
+    return [f"{p.field}: {p.message}" for p in _missing(params)] + [
+        str(p) for p in validate(params)
+    ]
+
+
+def _missing(params: Params) -> list[Problem]:
+    """The structural half of `_problems`: fields that should be there but are not.
+
+    Optional-ness is read off the annotations. A field marked `str | None` is
+    not required; a field the model always writes (see `_MODEL_AUTHORED`) is
+    not checked here either. The validation engine handles everything else:
+    if a value is present but malformed, that is its problem, not this one's.
+    """
     optional = {
         name
         for name, hint in get_type_hints(type(params)).items()
         if type(None) in get_args(hint)
     }
     return [
-        f.name
+        Problem(field=f.name, message="missing")
         for f in fields(params)
         if f.name not in optional
         and f.name not in _MODEL_AUTHORED
@@ -202,9 +223,26 @@ def _missing(params: Params) -> list[str]:
     ]
 
 
-def _question(missing: list[str]) -> str:
-    wanted = [_ASKED_AS.get(name, f"the {name.replace('_', ' ')}") for name in missing]
-    return "Could you tell me " + " and ".join(wanted) + "?"
+def _question(problems: list[str]) -> str:
+    """Render the joined problems as one operator-facing question.
+
+    Each problem is `field: message` from either `_missing` or `validate`.
+    The field name drives which natural-language form we use; the message is
+    added when it carries information the form does not.
+    """
+    parts: list[str] = []
+    for problem in problems:
+        field, _, message = problem.partition(":")
+        field = field.strip()
+        message = message.strip()
+        asked_as = _ASKED_AS.get(field)
+        if asked_as is None:
+            asked_as = f"the {field.replace('_', ' ')}"
+        if message and message != "missing":
+            parts.append(f"{asked_as} ({message})")
+        else:
+            parts.append(asked_as)
+    return "Could you tell me " + " and ".join(parts) + "?"
 
 
 # ---- the planners ----------------------------------------------------
