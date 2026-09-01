@@ -116,15 +116,13 @@ async def _run(stack: AsyncExitStack) -> None:
     if servers:
         log.info("mcp: %s", ", ".join(s.name for s in servers))
 
-    # Register the workflow's extraction agents. Each is optional — a
-    # workflow without a registered extractor simply runs triage's first
-    # pass through validate, which catches missing fields but not
-    # malformed ones. The agent path is what lets us catch both.
-    from friday.extraction import register_api_issue_extractor
+    # Register the workflow's extraction agents. Composition root does not
+    # know about each one — it asks the extractor module to wire itself
+    # from config. Adding a new extractor is a change in
+    # `friday/extraction.py`, not here.
+    from friday.extraction import register_extractors
 
-    api_ext_config = config.agents.get("extractor_api_issue")
-    if api_ext_config is not None:
-        register_api_issue_extractor(api_ext_config)
+    register_extractors(config)
 
     promotion = Promotion(db=db)
     # Read once, at build time: a promotion takes effect on the next start

@@ -228,3 +228,16 @@ def _parse(output: str) -> dict[str, Any]:
             continue
         result[key] = value
     return result
+
+
+def register_extractors(config: "Config") -> None:  # type: ignore[name-defined]  # noqa: F821
+    """Wire every extractor the configuration declares.
+
+    Composition root calls this once at startup. Each extractor is
+    optional: a workflow without a registered extractor runs without one,
+    which is the same as the no-extractor path. Adding a new extractor is
+    one new line here, not a change to the composition root.
+    """
+    api_ext_config = config.agents.get("extractor_api_issue")
+    if api_ext_config is not None:
+        register_api_issue_extractor(api_ext_config)
