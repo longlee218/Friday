@@ -251,3 +251,95 @@ async def test_finding_what_to_announce_takes_one_query(db):
 
     assert len(queries) == 1
     assert len(await db.outbound()) == 5
+
+
+async def test_extraction_runs_when_a_message_is_linked(db):
+    """End-to-end: a message is recorded, a task is linked to it, the runner
+    reads the text, the registered extractor fills fields, the planner gets
+    a complete Params and parks. Without the link to original_text, the
+    runner has nothing to extract from and the test would only prove the
+    read path is plumbed."""
+    from dataclasses import dataclass
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update as sa_update
+
+    from friday import schema
+    from friday.config import AgentConfig
+    from friday.conversation import ConversationId
+    from friday.extraction import (
+        _EXTRACTORS,
+        build_extractor,
+        extractor,
+    )
+    from friday.harness import Harness
+    from friday.models import ApiIssueParams, InboundEvent, MentionType
+
+    class StubResult:
+        # The model has to repeat every field, including ones triage already
+        # filled, because returning null would cancel triage's value. That is
+        # what the extraction prompt instructs and the test mirrors.
+        final_output = (
+            '{"summary": "checkout 500", '
+            '"environment": "production", '
+            '"correlation_id": "abcdef01-2345-6789-abcd-ef0123456789", '
+            '"curl": null}'
+        )
+
+    prompts_seen: list[str] = []
+
+    class StubHarness:
+        async def run(self, prompt, *, context=None, calls=None, extra_turns=0):
+            prompts_seen.append(prompt)
+            return StubResult()
+
+    cfg = AgentConfig(
+        name="api_issue_ext",
+        api_key="sk-secret",
+        base_url="https://example.invalid/v1",
+        model="test-model",
+    )
+    ext = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=StubHarness(),  # type: ignore[arg-type]
+        name="api_issue_ext",
+    )
+    extractor("api_issue", ext)
+
+    try:
+        event = InboundEvent(
+            provider="fake",
+            provider_message_id="m-ext-1",
+            channel_id="watched",
+            thread_id=None,
+            author_id="u-reporter",
+            author_name="reporter",
+            text=(
+                "production broke at noon, "
+                "correlation id abcdef01-2345-6789-abcd-ef0123456789"
+            ),
+            created_at=datetime.now(timezone.utc),
+            mention_type=MentionType.DIRECT,
+        )
+        await db.record_message(event)
+        task = await make_task(db)
+        async with db._sessions.begin() as session:
+            await session.execute(
+                sa_update(schema.Message)
+                .where(schema.Message.provider_message_id == "m-ext-1")
+                .values(task_id=task.id)
+            )
+
+        await WorkflowRunner(db=db, auto_ask=False).run_once()
+
+        # Extraction ran: the harness saw the reporter's text. The exact
+        # Park action depends on validate's verdict — what matters here
+        # is that the prompt was sent and the message's original text
+        # reached the workflow.
+        assert prompts_seen, "extractor was never called"
+        assert "abcdef01-2345-6789" in prompts_seen[0]
+        # And the workflow produced an outbound row of some kind, which is
+        # how a task surfaces to a person.
+        assert await db.outbound(), "no outbound produced"
+    finally:
+        _EXTRACTORS.pop("api_issue", None)

@@ -74,6 +74,12 @@ def build_extractor(
     Use this when the extractor is built programmatically (e.g. from
     `config.yaml`). The `@extractor(...)` decorator is the registration
     shortcut.
+
+    The `task_type` for which this extractor is registered must match
+    `params_cls`: registering an `api_issue` extractor with
+    `params_cls=DocQuestionParams` would silently produce the wrong type at
+    runtime. The check is enforced at registration, not at extraction, so a
+    misconfigured system fails to start rather than producing a wrong answer.
     """
     return Extractor(harness=harness, params_cls=params_cls, name=name)
 
@@ -123,10 +129,15 @@ async def extract(task_type: str, text: str) -> Params | None:
 EXTRACTION_INSTRUCTIONS = """You fill structured fields from a chat message.
 
 You are shown the field schema (names and what each is for) and the message
-itself. For each field, copy the matching value verbatim from the message
+itself. For every field, copy the matching value verbatim from the message
 when you can find one. Pass null when the value is genuinely absent — never
-invent one. The triage step already produced a first pass; your job is to
-look for what it missed, not to repeat what it got right.
+invent one.
+
+The triage step already produced a first pass; for fields triage left
+blank, your job is to look for what it missed. The result you return is
+merged onto triage's, so a field set to null by you cancels triage's value
+- only set null when you have read the message and there is genuinely
+nothing there. When in doubt, repeat what triage produced.
 
 Reply in JSON only, with the schema fields as keys."""
 
@@ -139,16 +150,32 @@ def register_api_issue_extractor(config: "AgentConfig") -> None:  # type: ignore
     runs without an extractor, which is the same behaviour as the no-
     extractor registration path. Registration is idempotent: re-running it
     replaces the previous registration.
+
+    The params class is hard-coded to ApiIssueParams because that is the
+    contract the task_type implies. A misconfigured extractor (wrong schema
+    for its task type) is caught at extraction time by `_merge`'s isinstance
+    check, which drops the result. Better to fail at registration.
     """
     from friday.harness import Harness
     from friday.models import ApiIssueParams
+    from friday.workflows import PARAMS
+
+    task_type = "api_issue"
+    if PARAMS.get(task_type) is not ApiIssueParams:
+        # The task type is gone from the registry, or its schema changed.
+        # Either way, registering an extractor against it would silently
+        # produce the wrong Params type at runtime. Refuse.
+        raise ValueError(
+            f"cannot register api_issue extractor: PARAMS[{task_type!r}] "
+            f"is not ApiIssueParams (got {PARAMS.get(task_type)})"
+        )
 
     api_ext = build_extractor(
         params_cls=ApiIssueParams,
         harness=Harness(config=config, instructions=EXTRACTION_INSTRUCTIONS),
         name="api_issue_extractor",
     )
-    _EXTRACTORS["api_issue"] = api_ext
+    _EXTRACTORS[task_type] = api_ext
 
 
 def _prompt(text: str, params_cls: type[Params]) -> str:

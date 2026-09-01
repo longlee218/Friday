@@ -20,6 +20,11 @@ from friday.models import (
 )
 from friday.validation import Problem, validate
 
+#: Imported lazily inside `plan()` would only save a sys.modules lookup; it
+#: does not break a cycle (extraction.py imports harness and models, not
+#: workflows). Keep it here so the import graph is one read of the file.
+from friday.extraction import extract as _extract
+
 __all__ = [
     "Action",
     "Ask",
@@ -171,8 +176,6 @@ async def plan(
     registered and tested without reaching anything.
     """
     if text is not None:
-        from friday.extraction import extract as _extract
-
         extracted = await _extract(task_type, text)
         if extracted is not None:
             params = _merge(params, extracted)
