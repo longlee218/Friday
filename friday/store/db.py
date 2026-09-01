@@ -942,6 +942,37 @@ class Database:
             ).first()
         return (row[0], row[1]) if row else None
 
+    async def last_said_by_reporter(self, task_id: int) -> str | None:
+        """The most recent thing the person who opened this task has said in
+        that conversation — the question they asked, the detail they added.
+        None when they have said nothing since the report itself."""
+        who = await self.reporter_of(task_id)
+        if who is None:
+            return None
+        author_id, _ = who
+        ours = select(schema.Outbound.sent_message_id).where(
+            schema.Outbound.sent_message_id.is_not(None)
+        )
+        async with self._sessions() as session:
+            opening = await session.scalar(
+                select(schema.Message)
+                .where(schema.Message.task_id == task_id)
+                .order_by(schema.Message.created_at)
+                .limit(1)
+            )
+            latest = await session.scalar(
+                select(schema.Message)
+                .where(
+                    schema.Message.conversation_id == opening.conversation_id,
+                    schema.Message.author_id == author_id,
+                    schema.Message.created_at > opening.created_at,
+                    schema.Message.provider_message_id.not_in(ours),
+                )
+                .order_by(schema.Message.created_at.desc())
+                .limit(1)
+            )
+        return latest.text if latest is not None else None
+
     async def has_exchanged_with(self, author_id: str) -> bool:
         """Whether the operator and this person have ever replied to each other.
 

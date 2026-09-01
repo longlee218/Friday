@@ -166,7 +166,11 @@ class WorkflowRunner:
             # question. Announcing only the task's type and parameters sends
             # the operator to the board to find out what was actually wanted,
             # which is the one thing this message exists to save them.
-            text = _stuck(task, pauses.get(task.id))
+            # ponytail: one query per needs_human task per pass. Few of them
+            # by construction; batch if the column ever fills up.
+            text = _stuck(
+                task, pauses.get(task.id), await self._db.last_said_by_reporter(task.id)
+            )
             if text in already:
                 continue
             await self._db.queue_outbound(
@@ -463,11 +467,24 @@ def _fingerprint(params: dict) -> str:
     return blake2b(material.encode(), digest_size=16).hexdigest()
 
 
-def _stuck(task: Task, pause: tuple[str, str] | None = None) -> str:
-    """What it is, and enough of what it knows to judge without opening
-    anything."""
+def _stuck(
+    task: Task,
+    pause: tuple[str, str] | None = None,
+    last_said: str | None = None,
+) -> str:
+    """What it is, what it knows, and what the reporter last said — enough to
+    judge, and to answer, without opening anything.
+
+    The last message matters most when the task stopped *because of it*: a
+    question the agent could not answer. Without it the operator sees a task
+    with a correlationId in it and no hint that a person is waiting on a
+    sentence they could type in five seconds. Quoted, so it reads as theirs.
+    """
     known = ", ".join(f"{k}: {v}" for k, v in sorted(task.params.items()) if v)
     line = f"{task.type} #{task.id} — {known or 'nothing extracted'}"
     if pause is not None and pause[1]:
         line += f"\n{pause[0]}: {pause[1]}"
+    if last_said:
+        quoted = last_said.strip().replace("\n", "\n> ")
+        line += f"\nthey last said:\n> {quoted}"
     return line

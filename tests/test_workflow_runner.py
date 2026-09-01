@@ -669,3 +669,64 @@ async def test_the_stranger_line_reaches_the_prompt_and_only_then(tmp_path):
 
     assert "not written to this person" in prompts[0]
     assert "counterpart" not in prompts[1]
+
+
+# --- ticket 35: tell the operator what they were asked -----------------------
+
+
+async def _reporter_said(db, message_id, text, *, secs, task_id=None):
+    from datetime import timedelta
+
+    event = make_event(
+        message_id=message_id, text=text, mention_type=None,
+        created_at=datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc) + timedelta(seconds=secs),
+    )
+    await db.record_message(event, context_only=task_id is None)
+    if task_id is not None:
+        await db.mark_triaged(event, task_id, decision={"type": "api_issue"})
+
+
+async def test_the_operator_is_told_what_the_reporter_asked(db):
+    """The announcement was the type and the parameters — all true, none of it
+    the reason the task stopped. The reporter asked what a correlationId is;
+    the operator saw a task with one in it and no hint that a person was
+    waiting on a sentence they could type in five seconds."""
+    task = await make_task(db)
+    await _reporter_said(db, "m1", "API lỗi rồi", secs=0, task_id=task.id)
+    await _reporter_said(db, "m2", "correlationId là cái gì a nhỉ?", secs=30)
+    await db.move_task(task.id, TaskState.NEEDS_HUMAN)
+
+    await WorkflowRunner(db=db, auto_ask=False).run_once()
+
+    (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
+    assert "correlationId là cái gì a nhỉ?" in told.text
+
+
+async def test_nothing_is_added_when_they_said_nothing_since(db):
+    task = await make_task(db)
+    await _reporter_said(db, "m1", "API lỗi rồi", secs=0, task_id=task.id)
+    await db.move_task(task.id, TaskState.NEEDS_HUMAN)
+
+    await WorkflowRunner(db=db, auto_ask=False).run_once()
+
+    (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
+    assert "they last said" not in told.text
+
+
+async def test_our_own_question_is_not_what_they_last_said(db):
+    from friday.outbox import Kind
+
+    task = await make_task(db)
+    await _reporter_said(db, "m1", "API lỗi rồi", secs=0, task_id=task.id)
+    row = await db.queue_outbound(
+        task_id=task.id, conversation=task.conversation, kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user", text="cho anh xin correlationId",
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id="ours")
+    await _reporter_said(db, "ours", "cho anh xin correlationId", secs=10)
+    await db.move_task(task.id, TaskState.NEEDS_HUMAN)
+
+    await WorkflowRunner(db=db, auto_ask=False).run_once()
+
+    (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
+    assert "they last said" not in told.text
