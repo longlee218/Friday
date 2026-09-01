@@ -78,12 +78,12 @@ is a decision about whether to proceed, which depends on whether there is a
 human to ask. A dataclass has no notion of "human". Keeping it outside the type
 keeps the type a data shape; the engine turns that shape into a verdict.
 
-- [ ] `friday/validation.py` exists with `Matches`, `InSet`, `OneOf`, `NonEmpty`, and `validate`
-- [ ] `validate(params)` runs every rule in `_RULES` and returns a list of `Problem`, one per failure, all of them (not stop-on-first)
-- [ ] A `Params` class with empty `_RULES` validates cleanly
-- [ ] `_missing()` in `friday/workflows/__init__.py` calls `validate(params)` and merges its `Problem` list into the existing "what is None" output
-- [ ] `plan_by_required_parameters` returns `Ask` whenever `_missing` reports any problem (missing or invalid); the planner does not run in that case
-- [ ] No other module imports `friday.validation` — enforced by a grep test
-- [ ] The old "Optional means required check" path is preserved as one half of `_missing`; the new engine is the other half, not a replacement
-- [ ] A test asserts that an invalid value never reaches a planner's body, even when the field is non-Optional
-- [ ] No rules are written for `ApiIssueParams` or any other concrete type — that is a separate ticket (this one ships the engine only)
+- [x] `friday/validation.py` exists with `Matches`, `InSet`, `OneOf`, `NonEmpty`, and `validate`
+- [x] `validate(params)` runs every rule in `_RULES` and returns a list of `Problem`, one per failure, all of them (not stop-on-first)
+- [x] A `Params` class with empty `_RULES` validates cleanly
+- [x] `_missing()` in `friday/workflows/__init__.py` calls `validate(params)` and merges its `Problem` list into the existing "what is None" output
+- [x] `plan_by_required_parameters` returns `Ask` whenever `_missing` reports any problem (missing or invalid); the planner does not run in that case
+- [x] No other module imports `friday.validation` — enforced by a grep test
+- [x] The old "Optional means required check" path is preserved as one half of `_missing`; the new engine is the other half, not a replacement
+- [x] A test asserts that an invalid value never reaches a planner's body, even when the field is non-Optional
+- [x] No rules are written for `ApiIssueParams` or any other concrete type — that is a separate ticket (this one ships the engine only)
