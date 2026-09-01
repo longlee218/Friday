@@ -1,19 +1,37 @@
-# 28: A workflow that survives a restart
+# 28 (retired): a workflow that survives a restart
 
-**What to build:** A workflow runs as an ordered set of steps, each taking the state
-so far, doing one thing, and handing back what it learned. Killing the process
-partway through and starting again continues from the first unfinished step instead
-of paying for the finished ones twice.
+This ticket is retired. The original framing — "ordered set of steps, each
+recording before the next begins" — is **subsumed by ticket 32** (DAG
+framework) and **ticket 33** (the first DAG, `api_issue`). The DAG's
+checkpoint-after-every-node satisfies every acceptance criterion below:
 
-**Blocked by:** 27
+| Original criterion | Where it lives now |
+|---|---|
+| Workflow is an ordered set of named steps | DAG nodes in `friday/dag/` |
+| Each step's result recorded before the next begins | `DAGRunner` saves state after every node |
+| Restart continues at the first unfinished step | `load_dag_state(task.id)` + resume from the next node |
+| Step + effect commit together (own store) | DAG runner writes state in the same DB transaction as the result |
+| Step does not send twice on resume (external) | Ticket 33's `fix_bug` carries an idempotency key |
+| State is typed | `DAGState` is a frozen dataclass; missing keys raise on read |
+| Adding a workflow does not touch existing ones | `EDGE_ROUTER` is `dict[str, DAG]`; new entry, no edits |
 
-**Status:** ready-for-agent
+The text below is kept for the historical record and for any reviewer who
+wants to see why the ticket was retired rather than re-issued.
 
-**This reopens ticket 07, which was closed as superseded and should not have been.**
-The reason given there — that a planner writes nothing until it returns, so there is
-no position to resume from — is true only while a planner is one cheap call. A step
-that spends five tool calls and ten minutes against a log store is a position, and
-losing it costs real money.
+---
+
+## Original ticket body
+
+A workflow runs as an ordered set of steps, each taking the state so far, doing
+one thing, and handing back what it learned. Killing the process partway through
+and starting again continues from the first unfinished step instead of paying
+for the finished ones twice.
+
+This reopens ticket 07, which was closed as superseded and should not have been.
+The reason given there — that a planner writes nothing until it returns, so there
+is no position to resume from — is true only while a planner is one cheap
+call. A step that spends five tool calls and ten minutes against a log store is
+a position, and losing it costs real money.
 
 Building rather than adopting: a graph library was measured at twenty-two extra
 packages, a second HTTP client in the same container, and two of its own tables in
@@ -32,10 +50,16 @@ Branching and running steps side by side are explicitly not the goal. Ordinary P
 already expresses both, and a graph that exists to replace `if` puts a language
 between the author and their own code.
 
-- [ ] A workflow is an ordered set of named steps, each declaring what it needs and what it produces
-- [ ] Each step's result is recorded before the next begins
-- [ ] Killing the process mid-workflow and restarting continues at the first unfinished step
-- [ ] A step that writes to this system's own store cannot leave its effect recorded without its result, or the reverse
-- [ ] A step that has already sent something outside the process does not send it twice on resume
-- [ ] A workflow's state is typed, so a step that reads a value another step never wrote is a mistake that shows up before it runs
-- [ ] Adding a workflow adds a workflow, without touching the ones that exist
+## Why this ticket is retired, not deleted
+
+The reasoning in the original ticket — durable resume matters, build rather
+than adopt, ordinary Python over a graph library — is still right. Ticket 32
+embraces it: the DAG runner is ~150 lines, no graph library, no second HTTP
+client, no foreign tables. The split was between "a workflow is a procedure"
+(function model) and "a workflow is a graph" (DAG model); ticket 28 carried
+the procedure framing because that was the only shape available in 2026-08, and
+ticket 32 carries the DAG framing because that is the shape ticket 33 needs.
+
+If a reviewer thinks the original framing is still useful — e.g. "every node is
+an ordered set of named steps, recording before the next begins" — it lives on
+in ticket 32's acceptance criteria, which is the new home.
