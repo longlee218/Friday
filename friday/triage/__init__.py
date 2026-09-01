@@ -265,15 +265,3 @@ def _hygiene(params: Params, text: str) -> Params:
         for f in fields(params)
     }
     return type(params)(**cleaned)
-
-
-def _prompt(event: InboundEvent, context: Sequence[InboundEvent]) -> str:
-    """Prior messages first, the message to classify last and clearly marked."""
-    lines = []
-    if context:
-        lines.append("Earlier in this conversation:")
-        lines += [f"  {m.author_name}: {m.text}" for m in context]
-        lines.append("")
-    lines.append("Classify this message:")
-    lines.append(f"  {event.author_name}: {event.text}")
-    return "\n".join(lines)

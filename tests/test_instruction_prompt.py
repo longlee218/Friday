@@ -323,3 +323,41 @@ def test_a_three_layer_channel_context_is_split_by_provenance():
     assert "checkout" in out
     assert "degraded" in out
     assert "terse" in out
+
+
+# --- acceptance: triage and responder use the bundle -----------------------
+
+
+def test_triage_uses_the_bundle_not_its_own_prompt_assembler():
+    """Acceptance criterion #9: triage goes through ContextBundle, not a
+    hand-rolled string. Locked by source inspection: a future regression
+    that pulls ContextBundle out and inlines a string again would change
+    the source and this test catches it."""
+    import inspect
+
+    src = inspect.getsource(__import__("friday.triage", fromlist=["Triage"]).Triage.decide)
+    assert "ContextBundle" in src
+    assert "ContextBundle(" in src
+
+
+def test_responder_uses_the_bundle_not_its_own_prompt_assembler():
+    import inspect
+
+    src = inspect.getsource(
+        __import__("friday.responder", fromlist=["Responder"]).Responder.draft
+    )
+    assert "ContextBundle" in src
+    assert "ContextBundle(" in src
+
+
+def test_no_dead_prompt_assemblers_remain_in_triage_or_responder():
+    """The `_prompt` per-module assemblers were replaced by the bundle. If
+    they come back, the bundle is no longer the only place that builds a
+    prompt, and the seam guarantee is gone."""
+    import importlib
+
+    for module in ("friday.triage", "friday.responder"):
+        m = importlib.import_module(module)
+        assert not hasattr(m, "_prompt"), (
+            f"{module}._prompt is back — the bundle should be the only path"
+        )

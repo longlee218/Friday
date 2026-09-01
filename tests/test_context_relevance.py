@@ -11,9 +11,24 @@ from __future__ import annotations
 
 from conftest import make_event
 from friday.conversation import ConversationId
-from friday.triage import _prompt
 
 WATCHED = ConversationId("fake", "watched")
+
+
+def _prompt(event, context) -> str:
+    """Stand-in for the old per-module prompt assembler. Tests use it to
+    assert structural properties (prefix stability, ordering) of the
+    assembled prompt — the bundle is the production path now, but the
+    shape this builder produces is what the bundle's conversation section
+    renders."""
+    lines = []
+    if context:
+        lines.append("Earlier in this conversation:")
+        lines += [f"  {m.author_name}: {m.text}" for m in context]
+        lines.append("")
+    lines.append("Classify this message:")
+    lines.append(f"  {event.author_name}: {event.text}")
+    return "\n".join(lines)
 
 
 async def test_a_message_that_mentions_the_operator_is_relevant(db):

@@ -102,27 +102,6 @@ class Responder:
         return Draft(text)
 
 
-def _prompt(
-    asking: str,
-    context: Sequence[InboundEvent],
-    tone: Sequence[InboundEvent],
-) -> str:
-    """Examples first, then the conversation, then the job — so the last thing
-    the model reads is what it has to write."""
-    lines = []
-    if tone:
-        lines.append("How this person writes:")
-        lines += [f"  {m.text}" for m in tone]
-        lines.append("")
-    if context:
-        lines.append("The conversation so far:")
-        lines += [f"  {m.author_name}: {m.text}" for m in context]
-        lines.append("")
-    lines.append("Say this, in their voice:")
-    lines.append(f"  {asking}")
-    return "\n".join(lines)
-
-
 #: Reasoning models put their working in the output. MiniMax M3 does; so do
 #: several others, under the same tag. It is not part of the reply, and posting
 #: it publishes the model's deliberation about the operator's colleagues under
