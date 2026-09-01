@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from friday.domain.conversation import ConversationId
+from friday.providers import Provider
 from friday.providers.discord.user import DiscordUserProvider
 
 
@@ -77,18 +78,23 @@ async def test_someone_elses_message_is_not_marked_as_ours():
     assert provider._incoming.get_nowait().is_own is False
 
 
-def test_the_adapter_implements_everything_the_inbox_will_call():
+def test_the_adapter_implements_everything_the_protocol_declares():
     """`Provider` is a Protocol, so nothing checks this at import or at
-    construction — a missing method surfaces only when the inbox reaches for it,
-    at runtime, in production. `history` and `recent` were both absent for three
-    tickets and the recovery sweep never ran once."""
-    provider = DiscordUserProvider("token", client=stub_client())
+    construction — a missing method surfaces only when something reaches for
+    it, at run time, in production. `history` and `recent` were both absent for
+    three tickets and the recovery sweep never ran once.
 
-    missing = [
-        name
-        for name in ("name", "reconnected", "stream", "history", "recent", "send")
-        if not hasattr(provider, name)
-    ]
+    Read from the protocol, not from a list written beside it. The list used to
+    be written out here, and the two drifted: `send` was in this test and not
+    in `Provider`, while the outbox called it on every delivery.
+    """
+    import typing
+
+    provider = DiscordUserProvider("token", client=stub_client())
+    declared = typing.get_protocol_members(Provider)
+
+    assert "send" in declared, "the outbox calls it; the protocol must declare it"
+    missing = sorted(name for name in declared if not hasattr(provider, name))
     assert missing == []
 
 
