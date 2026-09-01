@@ -89,10 +89,17 @@ workflows:
   max_asks: 3
   # Let a burst of follow-ups settle before answering it.
   debounce_seconds: 45
-  # Send "which environment / can you send the correlationId or curl?" straight
-  # away, with no approval step. This is the only reply allowed out unreviewed:
-  # it is the same question every time, and if triage got the type wrong it
-  # costs the reporter one unnecessary question. Everything else parks.
+  # Let the responder phrase the ask in the operator's own voice, from the
+  # conversation and their real messages, instead of the fixed template.
+  # Still sent with no approval step (see auto_ask_for_details below): what
+  # is being asked never changes, only the wording does, and the responder
+  # falls back to the plain template if it fails to write one.
+  use_responder: true
+  # Send the missing-detail question straight away, with no approval step.
+  # This is the only reply allowed out unreviewed: which fields are missing
+  # is decided by fixed logic, not by the model, so a wrong classification
+  # costs the reporter one unnecessary question at worst. Everything else
+  # parks for a human.
   auto_ask_for_details: true
 
 ingest:
