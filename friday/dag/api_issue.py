@@ -7,13 +7,17 @@ read_logs → find_code_path → analyze_stack ─┬→ fix_bug → compose_rep
 
 Every node degrades rather than fails. A node whose tool server is not
 configured returns `None` and costs nothing — no model call, no error. The
-graph still reaches `compose_reply`, which then produces exactly what the
-deterministic planner produced before this graph existed: ask for a
-correlation id when there is nothing to trace, park when there is.
+graph still reaches `compose_reply`, which parks: the report was traceable
+enough to get here, so nothing found means the investigation came up empty,
+not that the reporter left something out.
 
 That degradation is the point of shipping it this way. Replacing a working
-planner with a graph that only works once Loki is wired would be a
-regression dressed as progress.
+planner with a graph that only works once Loki is wired would be a regression
+dressed as progress.
+
+Whether a report is traceable at all is decided before any of this, by
+`_traceable` in `ApiIssueParams._RULES`. This graph never sees one that is
+not.
 
 Only `analyze_stack` and `compose_reply` call a model. The other three are
 tool work. That ratio is why the graph is worth having: it gives us
@@ -236,17 +240,19 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
                 return Reply(written.final_output.strip())
         return Reply(said)
 
-    # Nothing found. Same two outcomes the planner had, for the same reasons:
-    # an id or a curl makes a request findable, an environment only narrows
-    # the search, so it is asked for alongside — never instead.
-    if params.correlation_id or params.curl:
-        return Park("has enough to trace")
-
-    wanted = ["the correlationId, or the curl you used"]
-    if not params.environment:
-        wanted.insert(0, "which environment you're on")
-    return Ask(
-        "Could you send " + " and ".join(wanted) + "? I'll trace it from there."
+    # Nothing found — and by the time this runs, that no longer means "we were
+    # never given enough". `_traceable` in `ApiIssueParams._RULES` gates the
+    # route: a report with neither a correlationId nor a curl is turned back at
+    # `prepare()` and never reaches a node. So arriving here with nothing found
+    # means the investigation itself came up empty, which is a person's
+    # problem, not a question for the reporter.
+    #
+    # There was an `Ask` here, inherited from the deterministic planner this
+    # graph replaced. It became unreachable when the rule moved into the gate,
+    # and it worded the same question `_question` and `_ASKED_AS` word — the
+    # second copy that drifts.
+    return Park(
+        "traceable, but nothing was found — no log server, or nothing to find"
     )
 
 

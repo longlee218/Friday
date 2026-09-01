@@ -140,8 +140,8 @@ def register_dags(
             )
     else:
         log.info(
-            "api_issue graph: no node agents configured — it will ask for a "
-            "correlationId rather than investigate"
+            "api_issue graph: no node agents configured — it will park every "
+            "report rather than investigate one"
         )
 
     # Stored for the runner to hand down through `DAGDeps`. Kept here rather

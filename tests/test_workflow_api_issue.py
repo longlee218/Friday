@@ -16,50 +16,63 @@ from friday.dag.api_issue import _compose_reply
 from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
 from types import SimpleNamespace
 
-from friday.workflows import Ask, Park, plan
+from friday.workflows import Ask, Park, plan, prepare
 
 
 def params(**kw):
     return ApiIssueParams(summary="checkout is 500", **kw)
 
 
-async def decide(**kw):
-    """What the graph replies with when nothing could be investigated.
+CID = "abcdef01-2345-6789-abcd-ef0123456789"
 
-    `task.params` is a plain dict in the database, which is what the node
-    reads, so the stand-in is a dict rather than a `Params` instance.
+
+async def gate(**kw):
+    """What the *route* decides — which is where this is decided.
+
+    These used to drive `_compose_reply` directly and assert on the `Ask` it
+    returned. That `Ask` is gone: the rule moved into `prepare()`, so a report
+    with nothing to trace on never reaches a node at all. Asserting on the node
+    was asserting on a path production stopped taking.
     """
+    _, problem = await prepare("api_issue", params(**kw))
+    return problem
+
+
+async def decide(**kw):
+    """What the graph replies with once it *has* run and found nothing."""
     task = SimpleNamespace(params={"summary": "checkout is 500", **kw})
     return await _compose_reply(DAGState.empty(), DAGDeps(task=task))
 
 
 async def test_a_report_with_nothing_to_trace_on_asks_for_details():
-    action = await decide()
+    action = await gate()
 
     assert isinstance(action, Ask)
     assert "correlationId" in action.text or "curl" in action.text.lower()
 
 
-async def test_a_correlation_id_is_enough_to_stop_asking():
-    assert isinstance(await decide(correlation_id="7f3a91c2"), Park)
+async def test_a_correlation_id_is_enough_to_reach_the_graph():
+    assert await gate(correlation_id=CID) is None
 
 
-async def test_a_curl_is_enough_to_stop_asking():
-    assert isinstance(await decide(curl="curl https://x"), Park)
-
-
-async def test_the_environment_is_asked_for_only_when_it_is_missing():
-    without = await decide()
-    with_env = await decide(environment="production")
-
-    assert "environment" in without.text.lower()
-    assert isinstance(with_env, Ask)
-    assert "environment" not in with_env.text.lower()
+async def test_a_curl_is_enough_to_reach_the_graph():
+    assert await gate(curl="curl https://x") is None
 
 
 async def test_an_environment_alone_is_not_enough_to_trace():
     """You cannot find a request from the environment name."""
-    assert isinstance(await decide(environment="production"), Ask)
+    assert isinstance(await gate(environment="production"), Ask)
+
+
+async def test_a_graph_that_found_nothing_parks_rather_than_asking_again():
+    """By the time a node runs, the reporter has already given something to
+    trace on — `_traceable` saw to that. So "nothing found" is the
+    investigation coming up empty, which is a person's problem, not another
+    question for the reporter."""
+    action = await decide(correlation_id=CID)
+
+    assert isinstance(action, Park)
+    assert "nothing was found" in action.reason
 
 
 # ---- the other task types --------------------------------------------------

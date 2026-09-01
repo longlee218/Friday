@@ -58,22 +58,28 @@ async def run(**kw) -> DAGState:
 
 async def test_with_no_tools_the_graph_still_reaches_a_decision():
     """A fresh install has no log server and no node agents. The graph must
-    still say something — and say the same thing the planner it replaced
-    said."""
-    state = await run()
+    still reach an outcome rather than stalling — every node degrades, and the
+    last one still decides.
+
+    It used to assert an `Ask` here, asking for the correlationId. That was the
+    deterministic planner's answer, inherited when this graph replaced it, and
+    it stopped being reachable when `_traceable` moved into the gate: a report
+    with nothing to trace on never reaches a node now. Parking is the honest
+    answer for a graph that ran and found nothing.
+    """
+    state = await run(correlation_id=UUID)
 
     assert state["read_logs"] is None
     assert state["find_code_path"] is None
     assert state["analyze_stack"]["actionable"] is False
-    assert isinstance(state["compose_reply"], Ask)
-    assert "correlationId" in state["compose_reply"].text
+    assert isinstance(state["compose_reply"], Park)
 
 
 async def test_a_traceable_report_parks_when_nothing_can_investigate_it():
     state = await run(correlation_id=UUID)
 
     assert isinstance(state["compose_reply"], Park)
-    assert "enough to trace" in state["compose_reply"].reason
+    assert "nothing was found" in state["compose_reply"].reason
 
 
 async def test_no_model_is_called_when_there_is_nothing_to_analyse():
