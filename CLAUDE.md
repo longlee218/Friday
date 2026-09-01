@@ -44,8 +44,8 @@ uv add <package>        # add a dependency (updates pyproject.toml and uv.lock)
 uv run pytest -q        # the whole suite; -k <expr> for one test
 ```
 
-Persistence is **SQLAlchemy 2.0 async** (`friday/schema.py` holds the mapped
-classes, `friday/db.py` converts them to and from the domain dataclasses) with
+Persistence is **SQLAlchemy 2.0 async** (`friday/store/schema.py` holds the mapped
+classes, `friday/store/db.py` converts them to and from the domain dataclasses) with
 **Alembic** migrations in `migrations/`. `run_agent.py` upgrades to head at
 startup, before anything opens the database.
 
@@ -115,35 +115,27 @@ What is actually on disk.
 
 | Path | Contents |
 | --- | --- |
-| `run_agent.py` | Composition root — the only place adapters are constructed, and the only place the asyncio tasks are started |
+| `run_agent.py` | Composition root — the only place adapters are constructed, and the only place the asyncio tasks are started. It asks each module to build itself; it reads no agent's knobs |
+| `serve_board.py` | The board alone, against the live database, without connecting to Discord |
 | `init_channel.py` | One-off: create a channel's context file for the operator to fill in |
-| `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, and each agent's persona mode |
+| `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, each agent's persona mode, and the sensitive words that keep a message away from the model |
 | `PERSONA.md` | Who every agent is, before it is told its job. Prose, read once at startup, prepended to each agent's instructions |
-| `friday/config.py` | Loads `config.yaml`, resolves `${VAR}` from the environment, stamps each `AgentConfig` with its persona |
-| `friday/persona.py` | Reads `PERSONA.md` and assembles the part each agent asked for |
-| `friday/models.py` | Every domain dataclass. No persistence, no SDK |
-| `friday/schema.py`, `db.py` | Mapped classes; the only store. `db.py` converts at the edge, so nothing above it knows SQLAlchemy exists |
-| `friday/conversation.py` | `ConversationId` — what counts as one exchange, and why a thread is its own |
+| `friday/config.py` | Loads `config.yaml`, resolves `${VAR}`, stamps each `AgentConfig` with its persona. Outside the packages because it is read before any of them |
+| **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `tasks.py` (`TaskState` and its legal transitions), `validation.py` (the rule engine, one call site) |
+| **`friday/store/`** | `schema.py` holds the mapped classes, `db.py` is the only store and converts at the edge — nothing above it knows SQLAlchemy exists |
+| **`friday/agent/`** | What it takes to call a model, and nothing about what to call it for: `harness.py` (the only module that may import the SDK), `instruction_prompt.py`, `persona.py`, `skills.py`, `mcp.py`, `llm_log.py` |
+| **`friday/memory/`** | What is kept between tasks, in tiers that never mix: `observations.py` (staged), `notes.py` (promoted, and only by an approved outcome), `channel_context.py` (per-channel YAML), `verdicts.py` (the operator marking a classification right) |
+| **`friday/ops/`** | Alive and safe, deciding nothing: `liveness.py`, `redact.py`, `api.py` |
+| **`friday/text/`** | `transform.py` splits code out before cleaning the prose; `param_hygiene.py` cleans one value. Decides nothing |
 | `friday/inbox/` | Deep module: `stream()`, `sweep_once()`, `tally()`. Gateway, backfill, cursors and dedup are implementation |
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py` (the account), `bot.py` (approval cards) and `normalise.py`. Its `__init__.py` is empty on purpose |
-| `friday/text/` | Turning what someone typed into something usable — `transform.py` splits code out before cleaning the prose, `param_hygiene.py` cleans a value. Decides nothing |
-| `friday/harness.py` | The only module that imports the agent SDK. Builds an agent, runs it, turns failure into work |
-| `friday/triage/` | Classification, its prefilter, parameter hygiene, and the loop that polls untriaged messages |
-| `friday/responder/` | Drafts a reply in the operator's voice |
-| `friday/workflows/` | The simple path — validate, ask, park — the `Ask`/`Reply`/`Park` actions, and the loop that acts on tasks |
+| `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages |
+| `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
+| `friday/workflows/` | The simple path — fill in, check, ask, park — the `Ask`/`Reply`/`Park` actions, and the loop that acts on tasks |
 | `friday/dag/` | The graph framework — nodes, edges, checkpointed resume, `PauseForHuman`, and the edge router. `dag/api_issue.py` is the first graph; `dag/workflows.py` is what the composition root calls |
-| `friday/extraction.py` | Per-workflow field extraction: each workflow owns its prompt, schema and model |
-| `friday/skills.py` | Markdown skills the operator writes, offered to reasoning agents by catalogue and fetched on demand |
-| `friday/verdicts.py` | The operator marking a classification right or wrong, with a Discord reaction |
-| `friday/tasks.py` | `TaskState` and the legal transitions between them |
+| `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
-| `friday/observations.py`, `notes.py` | Staging tier, and the promotion that only an approved outcome earns |
-| `friday/channel_context.py` | Per-channel YAML: what the machine learned, and what the operator wrote |
-| `friday/mcp.py` | Tool servers outside this process, built from configuration |
-| `friday/llm_log.py` | Both sides of every model call |
-| `friday/redact.py` | Credential scrubbing, on logs and on tracebacks |
-| `friday/liveness.py` | Heartbeat, outage alerts, daily summary, and the promotion cadence |
-| `friday/api.py`, `board/` | JSON API and the read-only page on `:8086` |
+| `friday/board/` | The read-only page on `:8086`; its JSON API is `ops/api.py` |
 | `migrations/` | Alembic revisions |
 | `tests/` | Driven through two seams: a fake `Provider` and a scripted model transport |
 | `docs/` | `DESIGN.md`, `SPEC.md`, `agents/` |
@@ -154,8 +146,11 @@ statement about PEP 420, not a licence to put implementation in `__init__.py` �
 importing any submodule runs the parent's `__init__.py` first, so whatever
 lives there is paid for by every import of the package.
 
-There is no `nodes/`, `procedures/`, `tools/`, `memory/`, `permissions/` or
-`hooks/` package, and their absence is a decision rather than an omission. The
+There is no `nodes/`, `procedures/`, `tools/`, `permissions/` or `hooks/`
+package, and their absence is a decision rather than an omission. (`memory/`
+was on that list until it existed — the six packages above were carved out of
+twenty-two loose modules once flat stopped scaling, which is the same rule
+applied at a later size, not a reversal of it.) The
 node vocabulary was removed from the design deliberately (workflows are
 deterministic Python; only triage and the responder call a model), tools live
 beside the state they touch because that is the only place their guard can be
@@ -205,7 +200,7 @@ not an implementation detail:
   and `model` are the whole of what it takes to move an agent to a different
   OpenAI-compatible provider. Not the Responses API: some providers reject
   parts of it, and one of them is the one in `config.yaml`.
-- **`friday/harness.py` is the only module that may import `agents`.** The SDK
+- **`friday/agent/harness.py` is the only module that may import `agents`.** The SDK
   is here for speed, not for keeps, and that is only true while replacing it
   means rewriting one file. What other modules need — `tool`, `ToolContext`,
   `Hooks`, the MCP server types — is re-exported from there under names that do
@@ -224,27 +219,27 @@ not an implementation detail:
 - **Nothing is sent by the caller that decided to send it.** An outbound
   message is a row; one loop delivers it. Approval is enforced as a predicate
   in the query that selects sendable rows, not as a check each caller must
-  remember — see `_NEEDS_APPROVAL` in `friday/db.py`.
+  remember — see `_NEEDS_APPROVAL` in `friday/store/db.py`.
 - **One persona, three modes, and the mode is per agent.** `PERSONA.md` says
   who the agents are and that people read Vietnamese; `config.yaml` says how
   much of it each agent takes. `full` for the two agents whose output a person
   reads, `language` for the ones filling in structured fields, `none` for the
   ones returning a path or a diff. This is not caution: triage fills in
-  `environment` by tool call and `friday/validation.py` requires
+  `environment` by tool call and `friday/domain/validation.py` requires
   `production` / `staging` / `dev`, so an agent carrying the voice writes
   `sản xuất` and the reporter is asked to confirm what they already said. It
   goes in `instructions`, never the per-call bundle — shared bytes at the
   front of a prompt are the ones a provider's cache reuses across agents.
 - **Triage classifies and nothing else.** No parameters, no summary — a type
   and a confidence. Everything a task knows is lifted out of the message by
-  `friday/extraction.py`, one extractor per task type, reading every message
+  `friday/extraction/`, one extractor per task type, reading every message
   linked to the task. The tool schema is the enforcement: a tool parameter is
   an instruction to the model, so `correlation_id` in the schema *is* triage
   extracting whatever the prompt says, and a test pins that every triage tool
   asks for nothing but `confidence`.
 - **A classifiable task type without a configured extractor is broken**, not
   degraded: it opens tasks with no parameters and asks the reporter for what
-  they already said. `friday/extraction.py`'s `EXTRACTS` and `PARAMS` must
+  they already said. `friday/extraction/`'s `EXTRACTS` and `PARAMS` must
   agree, and a test says so.
 - **Silence is not approval.** Only a classification the operator marked
   *right* becomes a few-shot example, and only a classifiable type at that. An
@@ -266,7 +261,7 @@ not an implementation detail:
 - `.gitignore` covers `__pycache__/`, build artifacts, `.venv`, and the runtime
   state that must never be committed: `data/`, `*.db*`, and `.env`.
 - The Discord user token is unscoped account access — it must never reach logs,
-  tracebacks, or the task DB. `friday/redact.py` enforces this on the way out,
+  tracebacks, or the task DB. `friday/ops/redact.py` enforces this on the way out,
   including from `sys.excepthook` and `threading.excepthook`, which the logging
   filter cannot reach.
 - **A rule worth stating is worth a test.** Several of the constraints above

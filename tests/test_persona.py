@@ -411,3 +411,22 @@ def test_every_script_at_the_repo_root_still_imports():
             broken[script.name] = f"{type(exc).__name__}: {exc}"
 
     assert broken == {}, f"scripts that cannot be imported: {broken}"
+
+
+def test_every_path_the_docs_name_exists():
+    """CLAUDE.md and CONTEXT.md are declared sources of truth, and the layout
+    table went stale the moment twenty-two modules moved into packages —
+    eighteen of its rows named files that were no longer there. Nothing broke,
+    which is exactly why it stayed wrong: a path in a table is only checked by
+    someone who follows it and finds nothing."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    missing = {}
+    for doc in ("CLAUDE.md", "CONTEXT.md"):
+        for named in re.findall(r"`(friday/[\w/.]+)`", (root / doc).read_text()):
+            if not (root / named).exists():
+                missing.setdefault(doc, []).append(named)
+
+    assert missing == {}, f"documented paths that do not exist: {missing}"

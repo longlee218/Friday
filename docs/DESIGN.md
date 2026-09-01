@@ -1,6 +1,16 @@
 # friday-agents — Design
 
-Status: **settled, not yet implemented.** One branch remains open (see [Open](#open)).
+Status: **built, and this file has drifted from it.**
+
+Read `CLAUDE.md` first — it describes what exists. This file records the
+reasoning behind decisions, and several of those decisions were later reversed
+in ways it does not reflect. Two are marked inline below and are the ones most
+likely to mislead: the "agentic nodes" vocabulary was removed, and triage's
+tool schemas no longer take any parameter but `confidence`.
+
+Kept rather than rewritten because the argument is still worth reading even
+where the conclusion moved. **Where it disagrees with the code, the code is
+right**, and this line is the warning that it can.
 
 A Discord agent that watches for mentions of a specific human, classifies them,
 turns the actionable ones into tasks, runs a fixed workflow of agentic nodes,
@@ -14,6 +24,11 @@ The shape is **a hard workflow with agentic nodes**: the skeleton is fixed and
 persisted, and each node is an LLM loop with tools. The skeleton buys
 auditability and restart-safety; the node buys adaptability inside one bounded
 step.
+
+> **Reversed.** The node vocabulary was dropped. Workflows are deterministic
+> Python and a graph's *shape* is code — a model never chooses the next step.
+> Only some nodes call a model at all. See `CLAUDE.md` § Architecture
+> constraints and `CONTEXT.md` § Graph.
 
 ## Ingestion
 
@@ -160,11 +175,17 @@ how a discriminated union is encoded here: each tool's schema declares the
 parameters its own type needs, and the model picks one.
 
 ```
-create_api_issue_task(environment?, correlation_id?, curl?, summary)
-create_access_request_task(project, permission, summary)
-create_doc_question_task(question, doc_ref?)
-skip(reason)
+create_api_issue_task(confidence)
+create_access_request_task(confidence)
+create_doc_question_task(confidence)
+skip(confidence)
 ```
+
+> **Reversed.** Every one of these took the parameters above until triage was
+> cut back to classifying. Lifting values out of a message is a different job
+> with a different failure mode; it belongs to `friday/extraction/`, one
+> extractor per task type. A test now fails if a triage tool asks for anything
+> but `confidence`, so the schemas written above are the ones the code forbids.
 
 `tool_use_behavior="stop_on_first_tool"` ends the run on the first call, so this
 is a single turn with no loop.

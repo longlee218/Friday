@@ -197,7 +197,7 @@ An **agent declaration** is then only what makes that agent different:
 instructions, tools, output shape. Triage was the first; the responder, the extractors and every
 reasoning node in a graph followed.
 
-`friday/harness.py` is the only module that may import the agent SDK. The SDK
+`friday/agent/harness.py` is the only module that may import the agent SDK. The SDK
 is here for speed, not for keeps, and that is only true while replacing it
 means rewriting one file.
 
