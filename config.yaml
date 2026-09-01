@@ -45,10 +45,14 @@ agents:
   # high-volume path needs the better model here, which inverts the usual
   # assumption — do not 'optimise' this down without re-running the probe.
   triage:
-    # Classifies, and fills in `environment` / `correlation_id` / `curl` by
-    # tool call. `summary` is free text a person reads on the board, so the
-    # language rule earns its place; the voice would cost the enum values.
-    persona: language
+    # Nothing. Its output is a tool name and a number — it writes no text at
+    # all, so there is no language to rule on and no voice to write in. Every
+    # word of a persona here is paid for on the highest-volume call in the
+    # system to change a choice between four tools, which it cannot.
+    #
+    # It was `language` while triage still filled in `environment` and wrote a
+    # `summary`. It stopped doing both, and this line did not follow.
+    persona: none
     api_key: ${TRIAGE_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"

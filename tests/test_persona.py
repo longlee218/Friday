@@ -277,14 +277,26 @@ def test_the_agent_that_speaks_for_the_operator_has_the_voice():
         assert "one or two sentences" in config.agents[name].persona, name
 
 
-def test_the_agents_that_fill_in_validated_fields_do_not():
+def test_the_agent_that_only_picks_a_tool_carries_nothing():
+    """Triage writes no text at all — its output is a tool name and a number.
+    There is no language to rule on and no voice to write in, and every word
+    of a persona would be paid for on the highest-volume call in the system to
+    change a choice between four tools, which it cannot.
+
+    It was `language` while triage still filled in `environment` and wrote a
+    `summary`. It stopped doing both and this did not follow, which is what a
+    persona mode set once and never revisited looks like."""
+    assert _shipped().agents["triage"].persona == ""
+
+
+def test_the_agents_that_fill_in_validated_fields_keep_the_language_rule():
     """`environment` has to be one of production / staging / dev. An agent
     carrying "write in Vietnamese" alongside a voice instruction writes
     `sản xuất`, validation rejects it, and the reporter is asked to confirm an
     environment they already gave."""
     config = _shipped()
 
-    for name in ("triage", "extractor_api_issue", "dag_analyze"):
+    for name in ("extractor_api_issue", "dag_analyze"):
         persona = config.agents[name].persona
         assert "Long Lee's assistant" in persona, name
         assert "one or two sentences" not in persona, name

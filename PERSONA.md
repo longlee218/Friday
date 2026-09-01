@@ -96,3 +96,12 @@ push it there, so a classifier does not get the voice section.
 `none` exists for the same kind of reason from the other end: a node asked for
 a `path:line` and a diff has nothing to say in anyone's voice, and a persona in
 its prompt is tokens spent on every call to make its output worse.
+
+**Triage is `none`, and it is the case worth understanding.** It writes no text
+— its whole output is which tool it called and a number — so there is no
+language to rule on. It was `language` for a while because it used to fill in
+`environment` and write a `summary`; when it stopped doing both, this did not
+follow, and 79% of the system prompt on the highest-volume call in the system
+was a description of how to write replies, sent to something that never writes
+one. A mode chosen once is a mode that goes stale silently: when an agent's
+job changes, its mode is part of the job.
