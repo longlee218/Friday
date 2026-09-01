@@ -64,3 +64,22 @@ def may_move(current: TaskState | str, target: TaskState | str) -> bool:
     must not crash a runner."""
     current, target = TaskState(current), TaskState(target)
     return target is current or target in ALLOWED[current]
+
+
+class OutboundState(StrEnum):
+    """Where an outbound row is in its life.
+
+    Here rather than in `friday/outbox/` or `friday/store/db.py`, because it
+    was in both: the outbox held `QUEUED/SENT/FAILED/SENT_MANUALLY` for its
+    readers and the store held `OUTBOUND_*` for its `WHERE` clauses, four
+    strings written twice. Two of the outbox's four had no reader left, which
+    is what a duplicated vocabulary looks like as it rots — one copy stops
+    being used and nothing says so.
+    """
+
+    QUEUED = "queued"
+    SENT = "sent"
+    FAILED = "failed"
+    #: Delivered by a person after we gave up. Kept apart from `failed` so the
+    #: audit trail says "a human sent this" rather than "this was abandoned".
+    SENT_MANUALLY = "sent_manually"

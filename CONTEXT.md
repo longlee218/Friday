@@ -242,6 +242,18 @@ The **kind** decides whether it needs approval:
 | `approval_card` | bot | no — it *is* the request for approval |
 | `reply` | user account | **yes** — the agent speaking as the operator |
 
+## Outbound state
+
+Where an outbound row is in its life: `queued`, `sent`, `failed`,
+`sent_manually`. One definition, in `friday/domain/tasks.py` beside
+`TaskState`, because it was two: the outbox held the set for its readers and
+the store held it for its `WHERE` clauses. Two of the outbox's four had no
+reader left by the time anyone looked — which is what a duplicated vocabulary
+looks like as it rots, one copy quietly going unused.
+
+`sent_manually` is apart from `failed` on purpose: the audit trail should say
+"a person sent this" rather than "this was abandoned".
+
 ## Outbox
 
 The only module that delivers. Holds outbound intents, dispatches each to the

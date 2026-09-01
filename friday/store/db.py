@@ -35,6 +35,7 @@ from sqlalchemy.pool import StaticPool
 
 from friday.store import schema
 from friday.domain.conversation import ConversationId
+from friday.domain.tasks import OutboundState
 from friday.domain.models import (
     InboundEvent,
     MentionType,
@@ -63,10 +64,14 @@ _NEWEST_FIRST = (
     cast(schema.Message.provider_message_id, Integer).desc(),
 )
 
-OUTBOUND_QUEUED = "queued"
-OUTBOUND_SENT = "sent"
-OUTBOUND_FAILED = "failed"
-OUTBOUND_SENT_MANUALLY = "sent_manually"
+#: Aliases, not definitions — `friday/domain/tasks.py` owns these. Kept as
+#: local names because they read better in a `WHERE` clause than the enum
+#: does, and renamed away from the enum's members so nothing here can quietly
+#: become a second source.
+OUTBOUND_QUEUED = OutboundState.QUEUED
+OUTBOUND_SENT = OutboundState.SENT
+OUTBOUND_FAILED = OutboundState.FAILED
+OUTBOUND_SENT_MANUALLY = OutboundState.SENT_MANUALLY
 
 #: Kinds the outbox refuses to select without an approval on the task. Kept as
 #: data here because it is a `WHERE` clause; `friday.outbox.Kind` is where the

@@ -430,3 +430,24 @@ def test_every_path_the_docs_name_exists():
                 missing.setdefault(doc, []).append(named)
 
     assert missing == {}, f"documented paths that do not exist: {missing}"
+
+
+def test_an_outbound_state_is_defined_once():
+    """`queued` was spelled out in `friday/outbox/` for its readers and again
+    in `friday/store/db.py` for its `WHERE` clauses — four strings, written
+    twice. Two of the outbox's four had no reader left by the time anyone
+    looked, which is what a duplicated vocabulary looks like as it rots: one
+    copy stops being used and nothing says so."""
+    from friday.domain.tasks import OutboundState
+    from friday.outbox import FAILED, QUEUED
+    from friday.store.db import (
+        OUTBOUND_FAILED,
+        OUTBOUND_QUEUED,
+        OUTBOUND_SENT,
+        OUTBOUND_SENT_MANUALLY,
+    )
+
+    assert QUEUED is OUTBOUND_QUEUED is OutboundState.QUEUED
+    assert FAILED is OUTBOUND_FAILED is OutboundState.FAILED
+    assert OUTBOUND_SENT is OutboundState.SENT
+    assert OUTBOUND_SENT_MANUALLY is OutboundState.SENT_MANUALLY

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 
 from friday.domain.models import Outbound
-from friday.domain.tasks import TaskState
+from friday.domain.tasks import OutboundState, TaskState
 
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN
 
@@ -22,14 +22,11 @@ __all__ = ["FAILED", "Kind", "Outbox", "QUEUED"]
 
 log = logging.getLogger(__name__)
 
-#: The two states a *reader* asks about — the board, the API and the liveness
-#: line all want "what is waiting" and "what gave up". The full set of four
-#: lives in `friday/store/db.py` as `OUTBOUND_*`, because there it is a `WHERE`
-#: clause. Two names for one string in two places is a duplication worth
-#: collapsing, and collapsing it means giving an outbound state a home in
-#: `friday/domain/` beside `TaskState`.
-QUEUED = "queued"
-FAILED = "failed"
+#: The two a *reader* asks about — the board, the API and the liveness line all
+#: want "what is waiting" and "what gave up". Named here for them; defined in
+#: `friday/domain/tasks.py`, which is the only place any of the four is defined.
+QUEUED = OutboundState.QUEUED
+FAILED = OutboundState.FAILED
 
 
 class Kind(StrEnum):
