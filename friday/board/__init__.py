@@ -146,7 +146,7 @@ _PAGE = """<!doctype html>
  ul {{ list-style: none; margin: 0; padding: 0; }}
  li {{ padding: .45rem .6rem; border-left: 2px solid #8884; margin-bottom: .3rem;
       background: #8881; border-radius: 0 4px 4px 0; }}
- .cols {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: .6rem; }}
+ .cols {{ display: grid; grid-template-columns: repeat(6, 1fr); gap: .6rem; }}
  .why {{ display: block; opacity: .55; font-size: .85em; }}
  .failed li {{ border-left-color: #e5484d; }}
  .failed h2 {{ color: #e5484d; opacity: 1; }}
