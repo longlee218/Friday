@@ -114,7 +114,7 @@ async def prepare(
     **This runs ahead of the graph, not inside the branch that has no graph.**
     It used to be the first two steps of `plan()`, which meant a task type with
     a graph — `api_issue`, the only type that has an extractor *and* rules —
-    got neither. Its `_RULES` were unreachable in production, its configured
+    got neither. Its `_RULES` on the params class were unreachable in production, its configured
     extractor could never run, and a `correlation_id` of "not-a-uuid" reached
     the graph, looked findable, and parked to the operator instead of asking
     the reporter to resend it. Nothing failed; it just quietly stopped

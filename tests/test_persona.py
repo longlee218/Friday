@@ -451,3 +451,23 @@ def test_an_outbound_state_is_defined_once():
     assert FAILED is OUTBOUND_FAILED is OutboundState.FAILED
     assert OUTBOUND_SENT is OutboundState.SENT
     assert OUTBOUND_SENT_MANUALLY is OutboundState.SENT_MANUALLY
+
+
+def test_no_module_exports_a_name_it_does_not_define():
+    """`friday.outbox.__all__` listed `ASKED`, which did not exist — so
+    `from friday.outbox import *` raised. Nothing does that, which is why it
+    went unnoticed; `__all__` is documentation that nothing reads until it is
+    wrong in a way that stops the process."""
+    import importlib
+    import pkgutil
+
+    import friday
+
+    broken = {}
+    for info in pkgutil.walk_packages(friday.__path__, prefix="friday."):
+        module = importlib.import_module(info.name)
+        undefined = [n for n in getattr(module, "__all__", ()) if not hasattr(module, n)]
+        if undefined:
+            broken[info.name] = undefined
+
+    assert broken == {}, f"__all__ names nothing defines: {broken}"

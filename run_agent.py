@@ -141,7 +141,7 @@ async def _run(stack: AsyncExitStack) -> None:
     # Register the workflow's extraction agents. Composition root does not
     # know about each one — it asks the extractor module to wire itself
     # from config. Adding a new extractor is a change in
-    # `friday/extraction.py`, not here.
+    # `friday/extraction/`, not here.
     from friday.extraction import register_extractors
 
     register_extractors(config)

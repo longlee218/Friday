@@ -21,7 +21,7 @@ class Decided:
     stops. Lifting values out of the message is a different job with a
     different failure mode, it belongs to whoever needs those values, and
     doing both here meant two producers for one set of fields and a merge to
-    reconcile them. See `friday/extraction.py`.
+    reconcile them. See `friday/extraction/`.
     """
 
     type: TaskType

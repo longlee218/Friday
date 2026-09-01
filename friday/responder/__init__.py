@@ -11,7 +11,7 @@ argument does not survive a model writing it.
 
 What it declares is only what makes it different from triage: instructions,
 and what to do with the answer. The client, the settings, the hooks and the
-error policy belong to `friday.harness` — this agent is the reason that module
+error policy belong to `friday.agent.harness` — this agent is the reason that module
 exists.
 """
 

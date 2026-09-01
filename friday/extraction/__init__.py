@@ -20,7 +20,15 @@ from typing import Any
 from friday.agent.harness import Harness
 from friday.domain.models import Params
 
-__all__ = ["Extractor", "build_extractor", "extract", "registered"]
+__all__ = [
+    "EXTRACTS",
+    "Extractor",
+    "build_extractor",
+    "extract",
+    "register",
+    "register_extractors",
+    "registered",
+]
 
 log = logging.getLogger(__name__)
 
