@@ -80,33 +80,37 @@ def agents_for_api_issue(
             if skills is not None and node in reasoning
             else []
         )
+        wants_skills = bool(tools)
         wanted = _NODE_SERVERS.get(node)
         mcp = [(servers or {})[wanted]] if wanted and wanted in (servers or {}) else []
         built[node] = Harness(
             config=agent_config,
-            instructions=instructions[node] + _skills_block(skills, node, reasoning),
+            instructions=instructions[node]
+            + (_skills_block(skills) if wants_skills else ""),
             tools=tools,
             mcp_servers=mcp,
         )
     return built
 
 
-def _skills_block(skills: Any, node: str, reasoning: set[str]) -> str:
+def _skills_block(skills: Any) -> str:
     """The catalogue, appended to a reasoning node's instructions.
 
     In the instructions rather than the per-call bundle because it is the
     stable part: the same list every call, so it costs one cache entry rather
     than one per task.
+
+    Rendered by `instruction_prompt.skills`, not by a second copy of it. A
+    description is written by the operator and lands inside a delimited
+    section; the renderer escapes it, and a hand-rolled `f"- {line}"` here did
+    not — so a description containing `</skills>` closed the section and
+    everything after it read as instructions. One concept, one renderer.
     """
-    if skills is None or node not in reasoning or not len(skills):
+    if skills is None or not len(skills):
         return ""
-    lines = [
-        "",
-        "",
-        "Skills you can read in full with fetch_skill(name):",
-    ]
-    lines += [f"- {line}" for line in skills.catalogue()]
-    return "\n".join(lines)
+    from friday.instruction_prompt import skills as skills_section
+
+    return "\n\n" + skills_section(skills.catalogue()).render()
 
 
 def register_dags(

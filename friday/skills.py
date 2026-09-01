@@ -23,7 +23,7 @@ from pathlib import Path
 
 import yaml
 
-__all__ = ["Skill", "SkillLibrary"]
+__all__ = ["Skill", "SkillLibrary", "fetch_skill_tool"]
 
 log = logging.getLogger(__name__)
 

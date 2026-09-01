@@ -14,9 +14,13 @@ non-trivial. Decisions recorded there were reached deliberately; if you think
 one is wrong, raise it rather than quietly building something else.
 
 Work is broken into tickets under `.scratch/discord-mention-triage/issues/`,
-derived from `docs/SPEC.md`. Tickets 01–17 are done (07 was superseded and
-reopened as 28). Open: 18–20 (the board's own repo, deferred by choice) and
-24, 27, 28, 29. Each ticket names what blocks it; work the frontier.
+derived from `docs/SPEC.md`. Tickets 01–17 and 23–27 and 29–33 are done; 07
+was superseded and reopened as 28, and 28 is now retired in favour of 32 and
+33. **Open: 18–20 only** — the board's own repo and its UI, deferred by
+choice. Each ticket names what blocks it; work the frontier.
+
+This line goes stale faster than anything else in this file. Check it against
+the `**Status:**` line in each ticket before trusting it.
 
 Keep the split honest: this file describes what *exists*, `docs/DESIGN.md`
 describes what is *agreed*. Do not document intent here as if it were

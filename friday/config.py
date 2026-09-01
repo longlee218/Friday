@@ -330,6 +330,15 @@ def _triage_examples(raw) -> tuple[tuple[str, str], ...]:
     believes they wrote, and which silently is not there, is worse than a
     startup that says which line is wrong.
     """
+    if not isinstance(raw, list):
+        # Without this, a string iterates character by character and the error
+        # names `triage_examples[0] ... got 'o'` — the first letter of the
+        # value, which sends the reader looking for a list entry that does not
+        # exist.
+        raise ConfigError(
+            f"triage_examples should be a list of 'message: task_type' pairs, "
+            f"got {type(raw).__name__}"
+        )
     examples: list[tuple[str, str]] = []
     for index, entry in enumerate(raw):
         if not isinstance(entry, dict) or len(entry) != 1:

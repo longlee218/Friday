@@ -237,6 +237,20 @@ ingest:
     # # ── Group chat ──
     # - "1536991232931135488"
 
+# ── What the operator writes down ─────────────────────────────────────────
+context:
+  # Per-channel YAML: what the machine learned about a channel, and what you
+  # wrote there yourself. `init_channel.py` creates one for you to fill in.
+  directory: context
+  # One Markdown file per skill, with `name` and `description` in its
+  # frontmatter. Adding a skill is adding a file — there is no list to edit.
+  # Agents are shown one line per skill and fetch the body only when they
+  # decide to use it, which is what keeps a hundred skills affordable.
+  skills_directory: skills
+  # What share of the model's context window a conversation has to reach
+  # before summarising it is cheaper than passing it raw.
+  summary_share: 0.5
+
 # ── Triage examples ────────────────────────────────────────────────────────
 # Classifications you wrote by hand. These are used whether or not anything
 # has been marked in Discord — a fresh install has nothing marked, and waiting
@@ -247,9 +261,19 @@ ingest:
 # classification you never looked at is one nobody read, and an agent that
 # learns from its own unreviewed output drifts with no floor.
 #
-#   ✅ ☑️ 👍  — that was right, use it as an example
-#   ❌ ✖️ 👎  — that was wrong
+#   ✅ ☑️  — that was right, use it as an example
+#   ❌ ✖️  — that was wrong
 #   remove the reaction to take the mark back
+#
+# 👍 and 👎 are deliberately NOT marks. A thumbs-up is the most ordinary
+# reaction on Discord — "ok anh nhé" to a colleague — and every casual one
+# landing on a classified message would quietly become a training example,
+# which is the exact thing this signal exists to prevent. The marks are ones
+# nobody reaches for by habit.
+#
+# A mark takes effect on the next restart: examples belong in the stable
+# front of the prompt, and a list that changed per call would cost the cache
+# hit on everything after it. See `agents.triage.examples` for how many.
 triage_examples: []
   # - "the checkout api is 500ing on prod": api_issue
   # - "can I get write access to the payments repo": access_request

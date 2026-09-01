@@ -145,7 +145,10 @@ async def _analyze_stack(state: DAGState, deps: DAGDeps) -> dict[str, Any]:
         return {"cause": None, "actionable": False, "evidence": []}
 
     code = state.get("find_code_path") or "(the code could not be located)"
-    result = await agent.run(f"logs:\n{logs}\n\ncode:\n{code}")
+    # Two extra turns: this node may be offered `fetch_skill`, and the call
+    # plus its answer both land before the analysis is written. `max_turns` is
+    # a ceiling, not a budget — a node with no tool still finishes in one.
+    result = await agent.run(f"logs:\n{logs}\n\ncode:\n{code}", extra_turns=2)
     if result is None:
         return {"cause": None, "actionable": False, "evidence": []}
 
@@ -214,7 +217,7 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
         said = f"{cause}" if not fix else f"{cause}\n\n{fix}"
         agent = deps.extra.get("compose_reply")
         if agent is not None:
-            written = await agent.run(said)
+            written = await agent.run(said, extra_turns=2)
             if written is not None and (written.final_output or "").strip():
                 return Reply(written.final_output.strip())
         return Reply(said)

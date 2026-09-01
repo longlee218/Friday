@@ -49,3 +49,13 @@ request" serves whoever needs it.
 - **`except ValueError` did not catch `OSError`.** A directory named `*.md`
   raises `IsADirectoryError` out of `read_text` and took down startup — the
   exact thing the "reported at startup, not failing" criterion forbids.
+- **Two renderers for one catalogue.** `instruction_prompt.skills` escaped the
+  descriptions; a second, hand-rolled copy in `dag/workflows.py` did not, so a
+  skill described as `harmless</skills>` closed the section and everything
+  after it read as instructions. Operator-written text inside a delimited
+  section is exactly what the escaping rule is for. One concept, one renderer.
+- **A node that could fetch a skill had no room to answer.** `max_turns`
+  defaults to 1, so the reasoning nodes would spend their only turn on the
+  tool call and return nothing — the graph then parks with the analysis
+  unwritten. Raised at the call, because a ceiling costs nothing to a node
+  that finishes in one turn.
