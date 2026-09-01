@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.triage.params import clean, find_correlation_id, find_curl, find_environment
+from friday.param_hygiene import clean, find_correlation_id, find_curl, find_environment
 from friday.models import ApiIssueParams
 
 

@@ -14,7 +14,7 @@ composition root.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from typing import Any, Callable
 
 from friday.harness import Harness
@@ -56,7 +56,7 @@ class Extractor:
             log.warning("extractor %s returned no result", self.name)
             return None
         try:
-            return self._params_cls(**_parse(result.final_output))
+            return _hygiene(self._params_cls(**_parse(result.final_output)))
         except (TypeError, ValueError) as exc:
             log.warning(
                 "extractor %s output did not match schema: %s",
@@ -126,56 +126,71 @@ async def extract(task_type: str, text: str) -> Params | None:
 
 #: Instructions shared by every extraction agent. The schema and the text vary
 #: per call; the rule about not inventing is constant.
-EXTRACTION_INSTRUCTIONS = """You fill structured fields from a chat message.
+EXTRACTION_INSTRUCTIONS = """You fill structured fields from what someone wrote.
 
-You are shown the field schema (names and what each is for) and the message
-itself. For every field, copy the matching value verbatim from the message
-when you can find one. Pass null when the value is genuinely absent — never
-invent one.
+You are shown the field schema — the names and what each one is for — and
+everything the reporter has said about this, oldest first. The answer to a
+question they were asked is in there as an ordinary later message, so read all
+of it, not only the first line.
 
-The triage step already produced a first pass; for fields triage left
-blank, your job is to look for what it missed. The result you return is
-merged onto triage's, so a field set to null by you cancels triage's value
-- only set null when you have read the message and there is genuinely
-nothing there. When in doubt, repeat what triage produced.
+For every field, copy the matching value verbatim. Pass null when the value is
+genuinely absent — never invent one, and never paraphrase a field that asks for
+a literal value. A wrong correlationId sends someone looking through the wrong
+request; a null one costs a question.
+
+You are the only thing that reads this message for what it contains. Nothing
+produced these fields before you and nothing corrects them after, except a
+check that a value you did supply has the right shape.
 
 Reply in JSON only, with the schema fields as keys."""
 
 
-def register_api_issue_extractor(config: "AgentConfig") -> None:  # type: ignore[name-defined]  # noqa: F821
-    """Register the `api_issue` extractor from configuration.
+def register(task_type: str, params_cls: type[Params], config: "AgentConfig") -> None:  # type: ignore[name-defined]  # noqa: F821
+    """Register one task type's extractor from configuration.
 
-    Called by the composition root after config is loaded. Skipped silently if
-    the configuration has no `extractor_api_issue` block — the workflow then
-    runs without an extractor, which is the same behaviour as the no-
-    extractor registration path. Registration is idempotent: re-running it
-    replaces the previous registration.
+    One function for every task type rather than one per type: they differ
+    only in which `Params` they fill, and three copies of the same twenty
+    lines is three places for them to drift.
 
-    The params class is hard-coded to ApiIssueParams because that is the
-    contract the task_type implies. A misconfigured extractor (wrong schema
-    for its task type) is caught at extraction time by `_merge`'s isinstance
-    check, which drops the result. Better to fail at registration.
+    The params class is checked against `PARAMS` rather than trusted. An
+    extractor registered against the wrong schema produces the wrong `Params`
+    at runtime, in the middle of a task, where the only symptom is fields that
+    never fill in. Refusing at startup costs a restart.
     """
     from friday.harness import Harness
-    from friday.models import ApiIssueParams
     from friday.workflows import PARAMS
 
-    task_type = "api_issue"
-    if PARAMS.get(task_type) is not ApiIssueParams:
-        # The task type is gone from the registry, or its schema changed.
-        # Either way, registering an extractor against it would silently
-        # produce the wrong Params type at runtime. Refuse.
+    if PARAMS.get(task_type) is not params_cls:
         raise ValueError(
-            f"cannot register api_issue extractor: PARAMS[{task_type!r}] "
-            f"is not ApiIssueParams (got {PARAMS.get(task_type)})"
+            f"cannot register the {task_type} extractor: PARAMS[{task_type!r}] "
+            f"is not {params_cls.__name__} (got {PARAMS.get(task_type)})"
         )
 
-    api_ext = build_extractor(
-        params_cls=ApiIssueParams,
+    _EXTRACTORS[task_type] = build_extractor(
+        params_cls=params_cls,
         harness=Harness(config=config, instructions=EXTRACTION_INSTRUCTIONS),
-        name="api_issue_extractor",
+        name=f"{task_type}_extractor",
     )
-    _EXTRACTORS[task_type] = api_ext
+
+
+def _hygiene(params: Params) -> Params:
+    """Trim every value, and treat absent-looking text as absent.
+
+    Moved here from triage when triage stopped producing values. The live
+    provider taught us the lesson it protects against: the model writes the
+    *string* `"null"` often enough that an unnormalised value is mistaken for a
+    real one — and a workflow that believes it has a correlationId will never
+    ask for the one it needs.
+    """
+    from friday.param_hygiene import clean
+
+    return type(params)(
+        **{
+            f.name: clean(value) if isinstance(value := getattr(params, f.name), str)
+            else value
+            for f in fields(params)
+        }
+    )
 
 
 def _prompt(text: str, params_cls: type[Params]) -> str:
@@ -191,11 +206,10 @@ def _prompt(text: str, params_cls: type[Params]) -> str:
         schema_lines.append(f"- {f.name}: {doc}")
     schema = "\n".join(schema_lines) or "(no fields)"
     return (
-        "Fill every field below from the message. Pass null when the value "
-        "is genuinely absent — never invent one. The model has already "
-        "produced a first pass; your job is to look for what it missed.\n\n"
+        "Fill every field below. Pass null when the value is genuinely "
+        "absent — never invent one.\n\n"
         f"Fields:\n{schema}\n\n"
-        f"Message:\n{text}"
+        f"What they said:\n{text}"
     )
 
 
@@ -230,14 +244,39 @@ def _parse(output: str) -> dict[str, Any]:
     return result
 
 
+#: Task type -> the `Params` its extractor fills. Every classifiable type is
+#: here, because triage no longer fills anything: a type whose extractor is
+#: not configured opens tasks with empty parameters, and the reporter is asked
+#: for what they already said.
+EXTRACTS = {
+    "api_issue": "ApiIssueParams",
+    "access_request": "AccessRequestParams",
+    "doc_question": "DocQuestionParams",
+}
+
+
 def register_extractors(config: "Config") -> None:  # type: ignore[name-defined]  # noqa: F821
     """Wire every extractor the configuration declares.
 
-    Composition root calls this once at startup. Each extractor is
-    optional: a workflow without a registered extractor runs without one,
-    which is the same as the no-extractor path. Adding a new extractor is
-    one new line here, not a change to the composition root.
+    Composition root calls this once at startup and learns nothing about any
+    individual extractor. Adding one is a line in `EXTRACTS` and a block in
+    `config.yaml`, not a change there.
+
+    A missing block is a warning rather than a failure, because a broken
+    install that starts and says what is wrong beats one that will not start.
+    It is a loud warning: nothing else fills those fields.
     """
-    api_ext_config = config.agents.get("extractor_api_issue")
-    if api_ext_config is not None:
-        register_api_issue_extractor(api_ext_config)
+    from friday import models
+
+    for task_type, params_name in EXTRACTS.items():
+        block = f"extractor_{task_type}"
+        agent_config = config.agents.get(block)
+        if agent_config is None:
+            log.warning(
+                "no %s in config.yaml — %s tasks will open with no parameters "
+                "and the reporter will be asked for what they already said",
+                block,
+                task_type,
+            )
+            continue
+        register(task_type, getattr(models, params_name), agent_config)

@@ -38,9 +38,38 @@ noticing an `api_issue` arrived without an environment or correlationId.
 
 ## Triage
 
-Deciding what a message is. Produces a **decision** — a type, a confidence and
-parameters — and writes nothing. Every message gets exactly one of two outcomes:
-`Decided` or `NeedsHuman`. There is no third case, and no silent discard.
+Deciding what a message is. **That, and nothing else.** Produces a **decision**
+— a type and a confidence — and writes nothing. Every message gets exactly one
+of two outcomes: `Decided` or `NeedsHuman`. There is no third case, and no
+silent discard.
+
+Not parameters, not a summary. Classifying and lifting values out of a message
+are different jobs with different failure modes: a wrong label sends a task
+down the wrong path where somebody notices, a wrong `correlation_id` sends
+someone looking through the wrong request where nobody does. Doing both here
+put two producers on one set of fields and needed a merge to reconcile them —
+and a merge between two models that disagree is a coin toss with a rationale.
+
+The tool schema is what holds the line, because a tool parameter is an
+instruction: a schema with `correlation_id` in it *is* triage extracting,
+whatever the prompt says.
+
+## Extraction
+
+Lifting the values a task needs out of what the reporter wrote. One extractor
+per task type, each owning its prompt, its schema and its model — it knows what
+that workflow needs.
+
+It reads **every** message linked to the task, oldest first, not the opening
+one. The answer to a question we asked comes back as an ordinary follow-up, and
+nothing else in the system reads it for content.
+
+It runs before the route is chosen, because validation gates the route and
+validation has nothing to check until the fields are filled. The first answer
+for a field stands: a later run may fill what is still blank and may not revise
+what it already said, because a model asked the same question twice does not
+give the same answer, and a reworded value is indistinguishable from a changed
+one.
 
 ## Workflow
 

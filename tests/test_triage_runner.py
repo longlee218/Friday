@@ -29,9 +29,8 @@ class StubTriage:
         return self._outcomes.pop(0) if self._outcomes else NeedsHuman("no script")
 
 
-def api_issue(confidence=0.9, **kw):
-    params = ApiIssueParams(summary="checkout 500", **kw)
-    return Decided(type="api_issue", confidence=confidence, params=params)
+def api_issue(confidence=0.9):
+    return Decided(type="api_issue", confidence=confidence)
 
 
 def runner(db, triage, threshold=0.7):
@@ -46,14 +45,17 @@ async def test_a_confident_decision_becomes_a_task(inbox, provider, db):
 
     assert [t.type for t in created] == ["api_issue"]
     stored = await db.tasks()
-    assert stored[0].params["summary"] == "checkout 500"
+    # Opened empty: triage said what it is and nothing more. The extractor
+    # fills it in on the first plan, and until then there is nothing here to
+    # be wrong.
+    assert stored[0].params == {}
     assert stored[0].state == "pending"
 
 
 async def test_a_skip_creates_no_task(inbox, provider, db):
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
-    skip = Decided(type="skip", confidence=0.99, params=SkipParams("banter"))
+    skip = Decided(type="skip", confidence=0.99)
 
     assert await runner(db, StubTriage(skip)).run_once() == []
     assert await db.tasks() == []
@@ -113,11 +115,7 @@ async def test_a_follow_up_of_a_different_type_asks_for_a_human(inbox, provider,
     provider.emit(make_event(message_id="10"))
     provider.emit(make_event(message_id="20", text="actually give me repo access"))
     await captured(inbox)
-    access = Decided(
-        type="access_request",
-        confidence=0.9,
-        params=AccessRequestParams("repo", "write", "needs access"),
-    )
+    access = Decided(type="access_request", confidence=0.9)
 
     r = runner(db, StubTriage(api_issue(), access))
     await r.run_once()
@@ -138,40 +136,59 @@ async def test_triage_reads_the_conversations_context(inbox, provider, db):
     assert triage.seen  # and it was given the conversation, see runner
 
 
-async def test_a_follow_up_merges_new_details_into_the_open_task(inbox, provider, db):
+async def test_a_follow_up_sends_the_task_back_to_be_re_planned(inbox, provider, db):
     """The answer to "which environment?" arrives as an ordinary message.
 
-    If it does not reach the task, the task waits forever for something it has
-    already been told.
+    Triage used to lift the values out of it — the second place it extracted.
+    It cannot now, and it does not have to: the follow-up is linked to the
+    task, the task goes back to pending, and the extractor reads everything the
+    reporter has said. What matters here is only that the answer wakes the task
+    up. If it does not, the task waits forever for something it has been told.
     """
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
     await runner(db, StubTriage(api_issue())).run_once()
-    await db.move_task((await db.tasks())[0].id, TaskState.WAITING_FOR_DETAILS)
+    task_id = (await db.tasks())[0].id
+    await db.move_task(task_id, TaskState.WAITING_FOR_DETAILS)
 
     provider.emit(make_event(message_id="20", text="prod, correlationId abc-123"))
     await captured(inbox)
-    answered = api_issue(environment="production", correlation_id="abc-123")
-    await runner(db, StubTriage(answered)).run_once()
+    await runner(db, StubTriage(api_issue())).run_once()
 
-    task = (await db.tasks())[0]
-    assert task.params["correlation_id"] == "abc-123"
-    assert task.params["environment"] == "production"
-    assert task.state == "pending"  # re-planned now that it can be traced
+    assert (await db.tasks())[0].state == "pending"
+
+
+async def test_the_extractor_is_shown_the_answer_and_not_only_the_report(
+    inbox, provider, db
+):
+    """Which is what makes the above enough. Every message linked to the task
+    is handed to the extractor, oldest first — the correlationId arrives in the
+    second one, and nothing else in the system reads it."""
+    provider.emit(make_event(message_id="10", text="API lỗi nè"))
+    await captured(inbox)
+    await runner(db, StubTriage(api_issue())).run_once()
+    task_id = (await db.tasks())[0].id
+
+    provider.emit(make_event(message_id="20", text="correlationId abc-123 nhé"))
+    await captured(inbox)
+    await runner(db, StubTriage(api_issue())).run_once()
+
+    said = await db.original_text_for(task_id)
+    assert "API lỗi nè" in said
+    assert "abc-123" in said
 
 async def test_a_skip_is_still_recorded_as_a_decision(inbox, provider, db):
     """A skip creates no task, so without this the decision leaves no trace and
     the confidence threshold can never be checked against real messages."""
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
-    skip = Decided(type="skip", confidence=0.95, params=SkipParams("banter"))
+    skip = Decided(type="skip", confidence=0.95)
 
     await runner(db, StubTriage(skip)).run_once()
 
     (decision,) = await db.decisions()
     assert decision["type"] == "skip"
     assert decision["confidence"] == 0.95
-    assert decision["params"]["reason"] == "banter"
     assert decision["task_id"] is None
 
 

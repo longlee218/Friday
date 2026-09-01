@@ -105,7 +105,11 @@ TaskType = Literal["api_issue", "access_request", "doc_question", "skip"]
 
 @dataclass(frozen=True, slots=True)
 class ApiIssueParams:
-    summary: str
+    #: Every field has a default, because nothing fills them in at
+    #: construction time any more. Triage classifies and stops; the task is
+    #: opened with no parameters at all, and the extractor fills them from
+    #: what the reporter actually wrote.
+    summary: str = ""
     environment: str | None = None
     correlation_id: str | None = None
     curl: str | None = None
@@ -136,14 +140,14 @@ class ApiIssueParams:
 
 @dataclass(frozen=True, slots=True)
 class AccessRequestParams:
-    project: str
-    permission: str
-    summary: str
+    project: str = ""
+    permission: str = ""
+    summary: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class DocQuestionParams:
-    question: str
+    question: str = ""
     doc_ref: str | None = None
 
 

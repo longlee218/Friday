@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 from friday.db import Database
 from friday.tasks import TaskState
@@ -41,11 +41,9 @@ def _record(outcome: TriageOutcome) -> dict:
             "confidence": 0.0,
             "params": {"reason": outcome.reason},
         }
-    return {
-        "type": outcome.type,
-        "confidence": outcome.confidence,
-        "params": asdict(outcome.params),
-    }
+    # No parameters: triage classifies and stops. The task opens empty and the
+    # extractor fills it from what the reporter wrote.
+    return {"type": outcome.type, "confidence": outcome.confidence, "params": {}}
 
 
 class TriageRunner:
@@ -114,12 +112,9 @@ class TriageRunner:
             )
 
         if outcome.type == "skip":
-            log.debug(
-                "skipped %s: %s", event.provider_message_id, outcome.params.reason
-            )
+            log.debug("skipped %s", event.provider_message_id)
             return None
 
-        params = asdict(outcome.params)
         existing = await self._db.open_task_for(event.conversation)
         if existing is not None:
             return await self._follow_up(existing, outcome)
@@ -131,9 +126,7 @@ class TriageRunner:
                 outcome.confidence,
                 event.provider_message_id,
             )
-        return await self._open(
-            event, outcome.type, outcome.confidence, params, state
-        )
+        return await self._open(event, outcome.type, outcome.confidence, {}, state)
 
     async def _follow_up(self, task: Task, outcome: Decided) -> Task:
         """A later message in a conversation already being worked on.
@@ -144,6 +137,11 @@ class TriageRunner:
         and the answer to a question we asked comes back as an ordinary message:
         if it does not reach the task, the task waits forever for something it
         has already been told.
+
+        This used to merge parameters lifted from the follow-up, which was the
+        second place triage extracted. It does not now. The message is linked
+        to the task, the task goes back to pending, and the extractor reads
+        everything the reporter has said — including the answer.
         """
         if outcome.type != task.type:
             log.info(
@@ -155,34 +153,15 @@ class TriageRunner:
             await self._db.move_task(task.id, NEEDS_HUMAN)
             return replace(task, state=NEEDS_HUMAN)
 
-        fresh = {k: v for k, v in asdict(outcome.params).items() if v is not None}
-        # Only a blank that has just been filled counts as progress. Every
-        # follow-up carries a new summary, and reopening on that alone would
-        # re-ask the same question for the rest of the conversation.
-        gained = [k for k, v in fresh.items() if not task.params.get(k)]
-        merged = {**task.params, **fresh}
-        if merged != task.params:
-            await self._db.set_task_params(task.id, merged)
-            task = replace(task, params=merged)
-        if not gained:
-            # Still missing what it was waiting for. Send it back to be
-            # re-planned rather than absorbing the message in silence: the
-            # reporter answered, we still cannot act, and they need to be told
-            # that again. The workflow bounds how often that happens.
-            log.info(
-                "task %d: follow-up still has no %s — re-planning",
-                task.id,
-                " or ".join(k for k, v in task.params.items() if not v) or "detail",
-            )
-            if task.state == ASKED:
-                await self._db.move_task(task.id, PENDING)
-                return replace(task, state=PENDING)
-            return task
-
-        log.info("task %d: follow-up supplied %s", task.id, ", ".join(gained))
+        # Back to pending, whatever it said. Whether the follow-up supplied
+        # anything is not a question this can answer any more — the message has
+        # to be *read* for that, and reading it is the extractor's job.
+        # Re-planning is what gets it read; the workflow bounds how often the
+        # reporter is asked the same thing.
+        log.info("task %d: follow-up — re-planning", task.id)
         if task.state == ASKED:
             await self._db.move_task(task.id, PENDING)
-            task = replace(task, state=PENDING)
+            return replace(task, state=PENDING)
         return task
 
     async def _open(

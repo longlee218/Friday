@@ -79,13 +79,40 @@ agents:
     # How many of your past replies to show it as tone examples.
     tone_examples: 8
 
-  # Runs after triage classifies a task as `api_issue`, to fill the fields
-  # triage left blank. The model is allowed to hallucinate; ticket 30's
-  # validate engine catches what it gets wrong. Cheap model on purpose — the
-  # job is pattern matching, not reasoning.
+  # ── Extractors, one per task type ─────────────────────────────────────────
+  # Triage says what a message is and stops. Everything a task knows is lifted
+  # out of the message here, by the extractor for its type, reading every
+  # message the reporter has sent about it — the answer to "which environment?"
+  # arrives as an ordinary follow-up.
+  #
+  # **A type without a block here opens tasks with no parameters at all**, and
+  # the reporter is asked for what they already said. Startup warns about it;
+  # nothing else fills those fields.
+  #
+  # The model is allowed to hallucinate — `friday/validation.py` catches what
+  # it gets wrong. Cheap models on purpose: the job is copying values out of
+  # text, not reasoning.
   extractor_api_issue:
     # Copies values out of the reporter's message. Same reasoning as triage:
     # a translated `environment` is a value that no longer validates.
+    persona: language
+    api_key: ${TRIAGE_API_KEY}
+    base_url: "https://api.minimax.io/v1"
+    model: "MiniMax-M3"
+    settings:
+      temperature: 0
+    max_turns: 1
+
+  extractor_access_request:
+    persona: language
+    api_key: ${TRIAGE_API_KEY}
+    base_url: "https://api.minimax.io/v1"
+    model: "MiniMax-M3"
+    settings:
+      temperature: 0
+    max_turns: 1
+
+  extractor_doc_question:
     persona: language
     api_key: ${TRIAGE_API_KEY}
     base_url: "https://api.minimax.io/v1"

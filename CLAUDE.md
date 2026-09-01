@@ -226,6 +226,17 @@ not an implementation detail:
   `sản xuất` and the reporter is asked to confirm what they already said. It
   goes in `instructions`, never the per-call bundle — shared bytes at the
   front of a prompt are the ones a provider's cache reuses across agents.
+- **Triage classifies and nothing else.** No parameters, no summary — a type
+  and a confidence. Everything a task knows is lifted out of the message by
+  `friday/extraction.py`, one extractor per task type, reading every message
+  linked to the task. The tool schema is the enforcement: a tool parameter is
+  an instruction to the model, so `correlation_id` in the schema *is* triage
+  extracting whatever the prompt says, and a test pins that every triage tool
+  asks for nothing but `confidence`.
+- **A classifiable task type without a configured extractor is broken**, not
+  degraded: it opens tasks with no parameters and asks the reporter for what
+  they already said. `friday/extraction.py`'s `EXTRACTS` and `PARAMS` must
+  agree, and a test says so.
 - **Silence is not approval.** Only a classification the operator marked
   *right* becomes a few-shot example, and only a classifiable type at that. An
   unmarked classification is one nobody read.

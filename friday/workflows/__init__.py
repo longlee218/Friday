@@ -127,7 +127,7 @@ async def prepare(
     if text is not None:
         extracted = await _extract(task_type, text)
         if extracted is not None:
-            params = _merge(params, extracted)
+            params = _fill(params, extracted)
 
     problems = _problems(params)
     return params, Ask(_question(problems)) if problems else None
@@ -173,43 +173,40 @@ def _problems(params: Params) -> list[Problem]:
     return [*_missing(params), *validate(params)]
 
 
-def _merge(triage_params: Params, extracted: Params) -> Params:
-    """Fill in the blanks the extractor found. Never overwrite a filled one.
+def _fill(known: Params, extracted: Params) -> Params:
+    """Fill in the blanks. Never rewrite a field that already has a value.
 
-    Extraction exists to recover what triage left out, and that is all it may
-    do. Letting it overwrite a field that already has a value looks harmless —
-    the extractor has a dedicated prompt, triage does not — and it cost this:
+    This is not the old `_merge`. That reconciled two producers — triage
+    lifted values out of the message and so did the extractor — and had to
+    decide which won. There is one producer now: triage classifies and stops,
+    and every field here comes from the extractor.
 
-        summary: Người dùng báo API có vấn đề, phản hồi chậm
-        summary: API được báo lỗi nhiều lần liên tiếp
-        summary: API có vấn đề, phản hồi chậm
-        summary: User reports API is failing / responding very slowly
-        ... nineteen of them, one task
+    What is left is a different guard, for a different failure. A model asked
+    the same question twice does not give the same answer, and this runs again
+    on every follow-up. Letting the second run rewrite the first cost nineteen
+    direct messages about one report, each carrying a differently worded
+    summary: a reworded value is a *changed* value, so the graph discarded its
+    work and the operator was told again.
 
-    `summary` is written by triage on every task. Re-extracting reworded it
-    every pass, and a reworded parameter is a *changed* parameter: it changed
-    the fingerprint, so the graph threw away its work and ran again; and it
-    changed the text of "this task needs you", so the operator was direct-
-    messaged again. Nineteen DMs and thirty-three model calls about one
-    unchanged report.
-
-    A model asked the same question twice does not give the same answer, so
-    anything that re-runs a model must not treat its output as a value that
-    changed. Blanks only.
+    So the first answer for a field stands. A later run may fill what is still
+    blank — which is exactly what a follow-up supplying the correlationId is —
+    and may not revise what it already said.
     """
-    if not isinstance(extracted, type(triage_params)):
-        # Defensive: a misregistered extractor cannot silently rewrite the
-        # task type's params. Drop the extracted result and keep triage's.
-        return triage_params
-    overlay = {
-        f.name: getattr(extracted, f.name)
-        for f in fields(extracted)
-        if getattr(extracted, f.name) is not None
-        and not getattr(triage_params, f.name)
-    }
+    if not isinstance(extracted, type(known)):
+        # Defensive: a misregistered extractor cannot silently rewrite a task
+        # type's parameters with another type's.
+        return known
     from dataclasses import replace as _replace
 
-    return _replace(triage_params, **overlay)
+    return _replace(
+        known,
+        **{
+            f.name: getattr(extracted, f.name)
+            for f in fields(extracted)
+            if getattr(extracted, f.name) is not None
+            and not getattr(known, f.name)
+        },
+    )
 
 
 def _missing(params: Params) -> list[Problem]:

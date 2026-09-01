@@ -2,44 +2,31 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from friday.config import AgentConfig
 from friday.harness import Harness, ToolContext, tool
-from friday.models import (
-    AccessRequestParams,
-    ApiIssueParams,
-    DocQuestionParams,
-    InboundEvent,
-    Params,
-    SkipParams,
-    TaskType,
-)
+from friday.models import InboundEvent, TaskType
 from friday.triage.prefilter import is_compensation_talk
-from friday.triage.params import clean
 
-__all__ = [
-    "AccessRequestParams",
-    "ApiIssueParams",
-    "Decided",
-    "DocQuestionParams",
-    "NeedsHuman",
-    "SkipParams",
-    "TaskType",
-    "Triage",
-    "TriageOutcome",
-]
+__all__ = ["Decided", "NeedsHuman", "TaskType", "Triage", "TriageOutcome"]
 
 log = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class Decided:
-    """Triage reached a conclusion. It has not acted on it."""
+    """Triage reached a conclusion: this message is of this type.
+
+    That is the whole of it. No parameters, no summary — triage classifies and
+    stops. Lifting values out of the message is a different job with a
+    different failure mode, it belongs to whoever needs those values, and
+    doing both here meant two producers for one set of fields and a merge to
+    reconcile them. See `friday/extraction.py`.
+    """
 
     type: TaskType
     confidence: float
-    params: Params
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,100 +48,63 @@ class _Capture:
     decided: Decided | None = None
 
 
-INSTRUCTIONS = """You triage chat messages that mention a backend engineer.
+INSTRUCTIONS = """You decide what a chat message is. Nothing else.
 
-Call exactly one tool describing what the message is.
+Call exactly one tool. Which tool you call is the answer; the only thing you
+add is how certain you are of it.
 
-For every parameter, look for a matching value in the message and copy it
-verbatim. Pass null only when the value is genuinely absent — never invent one,
-and never summarise a field that asks for a literal value.
+Do not copy values out of the message, do not summarise it, do not answer it.
+Something else reads the message for what it contains — your job is the label
+and your confidence in it.
 
 Messages about salary, personal matters, or social talk are always skip."""
 
 
 @tool
-def create_api_issue_task(
-    ctx: ToolContext[_Capture],
-    confidence: float,
-    summary: str,
-    environment: str | None,
-    correlation_id: str | None,
-    curl: str | None,
-) -> str:
+def create_api_issue_task(ctx: ToolContext[_Capture], confidence: float) -> str:
     """An API is behaving incorrectly: an error, a wrong response, a failure.
 
     Args:
         confidence: How certain you are of this classification, 0 to 1.
-        summary: One line describing the problem.
-        environment: The environment named in the message (production, staging, dev). null if absent.
-        correlation_id: The correlation id, trace id or request id in the message. null if absent.
-        curl: The curl command or request example in the message. null if absent.
     """
-    ctx.context.decided = Decided(
-        type="api_issue",
-        confidence=confidence,
-        params=ApiIssueParams(summary, environment, correlation_id, curl),
-    )
+    ctx.context.decided = Decided(type="api_issue", confidence=confidence)
     return "recorded"
 
 
 @tool
 def create_access_request_task(
-    ctx: ToolContext[_Capture],
-    confidence: float,
-    project: str,
-    permission: str,
-    summary: str,
+    ctx: ToolContext[_Capture], confidence: float
 ) -> str:
     """Someone is asking for permission or access to a project or repository.
 
     Args:
         confidence: How certain you are of this classification, 0 to 1.
-        project: The project or repository named.
-        permission: The access being asked for.
-        summary: One line describing the request.
     """
-    ctx.context.decided = Decided(
-        type="access_request",
-        confidence=confidence,
-        params=AccessRequestParams(project, permission, summary),
-    )
+    ctx.context.decided = Decided(type="access_request", confidence=confidence)
     return "recorded"
 
 
 @tool
 def create_doc_question_task(
-    ctx: ToolContext[_Capture],
-    confidence: float,
-    question: str,
-    doc_ref: str | None,
+    ctx: ToolContext[_Capture], confidence: float
 ) -> str:
     """A question about documentation, a specification, or intended behaviour.
 
     Args:
         confidence: How certain you are of this classification, 0 to 1.
-        question: What is being asked.
-        doc_ref: The document or spec referred to. null if none is named.
     """
-    ctx.context.decided = Decided(
-        type="doc_question",
-        confidence=confidence,
-        params=DocQuestionParams(question, doc_ref),
-    )
+    ctx.context.decided = Decided(type="doc_question", confidence=confidence)
     return "recorded"
 
 
 @tool
-def skip(ctx: ToolContext[_Capture], confidence: float, reason: str) -> str:
+def skip(ctx: ToolContext[_Capture], confidence: float) -> str:
     """The message needs no action: social talk, salary, or anything off topic.
 
     Args:
         confidence: How certain you are of this classification, 0 to 1.
-        reason: Why no action is needed.
     """
-    ctx.context.decided = Decided(
-        type="skip", confidence=confidence, params=SkipParams(reason)
-    )
+    ctx.context.decided = Decided(type="skip", confidence=confidence)
     return "recorded"
 
 
@@ -218,9 +168,7 @@ class Triage:
             # Decided, not dropped: it is still a recorded outcome, and the
             # model is never told what anyone earns.
             log.debug("skipping %s without a model call", event.provider_message_id)
-            return Decided(
-                type="skip", confidence=1.0, params=SkipParams("compensation talk")
-            )
+            return Decided(type="skip", confidence=1.0)
 
         capture = _Capture()
         # One extra turn: the answer arrives as a tool call, which is the call
@@ -249,32 +197,14 @@ class Triage:
 
         if capture.decided is None:
             return NeedsHuman("triage produced no classification")
-        decided = replace(
-            capture.decided, params=_hygiene(capture.decided.params, event.text)
-        )
+        decided = capture.decided
         log.info(
-            "triaged %s: %s (%.2f) %s",
+            "triaged %s: %s (%.2f)",
             event.provider_message_id,
             decided.type,
             decided.confidence,
-            decided.params,
         )
         return decided
-
-
-def _hygiene(params: Params, text: str) -> Params:
-    """Clean every value, then let the message correct the model.
-
-    Where a pattern matches the original text, that wins: a value copied out of
-    the message cannot be a hallucination, and the model's can.
-    """
-    cleaned = {
-        f.name: clean(getattr(params, f.name))
-        if isinstance(getattr(params, f.name), str)
-        else getattr(params, f.name)
-        for f in fields(params)
-    }
-    return type(params)(**cleaned)
 
 
 def _examples_block(examples: Sequence[tuple[str, str]]) -> str:

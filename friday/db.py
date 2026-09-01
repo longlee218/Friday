@@ -968,18 +968,26 @@ class Database:
             }
 
     async def original_text_for(self, task_id: int) -> str | None:
-        """The reporter's original message, for the workflow that opened this task.
+        """Everything the reporter has said about this task, oldest first.
 
-        Looked up via `messages.task_id` because the workflow no longer has
-        access to the inbound event — by the time a task is ready to be
-        planned, the inbox has long since moved on.
+        Every message, not the first one. The answer to a question we asked
+        arrives as an ordinary follow-up — "correlationId là abc-123" — and
+        triage no longer lifts values out of it, so the only thing that reads
+        it is the extractor. Handing the extractor the opening message alone
+        would mean the reporter answers and the task never learns.
+
+        Looked up via `messages.task_id` because the workflow has no access to
+        the inbound event: by the time a task is ready to be planned, the inbox
+        has long since moved on.
         """
         async with self._sessions() as session:
-            return await session.scalar(
-                select(schema.Message.original_text).where(
-                    schema.Message.task_id == task_id
-                )
+            rows = await session.scalars(
+                select(schema.Message.original_text)
+                .where(schema.Message.task_id == task_id)
+                .order_by(schema.Message.created_at)
             )
+            said = [text for text in rows if text]
+        return "\n".join(said) or None
 
     # ---- what the operator said about a classification -------------------
 

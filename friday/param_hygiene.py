@@ -1,4 +1,4 @@
-"""Cleaning and recovering triage parameters.
+"""Cleaning and recovering parameter values from a message.
 
 Two things the live provider taught us. The model emits the *string* "null"
 often enough that an unnormalised value will be mistaken for a real one — and a

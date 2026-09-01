@@ -3,6 +3,12 @@
 Driven with the SDK's ScriptedModel: no test makes a network call. What is being
 tested is our tool surface and how a tool call becomes a decision — not the
 model's judgement, which only a live run can speak to.
+
+**Triage classifies and stops.** Which tool it called is the whole answer; the
+only thing it adds is how certain it is. Lifting values out of the message is a
+different job with a different failure mode and it belongs to whoever needs
+those values — see `friday/extraction.py`. These tests hold that line, because
+the tool schema is the only thing stopping a model from being asked to do both.
 """
 
 from __future__ import annotations
@@ -32,15 +38,9 @@ async def decide(triage, text="the api is wrong", context=()):
     return await triage.decide(make_event(text=text), context=context)
 
 
-async def test_an_api_problem_becomes_an_api_issue_with_its_parameters():
+async def test_an_api_problem_becomes_an_api_issue():
     triage = triage_with([
-        function_call("create_api_issue_task", {
-            "confidence": 0.9,
-            "summary": "checkout returns 500",
-            "environment": "production",
-            "correlation_id": "7f3a91c2",
-            "curl": None,
-        }, call_id="1")
+        function_call("create_api_issue_task", {"confidence": 0.9}, call_id="1")
     ])
 
     outcome = await decide(triage)
@@ -48,67 +48,41 @@ async def test_an_api_problem_becomes_an_api_issue_with_its_parameters():
     assert isinstance(outcome, Decided)
     assert outcome.type == "api_issue"
     assert outcome.confidence == 0.9
-    assert outcome.params.environment == "production"
-    assert outcome.params.correlation_id == "7f3a91c2"
-    assert outcome.params.curl is None
 
 
 async def test_a_permission_request_becomes_an_access_request():
     triage = triage_with([
-        function_call("create_access_request_task", {
-            "confidence": 0.95,
-            "project": "payment-service",
-            "permission": "write",
-            "summary": "needs write access",
-        }, call_id="1")
+        function_call("create_access_request_task", {"confidence": 0.95}, call_id="1")
     ])
 
-    outcome = await decide(triage)
-
-    assert outcome.type == "access_request"
-    assert (outcome.params.project, outcome.params.permission) == (
-        "payment-service", "write")
+    assert (await decide(triage)).type == "access_request"
 
 
 async def test_a_question_about_docs_becomes_a_doc_question():
     triage = triage_with([
-        function_call("create_doc_question_task", {
-            "confidence": 0.8, "question": "is the field optional?", "doc_ref": None,
-        }, call_id="1")
+        function_call("create_doc_question_task", {"confidence": 0.8}, call_id="1")
     ])
 
-    outcome = await decide(triage)
-
-    assert outcome.type == "doc_question"
-    assert outcome.params.question == "is the field optional?"
+    assert (await decide(triage)).type == "doc_question"
 
 
 async def test_social_talk_becomes_a_skip():
     triage = triage_with([
-        function_call("skip", {"confidence": 0.99, "reason": "lunch plans"},
-                      call_id="1")
+        function_call("skip", {"confidence": 0.99}, call_id="1")
     ])
 
-    outcome = await decide(triage)
-
-    assert outcome.type == "skip"
-    assert outcome.params.reason == "lunch plans"
+    assert (await decide(triage)).type == "skip"
 
 
-async def test_a_message_with_no_extractable_parameters_still_decides():
-    """'the api is wrong' is the most common shape and carries nothing.
-    It must still produce a task — that is what triggers asking for the fields."""
+async def test_a_message_carrying_nothing_still_decides():
+    """"the api is wrong" is the most common shape there is and carries no
+    values at all. It must still produce a task — that is what triggers asking
+    for the fields, and it is why classifying does not depend on extracting."""
     triage = triage_with([
-        function_call("create_api_issue_task", {
-            "confidence": 0.6, "summary": "api is wrong",
-            "environment": None, "correlation_id": None, "curl": None,
-        }, call_id="1")
+        function_call("create_api_issue_task", {"confidence": 0.6}, call_id="1")
     ])
 
-    outcome = await decide(triage)
-
-    assert outcome.type == "api_issue"
-    assert outcome.params.correlation_id is None
+    assert (await decide(triage)).type == "api_issue"
 
 
 async def test_answering_without_calling_a_tool_asks_for_a_human():
@@ -136,50 +110,23 @@ async def test_triage_needs_no_database():
     assert "db" not in inspect.signature(Triage.__init__).parameters
 
 
-async def test_triage_passes_text_through_without_extracting_fields():
-    """Ticket 31 moved field extraction out of triage. Triage now leaves the
-    model's first-pass values alone — extraction is the workflow's job, and
-    the workflow's extractor uses the LLM, not the regex that used to live
-    here. The values the model produced are what triage ships; whatever the
-    workflow extracts overlays on top in plan()."""
-    triage = triage_with([
-        function_call("create_api_issue_task", {
-            "confidence": 0.9, "summary": "api broken",
-            "environment": "production", "correlation_id": None, "curl": None,
-        }, call_id="1")
-    ])
+def test_no_triage_tool_asks_for_anything_but_confidence():
+    """The line, held by the only thing that can hold it.
 
-    outcome = await decide(triage, text="failing on staging since noon")
+    A tool parameter is an instruction to the model, so a schema with
+    `correlation_id` in it *is* triage extracting, whatever the prompt says.
+    Adding one back would put two producers on one field again — and the merge
+    that reconciled them cost nineteen direct messages about one report before
+    it was removed.
+    """
+    import inspect
 
-    assert outcome.params.environment == "production"
+    from friday.triage import TOOLS
 
-
-async def test_the_string_null_is_treated_as_absent():
-    triage = triage_with([
-        function_call("create_api_issue_task", {
-            "confidence": 0.6, "summary": "api broken",
-            "environment": "null", "correlation_id": "null", "curl": "null",
-        }, call_id="1")
-    ])
-
-    outcome = await decide(triage, text="the api is wrong")
-
-    assert outcome.params.environment is None
-    assert outcome.params.correlation_id is None
-    assert outcome.params.curl is None
-
-
-async def test_hygiene_applies_to_other_task_types_too():
-    triage = triage_with([
-        function_call("create_doc_question_task", {
-            "confidence": 0.8, "question": "  is it optional?  ", "doc_ref": "N/A",
-        }, call_id="1")
-    ])
-
-    outcome = await decide(triage)
-
-    assert outcome.params.question == "is it optional?"
-    assert outcome.params.doc_ref is None
+    for tool in TOOLS:
+        taken = set(inspect.signature(tool.on_invoke_tool).parameters)
+        params = set(getattr(tool, "params_json_schema", {}).get("properties", {}))
+        assert params <= {"confidence"}, f"{tool.name} also asks for {params}"
 
 
 class NeverCalled(Model):

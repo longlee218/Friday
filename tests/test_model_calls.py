@@ -20,10 +20,7 @@ CONFIG = AgentConfig(
 
 
 def api_issue_call():
-    return function_call("create_api_issue_task", {
-        "confidence": 0.9, "summary": "checkout 500", "environment": "production",
-        "correlation_id": None, "curl": None,
-    }, call_id="1")
+    return function_call("create_api_issue_task", {"confidence": 0.9}, call_id="1")
 
 
 async def test_a_run_reports_both_sides_of_the_call():
@@ -35,7 +32,7 @@ async def test_a_run_reports_both_sides_of_the_call():
     (call,) = calls
     assert call.agent == "triage"
     assert call.model == "test-model"
-    assert "You triage chat messages" in call.system_prompt
+    assert "You decide what a chat message is" in call.system_prompt
     assert "checkout is 500ing" in call.prompt
     assert "create_api_issue_task" in call.output
     # ScriptedModel reports no usage; the plumbing is what is pinned here.
