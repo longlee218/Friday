@@ -28,6 +28,14 @@ def test_the_disagreeing_reactions_mean_wrong(emoji):
     assert mark_for(emoji) is Mark.WRONG
 
 
+@pytest.mark.parametrize("bare,selector", [("☑", "☑️"), ("✖", "✖️")])
+def test_the_variation_selector_does_not_decide_whether_a_mark_counts(bare, selector):
+    """Discord clients disagree about sending U+FE0F. Comparing raw strings
+    means the operator reacts, nothing happens, and there is no error
+    anywhere to notice — the worst shape a bug can take."""
+    assert mark_for(bare) is mark_for(selector) is not None
+
+
 def test_a_reaction_we_do_not_recognise_means_nothing():
     """People react for their own reasons. Reading a shrug as a judgement is
     putting words in their mouth."""

@@ -31,17 +31,29 @@ class Mark(StrEnum):
     WRONG = "wrong"
 
 
-#: Which reaction means what. Two obvious ones rather than a configurable
-#: set: the operator has to remember these without looking them up, and
-#: anything they have to look up they will not use.
+#: Which reaction means what. A handful of obvious ones rather than a
+#: configurable set: the operator has to remember these without looking them
+#: up, and anything they have to look up they will not use.
+#:
+#: Keys are stored without the variation selector — see `_plain`.
 EMOJI: dict[str, Mark] = {
     "✅": Mark.RIGHT,
-    "☑️": Mark.RIGHT,
+    "☑": Mark.RIGHT,
     "👍": Mark.RIGHT,
     "❌": Mark.WRONG,
-    "✖️": Mark.WRONG,
+    "✖": Mark.WRONG,
     "👎": Mark.WRONG,
 }
+
+#: U+FE0F, the emoji variation selector. Discord clients disagree about
+#: whether to send it: the same ☑ arrives as U+2611 from one and
+#: U+2611 U+FE0F from another. Comparing the raw string means the operator
+#: reacts, nothing happens, and there is no error anywhere to notice.
+_VARIATION_SELECTOR = "️"
+
+
+def _plain(emoji: str) -> str:
+    return emoji.strip().replace(_VARIATION_SELECTOR, "")
 
 
 def mark_for(emoji: str) -> Mark | None:
@@ -51,4 +63,4 @@ def mark_for(emoji: str) -> Mark | None:
     for their own reasons, and a system that answered every one of them would
     be reading intent into a shrug.
     """
-    return EMOJI.get(emoji.strip())
+    return EMOJI.get(_plain(emoji))
