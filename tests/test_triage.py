@@ -20,6 +20,7 @@ from agents.testing import ScriptedModel, assistant_message, function_call
 from conftest import make_event
 from friday.config import AgentConfig
 from friday.triage import Decided, NeedsHuman, Triage
+from friday.triage.prefilter import Sensitive
 
 CONFIG = AgentConfig(
     name="triage",
@@ -139,48 +140,83 @@ class NeverCalled(Model):
         raise AssertionError("the model was called")
 
 
-async def test_compensation_talk_is_skipped_without_calling_the_model():
-    """Pay talk must not reach a third-party API, and must not depend on the
-    model's judgement to be left alone."""
-    outcome = await decide(
-        Triage(config=CONFIG, model=NeverCalled()), "lương tháng này về chưa"
-    )
+WORDS = Sensitive(["lương", "thưởng", "salary", "bonus", "mật khẩu", "xin api key"])
 
-    assert isinstance(outcome, Decided)
-    assert outcome.type == "skip"
-    assert outcome.confidence == 1.0
+
+def guarded() -> Triage:
+    """A triage whose model fails the test if it is reached."""
+    return Triage(config=CONFIG, model=NeverCalled(), sensitive=WORDS)
+
+
+async def test_a_sensitive_message_never_reaches_the_model():
+    """The harm is in the sending, so the decision is made before the call —
+    by a rule a persuasive message cannot argue with."""
+    outcome = await decide(guarded(), "lương tháng này về chưa")
+
+    assert isinstance(outcome, NeedsHuman)
+
+
+async def test_it_is_held_for_the_operator_and_not_dropped():
+    """`NeedsHuman` opens a task in the column the operator watches. This list
+    contains words that appear in ordinary reports — "cho em xin api key của
+    staging" is an access request — and skipping them would be losing real
+    mentions on the strength of one word. The guarantee is that the *model*
+    does not see it."""
+    outcome = await decide(guarded(), "cho em xin api key của staging")
+
+    assert isinstance(outcome, NeedsHuman)
+    assert "xin api key" in outcome.reason
+
+
+def test_the_reason_names_the_word_and_not_the_message():
+    """The message is the thing being kept quiet. It must not be copied into
+    an explanation that then travels."""
+    said = "mật khẩu prod là hunter2"
+
+    assert said not in WORDS.found(said)
 
 
 @pytest.mark.parametrize(
     "text",
     [
         "lương tháng này về chưa",
+        "luong thang nay ve chua",          # no diacritics — how half of it is typed
+        "LƯƠNG tháng này?",                 # shouting
         "khi nào có thưởng tết",
         "did the salary come through?",
-        "what's the bonus structure",
-        "anh ơi lương",
+        "what's the BONUS structure",
+        "đổi mật khẩu DB giúp em",
     ],
 )
-async def test_compensation_phrasings_are_all_caught(text):
-    outcome = await decide(Triage(config=CONFIG, model=NeverCalled()), text)
-    assert outcome.type == "skip"
+async def test_every_phrasing_of_a_listed_word_is_caught(text):
+    assert isinstance(await decide(guarded(), text), NeedsHuman)
 
 
 @pytest.mark.parametrize(
     "text",
     [
         "the payment API returns 500",
-        "salary-service is down on staging",
-        "can you review the bonus calculation endpoint",
+        "salary-service is down on staging",   # a system, not a payday
+        "can you review the bonuses endpoint",  # `bonuses` is not `bonus`
     ],
 )
-async def test_work_about_pay_still_reaches_the_model(text):
-    """A pay-related *system* is ordinary work. Only talk about our own pay is
-    filtered."""
-    triage = triage_with([
-        function_call("create_api_issue_task", {
-            "confidence": 0.9, "summary": "s", "environment": None,
-            "correlation_id": None, "curl": None,
-        }, call_id="1")
-    ])
+async def test_a_word_inside_an_identifier_is_not_the_word(text):
+    """A hyphen or a suffix makes it a name. Holding every message about
+    `salary-service` would make the list unusable in a codebase that has one."""
+    triage = triage_with(
+        [function_call("create_api_issue_task", {"confidence": 0.9}, call_id="1")],
+    )
+    triage._sensitive = WORDS
+
     assert (await decide(triage, text)).type == "api_issue"
+
+
+async def test_an_empty_list_holds_nothing():
+    """An install that has not thought about this yet gets what it would have
+    had without the feature, not someone else's guesses about what is sensitive
+    in their workplace."""
+    triage = triage_with(
+        [function_call("create_api_issue_task", {"confidence": 0.9}, call_id="1")],
+    )
+
+    assert (await decide(triage, "lương tháng này về chưa")).type == "api_issue"

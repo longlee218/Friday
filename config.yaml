@@ -327,6 +327,44 @@ context:
   # before summarising it is cheaper than passing it raw.
   summary_share: 0.5
 
+# ── What never reaches the model ───────────────────────────────────────────
+# A message containing any of these is not sent to the classifier. It becomes
+# work for you instead — it is **held, never dropped**: some of these words
+# turn up in ordinary reports ("token hết hạn rồi" is a bug, "cho em xin api
+# key của staging" is an access request), and skipping them would be losing
+# real mentions on the strength of one word.
+#
+# Matched on whole words, case-insensitively, with Vietnamese diacritics folded
+# away — `lương` also catches `luong`, so you do not need both spellings. A
+# phrase matches only when its words appear together and in order.
+#
+# Add to this whenever you notice something. It is read at startup, so it takes
+# a restart and no rebuild.
+sensitive_words:
+  # Pay
+  - lương
+  - thưởng
+  - salary
+  - bonus
+  - payroll
+  - payslip
+  - compensation
+  # Health and personal records
+  - sổ y tế
+  - bệnh án
+  - bảo hiểm
+  - medical record
+  # Credentials — these also appear in real bug reports, which is exactly why
+  # the outcome is "hand it to you" and not "ignore it".
+  - mật khẩu
+  - password
+  - xin token
+  - xin api key
+  - api key
+  - secret key
+  - private key
+  - credential
+
 # ── Triage examples ────────────────────────────────────────────────────────
 # Classifications you wrote by hand. These are used whether or not anything
 # has been marked in Discord — a fresh install has nothing marked, and waiting

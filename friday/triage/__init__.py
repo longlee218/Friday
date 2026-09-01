@@ -8,7 +8,7 @@ from typing import Any, Literal
 from friday.config import AgentConfig
 from friday.agent.harness import Harness, ToolContext, tool
 from friday.domain.models import InboundEvent, TaskType
-from friday.triage.prefilter import is_compensation_talk
+from friday.triage.prefilter import Sensitive
 
 __all__ = ["Decided", "NeedsHuman", "TaskType", "Triage", "TriageOutcome"]
 
@@ -132,7 +132,13 @@ class Triage:
         config: AgentConfig,
         model=None,
         examples: Sequence[tuple[str, str]] = (),
+        sensitive: Sensitive | None = None,
     ) -> None:
+        #: Empty by default, which means nothing is held. An install that has
+        #: not thought about this yet gets the behaviour it would have had
+        #: without the feature, rather than a silent list of someone else's
+        #: guesses about what is sensitive in their workplace.
+        self._sensitive = sensitive or Sensitive(())
         # Examples are appended to the instructions rather than passed per
         # call: the instructions are the stable prefix, and a list that
         # changed per call would cost the cache hit on everything after it.
@@ -164,11 +170,20 @@ class Triage:
         `calls` collects both sides of every model call, for a caller that
         wants to keep them — which is the runner, because storing is a write.
         """
-        if is_compensation_talk(event.text):
-            # Decided, not dropped: it is still a recorded outcome, and the
-            # model is never told what anyone earns.
-            log.debug("skipping %s without a model call", event.provider_message_id)
-            return Decided(type="skip", confidence=1.0)
+        held = self._sensitive.found(event.text)
+        if held is not None:
+            # Held, not dropped. The guarantee is that the model does not see
+            # it, not that nobody does: this list contains words that appear in
+            # ordinary reports — "token hết hạn rồi" is a bug — and skipping
+            # them would be dropping real mentions on the strength of one word.
+            #
+            # The word is named; the message is not. It is the thing being
+            # kept quiet.
+            log.info(
+                "holding %s for you: it mentions %r, so it was not sent to the "
+                "model", event.provider_message_id, held,
+            )
+            return NeedsHuman(f"mentions {held!r} — not sent to the model")
 
         capture = _Capture()
         # One extra turn: the answer arrives as a tool call, which is the call

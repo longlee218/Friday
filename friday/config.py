@@ -144,6 +144,10 @@ class Config:
     #: install has nothing marked, and waiting for the first reaction before
     #: the classifier sees any example at all is a worse start than none.
     triage_examples: tuple[tuple[str, str], ...] = ()
+    #: Words that keep a message away from the model. The operator adds to
+    #: this as they notice things, so it is a line in `config.yaml` and a
+    #: restart rather than a commit.
+    sensitive_words: tuple[str, ...] = ()
     #: How often to say the process is alive and what it is holding. A
     #: working agent on a quiet day is otherwise indistinguishable from a
     #: dead one.
@@ -239,6 +243,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
         keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
         mcp_servers=_mcp_servers(_expand(raw.get("mcp_servers") or {})),
         triage_examples=_triage_examples(raw.get("triage_examples") or []),
+        sensitive_words=_sensitive_words(raw.get("sensitive_words") or []),
         database_path=raw.get("database_path", "./data/friday.db"),
         ingest=IngestConfig(
             # Coerced to str: an unquoted id in YAML parses as an int and
@@ -359,6 +364,23 @@ def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
             )
         )
     return tuple(servers)
+
+
+def _sensitive_words(raw) -> tuple[str, ...]:
+    """A flat list of words and phrases. Refused if it is anything else.
+
+    A string here iterates character by character, and the resulting rule holds
+    every message containing the letter "l" — a failure that looks like the
+    whole system going quiet.
+    """
+    if not isinstance(raw, list):
+        raise ConfigError(
+            f"sensitive_words should be a list of words, got {type(raw).__name__}"
+        )
+    bad = [w for w in raw if not isinstance(w, str)]
+    if bad:
+        raise ConfigError(f"sensitive_words should all be text, got {bad!r}")
+    return tuple(w.strip() for w in raw if w.strip())
 
 
 def _triage_examples(raw) -> tuple[tuple[str, str], ...]:

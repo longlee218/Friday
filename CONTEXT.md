@@ -26,9 +26,16 @@ whitespace inside a `curl` or a stack trace corrupts the one part of the
 message that has to survive verbatim — and it is the part a value is lifted
 out of. So code comes out first, is never touched, and goes back where it was.
 
-Distinct from the **prefilter**, which is not cleaning: pay talk between
-colleagues must not reach a third-party API at all, and a rule that runs before
-the call cannot be talked out of by a persuasive message.
+Distinct from the **prefilter**, which is not cleaning. Some messages must not
+reach a third-party API at all — pay, a medical record, a password, someone
+asking for an API key. The harm is in the sending, so it is decided before the
+call by a word list the operator maintains, not by a judgement a persuasive
+message could argue with.
+
+It **holds**; it does not skip. Several of those words turn up in ordinary
+reports, so a rule that dropped them would be losing real mentions on the
+strength of one word. The guarantee is that the model does not see it, not that
+nobody does.
 
 ## Conversation
 

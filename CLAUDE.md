@@ -191,8 +191,16 @@ not an implementation detail:
   Two delivery paths (gateway and REST backfill) feed the same pipeline, so
   every handler must be idempotent on that key.
 - **Never drop a mention.** Low confidence, turn-cap and token-cap breaches,
-  refusals, and classifier errors all route to `HITL` — never to a silent
-  discard. A dropped mention is indistinguishable from correct operation.
+  refusals, classifier errors and the sensitive-word prefilter all route to
+  `HITL` — never to a silent discard. A dropped mention is indistinguishable
+  from correct operation.
+- **Some messages must not reach the model at all**, and that is decided
+  before the call, by `config.yaml`'s `sensitive_words` — pay, health records,
+  credentials. A rule that runs first cannot be argued out of by a persuasive
+  message. It **holds**, it does not skip: several of those words appear in
+  ordinary reports ("token hết hạn rồi" is a bug), so the guarantee is that
+  the *model* does not see it, not that nobody does. The operator adds to the
+  list as they notice things, so it is configuration and a restart.
 - **Every model call goes through Chat Completions**, so `base_url`, `api_key`
   and `model` are the whole of what it takes to move an agent to a different
   OpenAI-compatible provider. Not the Responses API: some providers reject

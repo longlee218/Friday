@@ -1,42 +1,77 @@
 """What never reaches the model.
 
-Two reasons to decide something deterministically instead of asking. Pay talk
-between colleagues is nobody's work item, and routing it through a third-party
-API to be told so sends it somewhere it has no reason to go. And a rule that
-runs before the call cannot be talked out of by a persuasive message.
+Some messages must not be sent to a third-party API to be told what they are.
+Pay between colleagues, a medical record, a password, someone asking for an API
+key — the harm is in the sending, so the decision has to be made *before* the
+call, by a rule that a persuasive message cannot argue with. That is why this
+is a word list and not a judgement.
 
-The dangerous mistake here is the false positive: a real report skipped in
-silence is a dropped mention, the one thing this system must never do. So the
-rule is narrow — a compensation word standing on its own, in a message carrying
-no technical signal at all. Anything with an endpoint, an environment, a status
-code or a URL in it is work, whatever else it mentions.
+**Held, never dropped.** A message that trips this becomes work for the
+operator, not silence. That matters more here than it looks: the list contains
+words that appear in ordinary reports — "API trả 401, token hết hạn rồi" is a
+bug, "cho em xin api key của staging" is an access request — and a rule that
+skipped them would be dropping real mentions on the strength of one word. The
+guarantee is *the model does not see it*, not *nobody sees it*.
+
+The words are configuration, not code. The operator adds to this list as they
+notice things, and that should be a line in `config.yaml` and a restart, not a
+commit.
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
+from collections.abc import Iterable
 
-__all__ = ["is_compensation_talk"]
-
-_COMPENSATION = re.compile(
-    r"(?<![\w-])"
-    r"(lương|luong|thưởng|thuong|salary|salaries|payroll|payslip|bonus|bonuses"
-    r"|compensation|raise)"
-    r"(?![\w-])",
-    re.IGNORECASE,
-)
-
-# A hyphen or underscore next to the word is enough to make it an identifier —
-# `salary-service` is a system, not a payday.
-_TECHNICAL = re.compile(
-    r"https?://"
-    r"|\b(api|apis|endpoint|service|server|curl|http|https|url|error|exception"
-    r"|stacktrace|traceback|log|logs|deploy|deployment|staging|production|prod"
-    r"|uat|sandbox|db|database|query|request|response|payload|header|token"
-    r"|status|timeout|crash|bug|latency|[45]\d\d)\b",
-    re.IGNORECASE,
-)
+__all__ = ["Sensitive"]
 
 
-def is_compensation_talk(text: str) -> bool:
-    return bool(_COMPENSATION.search(text)) and not _TECHNICAL.search(text)
+class Sensitive:
+    """The words that keep a message away from the model.
+
+    Matched on whole words, case-insensitively, and with Vietnamese diacritics
+    folded away — so `lương` in the list also catches `luong`, which is how
+    half of Vietnamese chat is typed. A phrase like `xin token` matches only
+    when its words appear together and in order.
+    """
+
+    def __init__(self, words: Iterable[str]) -> None:
+        self._words = tuple(w for w in (w.strip() for w in words) if w)
+        self._patterns = tuple(
+            (word, re.compile(rf"(?<![\w-]){_fold(word)}(?![\w-])"))
+            for word in self._words
+        )
+
+    def __len__(self) -> int:
+        return len(self._words)
+
+    def found(self, text: str) -> str | None:
+        """The first configured word this message contains, or None.
+
+        The word is returned rather than a bare `True` so the operator can be
+        told *why* their message was held. The message itself is never part of
+        that explanation — it is the thing being kept quiet.
+        """
+        folded = _fold(text)
+        for word, pattern in self._patterns:
+            if pattern.search(folded):
+                return word
+        return None
+
+
+def _fold(text: str) -> str:
+    """Lowercase, strip diacritics, and collapse the spaces between words.
+
+    `Lương` and `luong` are the same word to anyone reading, and a list that
+    needed both spellings for every entry would be a list nobody maintains.
+    `đ` is spelled out because it is a distinct letter, not an accented `d`,
+    and NFD leaves it alone.
+    """
+    lowered = text.lower().replace("đ", "d")
+    stripped = "".join(
+        ch
+        for ch in unicodedata.normalize("NFD", lowered)
+        if not unicodedata.combining(ch)
+    )
+    return re.sub(r"\s+", " ", stripped)

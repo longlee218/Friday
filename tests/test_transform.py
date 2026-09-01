@@ -115,3 +115,35 @@ def test_no_url_is_put_in_front_of_a_model():
 
 def test_no_attachments_says_nothing():
     assert render_attachments(()) == ""
+
+
+# --- the list the operator maintains -----------------------------------------
+
+
+def test_the_configured_list_is_reachable_and_not_empty():
+    """`sensitive_words` is read at startup and nothing else fills it. An
+    empty list is a valid choice and a silent one — this is the check that the
+    shipped configuration actually carries the list it documents."""
+    import os
+    from pathlib import Path
+
+    from friday.config import load_config
+    from friday.triage.prefilter import Sensitive
+
+    for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY"):
+        os.environ.setdefault(key, "test-key")
+    words = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
+
+    assert len(Sensitive(words.sensitive_words)) > 0
+
+
+def test_a_string_where_a_list_belongs_is_refused():
+    """A string iterates character by character, and the resulting rule holds
+    every message containing the letter "l" — a failure that looks like the
+    whole system going quiet."""
+    import pytest
+
+    from friday.config import ConfigError, _sensitive_words
+
+    with pytest.raises(ConfigError, match="list of words"):
+        _sensitive_words("lương")

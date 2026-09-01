@@ -59,6 +59,7 @@ class TriageRunner:
         change here, not there.
         """
         from friday.triage import Triage
+        from friday.triage.prefilter import Sensitive
 
         try:
             settings = config.agents["triage"]
@@ -76,9 +77,24 @@ class TriageRunner:
         if examples:
             log.info("triage: %d example(s) the operator vouched for", len(examples))
 
+        sensitive = Sensitive(config.sensitive_words)
+        if len(sensitive):
+            log.info(
+                "%d word(s) keep a message away from the model — it is held "
+                "for you instead", len(sensitive),
+            )
+        else:
+            log.warning(
+                "sensitive_words is empty — every message goes to %s, "
+                "including anything about pay, health or credentials",
+                settings.base_url,
+            )
+
         return cls(
             db=db,
-            triage=Triage(config=settings, examples=examples),
+            triage=Triage(
+                config=settings, examples=examples, sensitive=sensitive
+            ),
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)
             ),
