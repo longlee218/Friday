@@ -1,0 +1,281 @@
+"""The first real graph: what to do about an API that is behaving wrongly.
+
+```
+read_logs → find_code_path → analyze_stack ─┬→ fix_bug → compose_reply
+                                            └→ compose_reply
+```
+
+Every node degrades rather than fails. A node whose tool server is not
+configured returns `None` and costs nothing — no model call, no error. The
+graph still reaches `compose_reply`, which then produces exactly what the
+deterministic planner produced before this graph existed: ask for a
+correlation id when there is nothing to trace, park when there is.
+
+That degradation is the point of shipping it this way. Replacing a working
+planner with a graph that only works once Loki is wired would be a
+regression dressed as progress.
+
+Only `analyze_stack` and `compose_reply` call a model. The other three are
+tool work. That ratio is why the graph is worth having: it gives us
+somewhere to *skip* the expensive step.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from friday.dag import DAG, DAGDeps, DAGState, Edge, Node
+from friday.dag.pause import PauseForHuman
+from friday.dag.router import register_dag
+from friday.models import ApiIssueParams
+from friday.workflows import Action, Ask, Park, Reply
+
+__all__ = ["build_api_issue_dag", "register_api_issue_dag"]
+
+log = logging.getLogger(__name__)
+
+#: Which tool server each node needs. A node whose server is absent skips.
+LOKI = "loki"
+SOURCE = "source"
+
+
+# --- instructions ----------------------------------------------------------
+
+READ_LOGS = """You look up log lines for one request.
+
+You are given a correlation id and an environment. Use the log tools to find
+the lines for that request in the last hour. Return the lines verbatim, oldest
+first. If you find nothing, say exactly: NO LOGS."""
+
+FIND_CODE = """You locate the code a stack trace points at.
+
+You are given log lines containing a stack trace. Use the file tools to find
+the file and line the topmost application frame refers to — not the framework
+frames. Return `path:line` and the surrounding ten lines. If the trace names
+no file you can find, say exactly: NOT FOUND."""
+
+ANALYZE = """You explain why one request failed.
+
+You are given log lines and, when it could be found, the code they point at.
+Answer in JSON with exactly these keys:
+  cause       — one sentence, what went wrong
+  actionable  — true only if the fix is obvious from what you were shown
+  evidence    — the specific log lines or code lines that show it
+
+Set actionable to false when you are guessing. A wrong "true" here spends a
+code change on a guess."""
+
+COMPOSE = """You write the reply to whoever reported this.
+
+You are given whatever the investigation found. Write what you would tell a
+colleague: what happened, what you did, what you need from them. Be brief.
+Do not invent a cause the evidence does not show — if the investigation found
+nothing, ask for what would let you look."""
+
+
+# --- the nodes -------------------------------------------------------------
+
+
+def _params(deps: DAGDeps) -> ApiIssueParams:
+    """The task's parameters, as the type that declares what they mean."""
+    return ApiIssueParams(**deps.task.params)
+
+
+async def _read_logs(state: DAGState, deps: DAGDeps) -> str | None:
+    """Pull the log lines for this request, if there is anything to pull with."""
+    params = _params(deps)
+    if not (params.correlation_id or params.curl):
+        return None  # nothing to look up by
+    agent = deps.extra.get("read_logs")
+    if agent is None or LOKI not in deps.servers:
+        log.debug("api_issue: no log server configured, skipping read_logs")
+        return None
+
+    result = await agent.run(
+        f"correlation id: {params.correlation_id}\n"
+        f"environment: {params.environment or 'unknown'}"
+    )
+    if result is None:
+        return None
+    lines = (result.final_output or "").strip()
+    return None if lines == "NO LOGS" else lines or None
+
+
+async def _find_code_path(state: DAGState, deps: DAGDeps) -> str | None:
+    """Locate the code the stack trace points at."""
+    logs = state.get("read_logs")
+    if not isinstance(logs, str) or not logs:
+        return None
+    agent = deps.extra.get("find_code_path")
+    if agent is None or SOURCE not in deps.servers:
+        return None
+
+    result = await agent.run(logs)
+    if result is None:
+        return None
+    found = (result.final_output or "").strip()
+    return None if found == "NOT FOUND" else found or None
+
+
+async def _analyze_stack(state: DAGState, deps: DAGDeps) -> dict[str, Any]:
+    """Say why it failed, and whether that is certain enough to act on.
+
+    Always returns the same shape, so the edge predicate downstream has one
+    thing to read rather than three cases to handle.
+    """
+    logs = state.get("read_logs")
+    if not isinstance(logs, str) or not logs:
+        return {"cause": None, "actionable": False, "evidence": []}
+
+    agent = deps.extra.get("analyze_stack")
+    if agent is None:
+        return {"cause": None, "actionable": False, "evidence": []}
+
+    code = state.get("find_code_path") or "(the code could not be located)"
+    result = await agent.run(f"logs:\n{logs}\n\ncode:\n{code}")
+    if result is None:
+        return {"cause": None, "actionable": False, "evidence": []}
+
+    return _as_analysis(result.final_output or "")
+
+
+#: Words in a cause that mean a change is not ours to make unattended.
+_HANDS_OFF = ("migration", "schema", "credential", "secret", "password", "token")
+
+
+async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | None:
+    """Apply the fix, or stop and ask.
+
+    Reached only when `analyze_stack` said the cause is actionable. Even then
+    there are changes this should not make on its own, and the honest move is
+    to ask rather than to widen what "actionable" was allowed to mean.
+    """
+    analysis = state["analyze_stack"]
+    cause = (analysis.get("cause") or "") if isinstance(analysis, dict) else ""
+
+    touched = [word for word in _HANDS_OFF if word in cause.lower()]
+    if touched:
+        raise PauseForHuman(
+            question=(
+                f"The cause mentions {touched[0]}, so I have not changed "
+                f"anything. Cause: {cause}"
+            ),
+            options=["I'll handle it", "go ahead and fix it"],
+            evidence={"cause": cause, "code": state.get("find_code_path")},
+            node="fix_bug",
+        )
+
+    agent = deps.extra.get("fix_bug")
+    if agent is None or SOURCE not in deps.servers:
+        raise PauseForHuman(
+            question=(
+                f"I found the cause but cannot change code from here. "
+                f"Cause: {cause}"
+            ),
+            evidence={"cause": cause, "code": state.get("find_code_path")},
+            node="fix_bug",
+        )
+
+    result = await agent.run(
+        f"cause: {cause}\ncode: {state.get('find_code_path')}"
+    )
+    return (result.final_output or "").strip() if result else None
+
+
+async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
+    """Decide what actually goes back, and in what form.
+
+    This is the node that produces the graph's `Action`, and the only one that
+    knows the difference between "we found something worth saying" and "we
+    need something from them first".
+
+    With no tools configured this reproduces the deterministic planner it
+    replaced, which is what makes removing that planner safe.
+    """
+    params = _params(deps)
+    analysis = state.get("analyze_stack") or {}
+    cause = analysis.get("cause") if isinstance(analysis, dict) else None
+
+    if cause:
+        fix = state.get("fix_bug")
+        said = f"{cause}" if not fix else f"{cause}\n\n{fix}"
+        agent = deps.extra.get("compose_reply")
+        if agent is not None:
+            written = await agent.run(said)
+            if written is not None and (written.final_output or "").strip():
+                return Reply(written.final_output.strip())
+        return Reply(said)
+
+    # Nothing found. Same two outcomes the planner had, for the same reasons:
+    # an id or a curl makes a request findable, an environment only narrows
+    # the search, so it is asked for alongside — never instead.
+    if params.correlation_id or params.curl:
+        return Park("has enough to trace")
+
+    wanted = ["the correlationId, or the curl you used"]
+    if not params.environment:
+        wanted.insert(0, "which environment you're on")
+    return Ask(
+        "Could you send " + " and ".join(wanted) + "? I'll trace it from there."
+    )
+
+
+# --- the graph -------------------------------------------------------------
+
+
+def _actionable(state: DAGState) -> bool:
+    analysis = state.get("analyze_stack")
+    return bool(isinstance(analysis, dict) and analysis.get("actionable"))
+
+
+def build_api_issue_dag() -> DAG:
+    """The graph. Agents are handed in through `deps`, not closed over here,
+    so the shape can be tested without a model or a tool server."""
+    return DAG(
+        name="api_issue",
+        nodes=(
+            Node("read_logs", _read_logs),
+            Node("find_code_path", _find_code_path),
+            Node("analyze_stack", _analyze_stack),
+            Node("fix_bug", _fix_bug),
+            Node("compose_reply", _compose_reply),
+        ),
+        edges=(
+            Edge("read_logs", "find_code_path"),
+            Edge("find_code_path", "analyze_stack"),
+            Edge("analyze_stack", "fix_bug", when=_actionable),
+            Edge("analyze_stack", "compose_reply"),
+            Edge("fix_bug", "compose_reply"),
+        ),
+    )
+
+
+def register_api_issue_dag() -> DAG:
+    """Register the graph for the `api_issue` task type."""
+    return register_dag("api_issue", build_api_issue_dag())
+
+
+def _as_analysis(text: str) -> dict[str, Any]:
+    """Read the analyst's answer, however it came back.
+
+    JSON when it obeys, a bare sentence when it does not. A model that
+    ignored the format is still telling us something; `actionable` stays
+    false because a shape we did not ask for is not evidence of certainty.
+    """
+    import json
+
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if isinstance(data, dict):
+                return {
+                    "cause": data.get("cause"),
+                    "actionable": bool(data.get("actionable")),
+                    "evidence": data.get("evidence") or [],
+                }
+    return {"cause": stripped or None, "actionable": False, "evidence": []}

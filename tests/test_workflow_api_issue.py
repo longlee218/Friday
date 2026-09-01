@@ -2,38 +2,55 @@
 
 The rule this encodes is the most frequent real action there is: a report
 arrives without the fields needed to trace it, and the first move is to ask.
+
+Ticket 33 moved that rule from `plan_api_issue` into the last node of the
+`api_issue` graph. These tests follow it there: they exercise
+`_compose_reply` with no agents and no tool servers, which is exactly the
+state a fresh install is in, and assert the same outcomes the planner gave.
 """
 
 from __future__ import annotations
 
+from friday.dag import DAGDeps, DAGState
+from friday.dag.api_issue import _compose_reply
 from friday.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
 from types import SimpleNamespace
 
-from friday.workflows import Ask, Park, Reply, plan, plan_api_issue
+from friday.workflows import Ask, Park, Reply, plan
 
 
 def params(**kw):
     return ApiIssueParams(summary="checkout is 500", **kw)
 
 
+async def decide(**kw):
+    """What the graph replies with when nothing could be investigated.
+
+    `task.params` is a plain dict in the database, which is what the node
+    reads, so the stand-in is a dict rather than a `Params` instance.
+    """
+    task = SimpleNamespace(params={"summary": "checkout is 500", **kw})
+    return await _compose_reply(DAGState.empty(), DAGDeps(task=task))
+
+
 async def test_a_report_with_nothing_to_trace_on_asks_for_details():
-    action = plan_api_issue(params())
+    action = await decide()
 
     assert isinstance(action, Ask)
     assert "correlationId" in action.text or "curl" in action.text.lower()
 
 
 async def test_a_correlation_id_is_enough_to_stop_asking():
-    assert isinstance(plan_api_issue(params(correlation_id="7f3a91c2")), Park)
+    assert isinstance(await decide(correlation_id="7f3a91c2"), Park)
 
 
 async def test_a_curl_is_enough_to_stop_asking():
-    assert isinstance(plan_api_issue(params(curl="curl https://x")), Park)
+    assert isinstance(await decide(curl="curl https://x"), Park)
 
 
 async def test_the_environment_is_asked_for_only_when_it_is_missing():
-    without = plan_api_issue(params())
-    with_env = plan_api_issue(params(environment="production"))
+    without = await decide()
+    with_env = await decide(environment="production")
 
     assert "environment" in without.text.lower()
     assert isinstance(with_env, Ask)
@@ -42,7 +59,7 @@ async def test_the_environment_is_asked_for_only_when_it_is_missing():
 
 async def test_an_environment_alone_is_not_enough_to_trace():
     """You cannot find a request from the environment name."""
-    assert isinstance(plan_api_issue(params(environment="production")), Ask)
+    assert isinstance(await decide(environment="production"), Ask)
 
 
 # ---- the other task types --------------------------------------------------

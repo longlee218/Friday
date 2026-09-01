@@ -123,3 +123,30 @@ def inbox(provider, db, config) -> Inbox:
 
 async def captured(inbox: Inbox) -> list[InboundEvent]:
     return [event async for event in inbox.stream()]
+
+
+@pytest.fixture(autouse=True)
+def workflow_graphs():
+    """Register the workflow graphs the way the composition root does.
+
+    Without this the tests exercise a route production never takes: a task
+    type with neither a planner nor a graph. `api_issue` moved into a graph in
+    ticket 33, so a runner test that does not register it is testing the
+    absence of a workflow rather than the workflow.
+
+    The config stand-in declares no agents, which is the state of a fresh
+    install — every node skips, and the graph's last node produces the same
+    ask-or-park the deterministic planner used to.
+    """
+    from types import SimpleNamespace
+
+    from friday.dag.router import EDGE_ROUTER
+    from friday.dag.workflows import DAG_DEPS_EXTRA, DAG_SERVERS, register_dags
+
+    register_dags(SimpleNamespace(agents={}), servers={})
+    try:
+        yield
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+        DAG_DEPS_EXTRA.clear()
+        DAG_SERVERS.clear()

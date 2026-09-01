@@ -124,6 +124,14 @@ async def _run(stack: AsyncExitStack) -> None:
 
     register_extractors(config)
 
+    # Register the workflow graphs. Same shape as the extractors above and for
+    # the same reason: which task types have a graph is the graph module's
+    # business, not this one's. Registration is explicit rather than a side
+    # effect of importing, so a test can choose the path it exercises.
+    from friday.dag.workflows import register_dags
+
+    register_dags(config, servers={s.name: s for s in servers})
+
     promotion = Promotion(db=db)
     # Read once, at build time: a promotion takes effect on the next start
     # rather than invalidating a warm prompt cache mid-run.

@@ -33,7 +33,7 @@ __all__ = [
     "Park",
     "Reply",
     "plan",
-    "plan_api_issue",
+
     "planner",
 ]
 
@@ -297,25 +297,16 @@ def _question(problems: list[Problem]) -> str:
 #
 # Last, because a planner registers itself as it is defined and the machinery
 # that registers it has to exist first.
-
-@planner("api_issue")
-def plan_api_issue(params: ApiIssueParams) -> Action:
-    """A report is only actionable once it can be traced.
-
-    A correlation id or a curl is what makes a specific request findable in the
-    logs. An environment narrows the search but cannot locate anything on its
-    own, so it is asked for alongside — never instead.
-    """
-    if params.correlation_id or params.curl:
-        return Park("has enough to trace")
-
-    wanted = ["the correlationId, or the curl you used"]
-    if not params.environment:
-        wanted.insert(0, "which environment you're on")
-    return Ask(
-        "Could you send " + " and ".join(wanted) + "? "
-        "I'll trace it from there."
-    )
+#
+# `api_issue` used to live here as `plan_api_issue`. Ticket 33 moved it into
+# `friday/dag/api_issue.py`, where the same rule — an id or a curl makes a
+# request findable, an environment only narrows the search — is the last node
+# of a graph that can also read the logs, find the code, and say what broke.
+# The rule did not change; it gained four steps in front of it.
+#
+# Nothing is registered here today. A task type with neither a planner nor a
+# DAG falls to `plan_by_required_parameters`, which asks for whatever the type
+# says it cannot manage without.
 
 
 #: Rebuilding a task's stored parameters as the type that declares which of

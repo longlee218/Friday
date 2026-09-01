@@ -24,6 +24,10 @@ __all__ = ["DAGState", "MissingNodeResult", "UNSTORABLE"]
 UNSTORABLE = "__unstorable__"
 
 
+def _is_marker(value: Any) -> bool:
+    return isinstance(value, dict) and UNSTORABLE in value
+
+
 class MissingNodeResult(KeyError):
     """A node read a result no node has produced.
 
@@ -46,13 +50,30 @@ class DAGState:
     def from_dict(cls, raw: dict[str, Any] | None) -> "DAGState":
         """Rebuild from storage. A missing or malformed row starts empty.
 
-        Tolerant on purpose: a state written by an older version of a DAG
+        **Nodes marked unstorable are dropped, so they run again.** The two
+        directions are deliberately asymmetric: the stored row keeps the
+        marker so someone reading the table can see the node ran and what it
+        produced, and the rebuilt state does not, because a node whose value
+        we no longer have has not usefully completed. Skipping it would leave
+        a hole every downstream node reads as absence.
+
+        The cost is that such a node repeats on resume. The fix, where that
+        matters, is to split it: an expensive node returning plain data, and a
+        cheap one turning that data into whatever object the caller wanted.
+
+        Tolerant otherwise: a state written by an older version of a graph
         should let the task make progress, not wedge it. The runner walks
         forward from the entry, so an unrecognised key is simply never read.
         """
         if not isinstance(raw, dict):
             return cls.empty()
-        return cls(results=dict(raw))
+        return cls(
+            results={
+                name: value
+                for name, value in raw.items()
+                if not _is_marker(value)
+            }
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """A JSON-safe projection, for storage.

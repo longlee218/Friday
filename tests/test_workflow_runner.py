@@ -216,8 +216,15 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     out under their name."""
     from friday.workflows import Reply
 
+    from friday.dag.router import EDGE_ROUTER
+
     async def answers(params, agent):
         return Reply("cache đầy thôi, anh clear rồi nhé")
+
+    # The `planners` override is the deterministic path. `api_issue` has a
+    # graph now, and the graph wins, so this test has to say which path it is
+    # about — it is about the approval machinery, not about routing.
+    EDGE_ROUTER.pop("api_issue", None)
 
     await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     runner = WorkflowRunner(db=db, auto_ask=True, planners={"api_issue": answers})
@@ -267,6 +274,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     from friday import schema
     from friday.config import AgentConfig
     from friday.conversation import ConversationId
+    from friday.dag.router import EDGE_ROUTER
     from friday.extraction import (
         _EXTRACTORS,
         build_extractor,
@@ -305,6 +313,10 @@ async def test_extraction_runs_when_a_message_is_linked(db):
         name="api_issue_ext",
     )
     extractor("api_issue", ext)
+    # Extraction happens inside `plan()`, on the deterministic path. The graph
+    # reads the task's stored params directly, so this test is about the
+    # extract-merge-validate pipeline and takes the path that has one.
+    EDGE_ROUTER.pop("api_issue", None)
 
     try:
         event = InboundEvent(

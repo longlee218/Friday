@@ -79,7 +79,11 @@ def test_a_value_that_will_not_serialise_is_stored_as_a_marker_not_dropped():
     assert isinstance(state["b"], NotJson)
 
 
-def test_a_node_marked_unstorable_still_counts_as_complete_on_resume():
+def test_a_node_marked_unstorable_runs_again_on_resume():
+    """Skipping it would leave a hole every downstream node reads as absence.
+    Re-running is the lesser cost, and the fix where it matters is to split
+    the node so the expensive half returns plain data."""
+
     class NotJson:
         pass
 
@@ -87,7 +91,20 @@ def test_a_node_marked_unstorable_still_counts_as_complete_on_resume():
         DAGState.empty().with_result("expensive", NotJson()).to_dict()
     )
 
-    assert restored.has("expensive")
+    assert not restored.has("expensive")
+
+
+def test_the_stored_row_keeps_the_marker_even_though_resume_drops_it():
+    """The two directions are asymmetric on purpose: the row is also a record
+    of what happened, and the marker is the only trace a non-storable result
+    leaves behind."""
+
+    class NotJson:
+        pass
+
+    stored = DAGState.empty().with_result("a", NotJson()).to_dict()
+
+    assert stored["a"] == {UNSTORABLE: "NotJson"}
 
 
 # --- construction guards ---------------------------------------------------
@@ -355,6 +372,7 @@ async def test_a_registered_dag_runs_instead_of_the_planner(db):
     async def answers(state: DAGState, deps: DAGDeps):
         return Reply("traced it: the upstream timed out")
 
+    EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", DAG(name="api_issue_test", nodes=(Node("answer", answers),)))
     try:
         await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
@@ -385,6 +403,7 @@ async def test_the_dag_state_is_persisted_between_passes(db):
         ran.append("decide")
         return Park("has enough to trace")
 
+    EDGE_ROUTER.pop("api_issue", None)
     register_dag(
         "api_issue",
         DAG(
@@ -420,6 +439,7 @@ async def test_a_pause_parks_the_task_with_the_question(db):
             options=["apply", "leave it"],
         )
 
+    EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", DAG(name="pausing", nodes=(Node("unsure", unsure),)))
     try:
         task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
@@ -446,6 +466,7 @@ async def test_a_dag_that_finishes_without_an_action_parks_rather_than_inventing
     async def shrugs(state: DAGState, deps: DAGDeps):
         return "some notes nobody asked to send"
 
+    EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", DAG(name="undecided", nodes=(Node("shrugs", shrugs),)))
     try:
         await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
