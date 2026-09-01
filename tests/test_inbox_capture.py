@@ -359,3 +359,59 @@ async def test_a_colleague_repeating_our_sentence_is_not_dropped(
     )
 
     assert kept is not None
+
+
+# --- an answer to our own question ------------------------------------------
+
+
+async def test_a_reply_to_something_we_posted_is_in_scope(provider, db, config):
+    """The agent asks a question and has to be able to hear the answer.
+
+    People reply in a thread; they do not tag you again to answer you. So the
+    answer carries no mention, `mention_type` is None, and it was dropped as
+    "does not address the account" — while being kept as context, which is why
+    it left a trace and no work. The task stayed in `waiting_for_details` for
+    ever and the cap on re-asking never fired, because no follow-up ever
+    arrived. Found by the operator, in a real thread, on the third message.
+    """
+    from friday.outbox import Kind
+
+    row = await db.queue_outbound(
+        task_id=None,
+        conversation=ConversationId("fake", "watched"),
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="cho anh xin cái correlationId nhé",
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id="ours-1")
+    inbox = Inbox(provider=provider, db=db, config=config)
+
+    kept = await inbox._handle(
+        make_event(
+            message_id="their-reply",
+            text="correlationId là cái gì a nhỉ, e ko biết",
+            mention_type=None,
+            reply_to="ours-1",
+        )
+    )
+
+    assert kept is not None
+    assert inbox.dropped == {}
+
+
+async def test_a_reply_to_someone_else_is_still_out_of_scope(provider, db, config):
+    """Only a reply to *us* addresses us. Two colleagues talking in a watched
+    channel are not asking the account anything."""
+    inbox = Inbox(provider=provider, db=db, config=config)
+
+    kept = await inbox._handle(
+        make_event(
+            message_id="m9",
+            text="đúng rồi đó anh",
+            mention_type=None,
+            reply_to="someone-elses-message",
+        )
+    )
+
+    assert kept is None
+    assert inbox.dropped == {"does not address the account": 1}

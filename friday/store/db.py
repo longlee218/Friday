@@ -688,6 +688,25 @@ class Database:
                 )
             )
 
+    async def posted_by_us(self, provider_message_id: str | None) -> bool:
+        """Whether this is a message this agent put there.
+
+        By id alone, unlike `we_sent`. The question here is "did we post the
+        thing they replied to", and a reply names a message id — there is no
+        text to fall back on and no race to close, because by the time someone
+        replies to a message the id has long since been recorded.
+        """
+        if not provider_message_id:
+            return False
+        async with self._sessions() as session:
+            return bool(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(schema.Outbound)
+                    .where(schema.Outbound.sent_message_id == provider_message_id)
+                )
+            )
+
     async def mark_outbound_sent(
         self, outbound_id: int, *, sent_message_id: str | None = None
     ) -> None:

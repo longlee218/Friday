@@ -12,6 +12,10 @@ __all__ = ["Inbox"]
 
 log = logging.getLogger(__name__)
 
+#: Named because `_handle` overrules exactly this one, and a string compared
+#: in two places is a string that gets edited in one of them.
+_NO_MENTION = "does not address the account"
+
 _LIVE_STREAM_ENDED = object()
 
 
@@ -153,6 +157,21 @@ class Inbox:
 
     async def _handle(self, event: InboundEvent) -> InboundEvent | None:
         reason = self._out_of_scope_reason(event)
+        if reason == _NO_MENTION and await self._db.posted_by_us(event.reply_to):
+            # They replied to something we posted. A reply names the message it
+            # answers, and if that message is ours then this one is addressed
+            # to us — whatever it does or does not @-mention.
+            #
+            # Without this the agent asks a question and cannot hear the
+            # answer. People reply in a thread; they do not tag you again to
+            # answer you. The task sat in `waiting_for_details` for ever, the
+            # cap on how often we re-ask never fired because no follow-up ever
+            # arrived, and the reporter had answered.
+            log.debug(
+                "%s answers a message of ours — in scope",
+                event.provider_message_id,
+            )
+            reason = None
         if reason is None and event.is_own and await self._db.we_sent(
             event.provider, event.provider_message_id, event.text
         ):
@@ -216,7 +235,11 @@ class Inbox:
         )
 
     def _out_of_scope_reason(self, event: InboundEvent) -> str | None:
-        """None means in scope. A string says why it was dropped."""
+        """None means in scope. A string says why it was dropped.
+
+        `_NO_MENTION` is the one reason `_handle` may overrule: a reply to
+        something we posted addresses us without naming us.
+        """
         if event.is_own and not self._config.capture_own_messages:
             # Never trigger work from our own messages: the agent would answer
             # its own replies. It is still kept as context — a conversation
@@ -224,7 +247,7 @@ class Inbox:
             # learns tone from these.
             return "written by the watched account"
         if event.mention_type is None:
-            return "does not address the account"
+            return _NO_MENTION
         if event.mention_type not in self._config.mention_types:
             return f"{event.mention_type} is not a watched mention type"
         if event.mention_type is MentionType.DM:
