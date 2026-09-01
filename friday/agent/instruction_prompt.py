@@ -310,9 +310,16 @@ def _render_params(params: Params) -> str:
     so `<` and `>` are escaped at the seam — `summary` is
     LLM-extracted from a Discord message, which makes it
     attacker-controlled.
+
+    **Null fields are rendered, not dropped.** They used to be dropped, which
+    saved a few tokens and hid the one thing this section is read for: a field
+    that is absent looked identical to a field the schema does not have. Asked
+    to request a correlationId, the responder could not see that this task had
+    none — only the conversation, which is a whole channel and held another
+    report's — and wrote "ok có correlationId rồi". An explicit `null` is the
+    difference between "we do not have this" and "there is nothing to have".
     """
-    fields = {k: v for k, v in asdict(params).items() if v is not None}
-    return _render_yaml(fields)
+    return _render_yaml(asdict(params))
 
 
 def _escape(text: str) -> str:

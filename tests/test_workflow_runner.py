@@ -96,11 +96,13 @@ class StubResponder:
     def __init__(self, text=None):
         self._text = text
         self.asked: list[str] = []
+        self.given_params: list = []
 
-    async def draft(self, *, asking, context=(), tone=(), calls=None):
+    async def draft(self, *, asking, params=None, context=(), tone=(), calls=None):
         from friday.responder import Draft
 
         self.asked.append(asking)
+        self.given_params.append(params)
         return Draft(self._text) if self._text else None
 
 
@@ -362,3 +364,25 @@ async def test_extraction_runs_when_a_message_is_linked(db):
         assert await db.outbound(), "no outbound produced"
     finally:
         _EXTRACTORS.pop("api_issue", None)
+
+
+async def test_the_responder_is_told_what_this_task_actually_knows(db):
+    """Without it the model has only the conversation, and a conversation is a
+    whole channel — it may hold another report's correlationId.
+
+    Observed on the real provider: asked to request one, it read the channel,
+    found one belonging to a different task, and wrote "ok có correlationId
+    rồi, để anh trace thử". False, promising work nobody would do, and sent
+    under the operator's name with no approval step.
+    """
+    from friday.domain.models import ApiIssueParams
+
+    responder = StubResponder("cho anh xin cái correlationId nhé")
+    await make_task(db, environment="production")
+
+    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+
+    (given,) = responder.given_params
+    assert isinstance(given, ApiIssueParams)
+    assert given.environment == "production"
+    assert given.correlation_id is None, "it must be able to see what is absent"

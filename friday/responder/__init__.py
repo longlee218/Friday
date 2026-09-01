@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from friday.config import AgentConfig
 from friday.agent.harness import Harness
 from friday.agent.skills import fetch_skill_tool
-from friday.domain.models import InboundEvent
+from friday.domain.models import Params, InboundEvent
 
 __all__ = ["Draft", "Responder"]
 
@@ -38,6 +38,11 @@ what needs to be said. Write that message the way they would write it.
 
 Match their language, their length, and their register. If their examples are
 in Vietnamese, reply in Vietnamese. They are usually brief.
+
+The `params` section is what this task actually knows. It is the truth about
+this request; the conversation is a whole channel and may hold values from
+somebody else's. Never say we have something the params show as null, and never
+say what you will do next — you are asking a question, not making a promise.
 
 Do not address anyone by @-mention. The message is posted as a reply to
 theirs, so it is already attached to them.
@@ -100,15 +105,24 @@ class Responder:
         self,
         *,
         asking: str,
+        params: "Params | None" = None,
         context: Sequence[InboundEvent] = (),
         tone: Sequence[InboundEvent] = (),
         calls: list | None = None,
     ) -> Draft | None:
         """Write what `asking` says, in the operator's voice.
 
-        None when it could not — the caller falls back to the template. Never a
-        message in someone else's name that the model was unsure of, and never
-        silence either.
+        `params` is what this task actually knows, and it is not optional in
+        spirit. Without it the model has only the conversation to go on — and a
+        conversation is a whole channel, which may hold another task's
+        correlationId. Asked to request one, it read the channel, found one
+        that belonged to a different report, and wrote "ok có correlationId
+        rồi, để anh trace thử": false, promising work nobody would do, and sent
+        under the operator's name with no approval step.
+
+        None when it could not write — the caller falls back to the template.
+        Never a message in someone else's name that the model was unsure of,
+        and never silence either.
         """
         from datetime import datetime, timezone
 
@@ -133,7 +147,7 @@ class Responder:
             ),
             tone=tone_examples(list(tone)),
             conversation=conversation(list(context)),
-            task=task("respond", None, asking),
+            task=task("respond", params, asking),
         )
         # Two extra turns when a skill can be fetched: the call and its
         # answer both land before the reply is started, and without the room

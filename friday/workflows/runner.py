@@ -258,6 +258,7 @@ class WorkflowRunner:
             return template
         draft = await self._responder.draft(
             asking=template,
+            params=_as_params(task),
             context=await self._db.relevant_messages(task.conversation),
             tone=await self._db.tone_examples(limit=self._tone_examples),
         )
@@ -401,6 +402,19 @@ class WorkflowRunner:
         from dataclasses import replace
 
         return replace(task, state=state)
+
+
+def _as_params(task: Task):
+    """The task's parameters as their declared type, or None if they no longer
+    fit it. Best effort: the responder is better off with no params than with
+    a crash, and `_plan` has already parked anything malformed."""
+    params_type = PARAMS.get(task.type)
+    if params_type is None:
+        return None
+    try:
+        return params_type(**task.params)
+    except TypeError:
+        return None
 
 
 def _fingerprint(params: dict) -> str:
