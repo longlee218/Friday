@@ -147,3 +147,27 @@ async def test_this_is_the_only_module_that_imports_the_sdk():
     ).stdout.split()
 
     assert set(hits) <= allowed, f"unexpected importer: {set(hits) - allowed}"
+
+
+async def test_run_accepts_a_context_bundle():
+    """Ticket 27 widens the seam: a bundle's rendered string is the prompt,
+    and nothing else about the call changes. Plain string still works."""
+    from agents.testing import ScriptedModel, assistant_message
+    from friday.instruction_prompt import ContextBundle, identity, notes
+
+    bundle = ContextBundle(
+        identity=identity("triage", "you triage mentions"),
+        notes=notes(None),  # empty section, no body
+    )
+    h = harness([assistant_message("done")])
+    result = await h.run(bundle)
+    assert result.final_output == "done"
+
+
+async def test_run_still_accepts_a_plain_string():
+    """The scripted-test seam: a plain string keeps working unchanged."""
+    from agents.testing import ScriptedModel, assistant_message
+
+    h = harness([assistant_message("done")])
+    result = await h.run("plain prompt")
+    assert result.final_output == "done"

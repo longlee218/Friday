@@ -111,13 +111,18 @@ class Harness:
 
     async def run(
         self,
-        prompt: str,
+        prompt: "str | ContextBundle",
         *,
         context: Any = None,
         calls: list | None = None,
         extra_turns: int = 0,
     ) -> Any | None:
         """Run it. `None` means it did not answer.
+
+        Accepts a plain string (the scripted-test seam — unchanged) or a
+        `ContextBundle` (ticket 27) whose `.render()` produces the system
+        prompt. The bundle is the one place every section of an agent's
+        knowledge is assembled; this method does not assemble it.
 
         Every agent turns that into its own kind of work — a task for a human,
         or a fall back to a template — so none of them has to catch anything.
@@ -128,6 +133,11 @@ class Harness:
         `extra_turns` is for an agent whose answer arrives as a tool call: the
         call and its result are two turns where a written answer is one.
         """
+        from friday.instruction_prompt import ContextBundle
+
+        if isinstance(prompt, ContextBundle):
+            prompt = prompt.render()
+
         # Deferred: `llm_log` reaches `Hooks` through this module, so importing
         # it at module load time would be a cycle.
         from friday.llm_log import LogHooks
