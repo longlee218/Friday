@@ -172,7 +172,12 @@ class TriageRunner:
 
         existing = await self._db.open_task_for(event.conversation)
         if existing is not None:
-            return await self._follow_up(existing, outcome)
+            followed = await self._follow_up(existing, outcome)
+            if followed is not None:
+                return followed
+            # A different subject. Fall through and open its own task — the
+            # old one has been flagged for a human, and absorbing this into it
+            # would be losing a report to say something about another one.
 
         state = PENDING if outcome.confidence >= self._threshold else NEEDS_HUMAN
         if state == NEEDS_HUMAN:
@@ -183,7 +188,7 @@ class TriageRunner:
             )
         return await self._open(event, outcome.type, outcome.confidence, {}, state)
 
-    async def _follow_up(self, task: Task, outcome: Decided) -> Task:
+    async def _follow_up(self, task: Task, outcome: Decided) -> Task | None:
         """A later message in a conversation already being worked on.
 
         Two things can arrive in a follow-up. A change of subject — a bug report
@@ -197,16 +202,27 @@ class TriageRunner:
         second place triage extracted. It does not now. The message is linked
         to the task, the task goes back to pending, and the extractor reads
         everything the reporter has said — including the answer.
+
+        Returns `None` when the message turns out not to belong to this task at
+        all, which is the caller's cue to open one for it.
         """
         if outcome.type != task.type:
+            # Two things are true and only one used to be acted on. The task in
+            # flight has changed subject and a person should look — *and* this
+            # message is a report of its own, which used to be absorbed: it was
+            # marked triaged against the old task and no task was ever opened
+            # for it. A mention that produces no task is a dropped mention.
+            #
+            # `None` means "not a follow-up after all"; the caller opens one.
             log.info(
-                "task %d was %s, follow-up looks like %s — asking a human",
+                "task %d was %s, this looks like %s — asking a human, and "
+                "opening a task for the new one",
                 task.id,
                 task.type,
                 outcome.type,
             )
             await self._db.move_task(task.id, NEEDS_HUMAN)
-            return replace(task, state=NEEDS_HUMAN)
+            return None
 
         # Back to pending, whatever it said. Whether the follow-up supplied
         # anything is not a question this can answer any more — the message has

@@ -14,6 +14,7 @@ called by `prepare()` before any route is chosen. Adding one is an entry in
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import fields
 from typing import Any
 
@@ -63,8 +64,21 @@ class Extractor:
         if result is None:
             log.warning("extractor %s returned no result", self.name)
             return None
+        read = _parse(result.final_output or "")
+        known = set(self._params_cls.__dataclass_fields__)
+        unknown = sorted(set(read) - known)
+        if unknown:
+            # Dropped, not fatal. One line the model decorated or invented used
+            # to raise on the constructor and discard everything — including
+            # the fields it had read correctly, which is the opposite of what
+            # a best-effort step should do when it half succeeds.
+            log.info(
+                "extractor %s: ignoring %s", self.name, ", ".join(map(repr, unknown))
+            )
         try:
-            return _hygiene(self._params_cls(**_parse(result.final_output)))
+            return _hygiene(
+                self._params_cls(**{k: v for k, v in read.items() if k in known})
+            )
         except (TypeError, ValueError) as exc:
             log.warning(
                 "extractor %s output did not match schema: %s",
@@ -204,18 +218,19 @@ def _parse(output: str) -> dict[str, Any]:
     """Coerce a model output to a kwargs dict for the Params class.
 
     Models produce prose like `environment: production` or JSON. We accept
-    either; the dataclass constructor validates the types.
-    """
-    output = output.strip()
-    if output.startswith("{"):
-        import json
+    either, and the caller keeps only the keys its schema knows — this returns
+    what it read, not what is valid.
 
-        try:
-            data = json.loads(output)
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
+    Keys are stripped of the decoration a model puts around them. Asked for
+    JSON it frequently answers with a Markdown list, and `- environment:
+    production` was read as a field literally called `- environment`. One such
+    line raised on the dataclass constructor and lost the whole extraction,
+    including the correlationId two lines above it that had been read
+    correctly.
+    """
+    data = _json_object(output)
+    if data is not None:
+        return data
     # Fallback: `key: value` lines. Crude but works for the small schemas we
     # deal with; ticket 31 is a starting point, not a finished format.
     result: dict[str, Any] = {}
@@ -223,12 +238,56 @@ def _parse(output: str) -> dict[str, Any]:
         if ":" not in line:
             continue
         key, _, value = line.partition(":")
-        key = key.strip()
+        key = _undecorate(key)
         value = value.strip().strip("\"'`")
-        if value.lower() in ("null", "none", ""):
+        if not key or value.lower() in ("null", "none", ""):
             continue
         result[key] = value
     return result
+
+
+def _json_object(output: str) -> dict[str, Any] | None:
+    """The JSON object in the output, wherever it is. None if there is none.
+
+    Not `startswith("{")`. A model asked for JSON only routinely answers with a
+    sentence first, a fenced block, or its own reasoning — and the check used
+    to fail on all three, dropping perfectly good JSON into the line-by-line
+    fallback below, which then read `"environment": null,` as the *string*
+    `"null,"`. A truthy string in `correlation_id` passes the "is there
+    anything to trace on" gate and fails the uuid rule, so the reporter is
+    asked to resend a correlationId they already sent correctly. Observed, on
+    the real provider, exactly that way.
+
+    Braces are matched rather than searched for, because the last `}` in the
+    output may belong to prose after the object.
+    """
+    import json
+
+    start = output.find("{")
+    while start != -1:
+        depth = 0
+        for i in range(start, len(output)):
+            if output[i] == "{":
+                depth += 1
+            elif output[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        data = json.loads(output[start : i + 1])
+                    except json.JSONDecodeError:
+                        break
+                    return data if isinstance(data, dict) else None
+        start = output.find("{", start + 1)
+    return None
+
+
+#: Bullets, numbering and emphasis a model puts around a field name when it
+#: answers in Markdown instead of the JSON it was asked for.
+_DECORATION = re.compile(r"^[\s>*+-]*(?:\d+[.)]\s*)?[`*_\"']*|[`*_\"']*$")
+
+
+def _undecorate(key: str) -> str:
+    return _DECORATION.sub("", key.strip()).strip()
 
 
 #: Task type -> the `Params` its extractor fills. Every classifiable type is

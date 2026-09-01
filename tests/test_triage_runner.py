@@ -104,9 +104,15 @@ async def test_a_follow_up_updates_the_open_task_rather_than_opening_a_second(
     assert len(await db.tasks()) == 1
 
 
-async def test_a_follow_up_of_a_different_type_asks_for_a_human(inbox, provider, db):
-    """A bug report that turns into something else should not be relabelled
-    silently."""
+async def test_a_message_of_a_different_type_gets_its_own_task(inbox, provider, db):
+    """A bug report that turns into something else must not be relabelled
+    silently — and the new message must not be swallowed saying so.
+
+    It used to be: the open task was flagged for a human and the new message
+    was marked triaged against it, so no task was ever opened for what it
+    actually was. Caught by running the real pipeline over six messages — a
+    genuine api_issue arrived after a held one and produced nothing at all.
+    """
     provider.emit(make_event(message_id="10"))
     provider.emit(make_event(message_id="20", text="actually give me repo access"))
     await captured(inbox)
@@ -116,8 +122,10 @@ async def test_a_follow_up_of_a_different_type_asks_for_a_human(inbox, provider,
     await r.run_once()
 
     tasks = await db.tasks()
-    assert len(tasks) == 1
-    assert tasks[0].state == "needs_human"
+    assert [(t.type, t.state) for t in tasks] == [
+        ("api_issue", "needs_human"),   # flagged: its subject changed
+        ("access_request", "pending"),  # and the new report is real work
+    ]
 
 
 async def test_triage_reads_the_conversations_context(inbox, provider, db):
