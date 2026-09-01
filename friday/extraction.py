@@ -78,24 +78,25 @@ def build_extractor(
     return Extractor(harness=harness, params_cls=params_cls, name=name)
 
 
-def extractor(task_type: str) -> Callable[[Extractor], Extractor]:
-    """Register an Extractor for `task_type`. Used as a decorator:
+def extractor(task_type: str, ext: Extractor) -> Extractor:
+    """Register an Extractor for `task_type`.
 
-        @extractor("api_issue")
-        EXTRACTOR_API_ISSUE = build_extractor(...)
+        @extractor("api_issue", Extractor(...))
 
-    Mirrors `@planner(...)` in `friday.workflows`.
+    Returns `ext` unchanged so it can sit at module top-level next to the
+    instance it registers. `build_extractor(...)` followed by this decorator is
+    the common shape:
+
+        @extractor("api_issue", build_extractor(
+            params_cls=ApiIssueParams, harness=harness, name="api_issue",
+        ))
     """
-
-    def register(ext: Extractor) -> Extractor:
-        if task_type in _EXTRACTORS:
-            raise ValueError(
-                f"extractor already registered for task type {task_type!r}"
-            )
-        _EXTRACTORS[task_type] = ext
-        return ext
-
-    return register
+    if task_type in _EXTRACTORS:
+        raise ValueError(
+            f"extractor already registered for task type {task_type!r}"
+        )
+    _EXTRACTORS[task_type] = ext
+    return ext
 
 
 def registered() -> dict[str, Extractor]:
