@@ -44,6 +44,19 @@ class Skill:
 
 
 class SkillLibrary:
+    @classmethod
+    def build(cls, config) -> "SkillLibrary":
+        """Load from the configured directory and say what could not be read.
+
+        A skill the operator believes they wrote and which silently is not
+        there is worse than a noisy start, so every unreadable file is named.
+        """
+        library = cls(config.context.skills_directory).load()
+        for problem in library.problems:
+            log.warning("skill could not be read — %s", problem)
+        log.info("%d skill(s) available", len(library))
+        return library
+
     """Every skill on disk, read once at startup.
 
     Read once rather than per call: the catalogue goes in the stable front of

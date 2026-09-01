@@ -50,6 +50,13 @@ class ChannelContext:
 
 
 class ContextStore:
+    @classmethod
+    def build(cls, config) -> "ContextStore":
+        store = cls(config.context.directory)
+        for problem in store.validate_all():
+            log.warning("channel context file could not be read — %s", problem)
+        return store
+
     """One YAML file per channel, inheriting `base.yaml`.
 
     Reads tolerate a missing or malformed file — a channel the agent has never
@@ -150,6 +157,18 @@ class ContextRebuilder:
     rebuild that fires whether or not anything changed would spend a summary
     call on channels with nothing new to say.
     """
+
+    @classmethod
+    def build(cls, config, *, store, db, promotion) -> "ContextRebuilder":
+        """Which agent summarises a channel, and when, are this module's
+        business. The composition root asks for a rebuilder."""
+        return cls(
+            store=store,
+            db=db,
+            promotion=promotion,
+            summary_config=config.agents.get("summary"),
+            summary_share=config.context.summary_share,
+        )
 
     def __init__(
         self,

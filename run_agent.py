@@ -29,7 +29,6 @@ from friday.providers.discord.bot import DiscordBot
 from friday.responder import Responder
 from friday.agent.skills import SkillLibrary
 from friday.domain.tasks import TaskState
-from friday.triage import Triage
 from friday.triage.runner import TriageRunner
 from friday.workflows.runner import WorkflowRunner
 
@@ -86,24 +85,9 @@ async def _run(stack: AsyncExitStack) -> None:
             "DISCORD_USER_TOKEN is not set. Put it in .env (see .env.example) "
             "or export it before running."
         )
-    try:
-        triage_config = config.agents["triage"]
-    except KeyError:
-        raise SystemExit("No 'triage' agent in config.yaml — see the agents section.")
-
     db = await Database.connect(config.database_path)
-
-    context_store = ContextStore(config.context.directory)
-    for problem in context_store.validate_all():
-        log.warning("channel context file could not be read — %s", problem)
-
-    # Read once, at startup. A skill the operator believes they wrote and which
-    # silently is not there is worse than a noisy start, so every unreadable
-    # file is named rather than skipped in silence.
-    skills = SkillLibrary(config.context.skills_directory).load()
-    for problem in skills.problems:
-        log.warning("skill could not be read — %s", problem)
-    log.info("%d skill(s) available", len(skills))
+    context_store = ContextStore.build(config)
+    skills = SkillLibrary.build(config)
 
     provider = DiscordUserProvider(token=token)
     inbox = Inbox(provider=provider, db=db, config=config.ingest)
@@ -143,22 +127,7 @@ async def _run(stack: AsyncExitStack) -> None:
 
     provider.on_verdict = marked
 
-    # Read once, at build time. Examples belong in the stable front of the
-    # prompt, and a list that changed per call would cost the cache hit on
-    # everything after it — a mark made now takes effect on the next start.
-    examples = list(config.triage_examples) + await db.confirmed_classifications(
-        limit=int(triage_config.options.get("examples", 8))
-    )
-    if examples:
-        log.info("triage: %d example(s) the operator vouched for", len(examples))
-
-    runner = TriageRunner(
-        db=db,
-        triage=Triage(config=triage_config, examples=examples),
-        confidence_threshold=float(
-            triage_config.options.get("confidence_threshold", 0.7)
-        ),
-    )
+    runner = await TriageRunner.build(config, db=db)
 
     # Connected here rather than by whoever uses them: a connection has a
     # lifetime, and something has to close it. The stack unwinds with the run.
@@ -192,33 +161,8 @@ async def _run(stack: AsyncExitStack) -> None:
     # rather than invalidating a warm prompt cache mid-run.
     learned = await promotion.render()
 
-    responder_config = config.agents.get("responder")
-    responder = (
-        Responder(config=responder_config, notes=learned, skills=skills)
-        if config.workflows.use_responder and responder_config
-        else None
-    )
-    # No agent is handed to the runner. An agent is a node inside a graph, and
-    # `register_dags` above built those from configuration; the runner decides
-    # *when* a task is worked and *whether* what came back may be sent, which
-    # is not a question a model answers.
-    workflows = WorkflowRunner(
-        db=db,
-        auto_ask=config.workflows.auto_ask_for_details,
-        responder=responder,
-        tone_examples=int(
-            (responder_config.options.get("tone_examples", 8))
-            if responder_config
-            else 8
-        ),
-        max_asks=config.workflows.max_asks,
-        debounce_seconds=config.workflows.debounce_seconds,
-    )
-    if responder is not None:
-        log.info(
-            "responder on %s — its drafts need approval before they go out",
-            responder_config.model,
-        )
+    responder = Responder.build(config, notes=learned, skills=skills)
+    workflows = WorkflowRunner.build(config, db=db, responder=responder)
     async def decided(*, task_id: int, approved: bool, by: str) -> None:
         """What a button press means.
 
@@ -273,12 +217,8 @@ async def _run(stack: AsyncExitStack) -> None:
         db=db,
         liveness=liveness,
         promotion=promotion,
-        context_rebuilder=ContextRebuilder(
-            store=context_store,
-            db=db,
-            promotion=promotion,
-            summary_config=config.agents.get("summary"),
-            summary_share=config.context.summary_share,
+        context_rebuilder=ContextRebuilder.build(
+            config, store=context_store, db=db, promotion=promotion
         ),
         interval_seconds=config.heartbeat_seconds,
         keep_model_calls_days=config.keep_model_calls_days,

@@ -309,3 +309,24 @@ def test_the_shipped_persona_file_has_every_section_a_mode_names():
     wanted = {name for names in _SECTIONS.values() for name in names}
 
     assert set(persona._sections) == wanted
+
+
+# --- the composition root asks; it does not know ----------------------------
+
+
+def test_no_agent_configuration_is_read_in_the_composition_root():
+    """`run_agent.py` constructs the adapters and starts the loops. Which knobs
+    a step has — its confidence threshold, how many examples it shows, how many
+    tone examples it wants — is that step's business, and reading them here
+    means adding one is a change in two files.
+
+    Enforced by grep because the leak is invisible: nothing breaks when a
+    `options.get(...)` appears here, it just quietly makes the root know one
+    more thing about one more step.
+    """
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "run_agent.py").read_text()
+
+    for leak in ("config.agents", "options.get("):
+        assert leak not in source, f"{leak!r} belongs in the module that owns it"

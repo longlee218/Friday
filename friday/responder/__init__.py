@@ -53,6 +53,23 @@ class Draft:
 
 
 class Responder:
+    @classmethod
+    def build(cls, config, *, notes: str = "", skills=None) -> "Responder | None":
+        """The responder, or None when it is off or unconfigured.
+
+        `None` is a working state, not a failure: the workflow falls back to
+        the plain template, which is what shipped before this existed.
+        """
+        settings = config.agents.get("responder")
+        if not (config.workflows.use_responder and settings):
+            return None
+        built = cls(config=settings, notes=notes, skills=skills)
+        log.info(
+            "responder on %s — its drafts need approval before they go out",
+            settings.model,
+        )
+        return built
+
     def __init__(
         self,
         *,
@@ -61,6 +78,10 @@ class Responder:
         notes: str = "",
         skills=None,
     ) -> None:
+        #: How many of the operator's real messages to show as tone examples.
+        #: The responder's knob, read where the responder is built — the
+        #: workflow runner fetches them but has no opinion on how many.
+        self.tone_examples = int(config.options.get("tone_examples", 8))
         #: The operator's written-down knowledge. The responder gets it
         #: because how they write to their team is exactly the kind of thing
         #: they write down — which technical words stay in English, how short

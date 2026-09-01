@@ -47,6 +47,43 @@ def _record(outcome: TriageOutcome) -> dict:
 
 
 class TriageRunner:
+    @classmethod
+    async def build(cls, config, *, db: Database) -> "TriageRunner":
+        """Everything triage needs, read from configuration here.
+
+        The composition root asks for a triage runner; it does not know that
+        triage has a confidence threshold, or that it shows the classifier
+        examples, or how many. Those are this step's knobs and this is where
+        they are read — the same shape `register_extractors` and
+        `register_dags` already use, for the same reason: adding a knob is a
+        change here, not there.
+        """
+        from friday.triage import Triage
+
+        try:
+            settings = config.agents["triage"]
+        except KeyError:
+            raise SystemExit(
+                "No 'triage' agent in config.yaml — see the agents section."
+            ) from None
+
+        # Read once, at build time. Examples belong in the stable front of the
+        # prompt, and a list that changed per call would cost the cache hit on
+        # everything after it — a mark made now takes effect at the next start.
+        examples = list(config.triage_examples) + await db.confirmed_classifications(
+            limit=int(settings.options.get("examples", 8))
+        )
+        if examples:
+            log.info("triage: %d example(s) the operator vouched for", len(examples))
+
+        return cls(
+            db=db,
+            triage=Triage(config=settings, examples=examples),
+            confidence_threshold=float(
+                settings.options.get("confidence_threshold", 0.7)
+            ),
+        )
+
     def __init__(
         self,
         *,

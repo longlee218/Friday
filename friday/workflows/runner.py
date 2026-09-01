@@ -34,6 +34,23 @@ REVIEW = TaskState.REVIEW
 
 
 class WorkflowRunner:
+    @classmethod
+    def build(cls, config, *, db: Database, responder=None) -> "WorkflowRunner":
+        """The loop, built from the `workflows:` block.
+
+        Nothing about an agent reaches here: an agent is a node inside a graph,
+        and `register_dags` built those. This decides *when* a task is worked
+        and *whether* what came back may be sent, and neither is a question a
+        model answers.
+        """
+        return cls(
+            db=db,
+            responder=responder,
+            auto_ask=config.workflows.auto_ask_for_details,
+            max_asks=config.workflows.max_asks,
+            debounce_seconds=config.workflows.debounce_seconds,
+        )
+
     """Turns a pending task into an action.
 
     Produces outbound intents; it never delivers one. Deciding what to say and
@@ -52,7 +69,6 @@ class WorkflowRunner:
         db: Database,
         auto_ask: bool,
         responder=None,
-        tone_examples: int = 8,
         max_asks: int = 3,
         #: How long to let a burst settle. Three messages in ten seconds
         #: each send the task back to be re-planned, and each would
@@ -67,7 +83,9 @@ class WorkflowRunner:
         self._db = db
         self._auto_ask = auto_ask
         self._responder = responder
-        self._tone_examples = tone_examples
+        # Asked of the responder rather than passed in beside it. It is the
+        # responder's knob; this loop only fetches what it is told to fetch.
+        self._tone_examples = getattr(responder, "tone_examples", 8)
         self._max_asks = max_asks
         self._debounce = debounce_seconds
         self._sender = sender
