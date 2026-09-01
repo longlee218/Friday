@@ -312,8 +312,8 @@ def test_the_node_that_writes_a_patch_is_not_given_the_find_the_file_prompt():
     from friday.dag.workflows import agents_for_api_issue
 
     built = agents_for_api_issue(_every_node_configured())
-    assert built["fix_bug"].agent.instructions == graph.FIX
-    assert built["find_code_path"].agent.instructions == graph.FIND_CODE
+    assert built["fix_bug"].instructions == graph.FIX
+    assert built["find_code_path"].instructions == graph.FIND_CODE
 
 
 def test_a_node_is_handed_the_tool_server_it_needs():
@@ -327,11 +327,11 @@ def test_a_node_is_handed_the_tool_server_it_needs():
     loki = SimpleNamespace(name="loki")
     built = agents_for_api_issue(_every_node_configured(), None, {"loki": loki})
 
-    assert built["read_logs"].agent.mcp_servers == [loki]
+    assert built["read_logs"].tool_servers == [loki]
     # And only the ones it needs: the composer has nothing to look up.
-    assert built["compose_reply"].agent.mcp_servers == []
+    assert built["compose_reply"].tool_servers == []
     # A server that is not configured is not an error — the node skips.
-    assert built["find_code_path"].agent.mcp_servers == []
+    assert built["find_code_path"].tool_servers == []
 
 
 def test_a_skill_description_cannot_break_out_of_its_section(tmp_path):
@@ -353,7 +353,7 @@ def test_a_skill_description_cannot_break_out_of_its_section(tmp_path):
     assert skills.problems == []
 
     built = agents_for_api_issue(_every_node_configured(), skills)
-    instructions = built["analyze_stack"].agent.instructions
+    instructions = built["analyze_stack"].instructions
 
     assert "&lt;/skills&gt;" in instructions
     assert "harmless</skills>" not in instructions
@@ -440,4 +440,78 @@ def test_a_node_and_its_wiring_read_the_same_requirement():
 
     for node, server in NODE_SERVERS.items():
         wants_loki = server == "loki"
-        assert bool(built[node].agent.mcp_servers) is wants_loki, node
+        assert bool(built[node].tool_servers) is wants_loki, node
+
+
+# --- what stands between a model and someone's repository -------------------
+
+
+async def _fix_with(analysis, code=None, agent=None):
+    """Run `_fix_bug` against one analysis, with the source server present."""
+    from types import SimpleNamespace
+
+    from friday.dag import DAGDeps, DAGState
+    from friday.dag.api_issue import _fix_bug
+
+    state = DAGState.empty().with_result("analyze_stack", analysis)
+    if code is not None:
+        state = state.with_result("find_code_path", code)
+    return await _fix_bug(
+        state,
+        DAGDeps(
+            task=SimpleNamespace(params={"summary": "s"}),
+            servers={"source": object()},
+            extra={"fix_bug": agent} if agent else {},
+        ),
+    )
+
+
+async def test_an_actionable_verdict_with_no_cause_does_not_reach_the_fixer():
+    """`{"actionable": true, "cause": null}` is a shape a model that answered
+    half the question produces, and it disarmed the guard completely: the
+    hands-off words are matched against the cause, an empty cause matches
+    nothing, and the fixer was handed a migration to patch with no stated
+    reason — after which the composer saw a falsy cause and dropped the diff
+    on the floor. The change was made and never mentioned."""
+    from friday.dag.api_issue import _actionable
+    from friday.dag import DAGState
+
+    state = DAGState.empty().with_result(
+        "analyze_stack", {"cause": None, "actionable": True}
+    )
+
+    assert _actionable(state) is False
+
+
+async def test_the_guard_reads_the_file_the_fix_would_touch():
+    """A cause of "off-by-one in the loop bound" says nothing about the file
+    it is in, and the file was a migration. Matching only the model's prose
+    left the FIX prompt — the model policing itself — as the only thing
+    between that and a patched migration."""
+    from friday.dag.pause import PauseForHuman
+
+    with pytest.raises(PauseForHuman) as paused:
+        await _fix_with(
+            {"cause": "off-by-one in the loop bound", "actionable": True},
+            code="migrations/versions/443468757024_baseline_schema.py:20",
+        )
+
+    assert "migration" in str(paused.value)
+
+
+async def test_an_ordinary_fix_in_ordinary_code_still_goes_through():
+    """The guard has to let the thing it exists for happen, or it is just an
+    expensive way of never fixing anything."""
+    from types import SimpleNamespace
+
+    class Fixer:
+        async def run(self, prompt, **kw):
+            return SimpleNamespace(final_output="--- a/x.py\n+++ b/x.py")
+
+    diff = await _fix_with(
+        {"cause": "off-by-one in the loop bound", "actionable": True},
+        code="friday/checkout.py:20",
+        agent=Fixer(),
+    )
+
+    assert diff.startswith("--- a/x.py")

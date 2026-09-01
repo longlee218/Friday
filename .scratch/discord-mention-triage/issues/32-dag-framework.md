@@ -215,3 +215,23 @@ interaction shape — buttons, threaded replies — is out of scope for ticket 3
   `_fingerprint` never returns `""`, even for no parameters, so the default
   was only reachable by a caller who forgot the argument — and writing it
   guarantees the next load throws the state away. Required now.
+
+## Third review pass
+
+- **The `_raise_hands` rewrite fixed one bug and opened another.** Keying the
+  announcement on its text means any parameter change produces a new text —
+  carrying the *old* pause question. `dag_pauses` now enforces the same
+  fingerprint check `load_dag_state` does, so a pause computed against other
+  parameters is not reported. One reader enforcing an invariant while its
+  sibling ignores it is how the row starts lying.
+- `_fingerprint` joined `f"{key}={value}"`, making `{"a": "b=c"}` and
+  `{"a=b": "c"}` identical and `1` identical to `"1"`. Unreachable with
+  today's fields, but it is handed the raw JSON-decoded dict, not the
+  dataclass, so the type discipline it relied on was not enforced at its own
+  edge. JSON with sorted keys does not need it to be.
+- `load_dag_state` logged "parameters changed" for a row written before the
+  column existed, where the schema changed and the parameters did not. It logs
+  both digests now.
+- Tests read `Harness.agent.instructions` and `.agent.mcp_servers`, reaching
+  through the one module allowed to know the SDK's object shape and coupling
+  to it. `Harness` exposes `instructions` and `tool_servers` instead.

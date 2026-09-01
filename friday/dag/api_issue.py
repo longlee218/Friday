@@ -27,11 +27,10 @@ from typing import Any
 
 from friday.dag import DAG, DAGDeps, DAGState, Edge, Node
 from friday.dag.pause import PauseForHuman
-from friday.dag.router import register_dag
 from friday.models import ApiIssueParams
 from friday.workflows import Action, Ask, Park, Reply
 
-__all__ = ["build_api_issue_dag", "register_api_issue_dag"]
+__all__ = ["build_api_issue_dag"]
 
 log = logging.getLogger(__name__)
 
@@ -165,7 +164,10 @@ async def _analyze_stack(state: DAGState, deps: DAGDeps) -> dict[str, Any]:
     return _as_analysis(result.final_output or "")
 
 
-#: Words in a cause that mean a change is not ours to make unattended.
+#: Words that mean a change is not ours to make unattended. Matched against
+#: the cause *and* against the path the fix would touch: a cause reading
+#: "off-by-one in the loop bound" says nothing about the file it is in, and
+#: the file was `migrations/versions/443468757024_baseline_schema.py`.
 _HANDS_OFF = ("migration", "schema", "credential", "secret", "password", "token")
 
 
@@ -178,8 +180,10 @@ async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | None:
     """
     analysis = state["analyze_stack"]
     cause = (analysis.get("cause") or "") if isinstance(analysis, dict) else ""
+    where = str(state.get("find_code_path") or "")
 
-    touched = [word for word in _HANDS_OFF if word in cause.lower()]
+    subject = f"{cause}\n{where}".lower()
+    touched = [word for word in _HANDS_OFF if word in subject]
     if touched:
         raise PauseForHuman(
             question=(
@@ -250,8 +254,20 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
 
 
 def _actionable(state: DAGState) -> bool:
+    """Whether to attempt a fix at all.
+
+    A cause is required, not merely the `actionable` flag. `{"actionable":
+    true, "cause": null}` is a shape `_as_analysis` produces from a model that
+    answered half the question, and it used to disarm the guard completely:
+    `_fix_bug` matches `_HANDS_OFF` against the cause, an empty cause matches
+    nothing, and the fixer was handed a migration to patch with no stated
+    reason. `_compose_reply` then saw a falsy cause and dropped the diff on
+    the floor, so the change was made and never mentioned.
+    """
     analysis = state.get("analyze_stack")
-    return bool(isinstance(analysis, dict) and analysis.get("actionable"))
+    if not isinstance(analysis, dict):
+        return False
+    return bool(analysis.get("actionable") and analysis.get("cause"))
 
 
 def build_api_issue_dag() -> DAG:
@@ -274,11 +290,6 @@ def build_api_issue_dag() -> DAG:
             Edge("fix_bug", "compose_reply"),
         ),
     )
-
-
-def register_api_issue_dag() -> DAG:
-    """Register the graph for the `api_issue` task type."""
-    return register_dag("api_issue", build_api_issue_dag())
 
 
 def _as_analysis(text: str) -> dict[str, Any]:
@@ -342,4 +353,4 @@ def _is_yes(value: Any) -> bool:
         return value
     if isinstance(value, str):
         return value.strip().lower() in {"true", "yes", "y", "1"}
-    return value is True
+    return False

@@ -168,3 +168,24 @@ Four defects the QA pass found, all now fixed with a test each:
 - **Which server a node needs was stated in two files.** `NODE_SERVERS` lives
   beside the nodes now, and `dag/workflows.py` reads it. Adding a node used to
   mean editing both, with nothing to catch the drift.
+
+## Third review pass — the guard that decides whether code gets edited
+
+- **`{"actionable": true, "cause": null}` disarmed the hands-off guard
+  completely.** `_actionable` read only the flag; `_fix_bug` then matched the
+  hands-off words against an empty cause, which matches nothing. The fixer was
+  handed a migration to patch with no stated reason — and `_compose_reply`,
+  seeing a falsy cause, dropped the returned diff on the floor. The change was
+  made and never mentioned. A cause is required now.
+- **The guard read the model's prose, not the file the fix would touch.** A
+  cause of "off-by-one in the loop bound" says nothing about the file it is
+  in, and the file was
+  `migrations/versions/443468757024_baseline_schema.py`. It matches the
+  located path as well now — only the FIX prompt stood between that and a
+  patched migration, which is the model policing itself rather than the
+  deterministic check the code advertises.
+- Both were reachable only because `dag_fix` is commented out in
+  `config.yaml`. That is the one agent that edits repositories, so the guard
+  was disarmed precisely where it starts to matter.
+- `register_api_issue_dag()` was dead, exported, and would raise if anyone
+  called it after `register_dags`.

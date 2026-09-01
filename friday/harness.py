@@ -109,6 +109,22 @@ class Harness:
             **agent_options,
         )
 
+    @property
+    def instructions(self) -> str:
+        """What this agent was told it is, before any per-call context.
+
+        Exposed so composition can be checked without reaching through this
+        module into the SDK's own objects. `harness.py` is the only module
+        that may know that shape, and a test that reads `.agent.instructions`
+        would break on the swap this rule exists to keep cheap.
+        """
+        return self.agent.instructions or ""
+
+    @property
+    def tool_servers(self) -> list:
+        """The tool servers this agent was handed. Same reason as above."""
+        return list(self.agent.mcp_servers)
+
     async def run(
         self,
         prompt: "str | ContextBundle",

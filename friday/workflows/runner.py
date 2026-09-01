@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -105,7 +106,9 @@ class WorkflowRunner:
         tasks = await self._db.tasks_in_state(NEEDS_HUMAN, self._batch_size)
         if not tasks:
             return
-        pauses = await self._db.dag_pauses([task.id for task in tasks])
+        pauses = await self._db.dag_pauses(
+            {task.id: _fingerprint(task.params) for task in tasks}
+        )
         said = await self._db.announced(
             Kind.HELP_WANTED, state=NEEDS_HUMAN, limit=self._batch_size
         )
@@ -372,15 +375,25 @@ class WorkflowRunner:
 def _fingerprint(params: dict) -> str:
     """A stable digest of the parameters a graph ran against.
 
-    Sorted keys and a fixed separator, so the same parameters produce the same
-    string whatever order they were written in. Empty values are dropped: a
-    parameter that went from absent to `None` is the same absence, and
-    discarding a graph's work over that would cost tool calls for nothing.
+    Empty values are dropped, because `""` and `None` and absent are the same
+    absence for a `str | None` field, and discarding a graph's work over that
+    distinction would cost tool calls for nothing.
+
+    What is left is serialised as JSON with sorted keys rather than joined
+    into a string. Joining `f"{key}={value}"` made `{"a": "b=c"}` and
+    `{"a=b": "c"}` the same fingerprint, and `1` the same as `"1"` — both
+    unreachable today, because every parameter is a `str | None` field named
+    by the dataclass. But this function is handed the raw JSON-decoded dict,
+    not the dataclass, so the type discipline it was relying on is not
+    enforced at its own edge. JSON does not need it to be.
     """
     from hashlib import blake2b
 
-    material = "\u0000".join(
-        f"{key}={value}" for key, value in sorted(params.items()) if value
+    material = json.dumps(
+        {key: value for key, value in params.items() if value},
+        sort_keys=True,
+        allow_nan=False,
+        default=repr,
     )
     return blake2b(material.encode(), digest_size=16).hexdigest()
 

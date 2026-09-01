@@ -879,14 +879,26 @@ class Database:
                 said.setdefault(task_id, set()).add(text)
             return said
 
-    async def dag_pauses(self, task_ids: list[int]) -> dict:
+    async def dag_pauses(self, fingerprints: dict[int, str]) -> dict:
         """The node and question each of these tasks is paused on, if any.
 
-        In bulk, because the caller has a batch of tasks and asking per task
-        is how a poll that usually finds nothing costs twenty-one queries
-        every two seconds.
+        Keyed by task id to the fingerprint of that task's *current*
+        parameters, and a pause computed against different ones is not
+        returned. A pause is only cleared by a checkpoint, and a checkpoint
+        only happens after a node completes — so a run that discards its state
+        and then fails before finishing a node leaves the old question sitting
+        there. Reporting it would ask the reporter the very thing they just
+        answered, with their answer visible in the same message.
+
+        `load_dag_state` has enforced this since the fingerprint landed. This
+        is its sibling reading the same row, and one reader enforcing an
+        invariant while the other ignores it is how the row starts lying.
+
+        In bulk, because the caller has a batch and asking per task is how a
+        poll that usually finds nothing costs twenty-one queries every two
+        seconds.
         """
-        if not task_ids:
+        if not fingerprints:
             return {}
         async with self._sessions() as session:
             rows = await session.execute(
@@ -894,14 +906,16 @@ class Database:
                     schema.DagState.task_id,
                     schema.DagState.paused_at_node,
                     schema.DagState.paused_question,
+                    schema.DagState.params_fingerprint,
                 ).where(
-                    schema.DagState.task_id.in_(task_ids),
+                    schema.DagState.task_id.in_(list(fingerprints)),
                     schema.DagState.paused_at_node.is_not(None),
                 )
             )
             return {
                 task_id: (node, question or "")
-                for task_id, node, question in rows
+                for task_id, node, question, fingerprint in rows
+                if (fingerprint or "") == fingerprints[task_id]
             }
 
     async def original_text_for(self, task_id: int) -> str | None:
@@ -1120,9 +1134,11 @@ class Database:
                 and (row.params_fingerprint or "") != params_fingerprint
             ):
                 log.info(
-                    "task %d: parameters changed since the graph last ran, "
-                    "discarding what it concluded from the old ones",
+                    "task %d: parameters are %s, the graph concluded against "
+                    "%s — discarding what it concluded",
                     task_id,
+                    params_fingerprint,
+                    row.params_fingerprint or "(none recorded)",
                 )
                 return None
             return dict(row.results or {})

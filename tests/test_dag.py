@@ -856,3 +856,49 @@ async def test_a_malformed_value_is_challenged_before_the_graph_runs(db):
     assert ran == [], "the graph ran on a value validation should have caught"
     (asked,) = [r for r in await db.outbound() if r.kind == "ask_for_details"]
     assert "uuid" in asked.text
+
+
+def test_the_fingerprint_does_not_confuse_a_separator_for_a_field_boundary():
+    """Joining `key=value` made `{"a": "b=c"}` and `{"a=b": "c"}` the same
+    fingerprint, and `1` the same as `"1"`. Unreachable with today's `str |
+    None` fields, but this is handed the raw JSON-decoded dict, so the type
+    discipline it relied on is not enforced at its own edge."""
+    from friday.workflows.runner import _fingerprint
+
+    assert _fingerprint({"a": "b=c"}) != _fingerprint({"a=b": "c"})
+    assert _fingerprint({"correlation_id": 1}) != _fingerprint({"correlation_id": "1"})
+
+
+def test_an_absent_field_and_an_empty_one_are_the_same_absence():
+    """`""` and `None` and not-there mean the same for a `str | None` field.
+    Discarding a graph's work over that distinction costs tool calls for
+    nothing."""
+    from friday.workflows.runner import _fingerprint
+
+    assert _fingerprint({"a": "x", "b": ""}) == _fingerprint({"a": "x"})
+    assert _fingerprint({"a": "x", "b": None}) == _fingerprint({"a": "x"})
+    # And no-parameters-at-all is still a real digest, never the empty string
+    # that `save_dag_state` refuses.
+    assert _fingerprint({})
+
+
+async def test_a_pause_computed_against_other_parameters_is_not_announced(db):
+    """A pause is cleared by a checkpoint, and a checkpoint only happens after
+    a node completes — so a run that discards its state and then fails leaves
+    the old question sitting there. Announcing it asks the reporter the very
+    thing they just answered, with their answer visible in the same message."""
+    from friday.workflows.runner import WorkflowRunner, _fingerprint
+    from tests.test_workflow_runner import make_task
+
+    task = await make_task(db)
+    await db.save_dag_state(
+        task.id,
+        dag_name="api_issue",
+        results={},
+        params_fingerprint=_fingerprint({"summary": "something else entirely"}),
+        paused_at_node="first",
+        paused_question="Which environment is this?",
+    )
+
+    current = {task.id: _fingerprint(task.params)}
+    assert await db.dag_pauses(current) == {}

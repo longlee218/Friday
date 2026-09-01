@@ -72,8 +72,9 @@ def agents_for_api_issue(
             else []
         )
         wants_skills = bool(tools)
+        available = servers or {}
         wanted = graph_names.NODE_SERVERS.get(node)
-        mcp = [(servers or {})[wanted]] if wanted and wanted in (servers or {}) else []
+        mcp = [available[wanted]] if wanted in available else []
         built[node] = Harness(
             config=agent_config,
             instructions=instructions[node]
@@ -122,6 +123,21 @@ def register_dags(
     agents = agents_for_api_issue(config, skills, servers)
     if agents:
         log.info("api_issue graph: agents for %s", ", ".join(sorted(agents)))
+        # Which servers are *missing* — otherwise "why did read_logs never
+        # look anything up" has no answer anywhere. The node skips correctly;
+        # it just skips silently.
+        absent = sorted(
+            {
+                server
+                for node, server in graph_names.NODE_SERVERS.items()
+                if node in agents and server not in (servers or {})
+            }
+        )
+        if absent:
+            log.info(
+                "api_issue graph: no %s server — the nodes needing it will skip",
+                ", ".join(absent),
+            )
     else:
         log.info(
             "api_issue graph: no node agents configured — it will ask for a "
