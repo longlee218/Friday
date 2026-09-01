@@ -64,12 +64,22 @@ and `alembic upgrade head` died on `duplicate column name` at every subsequent
 start. `run_agent.py` migrates before anything opens the database, so that is
 a boot loop, not a warning.
 
-**Always autogenerate against a freshly migrated throwaway database, never the
-live one.** `data/friday.db` was built by hand-written DDL before Alembic existed
-and then stamped, so reflecting it yields ~27 cosmetic differences — `TEXT` vs
-`VARCHAR`, `server_default`s the models do not declare, a different column order.
-All are functionally identical in SQLite, and all of them would land in a
-migration that changes nothing.
+Autogenerating against the live database is safe again. It was not: the
+original `data/friday.db` was built by hand-written DDL before Alembic existed
+and then stamped, so reflecting it yielded ~27 cosmetic differences — `TEXT` vs
+`VARCHAR`, `server_default`s the models do not declare, a different column
+order — every one of which would have landed in a migration that changed
+nothing. That database was wiped on 2026-09-01 at the operator's request and
+rebuilt from `alembic upgrade head`, so it is now the migrations' own output
+and `compare_metadata` reports zero differences.
+
+**A throwaway database is still the safer habit**, because this only holds
+while nothing touches the schema by hand again:
+
+```bash
+FRIDAY_DB=/tmp/new.db uv run alembic upgrade head
+FRIDAY_DB=/tmp/new.db uv run alembic revision --autogenerate -m "what changed"
+```
 
 The database path comes from `config.yaml`, not `alembic.ini` — `FRIDAY_DB`
 overrides it. `tests/test_migrations.py` fails if `schema.py` and the migrations
