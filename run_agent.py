@@ -28,6 +28,7 @@ from friday.providers import CredentialRejected
 from friday.providers.discord.user import DiscordUserProvider
 from friday.providers.discord.bot import DiscordBot
 from friday.responder import Responder
+from friday.skills import SkillLibrary
 from friday.tasks import TaskState
 from friday.triage import Triage
 from friday.triage.runner import TriageRunner
@@ -96,6 +97,14 @@ async def _run(stack: AsyncExitStack) -> None:
     context_store = ContextStore(config.context.directory)
     for problem in context_store.validate_all():
         log.warning("channel context file could not be read — %s", problem)
+
+    # Read once, at startup. A skill the operator believes they wrote and which
+    # silently is not there is worse than a noisy start, so every unreadable
+    # file is named rather than skipped in silence.
+    skills = SkillLibrary(config.context.skills_directory).load()
+    for problem in skills.problems:
+        log.warning("skill could not be read — %s", problem)
+    log.info("%d skill(s) available", len(skills))
 
     provider = DiscordUserProvider(token=token)
     inbox = Inbox(provider=provider, db=db, config=config.ingest)

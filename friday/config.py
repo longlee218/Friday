@@ -112,6 +112,9 @@ class ContextConfig:
     """Where a channel's knowledge lives, and when it is worth summarising."""
 
     directory: str = "context"
+    #: Where the operator's skills live. One Markdown file per skill; adding
+    #: one is adding a file, with no list to edit.
+    skills_directory: str = "skills"
     #: What share of the model's context window a conversation has to reach
     #: before a summary is worth a model call. Below it, the raw messages are
     #: cheaper than summarising them.
@@ -188,6 +191,9 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
         ),
         context=ContextConfig(
             directory=str((raw.get("context") or {}).get("directory", "context")),
+            skills_directory=str(
+                (raw.get("context") or {}).get("skills_directory", "skills")
+            ),
             summary_share=float(
                 (raw.get("context") or {}).get("summary_share", 0.5)
             ),
