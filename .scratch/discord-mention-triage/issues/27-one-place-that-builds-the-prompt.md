@@ -50,12 +50,12 @@ escaped form lives inside its section; the agent never sees the raw string.
 ones, so two calls that differ only in the newest message share a byte-identical
 prefix.
 
-- [ ] An agent is given its knowledge by one function rather than assembling it
-- [ ] `Harness.run` accepts a `ContextBundle` whose `.render()` produces the prompt; a string still works
-- [ ] Adding a new source of knowledge changes one place (the bundle, or a new section function)
-- [ ] Untrusted content (channel overrides, notes) is HTML-escaped at the seam; an attempted injection closes nothing
-- [ ] A section that fails to load is logged and skipped, not raised
-- [ ] What is stable appears before what changes, so two calls that differ only in the newest message share a prefix
-- [ ] An agent can be given a subset, so the most frequently run one does not pay for what it never uses
-- [ ] The same `ContextBundle` rendered twice produces a byte-identical string (test)
-- [ ] Triage and Responder both call the bundle, not their own assembly (their tests still pass)
+- [x] An agent is given its knowledge by one function rather than assembling it
+- [x] `Harness.run` accepts a `ContextBundle` whose `.render()` produces the prompt; a string still works
+- [x] Adding a new source of knowledge changes one place (the bundle, or a new section function)
+- [x] Untrusted content (channel overrides, notes) is HTML-escaped at the seam; an attempted injection closes nothing
+- [x] A section that fails to load is logged and skipped, not raised
+- [x] What is stable appears before what changes, so two calls that differ only in the newest message share a prefix
+- [x] An agent can be given a subset, so the most frequently run one does not pay for what it never uses
+- [x] The same `ContextBundle` rendered twice produces a byte-identical string (test)
+- [x] Triage and Responder both call the bundle, not their own assembly (their tests still pass)
