@@ -146,7 +146,15 @@ class OneOf:
             raise ValueError("OneOf needs at least one field to look at")
 
     def check_params(self, params: Any) -> str | None:
+        """`None` passes. `""` fails with nothing to add.
+
+        The empty string is deliberate and follows `_missing`, which reports an
+        absent required field as a `Problem` with no message for the same
+        reason: there is nothing to say about a value that is not there beyond
+        asking for it. How to ask is phrasing, and phrasing lives in one place
+        (`_ASKED_AS`) — a rule that also worded the question would be the
+        second place, and the two would drift.
+        """
         if any(not _is_blank(getattr(params, f, None)) for f in self.fields):
             return None
-        listed = " or ".join(self.fields)
-        return f"need at least one of: {listed}"
+        return ""

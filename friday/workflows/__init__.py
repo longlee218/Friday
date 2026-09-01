@@ -89,6 +89,10 @@ _ASKED_AS = {
     "environment": "which environment you're on",
     "correlation_id": "the correlationId",
     "curl": "the curl you used",
+    #: The cross-field rule's sentinel. Either field answers it, so the
+    #: phrasing names both — asking for "the correlation_id or curl" would be
+    #: reading a rule out loud instead of asking a question.
+    "_traceable": "the correlationId, or the curl you used",
     "question": "what you would like to know",
     "permission": "what access you need",
     "doc_ref": "which document you mean",

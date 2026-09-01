@@ -72,10 +72,16 @@ without has to say so.** Required-ness is read off the parameter type —
 manage without it — so it is never declared twice and cannot drift from the
 schema the model is asked to fill.
 
-`api_issue` overrides that rule, because its own is not expressible as a type:
-a correlationId *or* a curl makes a request findable, and both are optional
-individually. A type with an override keeps it; everything else gets the
-general rule for free.
+`api_issue` overrides that rule with `OneOf`, because its own is not
+expressible as a type: a correlationId *or* a curl makes a request findable,
+and both are optional individually. A type with an override keeps it;
+everything else gets the general rule for free.
+
+The override is what decides whether a graph runs at all. Without it in
+`_RULES` — where it was documented but absent — a report with nothing to trace
+on validated cleanly, and the graph ran its whole path to find out it could do
+nothing. **A precondition belongs in the gate, not in the last node's else
+branch.**
 
 ## Graph
 

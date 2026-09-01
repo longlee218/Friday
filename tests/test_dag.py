@@ -641,7 +641,9 @@ async def test_answering_the_question_re_runs_the_nodes_that_asked_it(db):
         ),
     )
     try:
-        task = await make_task(db)
+        # A curl makes the report traceable, so the graph runs — without one it
+        # never starts, which is what `_traceable` is for.
+        task = await make_task(db, curl="curl -X GET /pay")
         await WorkflowRunner(db=db, auto_ask=True).run_once()
         assert looked_up == [None]
 

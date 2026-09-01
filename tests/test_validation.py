@@ -168,8 +168,31 @@ def test_problems_merges_structural_and_semantic():
 
 
 def test_a_params_with_no_rules_passes_validation_and_returns_no_problems():
-    good = ApiIssueParams(summary="x")
+    """`AccessRequestParams` declares no `_RULES`. `ApiIssueParams` used to be
+    the example here and no longer can be: it has a cross-field rule, and a
+    report with neither a correlationId nor a curl is not usable."""
+    from friday.models import AccessRequestParams
+
+    good = AccessRequestParams(project="payments", permission="write", summary="x")
     assert _problems(good) == []
+
+
+def test_an_api_issue_with_nothing_to_trace_on_is_not_usable():
+    """The rule that is not expressible as a type: `environment`,
+    `correlation_id` and `curl` are each optional, and a report with none of
+    them cannot be investigated at all. Without this the graph ran its whole
+    path to discover it could do nothing."""
+    problems = _problems(ApiIssueParams(summary="API lỗi nè"))
+
+    assert [p.field for p in problems] == ["_traceable"]
+    assert "correlationId" in _question(problems)
+    assert "curl" in _question(problems)
+
+
+def test_either_a_correlation_id_or_a_curl_is_enough():
+    cid = "abcdef01-2345-6789-abcd-ef0123456789"
+    assert _problems(ApiIssueParams(summary="s", correlation_id=cid)) == []
+    assert _problems(ApiIssueParams(summary="s", curl="curl -X GET /pay")) == []
 
 
 # --- the question ------------------------------------------------------

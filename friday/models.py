@@ -6,7 +6,7 @@ from typing import Any, Literal
 from enum import StrEnum
 
 from friday.conversation import ConversationId, resolve
-from friday.validation import InSet, Matches
+from friday.validation import InSet, Matches, OneOf
 
 
 class MentionType(StrEnum):
@@ -113,12 +113,24 @@ class ApiIssueParams:
     #: Validate catches what the LLM extractor got wrong. `environment` has to
     #: be one of the three environments we actually serve; `correlation_id`
     #: has to look like a uuid for Loki's query_range filter to find it.
+    #:
+    #: `_traceable` is this type's override of the general required-ness rule,
+    #: which reads its answer off the annotations: all three of `environment`,
+    #: `correlation_id` and `curl` are `str | None`, so none of them is
+    #: individually required — and yet a report with none of them cannot be
+    #: investigated at all. An id *or* a curl makes a request findable; that is
+    #: not something a type can say, which is what `OneOf` is for.
+    #:
+    #: Without it nothing in the gate knew, so a report with nothing to trace
+    #: on validated cleanly and the graph ran its whole path to discover it
+    #: could do nothing.
     _RULES = {
         "environment": InSet(frozenset({"production", "staging", "dev"})),
         "correlation_id": Matches(
             r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",
             name="uuid",
         ),
+        "_traceable": OneOf(fields=("correlation_id", "curl")),
     }
 
 
