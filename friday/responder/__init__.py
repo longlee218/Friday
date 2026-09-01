@@ -125,12 +125,19 @@ class Responder:
             tools=[fetch_skill_tool(skills)] if skills is not None else [],
         )
 
+    def knows(self, channel_id: str, name: str) -> bool:
+        """Whether the operator wrote this person down for this room."""
+        room = self._context.context(channel_id) if self._context else None
+        people = (room.overrides.get("people") or {}) if room else {}
+        return name in people
+
     async def draft(
         self,
         *,
         asking: str,
         params: "Params | None" = None,
         channel_id: str | None = None,
+        stranger: bool = False,
         context: Sequence[InboundEvent] = (),
         tone: Sequence[InboundEvent] = (),
         calls: list | None = None,
@@ -153,6 +160,7 @@ class Responder:
 
         from friday.agent.instruction_prompt import (
             ContextBundle,
+            Section,
             base,
             channel_base,
             channel_derived,
@@ -173,6 +181,10 @@ class Responder:
             channel_base=channel_base(room),
             channel_derived=channel_derived(room),
             channel_overrides=channel_overrides(room),
+            counterpart=Section(
+                "counterpart",
+                "You have not written to this person before." if stranger else "",
+            ),
             skills=skills_section(
                 self._skills.catalogue() if self._skills is not None else None
             ),

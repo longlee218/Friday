@@ -96,6 +96,10 @@ class ContextBundle:
     channel_overrides: Section = field(
         default_factory=lambda: Section("channel_overrides")
     )
+    #: Whether the operator has any history with the person being written
+    #: to. One line when they do not; nothing when they do. Only the responder
+    #: fills it — it is the one agent that has to pick a form of address.
+    counterpart: Section = field(default_factory=lambda: Section("counterpart"))
     #: Long-term notes — also escaped, also operator-influenced.
     notes: Section = field(default_factory=lambda: Section("notes"))
     #: Catalogue of skills the agent can ask for (ticket 24 fills this).
@@ -120,6 +124,7 @@ class ContextBundle:
             self.channel_base.render(),
             self.channel_derived.render(),
             self.channel_overrides.render(),
+            self.counterpart.render(),
             self.notes.render(),
             self.skills.render(),
             self.tone.render(),

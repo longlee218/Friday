@@ -6,7 +6,7 @@ writes.
 
 **Blocked by:** 40 (the room decides the register)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why this is the dangerous case
 
@@ -42,11 +42,32 @@ when nothing is known about anybody.
 
 ## Acceptance criteria
 
-- [ ] With no history and no written register for a person, the form of address
+- [x] With no history and no written register for a person, the form of address
       is the safer one
-- [ ] Nothing else about the message changes — a test compares a draft to the
-      same draft for a known counterpart and asserts only the address differs
-- [ ] A written register for that person or that room wins over this
-- [ ] It applies in a channel with no context file at all
-- [ ] The rule is written in the Responder family's section and reaches no
+- [ ] ~~Nothing else about the message changes — a test compares a draft to the
+      same draft for a known counterpart and asserts only the address differs~~ —
+      **not testable with a scripted model**: what changes in the *message* is
+      the model's doing. What is tested is the input: exactly one line differs
+      between a stranger's prompt and a known person's, and the persona says
+      what that line may change. Verify on the live provider.
+- [x] A written register for that person or that room wins over this
+- [x] It applies in a channel with no context file at all
+- [x] The rule is written in the Responder family's section and reaches no
       other family
+
+## What it came to
+
+"Known" is: the operator and this person have replied to each other, in either
+direction, ever — or the operator wrote them into the room's `people:`. Not
+"both have spoken in this channel": the operator has spoken in every watched
+channel, which would make everybody known.
+
+When neither holds, the responder's prompt gains one line — `You have not
+written to this person before` — and the Responder section of `PERSONA.md` says
+what that line is allowed to change: the form of address, and nothing else.
+
+**The pronouns in `PERSONA.md` are a guess** — *anh/chị* for them, *mình* for
+the agent. The operator decided that only the form of address changes; they did
+not say to what. Correct the two words there if they are wrong; nothing else
+depends on them.
+

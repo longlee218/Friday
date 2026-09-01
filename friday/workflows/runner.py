@@ -257,10 +257,26 @@ class WorkflowRunner:
             asking=template,
             params=_as_params(task),
             channel_id=task.conversation.channel_id,
+            stranger=await self._stranger(task),
             context=await self._db.relevant_messages(task.conversation),
             tone=await self._db.tone_examples(limit=self._tone_examples),
         )
         return template if draft is None else draft.text
+
+    async def _stranger(self, task: Task) -> bool:
+        """Nobody the operator has written to before, and nobody they have
+        written down. Learning a voice from history fails exactly here — no
+        history, so the average, and the average is how they write to their
+        own team — so the default has to be the safer register, not the
+        average one."""
+        who = await self._db.reporter_of(task.id)
+        if who is None:
+            return False
+        author_id, name = who
+        named = getattr(self._responder, "knows", lambda *_: False)(
+            task.conversation.channel_id, name
+        )
+        return not named and not await self._db.has_exchanged_with(author_id)
 
     async def _plan(self, task: Task) -> Action:
         """Fill in, check, then route. In that order, for every task type.

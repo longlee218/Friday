@@ -100,8 +100,10 @@ class StubResponder:
         self._text = text
         self.asked: list[str] = []
         self.given_params: list = []
+        self.strangers: list[bool] = []
 
-    async def draft(self, *, asking, params=None, channel_id=None, context=(), tone=(), calls=None):
+    async def draft(self, *, asking, params=None, channel_id=None, stranger=False, context=(), tone=(), calls=None):
+        self.strangers.append(stranger)
         from friday.responder import Draft
 
         self.asked.append(asking)
@@ -583,3 +585,87 @@ async def test_a_handled_task_can_be_reopened_by_a_person(db):
     await db.move_task(task.id, TaskState.PENDING)
 
     assert (await db.tasks())[0].state == TaskState.PENDING
+
+
+# --- ticket 41: a stranger changes the pronouns, and nothing else ------------
+
+
+async def test_someone_the_operator_never_wrote_to_is_a_stranger(db):
+    responder = StubResponder("dạ anh/chị gửi mình correlationId nhé")
+    task = await make_task(db)
+    await db.record_message(make_event(message_id="m1", author_id="newcomer"))
+    await db.mark_triaged(make_event(message_id="m1", author_id="newcomer"), task.id, decision={"type": "api_issue"})
+
+    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+
+    assert responder.strangers == [True]
+
+
+async def test_an_exchange_in_either_direction_makes_them_known(db):
+    """A reply is the smallest thing that is an actual exchange. Being in the
+    same channel is not — the operator has spoken in every watched channel."""
+    responder = StubResponder("cho anh xin correlationId nhé")
+    task = await make_task(db)
+    await db.record_message(make_event(message_id="m1", author_id="dana"))
+    await db.mark_triaged(make_event(message_id="m1", author_id="dana"), task.id, decision={"type": "api_issue"})
+    # Long once replied to something dana said.
+    await db.record_message(make_event(message_id="old", author_id="dana", text="hi"), context_only=True)
+    await db.record_message(
+        make_event(message_id="long-said", author_id="me", is_own=True, text="hi em", reply_to="old"),
+        context_only=True,
+    )
+
+    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+
+    assert responder.strangers == [False]
+
+
+async def test_being_written_down_for_the_room_makes_them_known(db, tmp_path):
+    from friday.memory.channel_context import ContextStore
+    from friday.responder import Responder
+
+    store = ContextStore(tmp_path)
+    store.init_channel("watched", overrides={"people": {"reporter": "thân"}})
+    store.hold_all()
+
+    class Stub(StubResponder):
+        def __init__(self):
+            super().__init__("ok")
+            self._context = store
+        knows = Responder.knows
+
+    responder = Stub()
+    task = await make_task(db)
+    await db.record_message(make_event(message_id="m1", author_name="reporter"))
+    await db.mark_triaged(make_event(message_id="m1", author_name="reporter"), task.id, decision={"type": "api_issue"})
+
+    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+
+    assert responder.strangers == [False]
+
+
+async def test_the_stranger_line_reaches_the_prompt_and_only_then(tmp_path):
+    from agents.models.interface import Model
+
+    from friday.config import AgentConfig
+    from friday.responder import Responder
+
+    prompts: list[str] = []
+
+    class Capture(Model):
+        async def get_response(self, system_instructions, input, *a, **kw):
+            prompts.append(str(input))
+            raise RuntimeError("captured")
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    responder = Responder(
+        config=AgentConfig(name="r", api_key="k", base_url="http://x/v1", model="m"),
+        model=Capture(),
+    )
+    await responder.draft(asking="q", stranger=True)
+    await responder.draft(asking="q", stranger=False)
+
+    assert "not written to this person" in prompts[0]
+    assert "counterpart" not in prompts[1]

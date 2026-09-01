@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import aliased
 from sqlalchemy.pool import StaticPool
 
 from friday.store import schema
@@ -927,6 +928,46 @@ class Database:
             )
         )
         return found[0] if found else None
+
+    async def reporter_of(self, task_id: int) -> tuple[str, str] | None:
+        """Who opened this task: `(author_id, author_name)` of its first message."""
+        async with self._sessions() as session:
+            row = (
+                await session.execute(
+                    select(schema.Message.author_id, schema.Message.author_name)
+                    .where(schema.Message.task_id == task_id)
+                    .order_by(schema.Message.created_at)
+                    .limit(1)
+                )
+            ).first()
+        return (row[0], row[1]) if row else None
+
+    async def has_exchanged_with(self, author_id: str) -> bool:
+        """Whether the operator and this person have ever replied to each other.
+
+        Not "have both spoken in the same channel" — the operator has spoken
+        in every watched channel, which would make everybody known. A reply in
+        either direction is an actual exchange, and it is the smallest thing
+        that is.
+        """
+        m, r = schema.Message, aliased(schema.Message)
+        async with self._sessions() as session:
+            they_replied_to_us = (
+                select(func.count())
+                .select_from(m)
+                .join(r, r.provider_message_id == m.reply_to)
+                .where(m.author_id == author_id, r.is_own.is_(True))
+            )
+            we_replied_to_them = (
+                select(func.count())
+                .select_from(m)
+                .join(r, r.provider_message_id == m.reply_to)
+                .where(m.is_own.is_(True), r.author_id == author_id)
+            )
+            return bool(
+                await session.scalar(they_replied_to_us)
+                or await session.scalar(we_replied_to_them)
+            )
 
     async def tasks_the_operator_handled(self) -> list[Task]:
         """Open tasks the operator has answered themselves.
