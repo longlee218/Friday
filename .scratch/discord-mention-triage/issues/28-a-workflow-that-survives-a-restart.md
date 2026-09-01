@@ -5,17 +5,24 @@
 This ticket is retired. The original framing — "ordered set of steps, each
 recording before the next begins" — is **subsumed by ticket 32** (DAG
 framework) and **ticket 33** (the first DAG, `api_issue`). The DAG's
-checkpoint-after-every-node satisfies every acceptance criterion below:
+checkpoint-after-every-node satisfies **five of the seven** criteria below.
+Two are not implemented, and this table claimed them: it was written from the
+design of tickets 32 and 33 rather than from the code that landed, which is
+the failure mode a retirement table is most prone to.
 
 | Original criterion | Where it lives now |
 |---|---|
 | Workflow is an ordered set of named steps | DAG nodes in `friday/dag/` |
 | Each step's result recorded before the next begins | `DAGRunner` saves state after every node |
 | Restart continues at the first unfinished step | `load_dag_state(task.id)` + resume from the next node |
-| Step + effect commit together (own store) | DAG runner writes state in the same DB transaction as the result |
-| Step does not send twice on resume (external) | Ticket 33's `fix_bug` carries an idempotency key |
+| Step + effect commit together (own store) | **Not implemented.** The checkpoint is its own transaction, written after the node returns. A crash between the node's own write and the checkpoint replays the node. Every node in `api_issue` is a read, so today this costs a repeated query and nothing else — it stops being free the first time a node writes anywhere but `dag_state`. |
+| Step does not send twice on resume (external) | **Not implemented.** `fix_bug` has no idempotency key; it is guarded by `PauseForHuman` and by `dag_fix` being unconfigured. Needed before that agent is turned on. |
 | State is typed | `DAGState` is a frozen dataclass; missing keys raise on read |
 | Adding a workflow does not touch existing ones | `EDGE_ROUTER` is `dict[str, DAG]`; new entry, no edits |
+
+Both gaps are recorded here rather than reopened as tickets because neither is
+reachable in the shipped configuration. **They become blocking the moment a
+node writes outside `dag_state`, or `dag_fix` is configured.**
 
 The text below is kept for the historical record and for any reviewer who
 wants to see why the ticket was retired rather than re-issued.
