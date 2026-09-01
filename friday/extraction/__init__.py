@@ -182,7 +182,6 @@ def _hygiene(params: Params) -> Params:
     real one — and a workflow that believes it has a correlationId will never
     ask for the one it needs.
     """
-    return params
     from friday.text.param_hygiene import clean
 
     return type(params)(
