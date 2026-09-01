@@ -28,6 +28,10 @@ agents:
     # Escalate to a human below this rather than guessing. A placeholder until
     # real decisions accumulate — do not trust this number yet.
     confidence_threshold: 0.7
+    # How many past classifications the operator marked right to show as
+    # examples. Read once at startup: examples belong in the stable front of
+    # the prompt, so a mark made now takes effect on the next restart.
+    examples: 8
 
   # Runs only on tasks that reached a reply. Low volume, and the output goes out
   # under your name — worth a better model and some warmth.

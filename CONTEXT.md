@@ -47,16 +47,10 @@ parameters — and writes nothing. Every message gets exactly one of two outcome
 What to do about a task. Returns an **action** — `Ask`, `Reply` or `Park` —
 never a side effect.
 
-A planner is a function of the task's parameters, registered with
-`@planner("task_type")` where it is written. It declares the collaborators it
-wants by naming them; one that decides by branching names none and stays a pure
-function, and one that has to look something up asks for `agent` and may be a
-coroutine. That is where a workflow becomes agentic, per task type and on
-evidence, rather than everywhere at once.
-
-The reflection runs once, at import, so a task type that does not exist and a
-collaborator nothing can supply both fail on the way up rather than the first
-time that task type appears.
+There are two ways a task type gets its action, and which one it uses is
+decided by the **edge router**: a task type with a **graph** goes to the graph,
+and one without takes the deterministic path — validate the parameters, ask for
+whatever is missing, park otherwise. Most types need nothing more than that.
 
 `Ask` is the agent's own decision. `Reply` waits for approval — asking for a
 correlationId costs a question if it is wrong, and asserting a cause costs the
@@ -72,6 +66,32 @@ schema the model is asked to fill.
 a correlationId *or* a curl makes a request findable, and both are optional
 individually. A type with an override keeps it; everything else gets the
 general rule for free.
+
+## Graph
+
+How a workflow that is more than one decision gets made. A **node** is
+`async (state, deps) -> result`; an **edge** may carry a predicate, and the
+first whose predicate holds is the one taken. Deterministic Python: the shape
+is code, not something a model chooses at run time.
+
+Two things follow from that shape and neither is incidental.
+
+A graph **checkpoints after every node**, so a restart resumes rather than
+re-running work that cost money. Results are only meaningful for the inputs
+that produced them, so state is discarded when the task's parameters change —
+otherwise asking the reporter a question and receiving an answer would change
+nothing.
+
+A node that cannot decide **pauses** rather than guessing: `PauseForHuman`
+carries the question, which becomes a `Park` and reaches the operator with the
+question intact. It is not a failure and not an outcome — it is the graph
+stopping to ask.
+
+An agent is a node inside a graph, never the thing driving it. Which agent a
+node gets, and which tool server, is composition — handed down through `deps`,
+so the shape of a graph can be tested without a model or a server. A node whose
+agent or server is absent skips and returns nothing; the graph still reaches
+its last node, which is the only one that decides what to send.
 
 ## Tool server
 
@@ -93,11 +113,12 @@ hooks, turn and token caps, guardrails, handoffs, and the rule that any failure
 becomes work for a human rather than silence.
 
 An **agent declaration** is then only what makes that agent different:
-instructions, tools, output shape. Triage is one; the responder will be the
-second.
+instructions, tools, output shape. Triage was the first; the responder, the extractors and every
+reasoning node in a graph followed.
 
-Not built yet, deliberately. One agent is a hypothetical seam; two is a real
-one. Building it against triage alone would mean guessing at what varies.
+`friday/harness.py` is the only module that may import the agent SDK. The SDK
+is here for speed, not for keeps, and that is only true while replacing it
+means rewriting one file.
 
 ## Observation
 

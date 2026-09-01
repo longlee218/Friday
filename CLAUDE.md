@@ -106,6 +106,10 @@ What is actually on disk.
 | `friday/triage/` | Classification, its prefilter, parameter hygiene, and the loop that polls untriaged messages |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/workflows/` | `plan()` and the `Ask`/`Reply`/`Park` actions, plus the loop that acts on tasks |
+| `friday/dag/` | The graph framework — nodes, edges, checkpointed resume, `PauseForHuman`, and the edge router. `dag/api_issue.py` is the first graph; `dag/workflows.py` is what the composition root calls |
+| `friday/extraction.py` | Per-workflow field extraction: each workflow owns its prompt, schema and model |
+| `friday/skills.py` | Markdown skills the operator writes, offered to reasoning agents by catalogue and fetched on demand |
+| `friday/verdicts.py` | The operator marking a classification right or wrong, with a Discord reaction |
 | `friday/tasks.py` | `TaskState` and the legal transitions between them |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `friday/observations.py`, `notes.py` | Staging tier, and the promotion that only an approved outcome earns |
@@ -174,14 +178,23 @@ not an implementation detail:
   `Hooks`, the MCP server types — is re-exported from there under names that do
   not mention the library. `tests/test_harness.py` fails if a second module
   reaches past it.
-- **Workflows are deterministic Python, not agentic nodes.** Only two steps
-  call a model: triage and the responder. Durable resume for a workflow that
-  spends real money before it finishes is ticket 28, and is **not built** — do
-  not write code that assumes it exists.
+- **Workflows are deterministic Python, and an agent is a node inside one.**
+  The route is classify → edge router → graph: which task type has a graph is
+  `friday/dag/workflows.py`'s business, not the composition root's. The graph's
+  *shape* is code — a model never chooses the next step. Durable resume is
+  built (ticket 32): a graph checkpoints after every node, and discards its
+  state when the task's parameters change, because a conclusion drawn without
+  the correlationId is not a conclusion about the request that has one.
+- **A task type without a graph is not a mistake.** It takes the deterministic
+  path — validate, ask for what is missing, park — which is all most types
+  need. Build a graph when there are steps worth skipping, not before.
 - **Nothing is sent by the caller that decided to send it.** An outbound
   message is a row; one loop delivers it. Approval is enforced as a predicate
   in the query that selects sendable rows, not as a check each caller must
   remember — see `_NEEDS_APPROVAL` in `friday/db.py`.
+- **Silence is not approval.** Only a classification the operator marked
+  *right* becomes a few-shot example, and only a classifiable type at that. An
+  unmarked classification is one nobody read.
 - **Agents never write long-term memory directly.** `remember()` writes to a
   staging tier that is never read back into a prompt; a promotion pass moves
   only what an approved outcome corroborates. A test fails if any module but
