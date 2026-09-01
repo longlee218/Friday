@@ -236,11 +236,9 @@ async def _run(stack: AsyncExitStack) -> None:
             "agent can reply, or it will answer itself"
         )
     log.info(
-        "watching %d channel(s) for %s | triage on %s via %s",
+        "watching %d channel(s) for %s",
         len(config.ingest.watched_channels),
         ", ".join(sorted(config.ingest.mention_types)),
-        triage_config.model,
-        triage_config.base_url,
     )
     for channel_id in sorted(config.ingest.watched_channels):
         log.info(

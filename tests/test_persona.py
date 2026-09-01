@@ -342,3 +342,48 @@ def test_no_agent_configuration_is_read_in_the_composition_root():
 
     for leak in ("config.agents", "options.get("):
         assert leak not in source, f"{leak!r} belongs in the module that owns it"
+
+
+def test_the_composition_root_can_actually_be_imported_and_read():
+    """`triage_config.model` survived a refactor that deleted
+    `triage_config`, so `run_agent.py` raised `NameError` at startup — after
+    connecting to Discord, before starting a single loop.
+
+    Nothing caught it: 580 tests passed, because no test imports the
+    composition root and no test runs it. This one at least reads every name
+    it uses and fails on one nothing defines.
+    """
+    import ast
+    import builtins
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "run_agent.py").read_text()
+    tree = ast.parse(source)
+
+    # Module-level dunders exist at run time without an assignment.
+    defined = set(dir(builtins)) | {"__file__", "__name__", "__doc__"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            defined.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defined.add(node.name)
+            defined.update(a.arg for a in node.args.args)
+            defined.update(a.arg for a in node.args.kwonlyargs)
+        elif isinstance(node, ast.ClassDef):
+            defined.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            defined.update((a.asname or a.name).split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            defined.add(node.name)
+        elif isinstance(node, ast.comprehension):
+            for target in ast.walk(node.target):
+                if isinstance(target, ast.Name):
+                    defined.add(target.id)
+
+    used = {
+        n.id
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+    }
+
+    assert used <= defined, f"run_agent.py uses undefined name(s): {used - defined}"

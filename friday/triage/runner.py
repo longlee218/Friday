@@ -77,6 +77,8 @@ class TriageRunner:
         if examples:
             log.info("triage: %d example(s) the operator vouched for", len(examples))
 
+        log.info("triage on %s via %s", settings.model, settings.base_url)
+
         sensitive = Sensitive(config.sensitive_words)
         if len(sensitive):
             log.info(
