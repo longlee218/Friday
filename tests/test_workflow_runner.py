@@ -101,7 +101,7 @@ class StubResponder:
         self.asked: list[str] = []
         self.given_params: list = []
 
-    async def draft(self, *, asking, params=None, context=(), tone=(), calls=None):
+    async def draft(self, *, asking, params=None, channel_id=None, context=(), tone=(), calls=None):
         from friday.responder import Draft
 
         self.asked.append(asking)

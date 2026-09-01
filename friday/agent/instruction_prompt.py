@@ -152,6 +152,25 @@ def base(now: datetime) -> Section:
     return Section("base", f"Today's date: {now.date().isoformat()}.")
 
 
+def channel_sections(ctx: ChannelContext | None) -> str:
+    """The room, rendered for whoever writes to a person in it.
+
+    All three layers, in precedence order, or nothing at all for a channel
+    with no file — which is the behaviour every channel had before this.
+    """
+    if ctx is None:
+        return ""
+    return "\n".join(
+        part
+        for part in (
+            channel_base(ctx).render(),
+            channel_derived(ctx).render(),
+            channel_overrides(ctx).render(),
+        )
+        if part
+    )
+
+
 def channel_base(ctx: ChannelContext | None) -> Section:
     """Operator-authored base file. Considered trusted — the operator
     wrote the file knowing what it means — so it does not escape."""

@@ -256,6 +256,7 @@ class WorkflowRunner:
         draft = await self._responder.draft(
             asking=template,
             params=_as_params(task),
+            channel_id=task.conversation.channel_id,
             context=await self._db.relevant_messages(task.conversation),
             tone=await self._db.tone_examples(limit=self._tone_examples),
         )

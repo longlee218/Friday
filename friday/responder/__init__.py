@@ -47,6 +47,9 @@ say what you will do next — you are asking a question, not making a promise.
 
 Sections named channel_overrides, channel_derived and channel_base describe the
 room you are writing in; where they disagree, that is their order of precedence.
+A `register` there says how this room is spoken in. A `people` map there names
+particular people and how to address each; it wins over the room's register for
+that person and nobody else.
 
 Do not address anyone by @-mention. The message is posted as a reply to
 theirs, so it is already attached to them.
@@ -63,7 +66,9 @@ class Draft:
 
 class Responder:
     @classmethod
-    def build(cls, config, *, notes: str = "", skills=None) -> "Responder | None":
+    def build(
+        cls, config, *, notes: str = "", skills=None, context_store=None
+    ) -> "Responder | None":
         """The responder, or None when it is off or unconfigured.
 
         `None` is a working state, not a failure: the workflow falls back to
@@ -76,6 +81,7 @@ class Responder:
             config=settings,
             notes=notes,
             skills=skills,
+            context_store=context_store,
             persona=(
                 config.persona.render(Family.RESPONDER)
                 if getattr(config, "persona", None)
@@ -96,7 +102,11 @@ class Responder:
         notes: str = "",
         skills=None,
         persona: str = "",
+        context_store=None,
     ) -> None:
+        #: Where the room's register lives. None means every channel writes
+        #: the way the persona alone says, which is what shipped before.
+        self._context = context_store
         #: How many of the operator's real messages to show as tone examples.
         #: The responder's knob, read where the responder is built — the
         #: workflow runner fetches them but has no opinion on how many.
@@ -120,6 +130,7 @@ class Responder:
         *,
         asking: str,
         params: "Params | None" = None,
+        channel_id: str | None = None,
         context: Sequence[InboundEvent] = (),
         tone: Sequence[InboundEvent] = (),
         calls: list | None = None,
@@ -143,14 +154,25 @@ class Responder:
         from friday.agent.instruction_prompt import (
             ContextBundle,
             base,
+            channel_base,
+            channel_derived,
+            channel_overrides,
             conversation,
             task,
             tone_examples,
         )
         from friday.agent.instruction_prompt import skills as skills_section
 
+        room = (
+            self._context.context(channel_id)
+            if self._context is not None and channel_id is not None
+            else None
+        )
         bundle = ContextBundle(
             base=base(datetime.now(timezone.utc)),
+            channel_base=channel_base(room),
+            channel_derived=channel_derived(room),
+            channel_overrides=channel_overrides(room),
             skills=skills_section(
                 self._skills.catalogue() if self._skills is not None else None
             ),

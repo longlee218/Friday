@@ -52,9 +52,11 @@ class ChannelContext:
 class ContextStore:
     @classmethod
     def build(cls, config) -> "ContextStore":
-        store = cls(config.context.directory)
+        store = cls(config.context.directory).hold_all()
         for problem in store.validate_all():
             log.warning("channel context file could not be read — %s", problem)
+        if store._held:
+            log.info("channel context for %d channel(s)", len(store._held))
         return store
 
     """One YAML file per channel, inheriting `base.yaml`.
@@ -68,6 +70,18 @@ class ContextStore:
 
     def __init__(self, directory: Path | str) -> None:
         self._dir = Path(directory)
+        #: Read once at startup, like everything else the operator writes.
+        #: Reading per message would be file I/O on the event loop; and two
+        #: rules for "when does my edit take effect" is one too many.
+        self._held: dict[str, ChannelContext] = {}
+
+    def hold_all(self) -> "ContextStore":
+        self._held = {c: self.load(c) for c in self.known_channels()}
+        return self
+
+    def context(self, channel_id: str) -> ChannelContext | None:
+        """The held context for a channel, or None if it has no file."""
+        return self._held.get(channel_id)
 
     def base(self) -> dict[str, Any]:
         return self._read(self._dir / BASE_NAME) or {}
@@ -101,6 +115,9 @@ class ContextStore:
         existing["derived"] = derived
         existing.setdefault("overrides", {})
         self._write(self.path_for(channel_id), existing)
+        # The writer refreshes what is held. The learned layer is the one part
+        # the operator does not write, so it must not wait for a restart.
+        self._held[channel_id] = self.load(channel_id)
 
     def known_channels(self) -> list[str]:
         """Channels with a file already — the set a rebuild considers."""

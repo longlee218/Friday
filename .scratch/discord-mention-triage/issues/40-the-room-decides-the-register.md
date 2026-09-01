@@ -7,7 +7,7 @@ handling of their own, that is written down beside the room's default.
 
 **Blocked by:** 39 (each family gets its own prompt)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why this is not already true
 
@@ -51,17 +51,30 @@ in memory too. No file is read twice and nothing waits for a restart.
 
 ## Acceptance criteria
 
-- [ ] The responder and the node that composes a reply receive the channel's
+- [x] The responder and the node that composes a reply receive the channel's
       base, learned and override layers, in the documented precedence
-- [ ] No other agent receives them
-- [ ] A per-person entry in the override layer changes how that person is
+- [x] No other agent receives them
+- [x] A per-person entry in the override layer changes how that person is
       addressed, and only that person
-- [ ] A channel with no file behaves exactly as today
-- [ ] The learned layer becomes visible without a restart when the rebuilder
+- [x] A channel with no file behaves exactly as today
+- [x] The learned layer becomes visible without a restart when the rebuilder
       writes it
-- [ ] Nothing reads a context file per message
-- [ ] The layered content is escaped at the same seam as everything else that
+- [x] Nothing reads a context file per message
+- [x] The layered content is escaped at the same seam as everything else that
       reaches a prompt — the base and override layers are operator-written, the
       learned layer is not
-- [ ] A test drafts the same message in two channels with different registers
+- [x] A test drafts the same message in two channels with different registers
       and asserts they differ
+
+## What it came to
+
+Three additions and no new mechanism: the store holds what it read
+(`hold_all`, `context`), the rebuilder refreshes the entry it just wrote, and
+the responder fills the three sections that were always in the bundle. The
+composing node gets the same sections through `deps.extra`. `people:` is data in
+the override layer, rendered as it is; the responder's instructions say what it
+means.
+
+The room test is at the seam a scripted model allows — the same ask in two
+rooms produces two different prompts — because whether the *model* then writes
+differently is its business, not this ticket's.

@@ -121,6 +121,7 @@ def register_dags(
     *,
     servers: dict[str, Any] | None = None,
     skills: Any = None,
+    context_store: Any = None,
 ) -> None:
     """Register every graph this build knows about.
 
@@ -158,7 +159,7 @@ def register_dags(
     # Stored for the runner to hand down through `DAGDeps`. Kept here rather
     # than closed over inside the graph so the graph stays testable without
     # either a model or a tool server.
-    DAG_DEPS_EXTRA["api_issue"] = agents
+    DAG_DEPS_EXTRA["api_issue"] = {**agents, "context_store": context_store}
     # Replaced, not merged. Merging means a second call — a test, a restart in
     # the same process — leaves the previous run's servers reachable, and a
     # closed connection that is still in the dict is worse than an absent one:

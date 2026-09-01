@@ -153,7 +153,10 @@ async def _run(stack: AsyncExitStack) -> None:
     from friday.dag.workflows import register_dags
 
     register_dags(
-        config, servers={s.name: s for s in servers}, skills=skills
+        config,
+        servers={s.name: s for s in servers},
+        skills=skills,
+        context_store=context_store,
     )
 
     promotion = Promotion(db=db)
@@ -161,7 +164,9 @@ async def _run(stack: AsyncExitStack) -> None:
     # rather than invalidating a warm prompt cache mid-run.
     learned = await promotion.render()
 
-    responder = Responder.build(config, notes=learned, skills=skills)
+    responder = Responder.build(
+        config, notes=learned, skills=skills, context_store=context_store
+    )
     workflows = WorkflowRunner.build(config, db=db, responder=responder)
     async def decided(*, task_id: int, approved: bool, by: str) -> None:
         """What a button press means.

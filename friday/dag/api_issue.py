@@ -235,7 +235,14 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
         said = f"{cause}" if not fix else f"{cause}\n\n{fix}"
         agent = deps.extra.get("compose_reply")
         if agent is not None:
-            written = await agent.run(said, extra_turns=2)
+            # Same family as the responder, same room. The register of the
+            # channel this goes back into is part of what to say.
+            from friday.agent.instruction_prompt import channel_sections
+
+            store = deps.extra.get("context_store")
+            room = store.context(deps.task.conversation.channel_id) if store else None
+            prompt = "\n".join(p for p in (channel_sections(room), said) if p)
+            written = await agent.run(prompt, extra_turns=2)
             if written is not None and (written.final_output or "").strip():
                 return Reply(written.final_output.strip())
         return Reply(said)
