@@ -348,3 +348,38 @@ async def test_every_type_the_classifier_can_produce_can_become_an_example(db, k
     )
 
     assert await db.confirmed_classifications() == [("some message", kind)]
+
+
+async def _confirmed(db, message_id: str, kind: str, text: str) -> None:
+    """Classified, and the operator saying that classification was right."""
+    await _classified(db, message_id, kind, text)
+    await db.record_verdict(
+        provider="fake", provider_message_id=message_id, mark="right", by="operator"
+    )
+
+
+async def test_one_afternoon_of_marking_skips_does_not_fill_every_slot(db):
+    """Marks arrive in bursts. An afternoon spent confirming that a noisy
+    channel is mostly `skip` is a realistic afternoon, and eight of eight
+    examples reading "this one is skip" teaches the classifier to skip."""
+    await _confirmed(db, "real", "api_issue", "checkout is 500ing")
+    for n in range(12):
+        await _confirmed(db, f"lunch{n}", "skip", f"anyone want lunch {n}")
+
+    examples = await db.confirmed_classifications(limit=4)
+
+    kinds = [kind for _, kind in examples]
+    assert "api_issue" in kinds, "the only positive example was crowded out"
+    assert len(examples) == 4
+
+
+async def test_balancing_does_not_invent_types_nobody_confirmed(db):
+    """Only what exists is shared out. One type marked means examples of one
+    type — this balances, it does not fabricate."""
+    for n in range(5):
+        await _confirmed(db, f"bug{n}", "api_issue", f"broken {n}")
+
+    examples = await db.confirmed_classifications(limit=3)
+
+    assert len(examples) == 3
+    assert {kind for _, kind in examples} == {"api_issue"}

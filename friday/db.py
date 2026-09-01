@@ -953,11 +953,17 @@ class Database:
     async def confirmed_classifications(
         self, *, limit: int = 20
     ) -> list[tuple[str, str]]:
-        """Message text and the type it was marked *right* as, newest first.
+        """Message text and the type it was marked *right* as.
 
         The join is the guarantee: only a classification the operator marked
         right appears here. One they never looked at is absent, and so cannot
         become an example the classifier learns its own habits from.
+
+        Balanced across types rather than purely newest-first. Marks arrive in
+        bursts — an afternoon spent confirming that a noisy channel is mostly
+        `skip` is a realistic afternoon — and eight of eight examples reading
+        "this one is skip" teaches the classifier to skip. Recency still
+        orders *within* a type; what is shared out is the eight slots.
         """
         async with self._sessions() as session:
             rows = await session.execute(
@@ -981,9 +987,11 @@ class Database:
                     schema.Message.decision_type.in_(CLASSIFIABLE),
                 )
                 .order_by(schema.Verdict.marked_at.desc())
-                .limit(limit)
+                # Deeper than `limit`, because the balancing below picks from
+                # this rather than taking it whole.
+                .limit(max(limit * 4, limit))
             )
-            return [(text, kind) for text, kind in rows]
+            return _balanced([(text, kind) for text, kind in rows], limit)
 
     # ---- workflow graph state -------------------------------------------
 
@@ -1153,3 +1161,28 @@ def _task(row: schema.Task) -> Task:
         params=row.params or {},
         created_at=row.created_at,
     )
+
+
+def _balanced(rows: list[tuple[str, str]], limit: int) -> list[tuple[str, str]]:
+    """Share the example slots out across the types, newest first within each.
+
+    Round-robin over the types present, taking the newest unused example of
+    each in turn. A type nobody has confirmed simply is not in the rotation —
+    this balances what exists rather than inventing what does not.
+
+    Order is not preserved overall, and does not need to be: these go into the
+    prompt as a set of labelled examples, not as a transcript.
+    """
+    by_type: dict[str, list[tuple[str, str]]] = {}
+    for row in rows:
+        by_type.setdefault(row[1], []).append(row)
+
+    taken: list[tuple[str, str]] = []
+    while len(taken) < limit and any(by_type.values()):
+        for remaining in by_type.values():
+            if not remaining:
+                continue
+            taken.append(remaining.pop(0))
+            if len(taken) == limit:
+                break
+    return taken

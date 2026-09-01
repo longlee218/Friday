@@ -29,3 +29,29 @@ marked *right* becomes an example. One that was never marked is one nobody read.
 - [x] Examples given to the classifier come only from ones marked right, never from ones merely unmarked
 - [x] The operator can supply examples by hand, and those are used whether or not anything has been marked
 - [x] Marking the same thing twice, or unmarking, leaves a sensible record rather than a duplicate
+
+## Review fixes (after QA)
+
+- **The feature was silently dead.** `on_reaction_add` only dispatches when
+  the message is still in the library's RAM cache — a deque filled solely by
+  live MESSAGE_CREATE, empty at every restart, and never touched by the REST
+  sweep. Verified in the vendored library
+  (`discord/state.py:2184-2194`): raw first, then `_get_message()`, and the
+  rich event only on a cache hit. So marking anything older than the last
+  restart did nothing, with no log and no error anywhere. Moved to
+  `on_raw_reaction_add` / `on_raw_reaction_remove`.
+- **Removing an old reaction deleted a newer mark.** ✅ then ❌ then removing
+  the ✅ left no verdict at all: Discord leaves both on the message, and
+  adding the new one before removing the old is the natural order to do it in.
+  The removal now only clears when the mark taken back is the one on record.
+- **`needs_human` leaked into the examples.** `mark_triaged` also records the
+  *state* a message ended in, and marking one of those right is a sensible
+  thing to do — it just must not teach the classifier a label it has no tool
+  for. `CLASSIFIABLE` is a closed set, not merely "not null".
+- **👍 and 👎 are gone.** A thumbs-up is the most ordinary reaction on
+  Discord, and every casual one landing on a classified message would quietly
+  become a training example — the exact thing this ticket exists to prevent.
+- **Eight of eight examples could all be `skip`.** Marks arrive in bursts, and
+  newest-first with a limit of eight makes an afternoon spent confirming a
+  noisy channel into a classifier that skips. The slots are now shared across
+  the types present; recency still orders within a type.
