@@ -16,9 +16,12 @@ one is wrong, raise it rather than quietly building something else.
 Work is broken into tickets under `.scratch/discord-mention-triage/issues/`,
 derived from `docs/SPEC.md`. Tickets 01–17 and 23–27 and 29–33 are done; 07
 was superseded and reopened as 28, and 28 is now retired in favour of 32 and
-33. **Open: 18–20** — the board's own repo and its UI, deferred by choice — **and
-34–36**, which came out of watching a real thread: the reporter replied to the
-agent's question, and nothing could hear the answer or explain the question. Each ticket names what blocks it; work the frontier.
+33. **Open: 18–20** — the board's own repo and its UI, deferred by choice — **35
+and 36**, and **37–41**. Everything from 34 on came out of watching real
+threads rather than reading code: the reporter replied and nothing could hear
+the answer, sent the details in a second message and nothing read it, asked
+what a correlationId is and nothing could explain, and the operator answered by
+hand while the agent went on asking. Each ticket names what blocks it; work the frontier.
 
 This line goes stale faster than anything else in this file. Check it against
 the `**Status:**` line in each ticket before trusting it.
