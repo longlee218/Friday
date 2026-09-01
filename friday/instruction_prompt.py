@@ -30,16 +30,14 @@ to read.
 from __future__ import annotations
 
 import html
+import json
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from friday.channel_context import ChannelContext, ContextStore
-from friday.conversation import ConversationId
-from friday.db import Database
+from friday.channel_context import ChannelContext
 from friday.models import InboundEvent, Params
-from friday.notes import Promotion
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +57,7 @@ class Section:
     body: str = ""
 
     def render(self) -> str:
-        if not self.body:
+        if not self.body or not self.body.strip():
             return ""
         return f"<{self.name}>\n{self.body}\n</{self.name}>\n"
 
@@ -244,14 +242,20 @@ def task(task_type: str, params: Params | None, action_hint: str | None) -> Sect
 
 
 def _render_yaml(d: dict[str, Any]) -> str:
-    """Render a dict as `key: value` lines.
+    """Render a dict as escaped JSON.
 
-    Deliberately dumb: tickets 24/25/26 do not exist yet, and the YAML
-    library is already imported elsewhere for the context files. The real
-    format is for ticket 27's full implementation to decide; for now
-    stable prefix comes from ordering, not from a fancy formatter.
+    JSON over YAML because: (a) every model is trained on it, (b)
+    `json.dumps` escapes `<` and `>` for free, (c) the format is stable
+    across Python versions. `ensure_ascii=False` keeps non-ASCII readable;
+    `sort_keys=True` makes the prefix stable so two calls with the same
+    data produce a byte-identical render.
     """
-    return "\n".join(f"{k}: {v!r}" for k, v in sorted(d.items()) if v is not None)
+    if not d:
+        return ""
+    return html.escape(
+        json.dumps(d, sort_keys=True, ensure_ascii=False, default=str),
+        quote=False,
+    )
 
 
 def _render_yaml_escaped(d: dict[str, Any]) -> str:
@@ -264,20 +268,16 @@ def _render_yaml_escaped(d: dict[str, Any]) -> str:
 
 
 def _render_params(params: Params) -> str:
-    """Render a frozen-slots Params dataclass as escaped `key: value` lines.
+    """Render a frozen-slots Params dataclass as escaped JSON.
 
     `asdict()` is the only way to read a slots-only frozen dataclass
-    without poking internals. Every value is escaped at the seam: the
-    LLM extractor fills these from the reporter's message, which is
+    without poking internals. The render itself goes through `_render_yaml`
+    so `<` and `>` are escaped at the seam — `summary` is
+    LLM-extracted from a Discord message, which makes it
     attacker-controlled.
     """
-    lines = []
-    for k in sorted(asdict(params).keys()):
-        v = getattr(params, k)
-        if v is None:
-            continue
-        lines.append(f"  {k}: {html.escape(str(v), quote=False)}")
-    return "\n".join(lines)
+    fields = {k: v for k, v in asdict(params).items() if v is not None}
+    return _render_yaml(fields)
 
 
 def _escape(text: str) -> str:

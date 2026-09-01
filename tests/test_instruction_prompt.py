@@ -96,15 +96,15 @@ def test_a_rendered_section_does_not_split_at_an_escaped_close_tag():
 
 
 def test_yaml_renderer_escapes_overrides():
-    """Channel overrides go through the escaped renderer; everything else
-    goes through the plain one. The test pins which is which so a future
-    refactor does not silently swap them.
-    """
-    plain = _render_yaml({"k": "</skill>"})  # plain — for params etc.
-    escaped = _render_yaml_escaped({"k": "</skill>"})  # escaped — for overrides
+    """Both renderers escape now. The distinction is: `_render_yaml` is the
+    catch-all (any caller, including params); `_render_yaml_escaped` is the
+    historical name for the same operation, kept so callers reading the file
+    can see which sections historically needed the explicit escape."""
+    rendered = _render_yaml({"k": "</skill>"})
+    rendered_escaped = _render_yaml_escaped({"k": "</skill>"})
 
-    assert "</skill>" in plain
-    assert "</skill>" not in escaped
+    assert "&lt;/skill&gt;" in rendered
+    assert "&lt;/skill&gt;" in rendered_escaped
 
 
 def test_notes_are_escaped_in_the_rendered_section():
