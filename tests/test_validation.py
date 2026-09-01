@@ -167,5 +167,67 @@ def test_validate_is_only_imported_from_one_module():
         capture_output=True, text=True,
     ).stdout.split()
 
+
+async def test_validate_is_only_imported_from_one_module():
+    """Ticket 30's seam guarantee. The whole point is one call site. A second
+    import is a test failure, not a documentation issue.
+
+    Covers three import shapes:
+      from friday.validation import ...
+      from friday import validation
+      import friday.validation
+    """
+    hits = subprocess.run(
+        ["grep", "-rlE", r"\bfriday\.validation\b", "friday/"],
+        capture_output=True, text=True,
+    ).stdout.split()
+
     allowed = {"friday/workflows/__init__.py"}
     assert set(hits) <= allowed, f"unexpected importer: {set(hits) - allowed}"
+
+
+async def test_an_invalid_value_never_reaches_a_planner_body():
+    """The acceptance that earns the seam its name. Register a planner that
+    records when it runs; pass params whose rule should fail; assert the
+    planner never saw the call.
+
+    Uses `_PLANNERS` directly because that is the registry plan() dispatches
+    through — testing it is testing the seam itself.
+    """
+    from friday.validation import Matches
+    from friday.workflows import (
+        PARAMS,
+        _PLANNERS,
+        plan,
+        plan_by_required_parameters,
+        planner,
+    )
+
+    @dataclass
+    class StrictParams:
+        cid: str
+        _RULES = {"cid": Matches(r"^[a-f0-9-]{36}$", name="uuid")}
+
+    called = []
+
+    PARAMS["strict_test_type"] = StrictParams
+
+    @planner("strict_test_type")
+    def strict_plan(params: StrictParams):
+        called.append(params)
+        return plan_by_required_parameters("strict_test_type", params)
+
+    try:
+        action = await plan(
+            "strict_test_type",
+            StrictParams(cid="not-a-uuid"),
+            agent=None,
+            planners=_PLANNERS,
+        )
+        assert not called, "planner ran with invalid params"
+        from friday.workflows import Ask
+        assert isinstance(action, Ask)
+        assert "uuid" in str(action.text)
+    finally:
+        _PLANNERS.pop("strict_test_type", None)
+        PARAMS.pop("strict_test_type", None)

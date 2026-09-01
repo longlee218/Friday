@@ -157,9 +157,17 @@ async def plan(
     per task type and on evidence. One that decides by branching is a pure
     function and stays one.
 
+    Validation runs first, before dispatch: a planner must not see a malformed
+    value, because every planner's correct behaviour for one is to ask again,
+    which is exactly what `_problems` does at the structural layer.
+
     `planners` overrides the registry, which is how a step is tried before it is
     registered and tested without reaching anything.
     """
+    problems = _problems(params)
+    if problems:
+        return Ask(_question(problems))
+
     if planners is not None and task_type in planners:
         # Adapted here rather than at registration, so trying a step out takes
         # exactly the shape it will finally be written in — sync or async, with
