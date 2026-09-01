@@ -591,7 +591,10 @@ async def test_state_from_a_different_graph_is_not_applied(db):
     Handing a rewritten graph its predecessor's results makes it skip nodes on
     the strength of work that was never done."""
     await db.save_dag_state(
-        1, dag_name="the_old_graph", results={"read_logs": "stale lines"}
+        1,
+        dag_name="the_old_graph",
+        results={"read_logs": "stale lines"},
+        params_fingerprint="same-inputs",
     )
 
     assert await db.load_dag_state(1, dag_name="the_new_graph") is None
@@ -758,3 +761,68 @@ def test_the_composition_root_registers_the_graphs():
 
     source = Path(__file__).resolve().parents[1] / "run_agent.py"
     assert "register_dags(" in source.read_text()
+
+
+async def test_a_second_pause_asks_a_second_question(db):
+    """The regression the fingerprint work created the conditions for.
+
+    The graph pauses, the operator is told. They answer, the parameters
+    change, the state is discarded, the graph re-runs — and pauses on
+    something else. Keyed on the fact of an announcement rather than on what
+    it said, that second question would be swallowed by the first one's row
+    and the task would sit in NEEDS_HUMAN with nobody told.
+    """
+    from friday.workflows.runner import WorkflowRunner
+    from tests.test_workflow_runner import make_task
+
+    asked: list[str] = []
+
+    async def stops(state: DAGState, deps: DAGDeps):
+        question = (
+            "which environment?"
+            if not deps.task.params.get("environment")
+            else "is this the production database or the replica?"
+        )
+        asked.append(question)
+        raise PauseForHuman(question, node="triage_it")
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag("api_issue", DAG(name="asks", nodes=(Node("triage_it", stops),)))
+    try:
+        task = await make_task(db, correlation_id="abcdef01-2345")
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+
+        await db.set_task_params(task.id, {**task.params, "environment": "prod"})
+        await db.move_task(task.id, "pending")
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+
+    told = [r.text for r in await db.outbound() if r.kind == "help_wanted"]
+    assert len(told) == 2, f"the second question never went out; asked {asked}"
+    assert "which environment" in told[0]
+    assert "replica" in told[1]
+
+
+async def test_the_same_question_is_not_asked_twice(db):
+    """The other half. A notification that repeats is one you learn to
+    ignore, and a task sitting untouched has nothing new to say."""
+    from friday.workflows.runner import WorkflowRunner
+    from tests.test_workflow_runner import make_task
+
+    async def stops(state: DAGState, deps: DAGDeps):
+        raise PauseForHuman("which environment?", node="triage_it")
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag("api_issue", DAG(name="asks", nodes=(Node("triage_it", stops),)))
+    try:
+        task = await make_task(db, correlation_id="abcdef01-2345")
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await db.move_task(task.id, "pending")
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+
+    told = [r.text for r in await db.outbound() if r.kind == "help_wanted"]
+    assert len(told) == 1

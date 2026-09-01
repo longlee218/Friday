@@ -157,3 +157,14 @@ Four defects the QA pass found, all now fixed with a test each:
   log server existed and then ran an agent with no tools, which can only
   invent the lines it was asked to look up. Each node's agent is now handed
   the server it needs, and only that one.
+
+## Second review pass
+
+- **Fenced JSON was not read as JSON.** ```` ```json {...} ``` ```` is the
+  most ordinary shape a model returns JSON in; unfenced, the whole blob failed
+  `startswith("{")`, became the `cause` verbatim, lost a genuine
+  `actionable: true` — so the fix edge was never taken — and was then proposed
+  as the reply to send under the operator's name.
+- **Which server a node needs was stated in two files.** `NODE_SERVERS` lives
+  beside the nodes now, and `dag/workflows.py` reads it. Adding a node used to
+  mean editing both, with nothing to catch the drift.

@@ -35,15 +35,6 @@ _API_ISSUE_AGENTS = {
 }
 
 
-#: Which tool server each node's agent needs handed to it. Without this the
-#: agent is asked to query logs with no log tool and can only invent them.
-_NODE_SERVERS = {
-    "read_logs": graph_names.LOKI,
-    "find_code_path": graph_names.SOURCE,
-    "fix_bug": graph_names.SOURCE,
-}
-
-
 def agents_for_api_issue(
     config: Any, skills: Any = None, servers: dict[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -81,7 +72,7 @@ def agents_for_api_issue(
             else []
         )
         wants_skills = bool(tools)
-        wanted = _NODE_SERVERS.get(node)
+        wanted = graph_names.NODE_SERVERS.get(node)
         mcp = [(servers or {})[wanted]] if wanted and wanted in (servers or {}) else []
         built[node] = Harness(
             config=agent_config,

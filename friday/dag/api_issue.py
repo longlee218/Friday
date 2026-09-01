@@ -39,6 +39,16 @@ log = logging.getLogger(__name__)
 LOKI = "loki"
 SOURCE = "source"
 
+#: Node -> the server it cannot work without. Read twice, from here both
+#: times: the node checks it before spending a model call, and
+#: `dag/workflows.py` reads it to hand the agent the server it will look for.
+#: Stated in two files, those two would drift and nothing would catch it.
+NODE_SERVERS = {
+    "read_logs": LOKI,
+    "find_code_path": SOURCE,
+    "fix_bug": SOURCE,
+}
+
 
 # --- instructions ----------------------------------------------------------
 
@@ -100,7 +110,7 @@ async def _read_logs(state: DAGState, deps: DAGDeps) -> str | None:
     if not (params.correlation_id or params.curl):
         return None  # nothing to look up by
     agent = deps.extra.get("read_logs")
-    if agent is None or LOKI not in deps.servers:
+    if agent is None or NODE_SERVERS["read_logs"] not in deps.servers:
         log.debug("api_issue: no log server configured, skipping read_logs")
         return None
 
@@ -120,7 +130,7 @@ async def _find_code_path(state: DAGState, deps: DAGDeps) -> str | None:
     if not isinstance(logs, str) or not logs:
         return None
     agent = deps.extra.get("find_code_path")
-    if agent is None or SOURCE not in deps.servers:
+    if agent is None or NODE_SERVERS["find_code_path"] not in deps.servers:
         return None
 
     result = await agent.run(logs)
@@ -182,7 +192,7 @@ async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | None:
         )
 
     agent = deps.extra.get("fix_bug")
-    if agent is None or SOURCE not in deps.servers:
+    if agent is None or NODE_SERVERS["fix_bug"] not in deps.servers:
         raise PauseForHuman(
             question=(
                 f"I found the cause but cannot change code from here. "
@@ -280,7 +290,7 @@ def _as_analysis(text: str) -> dict[str, Any]:
     """
     import json
 
-    stripped = text.strip()
+    stripped = _unfence(text.strip())
     if stripped.startswith("{"):
         try:
             data = json.loads(stripped)
@@ -294,6 +304,27 @@ def _as_analysis(text: str) -> dict[str, Any]:
                     "evidence": data.get("evidence") or [],
                 }
     return {"cause": stripped or None, "actionable": False, "evidence": []}
+
+
+def _unfence(text: str) -> str:
+    """Strip a Markdown code fence, if the answer arrived wearing one.
+
+    ```json {...} ``` is the most ordinary shape a model returns JSON in, and
+    without this the whole blob failed the `startswith("{")` check, became the
+    `cause` verbatim, and lost a genuine `actionable: true` on the way — so
+    the fix edge was never taken and the fenced text was proposed as the reply
+    to send under the operator's name.
+    """
+    if not text.startswith("```"):
+        return text
+    body = text[3:]
+    #: ```json / ```JSON / ``` — the language tag, if there is one.
+    if "\n" in body:
+        first, _, rest = body.partition("\n")
+        if not first.strip() or first.strip().isalpha():
+            body = rest
+    closing = body.rfind("```")
+    return (body[:closing] if closing != -1 else body).strip()
 
 
 def _is_yes(value: Any) -> bool:

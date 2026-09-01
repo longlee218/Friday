@@ -395,3 +395,49 @@ async def test_a_node_that_can_fetch_a_skill_has_room_to_answer_afterwards():
         DAGDeps(task=task, extra={"compose_reply": writer}),
     )
     assert writer.extra_turns == 2
+
+
+def test_fenced_json_is_read_as_json():
+    """```json {...} ``` is the most ordinary shape a model returns JSON in.
+    Unfenced, the whole blob became the `cause` verbatim and a genuine
+    `actionable: true` was lost — so the fix edge was never taken and the
+    fenced text was proposed as the reply to send under the operator's name."""
+    from friday.dag.api_issue import _as_analysis
+
+    analysis = _as_analysis(
+        '```json\n{"cause": "upstream timed out", "actionable": true}\n```'
+    )
+
+    assert analysis["cause"] == "upstream timed out"
+    assert analysis["actionable"] is True
+
+
+def test_a_fence_with_no_language_tag_is_read_too():
+    from friday.dag.api_issue import _as_analysis
+
+    assert _as_analysis('```\n{"cause": "x"}\n```')["cause"] == "x"
+
+
+def test_prose_is_still_prose():
+    """A model that ignored the format is still telling us something, and
+    `actionable` stays false because a shape we did not ask for is not
+    evidence of certainty."""
+    from friday.dag.api_issue import _as_analysis
+
+    analysis = _as_analysis("the upstream is down, I think")
+
+    assert analysis["cause"] == "the upstream is down, I think"
+    assert analysis["actionable"] is False
+
+
+def test_a_node_and_its_wiring_read_the_same_requirement():
+    """Which server a node needs was stated in two files. Adding a node meant
+    editing both, and nothing caught the drift."""
+    from friday.dag.api_issue import NODE_SERVERS
+    from friday.dag.workflows import agents_for_api_issue
+
+    built = agents_for_api_issue(_every_node_configured(), None, {"loki": object()})
+
+    for node, server in NODE_SERVERS.items():
+        wants_loki = server == "loki"
+        assert bool(built[node].agent.mcp_servers) is wants_loki, node

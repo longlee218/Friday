@@ -851,25 +851,58 @@ class Database:
                 update(schema.Task).where(schema.Task.id == task_id).values(**values)
             )
 
-    async def tasks_needing_announcement(
-        self, kind: str, *, state: str, limit: int = 20
-    ) -> list[Task]:
-        """Tasks in a state that nobody has been told about.
+    async def announced(self, kind: str, *, state: str, limit: int = 20) -> dict:
+        """What has already been said about each task in this state.
 
-        One anti-join rather than a count per task: the outbox row is already
+        Task id -> the set of texts already queued for it. The outbox row is
         the record of having said something, so asking it directly beats
         denormalising the same fact onto the task and keeping the two in step.
+
+        The *text*, not merely the fact of a row. "Told once, ever" is only
+        right while the message is the same message: a graph pauses with its
+        own question, and when the reporter answers it can pause on a
+        different one. A caller that asked only "was anything said?" would see
+        the first row and swallow the second question.
         """
-        told = select(schema.Outbound.task_id).where(
-            schema.Outbound.task_id == schema.Task.id,
-            schema.Outbound.kind == str(kind),
-        )
-        return await self._tasks(
-            select(schema.Task)
-            .where(schema.Task.state == str(state), ~told.exists())
-            .order_by(schema.Task.id)
-            .limit(limit)
-        )
+        async with self._sessions() as session:
+            rows = await session.execute(
+                select(schema.Outbound.task_id, schema.Outbound.text)
+                .join(schema.Task, schema.Task.id == schema.Outbound.task_id)
+                .where(
+                    schema.Task.state == str(state),
+                    schema.Outbound.kind == str(kind),
+                )
+                .limit(limit * 8)
+            )
+            said: dict[int, set[str]] = {}
+            for task_id, text in rows:
+                said.setdefault(task_id, set()).add(text)
+            return said
+
+    async def dag_pauses(self, task_ids: list[int]) -> dict:
+        """The node and question each of these tasks is paused on, if any.
+
+        In bulk, because the caller has a batch of tasks and asking per task
+        is how a poll that usually finds nothing costs twenty-one queries
+        every two seconds.
+        """
+        if not task_ids:
+            return {}
+        async with self._sessions() as session:
+            rows = await session.execute(
+                select(
+                    schema.DagState.task_id,
+                    schema.DagState.paused_at_node,
+                    schema.DagState.paused_question,
+                ).where(
+                    schema.DagState.task_id.in_(task_ids),
+                    schema.DagState.paused_at_node.is_not(None),
+                )
+            )
+            return {
+                task_id: (node, question or "")
+                for task_id, node, question in rows
+            }
 
     async def original_text_for(self, task_id: int) -> str | None:
         """The reporter's original message, for the workflow that opened this task.
@@ -1001,7 +1034,11 @@ class Database:
         *,
         dag_name: str,
         results: dict,
-        params_fingerprint: str = "",
+        #: Required, not defaulted. `_fingerprint` never returns "" — even for
+        #: no parameters at all — so an empty one is only what a caller who
+        #: forgot this argument writes, and writing it guarantees the next
+        #: load throws the state away.
+        params_fingerprint: str,
         paused_at_node: str | None = None,
         paused_question: str | None = None,
     ) -> None:

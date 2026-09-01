@@ -199,3 +199,19 @@ interaction shape — buttons, threaded replies — is out of scope for ticket 3
   the previous run's servers reachable, and a closed connection still in the
   dict is worse than an absent one: the node stops skipping and starts
   failing.
+
+## Second review pass
+
+- **The fingerprint work created the conditions for its own regression.**
+  Making a graph re-run when the parameters change makes re-runs common, and
+  `_raise_hands` was an anti-join on `(task_id, kind)` — "told once, ever",
+  which was right while the message was the task's type and parameters. It is
+  not once a graph pauses with its own question: pause with Q1, announce,
+  operator answers, state discarded, graph re-runs, pauses with Q2 — and the
+  first answer's outbox row swallows Q2, leaving the task in `NEEDS_HUMAN`
+  with nobody told. Keyed on the text now, in three queries regardless of
+  batch size.
+- **`save_dag_state(params_fingerprint="")` was a silent-data-loss default.**
+  `_fingerprint` never returns `""`, even for no parameters, so the default
+  was only reachable by a caller who forgot the argument — and writing it
+  guarantees the next load throws the state away. Required now.

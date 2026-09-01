@@ -243,24 +243,31 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     assert acted[0].state == "review"
 
 
-async def test_finding_what_to_announce_takes_one_query(db):
+async def test_announcing_costs_the_same_whether_there_are_five_tasks_or_one(db):
     """It ran a count per task, every two seconds, for something that almost
-    never has anything to do — twenty-one queries to usually find nothing."""
+    never has anything to do — twenty-one queries to usually find nothing.
+
+    Both the pause lookup and the already-said lookup are in bulk, so the
+    query count does not move with the batch."""
     queries: list[str] = []
-    original = db.tasks_needing_announcement
+    watched = ("tasks_in_state", "dag_pauses", "announced")
+    for name in watched:
+        original = getattr(db, name)
 
-    async def counted(*a, **kw):
-        queries.append("scan")
-        return await original(*a, **kw)
+        def counted(*a, _name=name, _original=original, **kw):
+            queries.append(_name)
+            return _original(*a, **kw)
 
-    db.tasks_needing_announcement = counted
+        setattr(db, name, counted)
+
     for _ in range(5):
         task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
         await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
     await WorkflowRunner(db=db, auto_ask=True).run_once()
 
-    assert len(queries) == 1
+    # One `tasks_in_state` for the pending sweep, one for the announcement.
+    assert queries == ["tasks_in_state", "tasks_in_state", "dag_pauses", "announced"]
     assert len(await db.outbound()) == 5
 
 

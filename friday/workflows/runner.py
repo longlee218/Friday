@@ -81,26 +81,41 @@ class WorkflowRunner:
         """Tell the operator about work nobody can act on.
 
         A task in a column nobody is watching is the same as a lost one. Told
-        once, because a notification that repeats is one you learn to ignore —
-        and the outbox row is itself the record of having told them, which is
-        why finding the untold ones is one anti-join rather than a count per
-        task on every poll.
+        once *per thing there is to say* — a notification that repeats is one
+        you learn to ignore, but a second, different question is not a repeat.
+
+        "Told once, ever" was right while the message was the task's type and
+        its parameters, which do not change while it sits there. It is not any
+        more: a graph pauses with its own question, and when the reporter
+        answers, the state is discarded, the graph re-runs, and it can pause
+        on a different one. Keyed on the fact of a row rather than on its
+        text, the second question would be swallowed by the first answer.
+
+        Three queries whatever the batch size, because this runs every two
+        seconds and usually has nothing to do.
         """
-        waiting = await self._db.tasks_needing_announcement(
+        tasks = await self._db.tasks_in_state(NEEDS_HUMAN, self._batch_size)
+        if not tasks:
+            return
+        pauses = await self._db.dag_pauses([task.id for task in tasks])
+        said = await self._db.announced(
             Kind.HELP_WANTED, state=NEEDS_HUMAN, limit=self._batch_size
         )
-        for task in waiting:
+
+        for task in tasks:
+            # A graph that stopped to ask something asked a *specific*
+            # question. Announcing only the task's type and parameters sends
+            # the operator to the board to find out what was actually wanted,
+            # which is the one thing this message exists to save them.
+            text = _stuck(task, pauses.get(task.id))
+            if text in said.get(task.id, ()):
+                continue
             await self._db.queue_outbound(
                 task_id=task.id,
                 conversation=task.conversation,
                 kind=Kind.HELP_WANTED,
                 sender=self._approver,
-                # A graph that stopped to ask something asked a *specific*
-                # question. Announcing only the task's type and parameters
-                # sends the operator to the board to find out what was
-                # actually wanted, which is the one thing this message exists
-                # to save them.
-                text=_stuck(task, await self._db.dag_pause(task.id)),
+                text=text,
             )
             log.info("task %d: asked the operator to look", task.id)
 
