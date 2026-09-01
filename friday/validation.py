@@ -4,8 +4,8 @@ A rule is a callable. `validate(params)` walks every rule registered on the
 params' class and returns the list of problems — empty if everything passes.
 
 Why a closed vocabulary of rules and not "any predicate"? Because a rule that
-also knows its own name and message is the one that survives being quoted back
-to the operator. A bare predicate only knows true/false; a rule knows "this
+also knows its own message is the one that survives being quoted back to the
+operator. A bare predicate only knows true/false; a rule knows "this
 correlation id is the wrong shape" and that is what the workflow turns into a
 question.
 """
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 
 __all__ = [
@@ -23,31 +23,23 @@ __all__ = [
     "NonEmpty",
     "OneOf",
     "Problem",
-    "Rule",
     "validate",
 ]
 
 
-class Rule(Protocol):
-    """Anything that says yes/no to a value, with a name and a failure message."""
-
-    @property
-    def name(self) -> str: ...
-
-    def check(self, value: Any) -> str | None:
-        """None if the value passes, a human-readable problem otherwise."""
-        ...
-
-
 @dataclass(frozen=True, slots=True)
 class Problem:
-    """One thing wrong with the params, addressable by field name."""
+    """One thing wrong with the params, addressable by field name.
+
+    `message` is empty when the field is missing entirely (structural); it
+    carries the rule's text when the field is present but wrong (semantic).
+    """
 
     field: str
-    message: str
+    message: str = ""
 
     def __str__(self) -> str:
-        return f"{self.field}: {self.message}"
+        return f"{self.field}: {self.message}" if self.message else self.field
 
 
 def validate(params: Any) -> list[Problem]:
@@ -95,7 +87,6 @@ class InSet:
     """The field must be one of a closed set. None passes."""
 
     values: frozenset[str]
-    name: str = "in set"
 
     def check(self, value: Any) -> str | None:
         if value is None:
@@ -109,8 +100,6 @@ class InSet:
 @dataclass(frozen=True, slots=True)
 class NonEmpty:
     """The field must be a non-empty string. None passes."""
-
-    name: str = "non-empty"
 
     def check(self, value: Any) -> str | None:
         if value is None:
@@ -129,11 +118,6 @@ class OneOf:
     """
 
     fields: tuple[str, ...]
-    name: str = "one of"
-
-    def check(self, value: Any) -> str | None:
-        # Per-field path is not meaningful; `validate` calls `check_params`.
-        return None
 
     def check_params(self, params: Any) -> str | None:
         if any(getattr(params, f, None) for f in self.fields):

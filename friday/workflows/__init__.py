@@ -189,16 +189,14 @@ def plan_by_required_parameters(task_type: str, params: Params) -> Action:
     return Ask(_question(problems))
 
 
-def _problems(params: Params) -> list[str]:
-    """What is wrong with the params, in the order the operator should hear it.
+def _problems(params: Params) -> list[Problem]:
+    """What is wrong with the params, structural first then semantic.
 
-    Merges the structural "is anything None that should not be" check with the
-    validation engine's "is anything there but wrong" check. Both run from this
-    one place, so no other module has to remember to call them.
+    Both run from this one place, so no other module has to remember to call
+    them. Returns `Problem` objects directly — the previous version stringified
+    and parsed back, which lost the structure the caller needs.
     """
-    return [f"{p.field}: {p.message}" for p in _missing(params)] + [
-        str(p) for p in validate(params)
-    ]
+    return [*_missing(params), *validate(params)]
 
 
 def _missing(params: Params) -> list[Problem]:
@@ -215,7 +213,7 @@ def _missing(params: Params) -> list[Problem]:
         if type(None) in get_args(hint)
     }
     return [
-        Problem(field=f.name, message="missing")
+        Problem(field=f.name)
         for f in fields(params)
         if f.name not in optional
         and f.name not in _MODEL_AUTHORED
@@ -223,23 +221,18 @@ def _missing(params: Params) -> list[Problem]:
     ]
 
 
-def _question(problems: list[str]) -> str:
+def _question(problems: list[Problem]) -> str:
     """Render the joined problems as one operator-facing question.
 
-    Each problem is `field: message` from either `_missing` or `validate`.
-    The field name drives which natural-language form we use; the message is
-    added when it carries information the form does not.
+    The field name drives which natural-language form to use; the message is
+    appended only when it carries information the form does not (i.e. when it
+    came from the validation engine, not the structural check).
     """
     parts: list[str] = []
     for problem in problems:
-        field, _, message = problem.partition(":")
-        field = field.strip()
-        message = message.strip()
-        asked_as = _ASKED_AS.get(field)
-        if asked_as is None:
-            asked_as = f"the {field.replace('_', ' ')}"
-        if message and message != "missing":
-            parts.append(f"{asked_as} ({message})")
+        asked_as = _ASKED_AS.get(problem.field, f"the {problem.field.replace('_', ' ')}")
+        if problem.message:
+            parts.append(f"{asked_as} ({problem.message})")
         else:
             parts.append(asked_as)
     return "Could you tell me " + " and ".join(parts) + "?"
