@@ -286,11 +286,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     from friday.config import AgentConfig
     from friday.domain.conversation import ConversationId
     from friday.dag.router import EDGE_ROUTER
-    from friday.extraction import (
-        _EXTRACTORS,
-        build_extractor,
-        extractor,
-    )
+    from friday.extraction import _EXTRACTORS, build_extractor
     from friday.agent.harness import Harness
     from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
 
@@ -323,7 +319,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
         harness=StubHarness(),  # type: ignore[arg-type]
         name="api_issue_ext",
     )
-    extractor("api_issue", ext)
+    _EXTRACTORS["api_issue"] = ext
     # Extraction happens inside `plan()`, on the deterministic path. The graph
     # reads the task's stored params directly, so this test is about the
     # extract-merge-validate pipeline and takes the path that has one.

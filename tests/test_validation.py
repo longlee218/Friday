@@ -254,14 +254,11 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
     records when it runs; pass params whose rule should fail; assert the
     planner never saw the call.
 
-    Driven through `plan` because that is the registry plan() dispatches
-    through — testing it is testing the seam itself.
+    Driven through the two calls `WorkflowRunner._plan` makes, in that order,
+    rather than through a wrapper only tests used.
     """
     from friday.domain.validation import Matches
-    from friday.workflows import (
-        PARAMS,
-        plan,
-    )
+    from friday.workflows import PARAMS, plan_by_required_parameters, prepare
 
     @dataclass
     class StrictParams:
@@ -271,7 +268,10 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
     PARAMS["strict_test_type"] = StrictParams
 
     try:
-        action = await plan("strict_test_type", StrictParams(cid="not-a-uuid"))
+        params, problem = await prepare(
+            "strict_test_type", StrictParams(cid="not-a-uuid")
+        )
+        action = problem or plan_by_required_parameters("strict_test_type", params)
         from friday.workflows import Ask
 
         assert isinstance(action, Ask), "a malformed value was accepted"

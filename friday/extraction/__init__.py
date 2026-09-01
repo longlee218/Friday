@@ -6,9 +6,9 @@ describes a field describes the rule for filling it. The model may
 hallucinate; that is the cost of LLM extraction, and ticket 30's validate
 engine catches what it gets wrong.
 
-Registered at import time, looked up by task type, called by `plan()`. No
-central list: adding an extractor is a block here, not a change to the
-composition root.
+Registered at startup by `register_extractors`, looked up by task type, and
+called by `prepare()` before any route is chosen. Adding one is an entry in
+`EXTRACTS` and a block in `config.yaml`, not a change to the composition root.
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ __all__ = ["Extractor", "build_extractor", "extract", "registered"]
 
 log = logging.getLogger(__name__)
 
-#: Task type -> extractor callable. Populated by `extractor(...)`; read by
-#: `plan()` between validate and dispatch.
+#: Task type -> the extractor that fills its parameters. Written by
+#: `register()`, read by `extract()` from inside `prepare()`.
 _EXTRACTORS: dict[str, "Extractor"] = {}
 
 
@@ -72,7 +72,7 @@ def build_extractor(
     """Wire a Harness to a Params class under a name.
 
     Use this when the extractor is built programmatically (e.g. from
-    `config.yaml`). The `@extractor(...)` decorator is the registration
+    `config.yaml`). `register(...)` is the registration
     shortcut.
 
     The `task_type` for which this extractor is registered must match
@@ -82,27 +82,6 @@ def build_extractor(
     misconfigured system fails to start rather than producing a wrong answer.
     """
     return Extractor(harness=harness, params_cls=params_cls, name=name)
-
-
-def extractor(task_type: str, ext: Extractor) -> Extractor:
-    """Register an Extractor for `task_type`.
-
-        @extractor("api_issue", Extractor(...))
-
-    Returns `ext` unchanged so it can sit at module top-level next to the
-    instance it registers. `build_extractor(...)` followed by this decorator is
-    the common shape:
-
-        @extractor("api_issue", build_extractor(
-            params_cls=ApiIssueParams, harness=harness, name="api_issue",
-        ))
-    """
-    if task_type in _EXTRACTORS:
-        raise ValueError(
-            f"extractor already registered for task type {task_type!r}"
-        )
-    _EXTRACTORS[task_type] = ext
-    return ext
 
 
 def registered() -> dict[str, Extractor]:

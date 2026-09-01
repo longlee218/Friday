@@ -16,7 +16,21 @@ from friday.dag.api_issue import _compose_reply
 from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
 from types import SimpleNamespace
 
-from friday.workflows import Ask, Park, plan, prepare
+from friday.workflows import Ask, Park, prepare
+
+
+async def _decide(task_type, params, *, text=None):
+    """The simple path, exactly as `WorkflowRunner._plan` walks it.
+
+    There was a `plan()` doing this, and every test here called it. Production
+    did not — `_plan` calls these two and routes to a graph in between — so a
+    convenience wrapper had become a second path that only tests took, which is
+    how five tests came to hold an unreachable branch elsewhere in this file.
+    """
+    from friday.workflows import plan_by_required_parameters, prepare
+
+    params, problem = await prepare(task_type, params, text=text)
+    return problem or plan_by_required_parameters(task_type, params)
 
 
 def params(**kw):
@@ -81,7 +95,7 @@ async def test_a_graph_that_found_nothing_parks_rather_than_asking_again():
 async def test_an_access_request_without_a_project_asks_for_one():
     """Same gap as api_issue had: a task that cannot be acted on has to say so,
     not sit in a queue nobody is watching."""
-    action = await plan(
+    action = await _decide(
         "access_request", AccessRequestParams(project="", permission="write",
                                               summary="needs access")
     )
@@ -91,7 +105,7 @@ async def test_an_access_request_without_a_project_asks_for_one():
 
 
 async def test_a_doc_question_without_a_question_asks_for_one():
-    action = await plan("doc_question", DocQuestionParams(question="", doc_ref=None))
+    action = await _decide("doc_question", DocQuestionParams(question="", doc_ref=None))
 
     assert isinstance(action, Ask)
 
@@ -99,7 +113,7 @@ async def test_a_doc_question_without_a_question_asks_for_one():
 async def test_an_optional_parameter_is_never_asked_for():
     """`doc_ref` is optional by its type. Asking for it would be asking for
     something we said we did not need."""
-    action = await plan("doc_question", DocQuestionParams(question="how does X work?",
+    action = await _decide("doc_question", DocQuestionParams(question="how does X work?",
                                                     doc_ref=None))
 
     assert isinstance(action, Park)
@@ -107,7 +121,7 @@ async def test_an_optional_parameter_is_never_asked_for():
 
 async def test_a_complete_request_parks_because_nothing_can_act_on_it_yet():
     """Nothing grants access. Parking is honest; asking again would not be."""
-    action = await plan(
+    action = await _decide(
         "access_request",
         AccessRequestParams(project="backend", permission="write", summary="s"),
     )
@@ -118,7 +132,7 @@ async def test_a_complete_request_parks_because_nothing_can_act_on_it_yet():
 async def test_the_summary_is_never_asked_for():
     """The model writes it. Asking the reporter for a summary of their own
     message is nonsense."""
-    action = await plan(
+    action = await _decide(
         "access_request", AccessRequestParams(project="backend",
                                               permission="write", summary="")
     )
@@ -135,7 +149,7 @@ async def test_api_issue_keeps_its_own_rule():
         curl=None,
     )
 
-    assert isinstance(await plan("api_issue", traceable), Park)
+    assert isinstance(await _decide("api_issue", traceable), Park)
 
 
 async def test_a_malformed_correlation_id_is_caught_by_the_rule():
@@ -147,7 +161,7 @@ async def test_a_malformed_correlation_id_is_caught_by_the_rule():
     wrong'."""
     bad = ApiIssueParams(summary="s", correlation_id="abc-123")
 
-    action = await plan("api_issue", bad)
+    action = await _decide("api_issue", bad)
 
     assert isinstance(action, Ask)
     assert "uuid" in action.text
@@ -160,7 +174,7 @@ async def test_a_type_with_no_graph_parks_once_it_has_what_it_needs():
     """The end of the simple path. Nothing here reaches a model: with every
     required parameter present there is no question left to ask, and parking
     is what "a human takes it from here" looks like."""
-    action = await plan(
+    action = await _decide(
         "api_issue",
         ApiIssueParams(
             summary="s", correlation_id="abcdef01-2345-6789-abcd-ef0123456789"

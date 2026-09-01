@@ -39,7 +39,7 @@ __all__ = [
     "PARAMS",
     "Park",
     "Reply",
-    "plan",
+    "plan_by_required_parameters",
     "prepare",
 ]
 
@@ -131,21 +131,6 @@ async def prepare(
 
     problems = _problems(params)
     return params, Ask(_question(problems)) if problems else None
-
-
-async def plan(
-    task_type: str,
-    params: Params,
-    *,
-    text: str | None = None,
-) -> Action:
-    """The whole of the simple path, for a task type with no graph.
-
-    A type that needs more than one decision gets a graph (`friday/dag/`), and
-    the runner routes to that after `prepare` and instead of this.
-    """
-    params, problem = await prepare(task_type, params, text=text)
-    return problem or plan_by_required_parameters(task_type, params)
 
 
 def plan_by_required_parameters(task_type: str, params: Params) -> Action:
@@ -257,5 +242,4 @@ def _question(problems: list[Problem]) -> str:
     return "Could you tell me " + " and ".join(parts) + "?"
 
 
-#: Rebuilding a task's stored parameters as the type that declares which of
-#: them are required.
+

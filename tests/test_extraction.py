@@ -19,7 +19,6 @@ from friday.extraction import (
     _parse,
     build_extractor,
     extract,
-    extractor,
     registered,
 )
 from friday.domain.validation import Matches
@@ -64,7 +63,7 @@ def test_extractor_decorator_registers_under_task_type():
         harness=StubHarness(),  # type: ignore[arg-type]
         name="fake_test_type_31",
     )
-    extractor("fake_test_type_31", ext)
+    _install("fake_test_type_31", ext)
 
     try:
         assert "fake_test_type_31" in registered()
@@ -72,37 +71,34 @@ def test_extractor_decorator_registers_under_task_type():
         registered().pop("fake_test_type_31", None)
 
 
-def test_extractor_decorator_rejects_double_registration():
-    @dataclass
-    class FakeParams:
-        x: Optional[str] = None
+def test_registering_twice_replaces_rather_than_raises():
+    """`extractor()` refused a duplicate. `register()` — the path the
+    composition root takes — does not, and could not: it may run twice in one
+    process, and the second run has to replace the first.
 
-    class StubHarness:
+    The guard was real behaviour that only tests could reach, and the test that
+    held it was the only reason anyone would think the live path had it.
+    """
+    from dataclasses import dataclass
+
+    @dataclass
+    class Fake:
+        environment: Optional[str] = None
+
+    class Silent:
         async def run(self, *a, **kw):
             return None
 
-    ext = build_extractor(
-        params_cls=FakeParams,
-        harness=StubHarness(),  # type: ignore[arg-type]
-        name="first",
-    )
-    extractor("duplicate_test_type_31", ext)
+    ext = build_extractor(params_cls=Fake, harness=Silent(), name="second")
+    _install("replaced_test_31", ext)
 
     try:
-        with pytest.raises(ValueError, match="already registered"):
-            extractor(
-                "duplicate_test_type_31",
-                build_extractor(
-                    params_cls=FakeParams,
-                    harness=StubHarness(),  # type: ignore[arg-type]
-                    name="second",
-                ),
-            )
+        _install("replaced_test_31", ext)
+        assert registered()["replaced_test_31"] is ext
     finally:
-        registered().pop("duplicate_test_type_31", None)
+        from friday.extraction import _EXTRACTORS
 
-
-# --- end-to-end with a scripted model ---------------------------------
+        _EXTRACTORS.pop("replaced_test_31", None)
 
 
 def test_an_extractor_returns_a_params_instance_filled_from_model_output():
@@ -127,7 +123,7 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
     ext = build_extractor(
         params_cls=ParamsWithRules, harness=StubHarness(), name="stub"  # type: ignore[arg-type]
     )
-    extractor("stub_test_31", ext)
+    _install("stub_test_31", ext)
 
     try:
         result = asyncio.run(extract("stub_test_31", "the api is wrong"))
@@ -151,7 +147,7 @@ def test_an_extractor_returns_none_when_harness_fails():
     ext = build_extractor(
         params_cls=Params, harness=FailingHarness(), name="fail"  # type: ignore[arg-type]
     )
-    extractor("failing_test_31", ext)
+    _install("failing_test_31", ext)
 
     try:
         result = asyncio.run(extract("failing_test_31", "x"))
@@ -175,7 +171,7 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
     ext = build_extractor(
         params_cls=StrictParams, harness=StubHarness(), name="bad"  # type: ignore[arg-type]
     )
-    extractor("bad_output_test_31", ext)
+    _install("bad_output_test_31", ext)
 
     try:
         # Output is not JSON and has no key:value lines, so _parse returns {}.
@@ -245,3 +241,18 @@ def test_values_are_trimmed():
     assert _hygiene(DocQuestionParams("  is it optional?  ")).question == (
         "is it optional?"
     )
+
+
+def _install(task_type, ext):
+    """Put an extractor in the registry, the way `register()` does.
+
+    There was an `extractor(task_type, ext)` in the module for this — called by
+    nothing but these tests, documented as a decorator, and shaped like a
+    function. It also refused a duplicate, a policy `register()` does not share
+    and could not: the composition root may run twice in one process, and the
+    second run has to replace the first rather than raise.
+    """
+    from friday.extraction import _EXTRACTORS
+
+    _EXTRACTORS[task_type] = ext
+
