@@ -6,7 +6,7 @@ fills in. Neither does the other's job.
 
 **Blocked by:** 30
 
-**Status:** ready-for-agent
+**Status:** done
 
 Today two things share `friday/triage`:
 

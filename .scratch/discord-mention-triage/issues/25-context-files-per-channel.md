@@ -6,7 +6,7 @@ it has learned, without either overwriting the other.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 Two kinds of knowledge share one file, and the split has to be visible in it. The
 **derived** part is written by the machine from what it has learned and is safe to

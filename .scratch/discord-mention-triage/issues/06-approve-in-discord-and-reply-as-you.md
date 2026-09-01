@@ -13,7 +13,11 @@ ticket that writes to a channel anyone else can see.
 - [x] Rejecting returns the task for human input instead of posting
 - [x] The approval card is itself an outbound row, so a card that fails to send is visible rather than leaving the task waiting for a decision nobody was asked for
 - [x] The reply action refuses to run when the task has not been approved, regardless of which node calls it
-- [ ] That refusal is returned to the caller as an ordinary result the model can respond to, not raised as an error
+- [~] *Obsolete.* That refusal is returned to the caller as an ordinary result the
+  model can respond to, not raised as an error — written when the reply action was a
+  `post_reply()` tool the model called. Ticket 12 replaced that with an outbound row
+  and a predicate in `sendable_outbound`'s query, so there is no caller to refuse:
+  an unapproved reply is simply not selected. The criterion has no subject any more.
 - [x] Who approved and when is recorded against the task
 - [x] The approval prompt reaches the human without requiring the application identity to be present in the watched channels
 

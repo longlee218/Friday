@@ -6,7 +6,7 @@ not from the domain dataclass.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 Today two things decide whether a task is actionable, in two different places,
 with two different ideas of what "missing" means.

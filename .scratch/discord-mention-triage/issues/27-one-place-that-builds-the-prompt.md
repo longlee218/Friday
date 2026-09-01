@@ -5,7 +5,7 @@ adding a source of knowledge means changing one place rather than every agent.
 
 **Blocked by:** 24, 25, 26
 
-**Status:** ready-for-agent
+**Status:** done
 
 There are now several things an agent might need: who it is, what is true of this
 channel, what has been learned, which skills exist, and what the conversation has

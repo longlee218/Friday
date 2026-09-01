@@ -6,7 +6,7 @@ place knows which library runs a model.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 The SDK is in this project for speed, not for keeps. That is a decision, and it only
 holds if the seam is real: four modules import `agents` today, and the fourth is the
