@@ -415,3 +415,46 @@ async def test_a_reply_to_someone_else_is_still_out_of_scope(provider, db, confi
 
     assert kept is None
     assert inbox.dropped == {"does not address the account": 1}
+
+
+async def test_a_reply_we_accepted_actually_reaches_the_queue(db, provider, config):
+    """Two halves of one decision, and they disagreed.
+
+    The inbox lets a reply-to-us through, and `untriaged_mentions` then asked
+    the same question a second way — `mention_type IS NOT NULL` — and threw it
+    away. The message was accepted, stored as work, and never queued: the
+    agent asked, the reporter answered, and the answer sat in the table.
+    """
+    from friday.outbox import Kind
+
+    row = await db.queue_outbound(
+        task_id=None,
+        conversation=ConversationId("fake", "watched"),
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="cho anh xin cái correlationId nhé",
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id="ours-1")
+    inbox = Inbox(provider=provider, db=db, config=config)
+
+    await inbox._handle(
+        make_event(
+            message_id="their-reply",
+            text="đây a: abcdef01-2345-6789-abcd-ef0123456789",
+            mention_type=None,
+            reply_to="ours-1",
+        )
+    )
+
+    queued = [e.provider_message_id for e in await db.untriaged_mentions()]
+    assert "their-reply" in queued
+
+
+async def test_context_is_still_never_queued(db, provider, config):
+    """`context_only` stamps `triaged_at` on the way in, which is the whole of
+    what keeps the seeded history out of the queue."""
+    inbox = Inbox(provider=provider, db=db, config=config)
+
+    await inbox._handle(make_event(message_id="chatter", mention_type=None))
+
+    assert await db.untriaged_mentions() == []

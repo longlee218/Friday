@@ -250,17 +250,25 @@ class Database:
         )
 
     async def untriaged_mentions(self, limit: int = 50) -> list[InboundEvent]:
-        """The queue: mentions nobody has looked at, oldest first.
+        """The queue: work nobody has looked at, oldest first.
 
         Context shares the table but is never classified — the queue is a
-        `WHERE` clause, not a second table.
+        `WHERE` clause, not a second table. `context_only` stamps `triaged_at`
+        on the way in, so that one column carries the whole answer.
+
+        It used to say `mention_type IS NOT NULL` as well, which was the same
+        question asked a second way and by a worse proxy. The two agreed until
+        a reply to one of our own messages became work: it addresses us and
+        mentions nobody, so the inbox let it in and this threw it away. The
+        agent asked a question, the reporter answered, and the answer sat in
+        the table having been accepted and never queued.
+
+        The inbox decides what is work. This reads that decision; it does not
+        take it again.
         """
         return await self._events(
             select(schema.Message)
-            .where(
-                schema.Message.mention_type.is_not(None),
-                schema.Message.triaged_at.is_(None),
-            )
+            .where(schema.Message.triaged_at.is_(None))
             .order_by(schema.Message.created_at)
             .limit(limit)
         )
