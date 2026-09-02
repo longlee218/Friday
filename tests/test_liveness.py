@@ -81,13 +81,18 @@ async def test_the_daily_summary_survives_a_restart(db):
 
 
 async def test_a_new_day_is_summarised_again(db):
-    from datetime import datetime, timezone
+    """Relative to the real clock, not fixed dates: the outbox stamps rows
+    with real time, so a hard-coded "yesterday" becomes "today" the moment the
+    calendar catches up — this test failed for exactly that reason the day
+    after it was written."""
+    from datetime import datetime, timedelta, timezone
 
     from friday.ops.liveness import Liveness
     from friday.outbox import Kind
 
+    today_noon = datetime.now(timezone.utc).replace(hour=12)
     liveness = Liveness(db=db, gateway=SimpleNamespace(down_since=None))
-    await liveness._summary(datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc))
-    await liveness._summary(datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc))
+    await liveness._summary(today_noon)
+    await liveness._summary(today_noon + timedelta(days=1))
 
     assert len([r for r in await db.outbound() if r.kind == Kind.SUMMARY]) == 2

@@ -14,7 +14,10 @@ from friday.agent.skills import Skill, SkillLibrary
 
 
 def write(directory, name: str, text: str) -> None:
-    (directory / name).write_text(text, encoding="utf-8")
+    """One skill, in the directory convention: `<name>/SKILL.md`."""
+    stem = name.removesuffix(".md")
+    (directory / stem).mkdir(parents=True, exist_ok=True)
+    (directory / stem / "SKILL.md").write_text(text, encoding="utf-8")
 
 
 SKILL = """---
@@ -30,7 +33,7 @@ Query the log store for the id, over the last hour.
 
 
 def test_a_skill_is_one_file_and_needs_no_list_edited(tmp_path):
-    write(tmp_path, "trace.md", SKILL)
+    write(tmp_path, "trace-a-request", SKILL)
 
     library = SkillLibrary(tmp_path).load()
 
@@ -39,7 +42,7 @@ def test_a_skill_is_one_file_and_needs_no_list_edited(tmp_path):
 
 
 def test_a_second_file_appears_without_touching_the_first(tmp_path):
-    write(tmp_path, "trace.md", SKILL)
+    write(tmp_path, "trace-a-request", SKILL)
     write(
         tmp_path,
         "voice.md",
@@ -61,7 +64,7 @@ def test_a_directory_that_does_not_exist_is_not_an_error(tmp_path):
 
 def test_files_that_are_not_markdown_are_left_alone(tmp_path):
     write(tmp_path, "notes.txt", "not a skill")
-    write(tmp_path, "trace.md", SKILL)
+    write(tmp_path, "trace-a-request", SKILL)
 
     library = SkillLibrary(tmp_path).load()
 
@@ -74,7 +77,7 @@ def test_files_that_are_not_markdown_are_left_alone(tmp_path):
 def test_the_catalogue_carries_the_description_not_the_body(tmp_path):
     """The whole point. A hundred descriptions is a page; a hundred bodies is
     a context window."""
-    write(tmp_path, "trace.md", SKILL)
+    write(tmp_path, "trace-a-request", SKILL)
 
     (line,) = SkillLibrary(tmp_path).load().catalogue()
 
@@ -105,7 +108,7 @@ def test_the_catalogue_grows_with_the_number_of_skills_not_their_length(tmp_path
 
 
 def test_fetching_a_skill_returns_the_body(tmp_path):
-    write(tmp_path, "trace.md", SKILL)
+    write(tmp_path, "trace-a-request", SKILL)
 
     body = SkillLibrary(tmp_path).load().fetch("trace-a-request")
 
@@ -116,7 +119,7 @@ def test_fetching_one_that_does_not_exist_is_an_answer_not_an_error(tmp_path):
     """An agent that guessed at a name made an ordinary mistake. Ending the
     run turns a recoverable wrong guess into a task for a person; the useful
     answer is the list of names it could have used."""
-    write(tmp_path, "trace.md", SKILL)
+    write(tmp_path, "trace-a-request", SKILL)
 
     answer = SkillLibrary(tmp_path).load().fetch("trce-a-reqest")
 
@@ -155,13 +158,13 @@ def test_a_malformed_file_is_reported_by_name_rather_than_failing_later(
 
     assert len(library) == 0
     assert len(library.problems) == 1
-    assert "broken.md" in library.problems[0]
+    assert "broken/SKILL.md" in library.problems[0]
     assert expected in library.problems[0]
 
 
 def test_one_bad_file_does_not_hide_the_good_ones(tmp_path):
     write(tmp_path, "broken.md", "no frontmatter")
-    write(tmp_path, "trace.md", SKILL)
+    write(tmp_path, "trace-a-request", SKILL)
 
     library = SkillLibrary(tmp_path).load()
 
@@ -169,24 +172,27 @@ def test_one_bad_file_does_not_hide_the_good_ones(tmp_path):
     assert len(library.problems) == 1
 
 
-def test_two_files_claiming_one_name_is_reported(tmp_path):
-    """Silently letting the second win is how "why is it reading the old
-    one?" happens a week later."""
-    write(tmp_path, "a.md", SKILL)
-    write(tmp_path, "b.md", SKILL)
+def test_a_frontmatter_disagreeing_with_its_directory_is_reported(tmp_path):
+    """The catalogue advertises one name and `fetch` would know another; an
+    agent following the catalogue exactly still guesses wrong. Two names for
+    one skill is the directory-era shape of the old duplicate-name problem."""
+    write(tmp_path, "trace-a-request", SKILL)
+    write(tmp_path, "impostor", SKILL)  # frontmatter still says trace-a-request
 
     library = SkillLibrary(tmp_path).load()
 
     assert len(library) == 1
-    assert "already defined" in library.problems[0]
+    assert "must match" in library.problems[0]
 
 
 def test_reloading_replaces_rather_than_accumulates(tmp_path):
     library = SkillLibrary(tmp_path)
-    write(tmp_path, "trace.md", SKILL)
+    write(tmp_path, "trace-a-request", SKILL)
     library.load()
 
-    (tmp_path / "trace.md").unlink()
+    import shutil
+
+    shutil.rmtree(tmp_path / "trace-a-request")
     library.load()
 
     assert len(library) == 0
@@ -212,7 +218,7 @@ def test_the_tool_is_bound_to_one_library(tmp_path):
     """What an agent can reach is composition, not something it declares."""
     from friday.agent.skills import fetch_skill_tool
 
-    write(tmp_path, "trace.md", SKILL)
+    write(tmp_path, "trace-a-request", SKILL)
     tool = fetch_skill_tool(SkillLibrary(tmp_path).load())
 
     assert tool.name == "fetch_skill"
@@ -224,7 +230,7 @@ def test_the_tool_is_bound_to_one_library(tmp_path):
 
 
 def _library(tmp_path):
-    write(tmp_path, "trace.md", SKILL)
+    write(tmp_path, "trace-a-request", SKILL)
     return SkillLibrary(tmp_path).load()
 
 
@@ -310,7 +316,8 @@ def test_only_the_reasoning_nodes_of_a_graph_get_skills(tmp_path):
 def test_a_file_saved_with_a_byte_order_mark_still_loads(tmp_path):
     """UTF-8 with a BOM is what Notepad writes by default. Rejecting it tells
     the operator their file has no frontmatter while they are looking at it."""
-    (tmp_path / "bom.md").write_text(
+    (tmp_path / "traced").mkdir()
+    (tmp_path / "traced" / "SKILL.md").write_text(
         "---\nname: traced\ndescription: how to trace\n---\n\nBody.",
         encoding="utf-8-sig",
     )
@@ -326,13 +333,15 @@ def test_something_unreadable_is_reported_rather_than_crashing_startup(tmp_path)
     """A directory named `*.md` raises `IsADirectoryError`, which is an
     `OSError` and not a `ValueError`. It used to reach the composition root
     and stop the process from starting."""
-    (tmp_path / "adir.md").mkdir()
-    (tmp_path / "fine.md").write_text("---\nname: fine\ndescription: d\n---\nB")
+    unreadable = tmp_path / "adir" / "SKILL.md"
+    unreadable.parent.mkdir()
+    unreadable.mkdir()  # a *directory* named SKILL.md: read_text raises OSError
+    write(tmp_path, "fine", "---\nname: fine\ndescription: d\n---\nB")
 
     library = SkillLibrary(tmp_path).load()
 
     assert len(library.problems) == 1
-    assert "adir.md" in library.problems[0]
+    assert "adir/SKILL.md" in library.problems[0]
     assert "fine" in library, "one bad file stopped the good ones loading"
 
 
@@ -361,3 +370,60 @@ def test_the_responder_is_told_not_to_invent_a_location():
     from friday.responder import INSTRUCTIONS
 
     assert "If no skill covers it, ask plainly and add nothing" in INSTRUCTIONS
+
+
+# --- the third step of disclosure: files inside a skill -----------------------
+
+
+BIG_SKILL = """---
+name: deploy
+description: How to deploy
+---
+
+Steps are short. For rollback, see [rollback.md](rollback.md).
+"""
+
+
+def test_a_skill_with_more_files_announces_them(tmp_path):
+    """Disclosure has three steps — catalogue, body, then the file the body
+    points at — and the second step has to name the third or the agent cannot
+    take it."""
+    write(tmp_path, "deploy", BIG_SKILL)
+    (tmp_path / "deploy" / "rollback.md").write_text("Rollback: revert the tag.")
+
+    library = SkillLibrary(tmp_path).load()
+
+    body = library.fetch("deploy")
+    assert "fetch by name: deploy/rollback.md" in body
+    assert library.fetch("deploy/rollback.md") == "Rollback: revert the tag."
+
+
+def test_a_skill_with_one_file_stays_one_fetch(tmp_path):
+    write(tmp_path, "trace-a-request", SKILL)
+
+    assert "fetch by name" not in SkillLibrary(tmp_path).load().fetch("trace-a-request")
+
+
+def test_a_path_that_was_not_catalogued_is_not_served(tmp_path):
+    """Files are read at load and served from memory, so a fabricated path —
+    `deploy/../../.env` — is unservable by construction: there is no filesystem
+    lookup at fetch time to traverse."""
+    write(tmp_path, "deploy", BIG_SKILL)
+    (tmp_path.parent / "secret.md").write_text("credentials")
+
+    library = SkillLibrary(tmp_path).load()
+
+    answer = library.fetch("deploy/../secret.md")
+    assert "credentials" not in answer
+    assert "no file" in answer
+
+
+def test_the_old_flat_layout_is_reported_not_ignored(tmp_path):
+    """A skill quietly skipped because it predates the directory convention is
+    the same silence as an unreadable one."""
+    (tmp_path / "trace.md").write_text(SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert len(library) == 0
+    assert "move this to trace/SKILL.md" in library.problems[0]
