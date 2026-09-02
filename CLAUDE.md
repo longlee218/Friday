@@ -124,6 +124,7 @@ What is actually on disk.
 | `init_channel.py` | One-off: create a channel's context file for the operator to fill in |
 | `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, each agent's persona mode, and the sensitive words that keep a message away from the model |
 | `PERSONA.md` | Who every agent is, before it is told its job. Prose, read once at startup, prepended to each agent's instructions |
+| `prompts/` | Every agent's instructions, one file per prompt — the wording is editable prose, the JSON keys and section names inside are contracts with parsers. `README.md` there is the one file never sent to a model |
 | `friday/config.py` | Loads `config.yaml`, resolves `${VAR}`, stamps each `AgentConfig` with its persona. Outside the packages because it is read before any of them |
 | **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `tasks.py` (`TaskState` and its legal transitions), `validation.py` (the rule engine, one call site) |
 | **`friday/store/`** | `schema.py` holds the mapped classes, `db.py` is the only store and converts at the edge — nothing above it knows SQLAlchemy exists |

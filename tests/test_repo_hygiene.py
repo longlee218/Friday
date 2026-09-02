@@ -175,3 +175,29 @@ def test_prompt_escaping_happens_at_one_seam():
     ).stdout.split()
 
     assert set(hits) <= allowed, f"a second escaping seam: {set(hits) - allowed}"
+
+
+def test_every_prompt_file_is_loaded_by_something():
+    """Prompt texts live in `prompts/` and code loads each by name. A file
+    nobody loads is a prompt somebody will edit and wait forever for the
+    change to show — the exact failure moving them out of the code was meant
+    to end. README.md is the one file meant for people, never for models."""
+    from pathlib import Path
+
+    # importing the four families loads every prompt they use
+    import friday.dag.api_issue  # noqa: F401
+    import friday.extraction  # noqa: F401
+    import friday.responder  # noqa: F401
+    import friday.triage  # noqa: F401
+    from friday.agent.prompts import _DIR, loaded
+
+    on_disk = {
+        str(p.relative_to(_DIR).with_suffix(""))
+        for p in Path(_DIR).rglob("*.md")
+        if p.name != "README.md"
+    }
+
+    assert on_disk == set(loaded()), (
+        f"orphaned prompt files: {on_disk - set(loaded())}; "
+        f"loaded from nowhere: {set(loaded()) - on_disk}"
+    )

@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from friday.agent.prompts import prompt
 from friday.dag import DAG, DAGDeps, DAGState, Edge, Node
 from friday.dag.pause import PauseForHuman
 from friday.domain.models import ApiIssueParams
@@ -55,48 +56,16 @@ NODE_SERVERS = {
 
 # --- instructions ----------------------------------------------------------
 
-READ_LOGS = """You look up log lines for one request.
+READ_LOGS = prompt("dag/read_logs")
 
-You are given a correlation id and an environment. Use the log tools to find
-the lines for that request in the last hour. Return the lines verbatim, oldest
-first. If you find nothing, say exactly: NO LOGS."""
+FIND_CODE = prompt("dag/find_code_path")
 
-FIND_CODE = """You locate the code a stack trace points at.
+ANALYZE = prompt("dag/analyze_stack")
 
-You are given log lines containing a stack trace. Use the file tools to find
-the file and line the topmost application frame refers to — not the framework
-frames. Return `path:line` and the surrounding ten lines. If the trace names
-no file you can find, say exactly: NOT FOUND."""
-
-ANALYZE = """You explain why one request failed.
-
-You are given log lines and, when it could be found, the code they point at.
-Answer in JSON with exactly these keys:
-  cause       — one sentence, what went wrong
-  actionable  — true only if the fix is obvious from what you were shown
-  evidence    — the specific log lines or code lines that show it
-
-Set actionable to false when you are guessing. A wrong "true" here spends a
-code change on a guess."""
-
-FIX = """You apply one small, obvious fix.
-
-You are given a cause and the code it points at. Make the smallest change
-that addresses that cause and nothing else. Return the diff you applied.
-
-Refuse, by saying exactly CANNOT FIX and why, when: the change would touch a
-test, a migration, a schema, or anything holding a credential; the fix is not
-obvious from what you were shown; or it would take more than a few lines.
-Refusing costs a question. Guessing costs a wrong change in someone's
-repository."""
+FIX = prompt("dag/fix_bug")
 
 
-COMPOSE = """You write the reply to whoever reported this.
-
-You are given whatever the investigation found. Write what you would tell a
-colleague: what happened, what you did, what you need from them. Be brief.
-Do not invent a cause the evidence does not show — if the investigation found
-nothing, ask for what would let you look."""
+COMPOSE = prompt("dag/compose_reply")
 
 
 # --- the nodes -------------------------------------------------------------

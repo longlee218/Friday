@@ -18,6 +18,7 @@ import re
 from dataclasses import fields
 from typing import Any
 
+from friday.agent.prompts import prompt
 from friday.agent.harness import Harness
 from friday.domain.models import Params
 
@@ -127,23 +128,7 @@ async def extract(task_type: str, text: str) -> Params | None:
 
 #: Instructions shared by every extraction agent. The schema and the text vary
 #: per call; the rule about not inventing is constant.
-EXTRACTION_INSTRUCTIONS = """You fill structured fields from what someone wrote.
-
-You are shown the field schema — the names and what each one is for — and
-everything the reporter has said about this, oldest first. The answer to a
-question they were asked is in there as an ordinary later message, so read all
-of it, not only the first line.
-
-For every field, copy the matching value verbatim. Pass null when the value is
-genuinely absent — never invent one, and never paraphrase a field that asks for
-a literal value. A wrong correlationId sends someone looking through the wrong
-request; a null one costs a question.
-
-You are the only thing that reads this message for what it contains. Nothing
-produced these fields before you and nothing corrects them after, except a
-check that a value you did supply has the right shape.
-
-Reply in JSON only, with the schema fields as keys."""
+EXTRACTION_INSTRUCTIONS = prompt("extractor")
 
 
 def register(task_type: str, params_cls: type[Params], config: "AgentConfig") -> None:  # type: ignore[name-defined]  # noqa: F821
