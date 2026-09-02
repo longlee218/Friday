@@ -272,7 +272,7 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
             "strict_test_type", StrictParams(cid="not-a-uuid")
         )
         action = problem or plan_by_required_parameters("strict_test_type", params)
-        from friday.workflows import Ask
+        from friday.domain.actions import Ask
 
         assert isinstance(action, Ask), "a malformed value was accepted"
         assert "uuid" in str(action.text)

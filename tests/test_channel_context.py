@@ -15,7 +15,7 @@ from friday.config import AgentConfig
 from friday.domain.conversation import ConversationId
 from friday.ops.liveness import Heartbeat
 from friday.memory.notes import Promotion
-from friday.domain.tasks import TaskState
+from friday.domain.states import TaskState
 from tests.conftest import make_event
 
 SUMMARY_CONFIG = AgentConfig(

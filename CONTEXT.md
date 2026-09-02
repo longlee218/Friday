@@ -245,7 +245,7 @@ The **kind** decides whether it needs approval:
 ## Outbound state
 
 Where an outbound row is in its life: `queued`, `sent`, `failed`,
-`sent_manually`. One definition, in `friday/domain/tasks.py` beside
+`sent_manually`. One definition, in `friday/domain/states.py` beside
 `TaskState`, because it was two: the outbox held the set for its readers and
 the store held it for its `WHERE` clauses. Two of the outbox's four had no
 reader left by the time anyone looked — which is what a duplicated vocabulary

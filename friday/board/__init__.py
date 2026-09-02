@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse
 
 from friday.store.db import Database
 from friday.outbox import FAILED, QUEUED
-from friday.domain.tasks import TaskState
+from friday.domain.states import TaskState
 
 __all__ = ["build_board"]
 

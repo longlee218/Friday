@@ -17,7 +17,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 from friday.store.db import Database
-from friday.domain.tasks import TaskState
+from friday.domain.states import TaskState
 from friday.domain.models import InboundEvent, Task
 from friday.triage import Decided, NeedsHuman, TriageOutcome
 

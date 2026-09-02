@@ -29,7 +29,7 @@ from friday.store.db import Database
 from friday.domain.models import InboundEvent, Outbound, Task
 from friday.outbox import FAILED
 from friday.ops.redact import scrub
-from friday.domain.tasks import TaskState
+from friday.domain.states import TaskState
 
 log = logging.getLogger(__name__)
 

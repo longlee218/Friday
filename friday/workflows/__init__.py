@@ -11,15 +11,17 @@ and ticket 33 emptied it: `api_issue` was its only entry and became a graph.
 A dispatcher with nothing to dispatch to is not extensibility, it is a second
 way to do what the graphs already do, so it is gone.
 
-`Ask`, `Reply` and `Park` stay: they are the vocabulary every path speaks,
-graphs included.
+`Ask`, `Reply` and `Park` live in `friday.domain.actions` — they are the
+vocabulary every path speaks, graphs included, so neither this module nor the
+graph engine defines them.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import fields
 from typing import get_args, get_type_hints
 
+from friday.domain.actions import Action, Ask, Park, Reply
 from friday.domain.models import (
     AccessRequestParams,
     ApiIssueParams,
@@ -42,35 +44,6 @@ __all__ = [
     "plan_by_required_parameters",
     "prepare",
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class Ask:
-    """Ask the reporter for something. The text is ready to send."""
-
-    text: str
-
-
-@dataclass(frozen=True, slots=True)
-class Reply:
-    """An answer. Unlike an `Ask`, this waits for approval.
-
-    The asymmetry is the point: asking for a correlationId costs a question if
-    it is wrong, and asserting a cause costs the operator's credibility with
-    their own team.
-    """
-
-    text: str
-
-
-@dataclass(frozen=True, slots=True)
-class Park:
-    """Nothing can be done automatically. A human picks it up."""
-
-    reason: str
-
-
-Action = Ask | Reply | Park
 
 
 PARAMS: dict[str, type] = {

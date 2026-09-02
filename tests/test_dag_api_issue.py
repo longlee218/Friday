@@ -15,7 +15,7 @@ import pytest
 from friday.dag import DAGDeps, DAGRunner, DAGState
 from friday.dag.api_issue import build_api_issue_dag
 from friday.dag.pause import PauseForHuman
-from friday.workflows import Ask, Park, Reply
+from friday.domain.actions import Ask, Park, Reply
 
 LOGS = "12:00:01 ERROR checkout.py:42 upstream timed out"
 UUID = "abcdef01-2345-6789-abcd-ef0123456789"

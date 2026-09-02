@@ -365,7 +365,7 @@ def test_a_task_type_with_no_dag_is_not_an_error():
 async def test_a_registered_dag_runs_instead_of_the_planner(db):
     """The route ticket 32 buys: a task type with a DAG goes to the graph,
     and the graph's Action is what the runner acts on."""
-    from friday.workflows import Reply
+    from friday.domain.actions import Reply
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 
@@ -389,7 +389,7 @@ async def test_a_registered_dag_runs_instead_of_the_planner(db):
 async def test_the_dag_state_is_persisted_between_passes(db):
     """Checkpoint through the real store: the second pass must not re-run a
     node the first pass finished."""
-    from friday.workflows import Park
+    from friday.domain.actions import Park
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 
@@ -487,7 +487,7 @@ async def test_a_bookkeeping_node_declared_last_does_not_discard_the_reply():
     audit line or a cleanup still decided something, and answering from the
     node tuple instead of the path throws that decision away — then parks
     with a reason that is not true."""
-    from friday.workflows import Reply
+    from friday.domain.actions import Reply
     from friday.workflows.runner import WorkflowRunner
 
     async def compose(s, d):
@@ -512,7 +512,7 @@ async def test_a_bookkeeping_node_declared_last_does_not_discard_the_reply():
 async def test_a_node_returning_none_after_the_decision_does_not_discard_it():
     """`None` means "nothing to record", which the node docstring encourages.
     It must not also mean "forget what the graph decided"."""
-    from friday.workflows import Reply
+    from friday.domain.actions import Reply
     from friday.workflows.runner import WorkflowRunner
 
     async def compose(s, d):
@@ -535,7 +535,7 @@ async def test_a_node_returning_none_after_the_decision_does_not_discard_it():
 async def test_the_trail_records_resumed_nodes_too():
     """A resumed run must be able to answer "what did this decide?" the same
     way a fresh one does, even though it re-ran nothing."""
-    from friday.workflows import Reply
+    from friday.domain.actions import Reply
     from friday.workflows.runner import WorkflowRunner
 
     async def compose(s, d):
@@ -617,7 +617,7 @@ async def test_answering_the_question_re_runs_the_nodes_that_asked_it(db):
     reads that state back, sees `read_logs` is done, and parks having read no
     logs at all: the system asked a question, got the answer, and ignored it.
     """
-    from friday.workflows import Ask, Park
+    from friday.domain.actions import Ask, Park
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 
@@ -669,7 +669,7 @@ async def test_state_survives_a_pass_that_changed_nothing(db):
     useless — every resume would re-run every node and the checkpoint would
     buy nothing.
     """
-    from friday.workflows import Park
+    from friday.domain.actions import Park
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 

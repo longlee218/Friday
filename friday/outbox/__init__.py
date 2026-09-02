@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 
 from friday.domain.models import Outbound
-from friday.domain.tasks import OutboundState, TaskState
+from friday.domain.states import OutboundState, TaskState
 
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN
 

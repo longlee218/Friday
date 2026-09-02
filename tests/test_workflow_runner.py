@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from conftest import make_event
 from friday.domain.conversation import ConversationId
 from friday.workflows.runner import ASKED, WorkflowRunner
-from friday.domain.tasks import TaskState
+from friday.domain.states import TaskState
 
 
 
@@ -203,7 +203,7 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     out under their name."""
     from friday.dag import DAG, Node
     from friday.dag.router import EDGE_ROUTER, register_dag
-    from friday.workflows import Reply
+    from friday.domain.actions import Reply
 
     async def answers(state, deps):
         return Reply("cache đầy thôi, anh clear rồi nhé")
@@ -501,7 +501,7 @@ async def _operator_said(db, message_id, text, *, reply_to=None, secs=10, author
 async def test_the_operator_answering_closes_the_task_and_withdraws_the_draft(db):
     """A `reply` waits for approval with no expiry. Without this, approving it
     two days later sends an answer that stopped being true when they typed."""
-    from friday.domain.tasks import OutboundState, TaskState
+    from friday.domain.states import OutboundState, TaskState
     from friday.outbox import Kind
 
     task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
@@ -560,7 +560,7 @@ async def test_with_several_open_tasks_and_no_reply_nothing_closes(db):
 async def test_a_reply_picks_the_task_out_of_several(db):
     """Their reply names what it answers — the reporter's message, which is
     linked to a task."""
-    from friday.domain.tasks import TaskState
+    from friday.domain.states import TaskState
 
     a = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     b = await make_task(db, curl="curl -X GET /pay")
@@ -578,7 +578,7 @@ async def test_a_reply_picks_the_task_out_of_several(db):
 async def test_a_handled_task_can_be_reopened_by_a_person(db):
     """Closing on "they said something in this channel" will sometimes be
     wrong, so it cannot be terminal."""
-    from friday.domain.tasks import TaskState
+    from friday.domain.states import TaskState
 
     task = await make_task(db)
     await db.move_task(task.id, TaskState.HANDLED_BY_OPERATOR)

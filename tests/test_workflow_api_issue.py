@@ -16,7 +16,8 @@ from friday.dag.api_issue import _compose_reply
 from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
 from types import SimpleNamespace
 
-from friday.workflows import Ask, Park, prepare
+from friday.domain.actions import Ask, Park
+from friday.workflows import prepare
 
 
 async def _decide(task_type, params, *, text=None):

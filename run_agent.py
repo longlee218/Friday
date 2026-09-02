@@ -28,7 +28,7 @@ from friday.providers.discord.user import DiscordUserProvider
 from friday.providers.discord.bot import DiscordBot
 from friday.responder import Responder
 from friday.agent.skills import SkillLibrary
-from friday.domain.tasks import TaskState
+from friday.domain.states import TaskState
 from friday.triage.runner import TriageRunner
 from friday.workflows.runner import WorkflowRunner
 

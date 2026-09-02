@@ -13,7 +13,7 @@ from conftest import captured, make_event
 from friday.board import build_board
 from friday.domain.conversation import ConversationId
 from friday.outbox import Kind
-from friday.domain.tasks import TaskState
+from friday.domain.states import TaskState
 
 WATCHED = ConversationId("fake", "watched")
 

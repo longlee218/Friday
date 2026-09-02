@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from friday.domain.conversation import ConversationId
 from friday.memory.notes import Promotion
-from friday.domain.tasks import TaskState
+from friday.domain.states import TaskState
 
 WATCHED = ConversationId("fake", "watched")
 

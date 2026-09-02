@@ -36,7 +36,7 @@ from sqlalchemy.pool import StaticPool
 
 from friday.store import schema
 from friday.domain.conversation import ConversationId
-from friday.domain.tasks import OutboundState
+from friday.domain.states import OutboundState
 from friday.domain.models import (
     InboundEvent,
     MentionType,
@@ -47,7 +47,7 @@ from friday.domain.models import (
     Task,
 )
 from friday.ops.redact import scrub
-from friday.domain.tasks import OPEN, IllegalTransition, TaskState, may_move
+from friday.domain.states import OPEN, IllegalTransition, TaskState, may_move
 
 __all__ = ["Database"]
 

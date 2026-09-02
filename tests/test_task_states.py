@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from friday.domain.conversation import ConversationId
-from friday.domain.tasks import IllegalTransition, TaskState, may_move
+from friday.domain.states import IllegalTransition, TaskState, may_move
 
 WATCHED = ConversationId("fake", "watched")
 

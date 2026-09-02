@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from friday.domain.conversation import ConversationId
 from friday.triage import Decided, NeedsHuman
 from friday.triage.runner import TriageRunner
-from friday.domain.tasks import TaskState
+from friday.domain.states import TaskState
 
 
 class StubTriage:

@@ -11,7 +11,7 @@ import pytest
 
 from friday.domain.conversation import ConversationId
 from friday.memory.observations import Category, remember_tool
-from friday.domain.tasks import TaskState
+from friday.domain.states import TaskState
 
 WATCHED = ConversationId("fake", "watched")
 

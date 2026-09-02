@@ -121,7 +121,7 @@ def test_an_outbound_state_is_defined_once():
     twice. Two of the outbox's four had no reader left by the time anyone
     looked, which is what a duplicated vocabulary looks like as it rots: one
     copy stops being used and nothing says so."""
-    from friday.domain.tasks import OutboundState
+    from friday.domain.states import OutboundState
     from friday.outbox import FAILED, QUEUED
     from friday.store.db import (
         OUTBOUND_FAILED,
@@ -200,3 +200,19 @@ def test_no_family_imports_another_familys_prompt_module():
                 text=True,
             ).stdout.strip()
             assert not hits, f"{family} imports {other}: {hits}"
+
+
+def test_the_graph_engine_and_the_loop_do_not_import_each_other_for_vocabulary():
+    """`Ask`, `Reply` and `Park` used to be defined in `friday/workflows/`, and
+    `friday/dag/` imported them from there — the graph engine reaching into the
+    loop for words that belong to neither. They live in
+    `friday.domain.actions` now; this pins the cycle staying gone rather than
+    quietly growing back the day someone needs one more shared name."""
+    import subprocess
+
+    hits = subprocess.run(
+        ["grep", "-rl", "--include=*.py", "friday.workflows import", "friday/dag"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert not hits, f"friday/dag imports friday.workflows for vocabulary: {hits}"
