@@ -8,14 +8,14 @@ import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from friday.dag import DAGDeps, DAGRunner, DAGState, PauseForHuman
+from friday.dag import DAGDeps, DAGRunner, DAGState
 from friday.dag.router import dag_for
 from friday.store.db import Database
 from friday.domain.actions import Action, Ask, Park, Reply
 from friday.domain.states import TaskState
 from friday.domain.models import Task
 from friday.outbox import Kind
-from friday.workflows import PARAMS, plan_by_required_parameters, prepare
+from friday.workflows import PARAMS
 
 __all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "REVIEW", "WorkflowRunner"]
 
@@ -277,58 +277,23 @@ class WorkflowRunner:
         return not named and not await self._db.has_exchanged_with(author_id)
 
     async def _plan(self, task: Task) -> Action:
-        """Route to a graph if this type has one; fill in, check, then route
-        by required parameters if it does not.
-
-        A graph type's own entry node fills in and checks — see `_run_dag` —
-        so this only does it for the type that has no graph to do it inside.
-        Extraction still runs before validation on the deterministic path:
-        validation is what stops a hallucinated field from being believed, so
-        it has to see what the extractor produced and not only what triage
-        wrote.
-        """
+        """Route to this type's graph. Every classifiable type has one — see
+        `register_dags` — so there is no second way to decide what to do with
+        a task any more."""
         params_type = PARAMS.get(task.type)
         if params_type is None:
             return Park(f"unknown task type {task.type!r}")
 
         try:
-            params = params_type(**task.params)
+            params_type(**task.params)
         except TypeError as exc:
             # Stored parameters that no longer fit their type — a schema change
             # landing on rows written before it. Work, not a crash.
             return Park(f"cannot read {task.type} parameters: {exc}")
 
         dag = dag_for(task.type)
-        if dag is not None:
-            return await self._run_dag(dag, task)
-
-        params, problem = await prepare(
-            task.type, params, text=await self._db.original_text_for(task.id)
-        )
-        task = await self._remember(task, params)
-        if problem is not None:
-            return problem
-        return plan_by_required_parameters(task.type, params)
-
-    async def _remember(self, task: Task, params) -> Task:
-        """Write back what extraction filled in, if it filled anything in.
-
-        Persisted rather than recomputed, for three reasons that all point the
-        same way. The graph reads `task.params` and would otherwise never see
-        the extracted fields. The board shows what the system believes, and
-        that should be what it acted on. And the graph's state is keyed on a
-        fingerprint of these parameters — recomputing them from the model on
-        every poll would let a differently-worded extraction throw away a
-        run's work for no reason.
-        """
-        from dataclasses import asdict, replace
-
-        filled = {**task.params, **asdict(params)}
-        if filled == task.params:
-            return task
-        await self._db.set_task_params(task.id, filled)
-        log.info("task %d: parameters filled in from the original message", task.id)
-        return replace(task, params=filled)
+        assert dag is not None, f"{task.type!r} is in PARAMS but has no registered graph"
+        return await self._run_dag(dag, task)
 
     async def _run_dag(self, dag, task: Task) -> Action:
         """Run the graph registered for this task type.
@@ -338,14 +303,15 @@ class WorkflowRunner:
         load state *by* until node 0 has produced one, and it must run on
         every pass regardless of what is stored, because there may be a new
         message since the last one. If it says the report cannot be worked
-        with, the graph never starts — same as today's deterministic path,
-        and there is nothing to check a fingerprint against yet either.
+        with, the graph never starts.
 
         Past that, the runner records each remaining node before starting the
         next, so a crash mid-graph resumes here rather than starting over. A
-        node that cannot decide raises `PauseForHuman`; that becomes a `Park`
-        carrying the question, which `_raise_hands` puts in front of the
-        operator.
+        node that cannot decide returns an `Ask` or `Park` like any node
+        deciding the graph's answer; when that is how the run ends, which
+        node said so and what it said are saved alongside the checkpoint, so
+        `_raise_hands` can put the specific question in front of the operator
+        rather than the task's bare type and parameters.
         """
         from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
 
@@ -358,28 +324,23 @@ class WorkflowRunner:
 
         try:
             prepared = await dag.node(dag.entry).run(DAGState.empty(), deps)
-        except PauseForHuman as pause:
-            # Node 0 asking to stop is not the ordinary case — the real
-            # `prepare` never does — but a synthetic or future graph's entry
-            # node might, and it gets the same treatment as any other node's
-            # pause. Nothing was written back, so the fingerprint to save
-            # against is whatever is already stored — the same one
-            # `_raise_hands` computes to find this row again.
-            await self._db.save_dag_state(
-                task.id,
-                dag_name=dag.name,
-                results={},
-                params_fingerprint=_fingerprint(task.params),
-                paused_at_node=pause.node or dag.entry,
-                paused_question=str(pause),
-            )
-            log.info("task %d: %s paused at %s — %s", task.id, dag.name, dag.entry, pause)
-            return Park(str(pause))
         except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
             log.warning("task %d: %s's %s failed — %s", task.id, dag.name, dag.entry, exc)
             return Park(f"{dag.name} failed: {exc}")
 
         if isinstance(prepared, (Ask, Reply, Park)):
+            if isinstance(prepared, Park):
+                # Node 0 deciding the answer is not special — a one-node
+                # graph's only node is node 0 — so it gets the same
+                # pause-recording treatment as any later node's `Park` does.
+                await self._record_pause(
+                    task.id,
+                    dag,
+                    results={},
+                    fingerprint=_fingerprint(task.params),
+                    node=dag.entry,
+                    park=prepared,
+                )
             return prepared
 
         fingerprint = _fingerprint(_prepare_material(prepared))
@@ -401,47 +362,54 @@ class WorkflowRunner:
 
         try:
             final = await runner.run()
-        except PauseForHuman as pause:
-            await self._db.save_dag_state(
-                task.id,
-                dag_name=dag.name,
-                results=_checkpointable(runner.state, dag),
-                params_fingerprint=fingerprint,
-                # The node, not the graph. The trail's last entry is the node
-                # that was running when it raised — appended before the node
-                # runs, precisely so a pause can be attributed.
-                paused_at_node=pause.node
-                or (runner.trail[-1] if runner.trail else dag.name),
-                paused_question=str(pause),
-            )
-            log.info("task %d: %s paused — %s", task.id, dag.name, pause)
-            return Park(str(pause))
         except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
             log.warning("task %d: %s failed — %s", task.id, dag.name, exc)
             return Park(f"{dag.name} failed: {exc}")
 
-        return self._outcome(dag, final, runner.trail)
+        outcome = self._outcome(dag, final, runner.trail)
+        if isinstance(outcome, Park):
+            # The run ended here rather than deciding something to send — an
+            # `Ask`/`Reply` is still headed for the reporter or the outbox, so
+            # only a `Park` is "stuck" in the sense the operator needs the
+            # specific reason for. One more save alongside the ordinary
+            # checkpoint the last node already wrote, so `_raise_hands` reads
+            # this run's actual reason rather than the task's bare type.
+            await self._record_pause(
+                task.id,
+                dag,
+                results=_checkpointable(final, dag),
+                fingerprint=fingerprint,
+                node=_last_action_node(final, runner.trail) or dag.name,
+                park=outcome,
+            )
+        return outcome
+
+    async def _record_pause(
+        self, task_id: int, dag, *, results: dict, fingerprint: str, node: str, park: Park
+    ) -> None:
+        """A run ended on a `Park`: save which node said so and what it said,
+        alongside the state so far, so `_raise_hands` can read this run's
+        actual reason rather than the task's bare type and parameters."""
+        await self._db.save_dag_state(
+            task_id,
+            dag_name=dag.name,
+            results=results,
+            params_fingerprint=fingerprint,
+            paused_at_node=node,
+            paused_question=park.reason,
+        )
 
     @staticmethod
     def _outcome(dag, final: DAGState, trail: list[str]) -> Action:
         """What the graph decided, as an action.
 
-        Read backwards along the path the run actually took, not along the
-        order the nodes were declared in. A graph often ends with bookkeeping
-        — an audit line, a cleanup — declared after the node that decides, and
-        letting declaration order answer means that bookkeeping silently
-        discards the reply.
-
         A graph that walked its whole path without producing an `Action` has
         not said what to send, and parking is the honest answer. Inventing a
         reply out of a value the graph never meant as one is not.
         """
-        for name in reversed(trail):
-            if not final.has(name):
-                continue
-            result = final[name]
-            if isinstance(result, (Ask, Reply, Park)):
-                return result
+        node = _last_action_node(final, trail)
+        if node is not None:
+            return final[node]
         return Park(f"{dag.name} finished without deciding what to send")
 
     async def _move(self, task: Task, state: str) -> Task:
@@ -480,6 +448,20 @@ def _prepare_material(prepared) -> dict:
     if isinstance(prepared, dict):
         return prepared
     return {"value": prepared}
+
+
+def _last_action_node(final: DAGState, trail: list[str]) -> str | None:
+    """Which node in the trail produced the graph's `Action`, reading
+    backwards along the path the run actually took rather than the order the
+    nodes were declared in. A graph often ends with bookkeeping — an audit
+    line, a cleanup — declared after the node that decides, and letting
+    declaration order answer means that bookkeeping silently discards the
+    reply. `None` if no node on the trail produced one at all.
+    """
+    for name in reversed(trail):
+        if final.has(name) and isinstance(final[name], (Ask, Reply, Park)):
+            return name
+    return None
 
 
 def _checkpointable(state: DAGState, dag) -> dict:

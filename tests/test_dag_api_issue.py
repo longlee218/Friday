@@ -14,7 +14,6 @@ import pytest
 
 from friday.dag import DAGDeps, DAGRunner, DAGState
 from friday.dag.api_issue import build_api_issue_dag
-from friday.dag.pause import PauseForHuman
 from friday.domain.actions import Ask, Park, Reply
 
 LOGS = "12:00:01 ERROR checkout.py:42 upstream timed out"
@@ -193,21 +192,23 @@ async def test_the_reply_carries_both_the_cause_and_the_fix():
 )
 async def test_a_cause_that_touches_something_dangerous_pauses(cause):
     """Widening what "actionable" is allowed to mean is how an agent ends up
-    editing a migration at three in the morning."""
+    editing a migration at three in the morning. Returning a `Park` ends the
+    run right there — the same as any node deciding the graph's answer,
+    which is what stopping is now, `PauseForHuman` having dissolved."""
     agents = _investigating(actionable=True)
     agents["analyze_stack"] = StubAgent(
         '{"cause": "%s", "actionable": true, "evidence": []}' % cause
     )
 
-    with pytest.raises(PauseForHuman) as caught:
-        await run(
-            agents=agents,
-            servers={"loki": object(), "source": object()},
-            correlation_id=UUID,
-        )
+    state = await run(
+        agents=agents,
+        servers={"loki": object(), "source": object()},
+        correlation_id=UUID,
+    )
 
-    assert caught.value.node == "fix_bug"
-    assert cause in caught.value.question
+    outcome = state["fix_bug"]
+    assert isinstance(outcome, Park)
+    assert cause in outcome.reason
     assert agents["fix_bug"].prompts == [], "it tried to patch anyway"
 
 
@@ -216,14 +217,15 @@ async def test_an_actionable_cause_with_no_source_server_pauses_rather_than_lyin
     the honest move; claiming a fix would not be."""
     agents = _investigating(actionable=True)
 
-    with pytest.raises(PauseForHuman) as caught:
-        await run(
-            agents=agents,
-            servers={"loki": object()},  # no source server
-            correlation_id=UUID,
-        )
+    state = await run(
+        agents=agents,
+        servers={"loki": object()},  # no source server
+        correlation_id=UUID,
+    )
 
-    assert "cannot change code" in caught.value.question
+    outcome = state["fix_bug"]
+    assert isinstance(outcome, Park)
+    assert "cannot change code" in outcome.reason
 
 
 # --- resume -----------------------------------------------------------------
@@ -245,16 +247,16 @@ async def test_resuming_after_a_pause_does_not_reread_the_logs():
     )
 
     first = DAGRunner(dag, deps=d)
-    with pytest.raises(PauseForHuman):
-        await first.run()
+    first_final = await first.run()
+    assert isinstance(first_final["fix_bug"], Park)
 
     reads_before = len(agents["read_logs"].prompts)
     assert reads_before == 1
 
     # The operator answered; the graph runs again from where it stopped.
     second = DAGRunner(dag, deps=d, state=first.state)
-    with pytest.raises(PauseForHuman):
-        await second.run()
+    second_final = await second.run()
+    assert isinstance(second_final["fix_bug"], Park)
 
     assert len(agents["read_logs"].prompts) == reads_before, "it read the logs again"
 
@@ -517,15 +519,13 @@ async def test_the_guard_reads_the_file_the_fix_would_touch():
     it is in, and the file was a migration. Matching only the model's prose
     left the FIX prompt — the model policing itself — as the only thing
     between that and a patched migration."""
-    from friday.dag.pause import PauseForHuman
+    outcome = await _fix_with(
+        {"cause": "off-by-one in the loop bound", "actionable": True},
+        code="migrations/versions/443468757024_baseline_schema.py:20",
+    )
 
-    with pytest.raises(PauseForHuman) as paused:
-        await _fix_with(
-            {"cause": "off-by-one in the loop bound", "actionable": True},
-            code="migrations/versions/443468757024_baseline_schema.py:20",
-        )
-
-    assert "migration" in str(paused.value)
+    assert isinstance(outcome, Park)
+    assert "migration" in outcome.reason
 
 
 async def test_an_ordinary_fix_in_ordinary_code_still_goes_through():

@@ -7,9 +7,11 @@ is wiring, and it used to live in a second module that this one's `register_
 dag` and `dag_for` were never read apart from — the composition root calls
 `register_dags` once, which is the only caller of everything else here.
 
-A task type with no DAG is not an error — the deterministic path in
-`friday.workflows` still handles it. `dag_for` answers "is there a graph for
-this?", and `None` means "no, use the simple path".
+Every classifiable task type has a graph — `register_dags` covers every entry
+in `PARAMS`, `api_issue` by name and everything else as a one-node graph built
+here. `dag_for` returning `None` for a *known* type would be a wiring bug, not
+a normal outcome; ticket 04 deleted the second way of deciding what to do with
+a task, and with it the branch that used to read that `None`.
 """
 
 from __future__ import annotations
@@ -20,10 +22,13 @@ from typing import Any
 from friday.dag import DAG
 from friday.dag import api_issue as graph_names
 from friday.dag.api_issue import build_api_issue_dag
+from friday.dag.prepare import prepare_node
+from friday.domain.models import Params
 
 __all__ = [
     "EDGE_ROUTER",
     "agents_for_api_issue",
+    "build_simple_dag",
     "dag_for",
     "register_dag",
     "register_dags",
@@ -53,8 +58,33 @@ def register_dag(task_type: str, dag: DAG) -> DAG:
 
 
 def dag_for(task_type: str) -> DAG | None:
-    """The DAG for this task type, or None to use the deterministic path."""
+    """The DAG for this task type. `None` for a type `register_dags` has
+    covered is a wiring bug — `WorkflowRunner._plan` asserts on it rather
+    than falling back to a second way of deciding what to do."""
     return EDGE_ROUTER.get(task_type)
+
+
+# --- the one-node graph, for a type with no investigation --------------------
+
+
+def build_simple_dag(task_type: str, params_cls: type[Params]) -> DAG:
+    """`prepare`, then ask for what is missing or hand the rest over — what
+    every type without an investigation needs (D1). There is nothing here
+    worth a second node yet; build one when there are steps worth skipping,
+    not before.
+    """
+    from friday.workflows import plan_by_required_parameters
+
+    return DAG(
+        name=task_type,
+        nodes=(
+            prepare_node(
+                task_type,
+                params_cls,
+                on_ready=lambda filled: plan_by_required_parameters(task_type, filled),
+            ),
+        ),
+    )
 
 
 # --- building the agents behind a graph's nodes -----------------------------
@@ -119,9 +149,21 @@ def register_dags(
     Idempotent: re-registering the same task type replaces it rather than
     raising, because the composition root may run twice in a test process and
     a second startup is not a wiring mistake.
+
+    Every entry in `PARAMS` gets a graph: `api_issue` its own, everything else
+    the one-node graph `build_simple_dag` builds. `dag_for` never answers "no
+    graph" for a type this covers, which is every classifiable type there is.
     """
+    from friday.workflows import PARAMS
+
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", build_api_issue_dag())
+
+    for task_type, params_cls in PARAMS.items():
+        if task_type == "api_issue":
+            continue
+        EDGE_ROUTER.pop(task_type, None)
+        register_dag(task_type, build_simple_dag(task_type, params_cls))
 
     agents = agents_for_api_issue(config, skills, servers)
     if agents:

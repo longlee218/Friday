@@ -142,7 +142,7 @@ What is actually on disk.
 | `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages |
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
 | `friday/workflows/` | The simple path — fill in, check, ask, park — the `Ask`/`Reply`/`Park` actions, and the loop that acts on tasks |
-| `friday/dag/` | The graph framework — nodes, edges, checkpointed resume, `PauseForHuman`. `dag/api_issue.py` is the first graph; `dag/router.py` registers every graph, builds their node agents, and is what the composition root calls |
+| `friday/dag/` | The graph framework — nodes, edges, checkpointed resume. `dag/prepare.py` builds every graph's entry node; `dag/api_issue.py` is the one with an investigation past it; `dag/router.py` registers every graph, builds their node agents, and is what the composition root calls |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `friday/board/` | The read-only page on `:8086`; its JSON API is `ops/api.py` |
@@ -225,9 +225,15 @@ not an implementation detail:
   built (ticket 32): a graph checkpoints after every node, and discards its
   state when the task's parameters change, because a conclusion drawn without
   the correlationId is not a conclusion about the request that has one.
-- **A task type without a graph is not a mistake.** It takes the deterministic
-  path — validate, ask for what is missing, park — which is all most types
-  need. Build a graph when there are steps worth skipping, not before.
+- **Every task type is a graph** (ticket 04). `access_request` and
+  `doc_question` get one node — extract, validate, then ask for what is
+  missing or hand over, which is all most types need — and `api_issue` gets
+  an investigation past that same node. `dag_for` never answers "no graph"
+  for a type `PARAMS` knows about; there is no second way to decide what to
+  do with a task any more, and `WorkflowRunner._plan` asserts on the
+  invariant rather than falling back to one. Build a multi-node graph when
+  there are steps worth skipping, not before — a one-node graph is that
+  principle under one name, not an exception to it.
 - **Nothing is sent by the caller that decided to send it.** An outbound
   message is a row; one loop delivers it. Approval is enforced as a predicate
   in the query that selects sendable rows, not as a check each caller must

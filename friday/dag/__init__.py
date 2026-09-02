@@ -27,7 +27,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from friday.dag.pause import PauseForHuman
 from friday.dag.state import DAGState
 
 __all__ = [
@@ -37,7 +36,6 @@ __all__ = [
     "DAGState",
     "Edge",
     "Node",
-    "PauseForHuman",
 ]
 
 log = logging.getLogger(__name__)
@@ -162,13 +160,17 @@ class DAG:
 class DAGRunner:
     """Walks a DAG, recording each node's result before starting the next.
 
-    Two things it guarantees, and they are the whole reason it exists:
+    The one thing it guarantees, and the whole reason it exists: **a
+    completed node does not run twice.** Resume starts at the first node with
+    no recorded result.
 
-    - **A completed node does not run twice.** Resume starts at the first
-      node with no recorded result.
-    - **A node that cannot decide can say so.** `PauseForHuman` propagates
-      out with the question intact, so the caller can park the task and ask
-      rather than let the node invent an answer.
+    A node that cannot decide says so by returning an `Ask`, `Reply` or
+    `Park` like any other node deciding what the graph's answer is — there
+    used to be a second way, `PauseForHuman`, raised rather than returned so
+    the run could stop mid-node instead of ending after one. It dissolved
+    once new reporter text re-running from node 1 (ticket 03) did everything
+    "resume from the paused node" bought, which was the only thing the second
+    mechanism was for.
     """
 
     def __init__(
@@ -205,11 +207,10 @@ class DAGRunner:
         return list(self._trail)
 
     async def run(self) -> DAGState:
-        """Run to the end, or to the first node that pauses.
-
-        Returns the state. `PauseForHuman` is raised, not returned: it is not
-        an outcome of the DAG, it is the DAG stopping to ask.
-        """
+        """Run to the end. A node deciding to stop early is not this
+        function's business to notice — the state carries its `Ask`, `Reply`
+        or `Park` like any other result, and the caller reads it off the
+        trail (see `WorkflowRunner._outcome`)."""
         current = self._resume_point()
         steps = 0
 

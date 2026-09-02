@@ -1,15 +1,16 @@
-"""What to do about a task, when there is only one decision to make.
+"""Fill in what the text carries, check it — the engine every graph's entry
+node runs, and the answer for a type with nothing past that node.
 
-The simple path: fill in what the text carries, check it, and ask for whatever
-is wrong or missing. Deterministic and free to run, which is what makes the
-first weeks of logs worth reading.
-
-A task type that needs more than one decision gets a graph instead
-(`friday/dag/`), and the runner routes to that first. There used to be a third
-thing here — a registry of per-type planner functions, some of them agentic —
-and ticket 33 emptied it: `api_issue` was its only entry and became a graph.
-A dispatcher with nothing to dispatch to is not extensibility, it is a second
-way to do what the graphs already do, so it is gone.
+`prepare` extracts and validates; `plan_by_required_parameters` is what a
+type with no investigation of its own says once `prepare` has nothing left to
+ask about — "no workflow for this yet". Neither is called directly by the
+loop any more: every task type is a graph (D1), so both are reached through
+`friday.dag.prepare.prepare_node`, which every graph's node 0 is built from.
+There used to be a third thing here — a registry of per-type planner
+functions, some of them agentic — and ticket 33 emptied it, ticket 04 removed
+the branch that read what was left of it: a dispatcher with nothing to
+dispatch to is not extensibility, it is a second way to do what the graphs
+already do.
 
 `Ask`, `Reply` and `Park` live in `friday.domain.actions` — they are the
 vocabulary every path speaks, graphs included, so neither this module nor the
@@ -78,20 +79,22 @@ async def prepare(
     *,
     text: str | None = None,
 ) -> tuple[Params, Action | None]:
-    """Fill the parameters in, then check them. Before any route is chosen.
+    """Fill the parameters in, then check them. Node 0 of every graph.
 
     Returns the parameters to work with, and an `Ask` when they are not fit to
     work with at all — a field missing, or one whose value the type's rules
     reject.
 
-    **This runs ahead of the graph, not inside the branch that has no graph.**
-    It used to be the first two steps of `plan()`, which meant a task type with
-    a graph — `api_issue`, the only type that has an extractor *and* rules —
-    got neither. Its `_RULES` on the params class were unreachable in production, its configured
+    **This is what every graph's entry node runs** (`friday.dag.prepare`), not
+    a step ahead of one. It used to be the first two steps of a `plan()` that
+    ran before the graph route was even chosen — which meant a task type with
+    a graph, `api_issue`, the only type that had an extractor *and* rules,
+    got neither: its `_RULES` were unreachable in production, its configured
     extractor could never run, and a `correlation_id` of "not-a-uuid" reached
     the graph, looked findable, and parked to the operator instead of asking
     the reporter to resend it. Nothing failed; it just quietly stopped
-    happening.
+    happening. Ticket 03 moved this inside the graph so there is nowhere left
+    for it to be skipped from.
 
     Extraction runs before validation on purpose: validation is what stops a
     hallucinated field from being believed, so it has to see what the extractor

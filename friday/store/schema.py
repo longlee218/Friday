@@ -155,7 +155,9 @@ class DagState(Base):
     params_fingerprint: Mapped[str] = mapped_column(default="")
     #: Node name -> that node's result.
     results: Mapped[dict] = mapped_column(JSON, default=dict)
-    #: Set when a node raised `PauseForHuman`. Cleared on resume.
+    #: Set when a run ends on an `Ask` or `Park` a node returned to stop
+    #: things there rather than decide the graph's own answer. Cleared on
+    #: resume — the next node to run checkpoints without them.
     paused_at_node: Mapped[str | None]
     paused_question: Mapped[str | None]
     updated_at: Mapped[datetime] = mapped_column(IsoDateTime)

@@ -27,14 +27,12 @@ somewhere to *skip* the expensive step.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict
 from typing import Any
 
 from friday.dag import DAG, DAGDeps, DAGState, Edge, Node
-from friday.dag.pause import PauseForHuman
-from friday.domain.actions import Action, Ask, Park, Reply
+from friday.dag.prepare import prepare_node, prepared_ok
+from friday.domain.actions import Action, Park, Reply
 from friday.domain.models import ApiIssueParams
-from friday.workflows import prepare as _prepare_params
 
 __all__ = ["build_api_issue_dag"]
 
@@ -56,32 +54,6 @@ NODE_SERVERS = {
 
 
 # --- the nodes -------------------------------------------------------------
-
-
-async def _prepare(state: DAGState, deps: DAGDeps) -> ApiIssueParams | Ask:
-    """Node 0: everything the reporter has said, filled in and checked.
-
-    Runs on every pass — there may be a new message since the last one — and
-    is never part of the checkpoint (`_run_dag` excludes it before saving);
-    only its *output* decides whether the rest of what was checkpointed is
-    still worth keeping. Reuses `friday.workflows.prepare` rather than
-    re-implementing extraction and validation a second time; that function
-    still serves the task types that have no graph of their own.
-    """
-    known = ApiIssueParams(**deps.task.params)
-    text = await deps.db.original_text_for(deps.task.id)
-    filled, problem = await _prepare_params("api_issue", known, text=text)
-
-    merged = {**deps.task.params, **asdict(filled)}
-    if merged != deps.task.params:
-        await deps.db.set_task_params(deps.task.id, merged)
-
-    return problem if problem is not None else filled
-
-
-def _prepared_ok(state: DAGState) -> bool:
-    """Whether `prepare` cleared the report to investigate."""
-    return not isinstance(state["prepare"], Ask)
 
 
 def _params(state: DAGState) -> ApiIssueParams:
@@ -160,12 +132,17 @@ async def _analyze_stack(state: DAGState, deps: DAGDeps) -> dict[str, Any]:
 _HANDS_OFF = ("migration", "schema", "credential", "secret", "password", "token")
 
 
-async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | None:
+async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | Park | None:
     """Apply the fix, or stop and ask.
 
     Reached only when `analyze_stack` said the cause is actionable. Even then
     there are changes this should not make on its own, and the honest move is
-    to ask rather than to widen what "actionable" was allowed to mean.
+    to stop rather than to widen what "actionable" was allowed to mean.
+    Returning a `Park` ends the run right here, the same as any node deciding
+    what to send — `PauseForHuman` used to be a second way to do that, raised
+    instead of returned; ticket 03 made "new text re-runs from node 1" do
+    everything "resume from the paused node" did, so there was nothing left
+    for the second mechanism to buy.
     """
     analysis = state["analyze_stack"]
     cause = (analysis.get("cause") or "") if isinstance(analysis, dict) else ""
@@ -174,31 +151,26 @@ async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | None:
     subject = f"{cause}\n{where}".lower()
     touched = [word for word in _HANDS_OFF if word in subject]
     if touched:
-        raise PauseForHuman(
-            question=(
-                f"The cause mentions {touched[0]}, so I have not changed "
-                f"anything. Cause: {cause}"
-            ),
-            options=["I'll handle it", "go ahead and fix it"],
-            evidence={"cause": cause, "code": state.get("find_code_path")},
-            node="fix_bug",
+        return Park(
+            f"The cause mentions {touched[0]}, so I have not changed "
+            f"anything. Cause: {cause} (I'll handle it / go ahead and fix it)"
         )
 
     agent = deps.extra.get("fix_bug")
     if agent is None or NODE_SERVERS["fix_bug"] not in deps.servers:
-        raise PauseForHuman(
-            question=(
-                f"I found the cause but cannot change code from here. "
-                f"Cause: {cause}"
-            ),
-            evidence={"cause": cause, "code": state.get("find_code_path")},
-            node="fix_bug",
+        return Park(
+            f"I found the cause but cannot change code from here. Cause: {cause}"
         )
 
     result = await agent.run(
         f"cause: {cause}\ncode: {state.get('find_code_path')}"
     )
     return (result.final_output or "").strip() if result else None
+
+
+def _fix_bug_ok(state: DAGState) -> bool:
+    """Whether `fix_bug` decided to continue rather than stop the run here."""
+    return not isinstance(state.get("fix_bug"), Park)
 
 
 async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
@@ -274,7 +246,7 @@ def build_api_issue_dag() -> DAG:
     return DAG(
         name="api_issue",
         nodes=(
-            Node("prepare", _prepare),
+            prepare_node("api_issue", ApiIssueParams),
             Node("read_logs", _read_logs),
             Node("find_code_path", _find_code_path),
             Node("analyze_stack", _analyze_stack),
@@ -282,12 +254,12 @@ def build_api_issue_dag() -> DAG:
             Node("compose_reply", _compose_reply),
         ),
         edges=(
-            Edge("prepare", "read_logs", when=_prepared_ok),
+            Edge("prepare", "read_logs", when=prepared_ok),
             Edge("read_logs", "find_code_path"),
             Edge("find_code_path", "analyze_stack"),
             Edge("analyze_stack", "fix_bug", when=_actionable),
             Edge("analyze_stack", "compose_reply"),
-            Edge("fix_bug", "compose_reply"),
+            Edge("fix_bug", "compose_reply", when=_fix_bug_ok),
         ),
     )
 

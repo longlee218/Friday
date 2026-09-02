@@ -103,14 +103,17 @@ result against the type's rules. Both happen before a route is chosen, because
 they are about the parameters and not about what to do with them. What was
 filled in is written back to the task, so the route reads what was checked.
 
-After that, there are two ways a task type gets its action, and which one it
-uses is decided by the **edge router**: a task type with a **graph** goes to the graph,
-and one without takes the deterministic path — validate the parameters, ask for
-whatever is missing, park otherwise. Most types need nothing more than that.
+After that, every task type gets its action from a **graph** (ticket 04) — the
+**edge router** looks one up for every type `PARAMS` knows about, never
+answering "no graph". A type with no investigation of its own gets one node:
+validate the parameters, ask for whatever is missing, hand over otherwise.
+Most types need nothing more than that; `api_issue` is the one with more.
 
-There is no third way. A registry of per-type planner functions lived here
-until ticket 33 emptied it, and a dispatcher with nothing to dispatch to is not
-extensibility — it is a second way to do what the graphs already do.
+There is no second way. A registry of per-type planner functions lived here
+until ticket 33 emptied it, a deterministic path outside any graph lived here
+until ticket 04 removed the branch that read it, and a dispatcher with nothing
+to dispatch to is not extensibility — it is a second way to do what the graphs
+already do.
 
 `Ask` is the agent's own decision. `Reply` waits for approval — asking for a
 correlationId costs a question if it is wrong, and asserting a cause costs the
@@ -127,11 +130,11 @@ expressible as a type: a correlationId *or* a curl makes a request findable,
 and both are optional individually. A type with an override keeps it;
 everything else gets the general rule for free.
 
-The override is what decides whether a graph runs at all. Without it in
-`_RULES` — where it was documented but absent — a report with nothing to trace
-on validated cleanly, and the graph ran its whole path to find out it could do
-nothing. **A precondition belongs in the gate, not in the last node's else
-branch.**
+The override is what decides whether the investigation past node 0 is worth
+starting. Without it in `_RULES` — where it was documented but absent — a
+report with nothing to trace on validated cleanly, and the graph ran its whole
+path to find out it could do nothing. **A precondition belongs in the gate,
+not in the last node's else branch.**
 
 ## Graph
 
@@ -142,16 +145,20 @@ is code, not something a model chooses at run time.
 
 Two things follow from that shape and neither is incidental.
 
-A graph **checkpoints after every node**, so a restart resumes rather than
-re-running work that cost money. Results are only meaningful for the inputs
-that produced them, so state is discarded when the task's parameters change —
-otherwise asking the reporter a question and receiving an answer would change
-nothing.
+A graph **checkpoints after every node but its entry** — `prepare`, node 0
+(ticket 03), which extracts and validates and runs fresh on every pass because
+there may be a new message since the last one, and is never itself part of
+the checkpoint. Its *output* is what state is discarded against: results are
+only meaningful for the inputs that produced them, so a restart resumes past
+node 0 exactly when nothing it found has changed, and re-investigates when it
+has — otherwise asking the reporter a question and receiving an answer would
+change nothing.
 
-A node that cannot decide **pauses** rather than guessing: `PauseForHuman`
-carries the question, which becomes a `Park` and reaches the operator with the
-question intact. It is not a failure and not an outcome — it is the graph
-stopping to ask.
+A node that cannot decide returns an `Ask` or `Park` and the run ends there,
+the same as any node deciding the graph's answer — an absent edge past it, not
+a special case. `PauseForHuman`, raised rather than returned, used to be a
+second way to do this; it dissolved (ticket 04) once new reporter text
+re-running from node 1 reached everywhere "resume from the paused node" did.
 
 An agent is a node inside a graph, never the thing driving it. Which agent a
 node gets, and which tool server, is composition — handed down through `deps`,

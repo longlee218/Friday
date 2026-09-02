@@ -10,7 +10,6 @@ from __future__ import annotations
 import pytest
 
 from friday.dag import DAG, DAGDeps, DAGRunner, Edge, Node
-from friday.dag.pause import PauseForHuman
 from friday.dag.router import EDGE_ROUTER, dag_for, register_dag
 from friday.dag.state import UNSTORABLE, DAGState, MissingNodeResult
 
@@ -263,53 +262,38 @@ async def test_a_failing_checkpoint_does_not_lose_the_run():
     assert state["b"] == "b-ran"
 
 
-# --- pause -----------------------------------------------------------------
+# --- a node that cannot decide -----------------------------------------------
 
 
-async def test_a_node_that_cannot_decide_raises_rather_than_guessing():
-    async def unsure(state: DAGState, deps: DAGDeps):
-        raise PauseForHuman(
-            question="Which environment did this run against?",
-            options=["production", "staging"],
-            evidence={"log_lines": 3},
-        )
-
-    dag = DAG(name="asks", nodes=(Node("unsure", unsure),))
-
-    with pytest.raises(PauseForHuman) as caught:
-        await DAGRunner(dag).run()
-
-    assert "Which environment" in str(caught.value)
-    assert caught.value.options == ["production", "staging"]
-    assert caught.value.evidence == {"log_lines": 3}
-
-
-async def test_a_pause_keeps_the_nodes_that_already_finished():
-    """Resume after the operator answers must not repeat the expensive part."""
+async def test_a_node_that_cannot_decide_ends_the_run_where_it_stands():
+    """A node stops the graph the same way any node decides its answer:
+    returning an `Ask`, `Reply` or `Park`, guarded by an edge that only
+    continues when it did not. `PauseForHuman` used to raise instead; it
+    dissolved once ticket 03 made new text re-run from node 1, which reached
+    the same place — the earlier nodes' work kept, only the rest re-run —
+    through the mechanism every task already used."""
+    from friday.domain.actions import Ask
 
     async def unsure(state: DAGState, deps: DAGDeps):
-        raise PauseForHuman(question="which one?")
+        return Ask("which environment did this run against?")
 
     dag = DAG(
         name="pauses",
         nodes=(node("expensive"), Node("unsure", unsure)),
-        edges=(Edge("expensive", "unsure"),),
+        edges=(
+            Edge("expensive", "unsure"),
+            # No further edge from "unsure" — the run has nowhere to go once
+            # it returns an Ask, which is what "the run ends" means in
+            # practice: an absent edge, not a special case in the engine.
+        ),
     )
     runner = DAGRunner(dag)
 
-    with pytest.raises(PauseForHuman):
-        await runner.run()
+    final = await runner.run()
 
-    assert runner.state["expensive"] == "expensive-ran"
-
-
-def test_a_pause_with_options_renders_them_for_the_operator():
-    pause = PauseForHuman(question="Apply the fix?", options=["yes", "no"])
-    assert str(pause) == "Apply the fix? (yes / no)"
-
-
-def test_a_pause_without_options_is_just_the_question():
-    assert str(PauseForHuman(question="What now?")) == "What now?"
+    assert final["expensive"] == "expensive-ran"
+    assert final["unsure"] == Ask("which environment did this run against?")
+    assert runner.trail == ["expensive", "unsure"]
 
 
 # --- cycles ----------------------------------------------------------------
@@ -353,9 +337,12 @@ def test_two_dags_claiming_one_task_type_is_refused():
         EDGE_ROUTER.pop("test_dup_32", None)
 
 
-def test_a_task_type_with_no_dag_is_not_an_error():
-    """The deterministic planner still handles it. None means 'use the
-    simple path', not 'something is wrong'."""
+def test_an_unregistered_task_type_has_no_dag():
+    """`None` here means the type was never registered at all — a task type
+    nothing in `PARAMS` knows about. That is different from a `PARAMS` entry
+    with no graph, which `register_dags` now never leaves true and
+    `WorkflowRunner._plan` asserts against rather than falling back to a
+    second way of deciding what to do."""
     assert dag_for("no_such_type_32") is None
 
 
@@ -433,16 +420,17 @@ async def test_the_dag_state_is_persisted_between_passes(db):
 
 
 async def test_a_pause_parks_the_task_with_the_question(db):
-    """PauseForHuman is the fourth outcome: not a guess, not a traceback, a
-    question the operator can answer."""
+    """A node that cannot decide is the fourth outcome: not a guess, not a
+    traceback, a question the operator can answer. This graph's *entry* node
+    is the one that cannot decide — the shape `access_request` and
+    `doc_question`'s real one-node graphs take when what is missing needs a
+    human, not the reporter."""
+    from friday.domain.actions import Park
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 
     async def unsure(state: DAGState, deps: DAGDeps):
-        raise PauseForHuman(
-            question="The fix touches a migration. Apply it?",
-            options=["apply", "leave it"],
-        )
+        return Park("The fix touches a migration. Apply it? (apply / leave it)")
 
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", DAG(name="pausing", nodes=(Node("unsure", unsure),)))
@@ -755,9 +743,48 @@ async def test_the_three_message_table_holds_end_to_end(db):
     assert "prepare" not in stored, "node 0 is never checkpointed"
 
 
+async def test_a_one_node_type_hands_over_on_the_same_terms_as_api_issue(db):
+    """D1: `access_request` gets a real graph too — one node — so this run
+    through `run_once` twice behaves exactly like `api_issue`'s does. Node 0
+    reruns on every pass regardless of stored state; a complete report hands
+    over with the specific reason recorded, not the task's bare type."""
+    from friday.domain.conversation import ConversationId
+    from friday.workflows.runner import WorkflowRunner
+
+    task = await db.create_task(
+        conversation=ConversationId("fake", "watched"),
+        type="access_request",
+        state="pending",
+        confidence=0.9,
+        params={"project": "", "permission": "", "summary": ""},
+    )
+
+    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    asked = [r for r in await db.outbound() if r.kind == "ask_for_details"]
+    assert len(asked) == 1
+    assert "project" in asked[0].text
+
+    # A follow-up supplies everything there is to ask for.
+    await db.set_task_params(
+        task.id, {"project": "backend", "permission": "write", "summary": "s"}
+    )
+    await db.move_task(task.id, "pending")
+    await WorkflowRunner(db=db, auto_ask=True).run_once()
+
+    pause = await db.dag_pause(task.id)
+    assert pause is not None, "hand-over must record why, same as api_issue does"
+    node, question = pause
+    assert node == "prepare", "the one node this graph has"
+    assert "no workflow for access_request" in question
+
+    told = [r for r in await db.outbound() if r.kind == "help_wanted"]
+    assert told, "the operator was never told"
+
+
 async def test_a_pause_records_the_node_that_paused_not_the_graph(db):
     """`paused_at_node` is read by a human deciding where to look. Storing
     the graph's name there answers a question nobody asked."""
+    from friday.domain.actions import Park
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 
@@ -765,7 +792,7 @@ async def test_a_pause_records_the_node_that_paused_not_the_graph(db):
         return "ok"
 
     async def stops(state: DAGState, deps: DAGDeps):
-        raise PauseForHuman("this needs a migration")
+        return Park("this needs a migration")
 
     EDGE_ROUTER.pop("api_issue", None)
     register_dag(
@@ -788,11 +815,12 @@ async def test_the_question_a_graph_paused_on_reaches_the_operator(db):
     """A pause asks something specific. The message that tells the operator
     there is work must carry it, or they open the board to find out what the
     system already knew."""
+    from friday.domain.actions import Park
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 
     async def stops(state: DAGState, deps: DAGDeps):
-        raise PauseForHuman("the cause mentions a migration, I have not touched it")
+        return Park("the cause mentions a migration, I have not touched it")
 
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", DAG(name="pauses", nodes=(Node("fix_bug", stops),)))
@@ -827,6 +855,7 @@ async def test_a_second_pause_asks_a_second_question(db):
     it said, that second question would be swallowed by the first one's row
     and the task would sit in NEEDS_HUMAN with nobody told.
     """
+    from friday.domain.actions import Park
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 
@@ -839,7 +868,7 @@ async def test_a_second_pause_asks_a_second_question(db):
             else "is this the production database or the replica?"
         )
         asked.append(question)
-        raise PauseForHuman(question, node="triage_it")
+        return Park(question)
 
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", DAG(name="asks", nodes=(Node("triage_it", stops),)))
@@ -862,11 +891,12 @@ async def test_a_second_pause_asks_a_second_question(db):
 async def test_the_same_question_is_not_asked_twice(db):
     """The other half. A notification that repeats is one you learn to
     ignore, and a task sitting untouched has nothing new to say."""
+    from friday.domain.actions import Park
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 
     async def stops(state: DAGState, deps: DAGDeps):
-        raise PauseForHuman("which environment?", node="triage_it")
+        return Park("which environment?")
 
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", DAG(name="asks", nodes=(Node("triage_it", stops),)))
