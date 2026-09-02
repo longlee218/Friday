@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Running. It ingests Discord mentions, classifies them, opens tasks, asks for
 missing details, and sends approved replies as the watched account. Roughly
-5,000 lines under `friday/`, on a single branch (`main`), with a passing suite.
+9,400 lines under `friday/`, on a single branch (`main`), with a passing suite.
 
 The design is settled and written down — see **`docs/DESIGN.md`**, the source of
 truth for what this is meant to become. Read it before adding anything
@@ -29,8 +29,8 @@ task type a graph, `prepare` as node 0, node agents reporting through tools.
 All nine are open. Its spec's D1–D18 are the rationale; the tickets reference
 them rather than repeating them.
 
-This line goes stale faster than anything else in this file. Check it against
-the `**Status:**` line in each ticket before trusting it.
+The two paragraphs above go stale faster than anything else in this file.
+Check them against the `**Status:**` line in each ticket before trusting them.
 
 Keep the split honest: this file describes what *exists*, `docs/DESIGN.md`
 describes what is *agreed*. Do not document intent here as if it were
@@ -128,10 +128,10 @@ What is actually on disk.
 | `run_agent.py` | Composition root — the only place adapters are constructed, and the only place the asyncio tasks are started. It asks each module to build itself; it reads no agent's knobs |
 | `serve_board.py` | The board alone, against the live database, without connecting to Discord |
 | `init_channel.py` | One-off: create a channel's context file for the operator to fill in |
-| `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, each agent's persona mode, and the sensitive words that keep a message away from the model |
-| `PERSONA.md` | Who every agent is, before it is told its job. Prose, read once at startup, prepended to each agent's instructions |
+| `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, which persona file to read, and the sensitive words that keep a message away from the model |
+| `PERSONA.md` | Who an agent is before it is told its job. Prose, read once at startup. One section per family — Responder, Node — and an agent's family is decided where it is built. Triage and the extractors get neither |
 | `friday/config.py` | Loads `config.yaml`, resolves `${VAR}`, stamps each `AgentConfig` with its persona. Outside the packages because it is read before any of them |
-| **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `tasks.py` (`TaskState` and its legal transitions), `validation.py` (the rule engine, one call site) |
+| **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `tasks.py` (`TaskState`, `OutboundState`, and the legal transitions), `validation.py` (the rule engine, one call site) |
 | **`friday/store/`** | `schema.py` holds the mapped classes, `db.py` is the only store and converts at the edge — nothing above it knows SQLAlchemy exists |
 | **`friday/agent/`** | What it takes to call a model, and nothing about what to call it for: `harness.py` (the only module that may import the SDK), `instruction_prompt.py`, `persona.py`, `skills.py`, `mcp.py`, `llm_log.py` |
 | **`friday/memory/`** | What is kept between tasks, in tiers that never mix: `observations.py` (staged), `notes.py` (promoted, and only by an approved outcome), `channel_context.py` (per-channel YAML), `verdicts.py` (the operator marking a classification right) |
@@ -160,10 +160,12 @@ There is no `nodes/`, `procedures/`, `tools/`, `permissions/` or `hooks/`
 package, and their absence is a decision rather than an omission. (`memory/`
 was on that list until it existed — the six packages above were carved out of
 twenty-two loose modules once flat stopped scaling, which is the same rule
-applied at a later size, not a reversal of it.) The
-node vocabulary was removed from the design deliberately (workflows are
-deterministic Python; only triage and the responder call a model), tools live
-beside the state they touch because that is the only place their guard can be
+applied at a later size, not a reversal of it.) The node vocabulary did come
+back, but as `friday/dag/` rather than a `nodes/` package: a node is a function
+in the graph that owns it, and four of the nine agent blocks in `config.yaml`
+are graph nodes calling a model. This paragraph said for months that only
+triage and the responder ever called one, which stopped being true the day the
+first graph shipped. Tools live beside the state they touch because that is the only place their guard can be
 enforced, and the four guards in this codebase answer four different questions
 about four different subjects — collapsing them into one package would cost
 locality and buy nothing. **Build one of these when a second caller appears,
@@ -230,16 +232,19 @@ not an implementation detail:
   message is a row; one loop delivers it. Approval is enforced as a predicate
   in the query that selects sendable rows, not as a check each caller must
   remember — see `_NEEDS_APPROVAL` in `friday/store/db.py`.
-- **One persona, three modes, and the mode is per agent.** `PERSONA.md` says
-  who the agents are and that people read Vietnamese; `config.yaml` says how
-  much of it each agent takes. `full` for the two agents whose output a person
-  reads, `language` for the ones filling in structured fields, `none` for the
-  ones returning a path or a diff. This is not caution: triage fills in
-  `environment` by tool call and `friday/domain/validation.py` requires
-  `production` / `staging` / `dev`, so an agent carrying the voice writes
-  `sản xuất` and the reporter is asked to confirm what they already said. It
-  goes in `instructions`, never the per-call bundle — shared bytes at the
-  front of a prompt are the ones a provider's cache reuses across agents.
+- **One persona, two families, and the family is decided in code.**
+  `PERSONA.md` says who the agents are and that people read Vietnamese, in one
+  section per family: the agents whose output a person reads, and the agents
+  that are a step inside an investigation. Triage and the extractors get
+  neither. There was a per-agent `persona:` knob in `config.yaml` with three
+  modes; it is gone. It went stale the first time an agent's job changed —
+  triage kept the mode describing how to write replies, and 79% of the
+  highest-volume prompt in the system was instructions for something it never
+  does. What the knob was guarding still holds: an agent carrying the voice
+  writes `sản xuất` where `friday/domain/validation.py` wants `production`, and
+  the reporter is asked to confirm what they already said. It goes in
+  `instructions`, never the per-call input — shared bytes at the front of a
+  prompt are the ones a provider's cache reuses across agents.
 - **Triage classifies and nothing else.** No parameters, no summary — a type
   and a confidence. Everything a task knows is lifted out of the message by
   `friday/extraction/`, one extractor per task type, reading every message
@@ -295,11 +300,29 @@ not an implementation detail:
   are enforced by a `grep`-based test rather than by memory, because the ones
   that were only written down are the ones that drifted.
 
+## Verifying a change
+
+A ticket, an edit to logic, a refactor — none of them are done until:
+
+1. **The whole suite passes.** `uv run pytest -q`, not a `-k` subset. Most of
+   the constraints above are enforced by a test rather than by memory, so a
+   green suite is the only evidence that the rules survived your change.
+2. **A subagent has checked the change, not you.** `scoutqa-test` for anything
+   the board serves on `:8086` — it drives a real browser, which is the only
+   way to know the page still renders — and `code-review` for the Python.
+   `scoutqa-test` needs the `scoutqa` CLI, which is not installed here yet.
+3. **Any guard you added has been deleted once and watched go red.** A test
+   that still passes without its guard was testing nothing.
+
+Report what the suite actually said. A step you skipped is worth saying out
+loud; a failing test reported as passing is the one failure this file cannot
+catch.
+
 ## Agent skills
 
 ### Issue tracker
 
-Local markdown under `.scratch/<feature-slug>/issues/`; the spec lives at `docs/SPEC.md`. See `docs/agents/issue-tracker.md`.
+Local markdown under `.scratch/<feature-slug>/issues/`, one board per feature, each with its own spec beside its issues. `docs/SPEC.md` is the original board's. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -308,6 +331,8 @@ The five canonical roles, unchanged (`needs-triage`, `needs-info`, `ready-for-ag
 ### Domain docs
 
 Single-context: **`CONTEXT.md`** at the repo root holds the domain vocabulary —
-Message, Conversation, Task, Triage, Workflow, Harness, Outbound intent, Outbox,
-Approval, Sender, Provider, Sweep. Read it before naming anything. `docs/adr/`
-does not exist yet. See `docs/agents/domain.md`.
+twenty-one terms, from Message and Conversation through Task, Triage,
+Extraction, Workflow, Graph, Tool server, Persona, Harness and Observation to
+Outbox, Approval, Provider and Sweep. Read it before naming anything, and add
+the term there when you name something new. `docs/adr/` does not exist yet.
+See `docs/agents/domain.md`.
