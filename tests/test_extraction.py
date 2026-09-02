@@ -279,9 +279,9 @@ def test_every_extraction_field_tells_the_model_what_it_means():
 
 def test_the_doc_reaches_the_extractors_prompt():
     from friday.domain.models import ApiIssueParams
-    from friday.extraction import _prompt
+    from friday.extraction.prompt import build_input
 
-    prompt = _prompt("API lỗi", ApiIssueParams)
+    prompt = build_input("API lỗi", ApiIssueParams)
 
     assert "copied exactly" in prompt
     assert "- summary: summary" not in prompt

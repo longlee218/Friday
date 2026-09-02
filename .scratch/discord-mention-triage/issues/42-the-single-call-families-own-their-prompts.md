@@ -8,7 +8,7 @@ assembles any part of it.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why these two together
 
@@ -31,9 +31,17 @@ real assembly.
 
 ## Acceptance criteria
 
-- [ ] One module per family owns every assembled byte of that family's prompt;
+- [x] One module per family owns every assembled byte of that family's prompt;
       the family's runtime code calls `build_*` and concatenates nothing itself
-- [ ] The assembled output is byte-identical to today's — proven by capturing
+- [x] The assembled output is byte-identical to today's — proven by capturing
       both before and after, not by eyeballing
-- [ ] `test_no_family_text_appears_in_another_familys_prompt` still passes
-- [ ] No new escaping site; the one-seam grep test still passes
+- [x] `test_no_family_text_appears_in_another_familys_prompt` still passes
+- [x] No new escaping site; the one-seam grep test still passes
+
+## What it came to
+
+`friday/triage/prompt.py` and `friday/extraction/prompt.py`. One trap worth
+recording: a family's prompt module is named `prompt`, and importing it binds
+that name on the package — shadowing the loader function any `__init__` had
+imported under the same name. The `__init__`s call builders only and never the
+loader. All ten captured prompts byte-identical before and after.

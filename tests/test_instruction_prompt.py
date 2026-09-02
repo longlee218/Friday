@@ -325,16 +325,17 @@ def test_a_three_layer_channel_context_is_split_by_provenance():
 # --- acceptance: triage and responder use the bundle -----------------------
 
 
-def test_triage_uses_the_bundle_not_its_own_prompt_assembler():
-    """Acceptance criterion #9: triage goes through ContextBundle, not a
-    hand-rolled string. Locked by source inspection: a future regression
-    that pulls ContextBundle out and inlines a string again would change
-    the source and this test catches it."""
+def test_triage_assembles_nothing_inline():
+    """The family's prompt module owns every assembled byte; the runtime code
+    calls `build_input` and concatenates nothing itself. This replaced a test
+    that pinned the opposite — "everything goes through ContextBundle" — a
+    decision the operator reversed when the bundle turned out to be the last
+    piece of shared shape in a shape-per-family system."""
     import inspect
 
     src = inspect.getsource(__import__("friday.triage", fromlist=["Triage"]).Triage.decide)
-    assert "ContextBundle" in src
-    assert "ContextBundle(" in src
+    assert "build_input(" in src
+    assert "ContextBundle" not in src
 
 
 def test_responder_uses_the_bundle_not_its_own_prompt_assembler():

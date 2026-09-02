@@ -267,13 +267,14 @@ async def test_nothing_happens_when_nobody_is_listening():
 def test_no_examples_means_no_examples_block():
     """A fresh install has nothing marked, and stays that way until somebody
     reacts. The instructions must not grow an empty heading."""
-    from friday.triage import INSTRUCTIONS, _examples_block
+    from friday.triage import INSTRUCTIONS
+    from friday.triage.prompt import _examples_block
 
     assert _examples_block(()) == ""
 
 
 def test_examples_are_rendered_with_what_they_turned_out_to_be():
-    from friday.triage import _examples_block
+    from friday.triage.prompt import _examples_block
 
     block = _examples_block([("checkout is 500ing", "api_issue")])
 

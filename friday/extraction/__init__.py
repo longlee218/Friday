@@ -18,9 +18,9 @@ import re
 from dataclasses import fields
 from typing import Any
 
-from friday.agent.prompts import prompt
 from friday.agent.harness import Harness
 from friday.domain.models import Params
+from friday.extraction.prompt import build_input, build_instructions
 
 __all__ = [
     "EXTRACTS",
@@ -61,7 +61,7 @@ class Extractor:
         the structural check, which is the right behaviour: nothing to
         hallucinate means nothing to validate.
         """
-        result = await self._harness.run(_prompt(text, self._params_cls))
+        result = await self._harness.run(build_input(text, self._params_cls))
         if result is None:
             log.warning("extractor %s returned no result", self.name)
             return None
@@ -126,9 +126,7 @@ async def extract(task_type: str, text: str) -> Params | None:
     return await ext.run(text)
 
 
-#: Instructions shared by every extraction agent. The schema and the text vary
-#: per call; the rule about not inventing is constant.
-EXTRACTION_INSTRUCTIONS = prompt("extractor")
+
 
 
 def register(task_type: str, params_cls: type[Params], config: "AgentConfig") -> None:  # type: ignore[name-defined]  # noqa: F821
@@ -154,7 +152,7 @@ def register(task_type: str, params_cls: type[Params], config: "AgentConfig") ->
 
     _EXTRACTORS[task_type] = build_extractor(
         params_cls=params_cls,
-        harness=Harness(config=config, instructions=EXTRACTION_INSTRUCTIONS),
+        harness=Harness(config=config, instructions=build_instructions()),
         name=f"{task_type}_extractor",
     )
 
@@ -176,27 +174,6 @@ def _hygiene(params: Params) -> Params:
             else value
             for f in fields(params)
         }
-    )
-
-
-def _prompt(text: str, params_cls: type[Params]) -> str:
-    """The extractor prompt: the schema first, the text second.
-
-    Schema first so the model sees what to fill before it reads what to fill
-    from. Each field's meaning comes from its `doc` metadata on the params
-    class — the field and its meaning live on the same line, so they cannot
-    drift apart. This prompt carries only what is true of every field.
-    """
-    schema_lines = []
-    for f in params_cls.__dataclass_fields__.values():  # type: ignore[attr-defined]
-        doc = (f.metadata or {}).get("doc", f.name.replace("_", " "))
-        schema_lines.append(f"- {f.name}: {doc}")
-    schema = "\n".join(schema_lines) or "(no fields)"
-    return (
-        "Fill every field below. Pass null when the value is genuinely "
-        "absent — never invent one.\n\n"
-        f"Fields:\n{schema}\n\n"
-        f"What they said:\n{text}"
     )
 
 

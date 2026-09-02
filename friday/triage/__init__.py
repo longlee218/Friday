@@ -4,7 +4,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from friday.agent.prompts import prompt
+from friday.triage.prompt import build_input, build_instructions
 from friday.config import AgentConfig
 from friday.agent.harness import Harness, ToolContext, tool
 from friday.domain.models import InboundEvent, TaskType
@@ -48,7 +48,9 @@ class _Capture:
     decided: Decided | None = None
 
 
-INSTRUCTIONS = prompt("triage")
+#: The bare text, kept as an attribute because tests pin sentences in it.
+#: Assembly — examples and all — lives in `friday.triage.prompt`.
+INSTRUCTIONS = build_instructions()
 
 
 @tool
@@ -136,7 +138,7 @@ class Triage:
         # A mark made now therefore takes effect at the next start.
         self._run = Harness(
             config=config,
-            instructions=INSTRUCTIONS + _examples_block(examples),
+            instructions=build_instructions(examples),
             tools=TOOLS,
             model=model,
             context_type=_Capture,
@@ -179,12 +181,8 @@ class Triage:
         capture = _Capture()
         # One extra turn: the answer arrives as a tool call, which is the call
         # and its result where a written answer would be one turn.
-        from friday.agent.instruction_prompt import ContextBundle, conversation
 
-        # The messages, and nothing else. No identity, no date, no task
-        # section: the whole output is which tool was called and a number, and
-        # none of those change it.
-        bundle = ContextBundle(conversation=conversation(list(context) + [event]))
+        bundle = build_input(list(context) + [event])
         result = await self._run.run(
             bundle, context=capture, calls=calls, extra_turns=1
         )
@@ -201,19 +199,3 @@ class Triage:
             decided.confidence,
         )
         return decided
-
-
-def _examples_block(examples: Sequence[tuple[str, str]]) -> str:
-    """Past classifications the operator vouched for, as few-shot examples.
-
-    Empty when nobody has vouched for anything, which is the state a fresh
-    install is in and the state it stays in until somebody reacts. That is
-    deliberate: an example nobody looked at teaches the classifier its own
-    habits, and the drift has no floor because every generation of examples
-    is drawn from the last one's output.
-    """
-    if not examples:
-        return ""
-    lines = ["", "", "Past messages, and what they turned out to be:"]
-    lines += [f"  {text!r} -> {kind}" for text, kind in examples]
-    return "\n".join(lines)
