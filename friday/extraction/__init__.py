@@ -7,22 +7,32 @@ hallucinate; that is the cost of LLM extraction, and ticket 30's validate
 engine catches what it gets wrong.
 
 Registered at startup by `register_extractors`, looked up by task type, and
-called by `prepare()` before any route is chosen. Adding one is an entry in
-`EXTRACTS` and a block in `config.yaml`, not a change to the composition root.
+called by `prepare()`, which is node 0 of every graph. Adding one is an entry
+in `EXTRACTS` and a block in `config.yaml`, not a change to the composition
+root.
+
+An extractor also carries `ask_clarification` (ticket 05): the model has just
+read everything the reporter said, and may know something is missing that no
+structural rule catches. It names *which* of its own fields, and why — never
+words, so the tool cannot be argued into phrasing that bypasses the operator's
+voice — and `friday.workflows.prepare` turns that into an `Ask` the Responder
+writes. Code stays the floor regardless: a field the structural rules reject
+is challenged with the code template whether or not the model asked about it.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from dataclasses import fields
-from typing import Any
+from dataclasses import dataclass, fields
+from typing import Any, Literal
 
-from friday.agent.harness import Harness
+from friday.agent.harness import Harness, ToolContext, tool
 from friday.domain.models import Params
 from friday.extraction.prompt import build_input, build_instructions
 
 __all__ = [
+    "Clarify",
     "EXTRACTS",
     "Extractor",
     "build_extractor",
@@ -39,6 +49,67 @@ log = logging.getLogger(__name__)
 _EXTRACTORS: dict[str, "Extractor"] = {}
 
 
+@dataclass(frozen=True, slots=True)
+class Clarify:
+    """The extractor's own request: these fields, because of this.
+
+    Intent, not words — `fields` names which of the type's own fields it
+    means, closed to a per-type enum so the model cannot invent one that does
+    not exist. The Responder turns this into the sentence a reporter reads;
+    this module never writes one.
+    """
+
+    fields: tuple[str, ...]
+    because: str
+
+
+@dataclass
+class _Capture:
+    """Per-run scratch space for `ask_clarification`, same pattern as
+    triage's — the tool writes here rather than to a module global, so
+    concurrent runs cannot overwrite each other."""
+
+    clarify: Clarify | None = None
+
+
+def _clarify_tool(params_cls: type[Params]):
+    """Build `ask_clarification` for one type: a closed enum of that type's
+    own *askable* fields — everything but what the model itself writes (see
+    `MODEL_AUTHORED` in `friday.workflows`). One function because every type
+    needs the identical shape, differing only in which fields it may name.
+    """
+    from friday.workflows import MODEL_AUTHORED
+
+    askable = tuple(f for f in params_cls.__dataclass_fields__ if f not in MODEL_AUTHORED)
+    FieldName = Literal[askable]
+
+    def ask_clarification(
+        ctx: ToolContext[_Capture], fields: list[FieldName], because: str
+    ) -> str:
+        ctx.context.clarify = Clarify(fields=tuple(fields), because=because)
+        return "recorded"
+
+    # `FieldName` is local to this call — `from __future__ import annotations`
+    # stringifies the signature above, and resolving it back would eval that
+    # string against the *module's* globals, where `FieldName` does not
+    # exist. Setting the real object here bypasses that eval for this one
+    # parameter.
+    ask_clarification.__annotations__["fields"] = list[FieldName]
+
+    ask_clarification.__doc__ = (
+        "Ask the reporter for specific fields, because something in what "
+        "they wrote makes this worth asking even though nothing here "
+        "requires it structurally — an ambiguity, a detail the report "
+        "implies but does not state.\n\n"
+        "Args:\n"
+        f"    fields: which of this type's own fields you mean — "
+        f"{', '.join(askable)}.\n"
+        "    because: why, in one short phrase — what you read that makes "
+        "this worth asking."
+    )
+    return tool(ask_clarification)
+
+
 class Extractor:
     """A workflow's extraction agent, plus the instructions that drive it.
 
@@ -53,18 +124,23 @@ class Extractor:
         self._params_cls = params_cls
         self.name = name
 
-    async def run(self, text: str) -> Params | None:
-        """Ask the model to fill the fields. None if the call failed.
+    async def run(self, text: str) -> tuple[Params | None, Clarify | None]:
+        """Ask the model to fill the fields. `(None, None)` if the call failed.
 
-        The harness already swallows exceptions into `last_error`, so a None
-        here means "the model could not answer" — the workflow falls back to
-        the structural check, which is the right behaviour: nothing to
-        hallucinate means nothing to validate.
+        The harness already swallows exceptions into `last_error`, so a
+        `None` params here means "the model could not answer" — the workflow
+        falls back to the structural check, which is the right behaviour:
+        nothing to hallucinate means nothing to validate. Whether the model
+        also called `ask_clarification` is independent of that — one extra
+        turn covers the tool call landing before or after the field text.
         """
-        result = await self._harness.run(build_input(text, self._params_cls))
+        capture = _Capture()
+        result = await self._harness.run(
+            build_input(text, self._params_cls), context=capture, extra_turns=1
+        )
         if result is None:
             log.warning("extractor %s returned no result", self.name)
-            return None
+            return None, None
         read = _parse(result.final_output or "")
         known = set(self._params_cls.__dataclass_fields__)
         unknown = sorted(set(read) - known)
@@ -77,7 +153,7 @@ class Extractor:
                 "extractor %s: ignoring %s", self.name, ", ".join(map(repr, unknown))
             )
         try:
-            return _hygiene(
+            filled = _hygiene(
                 self._params_cls(**{k: v for k, v in read.items() if k in known})
             )
         except (TypeError, ValueError) as exc:
@@ -86,7 +162,8 @@ class Extractor:
                 self.name,
                 exc,
             )
-            return None
+            return None, capture.clarify
+        return filled, capture.clarify
 
 
 def build_extractor(
@@ -112,17 +189,19 @@ def registered() -> dict[str, Extractor]:
     return dict(_EXTRACTORS)
 
 
-async def extract(task_type: str, text: str) -> Params | None:
+async def extract(task_type: str, text: str) -> tuple[Params | None, Clarify | None]:
     """Run the extractor registered for `task_type` over `text`.
 
     Returns the filled Params, or None if no extractor is registered or the
     extractor failed. None is the right answer for "skip this step" — the
     caller treats it as "no extra information found, do not validate the
-    hallucinated fields".
+    hallucinated fields". The `Clarify`, if any, is independent of whether
+    the params came back — the model may have called the tool and still
+    written nothing usable, or the reverse.
     """
     ext = _EXTRACTORS.get(task_type)
     if ext is None:
-        return None
+        return None, None
     return await ext.run(text)
 
 
@@ -152,7 +231,12 @@ def register(task_type: str, params_cls: type[Params], config: "AgentConfig") ->
 
     _EXTRACTORS[task_type] = build_extractor(
         params_cls=params_cls,
-        harness=Harness(config=config, instructions=build_instructions()),
+        harness=Harness(
+            config=config,
+            instructions=build_instructions(),
+            tools=[_clarify_tool(params_cls)],
+            context_type=_Capture,
+        ),
         name=f"{task_type}_extractor",
     )
 

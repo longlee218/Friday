@@ -5,6 +5,11 @@ The extraction module is the second half of the seam. It must:
 - parse a model's output into a Params instance
 - return None on any failure (the workflow falls back to structural only)
 - run before validate, so hallucinated values are still caught
+
+Ticket 05 adds `ask_clarification`, so `extract()`/`Extractor.run()` return a
+`(Params | None, Clarify | None)` pair rather than a bare `Params | None` —
+whether the model asked is independent of whether it also wrote usable field
+text.
 """
 
 from __future__ import annotations
@@ -126,9 +131,10 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
     _install("stub_test_31", ext)
 
     try:
-        result = asyncio.run(extract("stub_test_31", "the api is wrong"))
-        assert isinstance(result, ParamsWithRules)
-        assert result.environment == "production"
+        params, clarify = asyncio.run(extract("stub_test_31", "the api is wrong"))
+        assert isinstance(params, ParamsWithRules)
+        assert params.environment == "production"
+        assert clarify is None
     finally:
         registered().pop("stub_test_31", None)
 
@@ -150,8 +156,9 @@ def test_an_extractor_returns_none_when_harness_fails():
     _install("failing_test_31", ext)
 
     try:
-        result = asyncio.run(extract("failing_test_31", "x"))
-        assert result is None
+        params, clarify = asyncio.run(extract("failing_test_31", "x"))
+        assert params is None
+        assert clarify is None
     finally:
         registered().pop("failing_test_31", None)
 
@@ -177,14 +184,85 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
         # Output is not JSON and has no key:value lines, so _parse returns {}.
         # The Params constructor then fails with TypeError on the missing
         # required field; Extractor returns None.
-        result = asyncio.run(extract("bad_output_test_31", "x"))
-        assert result is None
+        params, clarify = asyncio.run(extract("bad_output_test_31", "x"))
+        assert params is None
+        assert clarify is None
     finally:
         registered().pop("bad_output_test_31", None)
 
 
 async def test_extract_returns_none_for_unregistered_task_type():
-    assert await extract("not_a_real_task_type_31_xyz", "anything") is None
+    assert await extract("not_a_real_task_type_31_xyz", "anything") == (None, None)
+
+
+# --- ask_clarification --------------------------------------------------
+
+
+async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
+    """The scripted-model seam: the model calls `ask_clarification` instead
+    of writing field text. `Extractor.run` surfaces it as a `Clarify` —
+    intent, not words: which of the type's own fields, and why."""
+    from agents.testing import ScriptedModel, assistant_message, function_call
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction import Clarify, _Capture, _clarify_tool
+
+    config = AgentConfig(
+        name="api_issue_ext",
+        api_key="k",
+        base_url="https://example.invalid/v1",
+        model="test-model",
+    )
+    ext = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=Harness(
+            config=config,
+            instructions="extract",
+            tools=[_clarify_tool(ApiIssueParams)],
+            context_type=_Capture,
+            model=ScriptedModel(
+                [
+                    [
+                        function_call(
+                            "ask_clarification",
+                            {
+                                "fields": ["correlation_id"],
+                                "because": "no id or curl anywhere in the report",
+                            },
+                            call_id="1",
+                        )
+                    ],
+                    [assistant_message("{}")],
+                ]
+            ),
+        ),
+        name="api_issue_ext",
+    )
+    _install("clarify_test_31", ext)
+
+    try:
+        params, clarify = await extract("clarify_test_31", "the api is broken")
+        assert clarify == Clarify(
+            fields=("correlation_id",), because="no id or curl anywhere in the report"
+        )
+    finally:
+        registered().pop("clarify_test_31", None)
+
+
+def test_ask_clarification_cannot_name_a_field_that_does_not_exist():
+    """The closed enum is the enforcement — `fields` is generated from the
+    type's own dataclass fields, `summary` (model-authored) excluded, so the
+    schema itself is what stops the model asking about something that is
+    not there or that it writes itself."""
+    from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
+    from friday.extraction import _clarify_tool
+
+    for params_cls in (ApiIssueParams, AccessRequestParams, DocQuestionParams):
+        schema = _clarify_tool(params_cls).params_json_schema
+        enum = set(schema["properties"]["fields"]["items"]["enum"])
+        assert enum == set(params_cls.__dataclass_fields__) - {"summary"}
 
 
 # --- triage classifies; extraction is the only producer ---------------------

@@ -169,6 +169,68 @@ async def test_a_malformed_correlation_id_is_caught_by_the_rule():
     assert "uuid" in action.text
 
 
+# ---- ask_clarification: code stays the floor (D12) --------------------------
+
+
+async def _prepare_with_clarify(params_obj, clarify, *, extracted=None, monkeypatch):
+    """`prepare()` with `extract()` stood in for, so the ordering between
+    code's own floor and a model's `Clarify` can be tested without a real
+    extractor or model."""
+    import friday.workflows as wf
+
+    async def stub_extract(task_type, text):
+        return extracted, clarify
+
+    monkeypatch.setattr(wf, "_extract", stub_extract)
+    return await wf.prepare("api_issue", params_obj, text="irrelevant")
+
+
+async def test_code_floor_wins_over_a_clarify_that_names_a_different_field(monkeypatch):
+    """The extractor asked about `environment`, but `correlation_id` is
+    malformed — code's own rule is what the reporter is challenged with,
+    because a value the rules reject cannot be waved through by the model
+    having asked about something else instead."""
+    from friday.extraction import Clarify
+
+    bad = params(correlation_id="not-a-uuid")
+    clarify = Clarify(fields=("environment",), because="no server named")
+
+    _, action = await _prepare_with_clarify(bad, clarify, monkeypatch=monkeypatch)
+
+    assert isinstance(action, Ask)
+    assert "uuid" in action.text
+    assert "server" not in action.text, "the model's own wording must not leak in here"
+
+
+async def test_a_clarify_for_an_already_filled_field_is_not_honoured(monkeypatch):
+    """The model asked about `correlation_id`, but it is already there — from
+    the reporter, or from this same extraction run. Asking again for
+    something already answered is not a question this exists to ask."""
+    from friday.extraction import Clarify
+
+    complete = params(correlation_id=CID)
+    clarify = Clarify(fields=("correlation_id",), because="not sure")
+
+    _, action = await _prepare_with_clarify(complete, clarify, monkeypatch=monkeypatch)
+
+    assert action is None, "nothing left to ask about once the field is filled"
+
+
+async def test_a_clarify_becomes_an_ask_once_code_has_nothing_to_say(monkeypatch):
+    """A report with a curl is traceable — code's own rules find nothing
+    wrong — but the extractor read something worth asking about anyway.
+    That is the case `ask_clarification` exists for."""
+    from friday.extraction import Clarify
+
+    traceable = params(curl="curl -X GET /pay")
+    clarify = Clarify(fields=("environment",), because="curl doesn't say which server")
+
+    _, action = await _prepare_with_clarify(traceable, clarify, monkeypatch=monkeypatch)
+
+    assert isinstance(action, Ask)
+    assert "environment" in action.text.lower()
+
+
 # ---- the end of the simple path --------------------------------------------
 
 

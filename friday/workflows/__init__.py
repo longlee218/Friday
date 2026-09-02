@@ -15,6 +15,12 @@ already do.
 `Ask`, `Reply` and `Park` live in `friday.domain.actions` — they are the
 vocabulary every path speaks, graphs included, so neither this module nor the
 graph engine defines them.
+
+`prepare` also honours a `Clarify` the extractor produced (ticket 05) — but
+only once its own structural and semantic checks have nothing left to say,
+and only for whichever of the model's named fields the fill actually left
+blank. Code is the floor; the model can ask for more than code requires, not
+argue its way past what code rejects.
 """
 
 from __future__ import annotations
@@ -34,11 +40,12 @@ from friday.domain.validation import Problem, validate
 #: Imported lazily inside `plan()` would only save a sys.modules lookup; it
 #: does not break a cycle (extraction.py imports harness and models, not
 #: workflows). Keep it here so the import graph is one read of the file.
-from friday.extraction import extract as _extract
+from friday.extraction import Clarify, extract as _extract
 
 __all__ = [
     "Action",
     "Ask",
+    "MODEL_AUTHORED",
     "PARAMS",
     "Park",
     "Reply",
@@ -54,8 +61,10 @@ PARAMS: dict[str, type] = {
 }
 
 #: Written by the model about the message, not supplied by the person who sent
-#: it. Asking someone for a summary of their own message is nonsense.
-_MODEL_AUTHORED = frozenset({"summary"})
+#: it. Asking someone for a summary of their own message is nonsense. Public —
+#: `friday.extraction` reads it too, to build `ask_clarification`'s closed
+#: enum of a type's *askable* fields.
+MODEL_AUTHORED = frozenset({"summary"})
 
 #: Field names that read badly as a question. Anything absent falls back to the
 #: field name, which is usually fine — "the project", "the permission".
@@ -99,14 +108,31 @@ async def prepare(
     Extraction runs before validation on purpose: validation is what stops a
     hallucinated field from being believed, so it has to see what the extractor
     produced and not only what triage wrote.
+
+    **Code is still the floor** (D12). The extractor may call
+    `ask_clarification` — it just read the whole thread, and may catch an
+    ambiguity no structural rule does — but a value the type's own rules
+    reject is challenged with the code template regardless of what the model
+    asked about instead. A model's question is honoured only once code has
+    nothing to say and only for fields the fill actually left blank: asking
+    again for something already answered is not a question this exists to ask.
     """
+    clarify: Clarify | None = None
     if text is not None:
-        extracted = await _extract(task_type, text)
+        extracted, clarify = await _extract(task_type, text)
         if extracted is not None:
             params = _fill(params, extracted)
 
     problems = _problems(params)
-    return params, Ask(_question(problems)) if problems else None
+    if problems:
+        return params, Ask(_question(problems))
+
+    if clarify is not None:
+        still_missing = tuple(f for f in clarify.fields if not getattr(params, f, None))
+        if still_missing:
+            return params, Ask(_question_from_clarify(Clarify(still_missing, clarify.because)))
+
+    return params, None
 
 
 def plan_by_required_parameters(task_type: str, params: Params) -> Action:
@@ -174,7 +200,7 @@ def _missing(params: Params) -> list[Problem]:
     """The structural half of `_problems`: fields that should be there but are not.
 
     Optional-ness is read off the annotations. A field marked `str | None` is
-    not required; a field the model always writes (see `_MODEL_AUTHORED`) is
+    not required; a field the model always writes (see `MODEL_AUTHORED`) is
     not checked here either. The validation engine handles everything else:
     if a value is present but malformed, that is its problem, not this one's.
     """
@@ -187,7 +213,7 @@ def _missing(params: Params) -> list[Problem]:
         Problem(field=f.name)
         for f in fields(params)
         if f.name not in optional
-        and f.name not in _MODEL_AUTHORED
+        and f.name not in MODEL_AUTHORED
         and not getattr(params, f.name)
     ]
 
@@ -216,6 +242,17 @@ def _question(problems: list[Problem]) -> str:
         asked_as = _ASKED_AS.get(field, f"the {field.replace('_', ' ')}")
         parts.append(f"{asked_as} ({message})" if message else asked_as)
     return "Could you tell me " + " and ".join(parts) + "?"
+
+
+def _question_from_clarify(clarify: Clarify) -> str:
+    """Render a `Clarify` the same shape `_question` renders `Problem`s —
+    content for the Responder to write from, not a sentence to send verbatim.
+    Every reporter-facing Ask goes through the Responder (`WorkflowRunner._say`)
+    before it is ever sent; this only has to say what needs asking.
+    """
+    parts = [_ASKED_AS.get(f, f"the {f.replace('_', ' ')}") for f in clarify.fields]
+    question = "Could you tell me " + " and ".join(parts) + "?"
+    return f"{question} ({clarify.because})" if clarify.because else question
 
 
 

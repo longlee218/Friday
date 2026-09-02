@@ -85,12 +85,21 @@ It reads **every** message linked to the task, oldest first, not the opening
 one. The answer to a question we asked comes back as an ordinary follow-up, and
 nothing else in the system reads it for content.
 
-It runs before the route is chosen, because validation gates the route and
-validation has nothing to check until the fields are filled. The first answer
-for a field stands: a later run may fill what is still blank and may not revise
-what it already said, because a model asked the same question twice does not
-give the same answer, and a reworded value is indistinguishable from a changed
-one.
+It runs inside `prepare`, node 0 of every graph (ticket 03), because
+validation has nothing to check until the fields are filled and runs
+immediately after regardless. The first answer for a field stands: a later
+run may fill what is still blank and may not revise what it already said,
+because a model asked the same question twice does not give the same answer,
+and a reworded value is indistinguishable from a changed one.
+
+An extractor may also call **`ask_clarification`** (ticket 05): it just read
+the whole thread and may catch something no structural rule does. It names
+which of its own fields, closed to that type's own dataclass fields, and
+why — intent, never words, so the tool cannot be argued into phrasing that
+bypasses the Responder's voice. Code stays the floor: a value the type's own
+rules reject is challenged with the code template regardless of what was
+asked instead, and a field the model names that turns out already filled is
+not asked about again.
 
 ## Workflow
 

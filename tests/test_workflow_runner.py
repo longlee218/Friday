@@ -350,6 +350,85 @@ async def test_extraction_runs_when_a_message_is_linked(db):
         _EXTRACTORS.pop("api_issue", None)
 
 
+async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db):
+    """Ticket 05, end to end: the report already has a curl, so the
+    structural floor (`_traceable`) finds nothing wrong — the only reason an
+    `Ask` exists at all is the extractor calling `ask_clarification` about a
+    field code does not require. The sentence that reaches the reporter is
+    the Responder's, not the template `_question_from_clarify` builds for it
+    to write from.
+    """
+    from agents.testing import ScriptedModel, assistant_message, function_call
+    from sqlalchemy import update as sa_update
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
+    from friday.extraction import _EXTRACTORS, _Capture, _clarify_tool, build_extractor
+    from friday.store import schema
+
+    ext = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=Harness(
+            config=AgentConfig(
+                name="api_issue_ext", api_key="k",
+                base_url="https://example.invalid/v1", model="test-model",
+            ),
+            instructions="extract",
+            tools=[_clarify_tool(ApiIssueParams)],
+            context_type=_Capture,
+            model=ScriptedModel(
+                [
+                    [
+                        function_call(
+                            "ask_clarification",
+                            {
+                                "fields": ["environment"],
+                                "because": "the curl doesn't say which server",
+                            },
+                            call_id="1",
+                        )
+                    ],
+                    [assistant_message("{}")],
+                ]
+            ),
+        ),
+        name="api_issue_ext",
+    )
+    _EXTRACTORS["api_issue"] = ext
+
+    responder = StubResponder("anh check giúp em cái server nhé")
+
+    try:
+        event = InboundEvent(
+            provider="fake", provider_message_id="m-clarify-1", channel_id="watched",
+            thread_id=None, author_id="u-reporter", author_name="reporter",
+            text="checkout API bị lỗi rồi, curl -X GET /pay", created_at=datetime.now(timezone.utc),
+            mention_type=MentionType.DIRECT,
+        )
+        await db.record_message(event)
+        task = await make_task(db, curl="curl -X GET /pay")  # traceable already
+        async with db._sessions.begin() as session:
+            await session.execute(
+                sa_update(schema.Message)
+                .where(schema.Message.provider_message_id == "m-clarify-1")
+                .values(task_id=task.id)
+            )
+
+        await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+
+        (row,) = await db.outbound()
+        assert row.text == "anh check giúp em cái server nhé", (
+            "the reporter must see the Responder's sentence, not the template"
+        )
+        (asking,) = responder.asked
+        assert "environment" in asking.lower(), (
+            "the Responder must be told which field to ask about"
+        )
+    finally:
+        _EXTRACTORS.pop("api_issue", None)
+
+
 async def test_the_responder_is_told_what_this_task_actually_knows(db):
     """Without it the model has only the conversation, and a conversation is a
     whole channel — it may hold another report's correlationId.

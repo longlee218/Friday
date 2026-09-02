@@ -31,6 +31,11 @@ You are the only thing that reads this message for what it contains. Nothing
 produced these fields before you and nothing corrects them after, except a
 check that a value you did supply has the right shape.
 
+If something is worth asking the reporter about — an ambiguity, a detail the
+report implies but does not state — call ask_clarification with which fields
+you mean and why. That is separate from filling fields: do both when both
+apply, and still reply in JSON for whatever you did find.
+
 Reply in JSON only, with the schema fields as keys."""
 
 
