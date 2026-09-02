@@ -34,7 +34,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
 from friday.memory.channel_context import ChannelContext
 from friday.domain.models import InboundEvent, Params
@@ -60,92 +60,6 @@ class Section:
         if not self.body or not self.body.strip():
             return ""
         return f"<{self.name}>\n{self.body}\n</{self.name}>\n"
-
-
-#: A builder returns a Section, or None to skip the section entirely. None is
-#: distinct from Section(name="...", body=""): None means "do not render
-#: anything for this slot"; empty body means "render the slot, with no
-#: content". Most callers want None on error, empty on legitimate absence.
-Builder = Callable[[], "Section | None"]
-
-
-@dataclass(frozen=True, slots=True)
-class ContextBundle:
-    """The knowledge a single agent call needs.
-
-    The bundle does not call the database itself; the caller resolves the
-    pieces and hands them in. That keeps this module free of async and
-    free of the `Database` import cycle.
-
-    Order is significant: identity -> base -> channel_* -> notes ->
-    skills -> tone -> conversation -> task. Stable sections first, volatile
-    last. The bundle's `render()` is appended to the agent's user turn
-    (alongside the actual question); identity/base/system-prompt-shaped
-    material still lives in `instructions`.
-    """
-
-    #: Stable everywhere — today's date, etc.
-    base: Section = field(default_factory=lambda: Section("base"))
-    #: Stable per channel — base file content.
-    channel_base: Section = field(default_factory=lambda: Section("channel_base"))
-    #: Machine-written derived content — escaped at the seam.
-    channel_derived: Section = field(
-        default_factory=lambda: Section("channel_derived")
-    )
-    #: Per channel, but operator-overridable — escaped at the seam.
-    channel_overrides: Section = field(
-        default_factory=lambda: Section("channel_overrides")
-    )
-    #: Whether the operator has any history with the person being written
-    #: to. One line when they do not; nothing when they do. Only the responder
-    #: fills it — it is the one agent that has to pick a form of address.
-    counterpart: Section = field(default_factory=lambda: Section("counterpart"))
-    #: Long-term notes — also escaped, also operator-influenced.
-    notes: Section = field(default_factory=lambda: Section("notes"))
-    #: Catalogue of skills the agent can ask for (ticket 24 fills this).
-    skills: Section = field(default_factory=lambda: Section("skills"))
-    #: Operator's past messages, as style reference. Kept apart from
-    #: conversation so the agent sees them labelled.
-    tone: Section = field(default_factory=lambda: Section("tone"))
-    #: The conversation so far, oldest first.
-    conversation: Section = field(default_factory=lambda: Section("conversation"))
-    #: Per-call section: the task, its params, what is missing, the decision.
-    task: Section = field(default_factory=lambda: Section("task"))
-
-    def render(self) -> str:
-        """Render the bundle as a string suitable for the user turn.
-
-        Each section is its own tag. Empty sections contribute nothing.
-        Returns text that is appended to the caller's question, NOT the
-        agent's system prompt — that lives in `instructions`.
-        """
-        parts = [
-            self.base.render(),
-            self.channel_base.render(),
-            self.channel_derived.render(),
-            self.channel_overrides.render(),
-            self.counterpart.render(),
-            self.notes.render(),
-            self.skills.render(),
-            self.tone.render(),
-            self.conversation.render(),
-            self.task.render(),
-        ]
-        # Sections only. There was a wrapper here — "You are an agent in the
-        # friday system" above, and a precedence rule for the channel sections
-        # below — sent to every caller. Triage was told how to resolve a
-        # conflict between three sections it is never passed. Who an agent is
-        # belongs to its family's persona; what the channel sections mean
-        # belongs to the one family that receives them.
-        return "\n".join(p for p in parts if p)
-
-
-# ---------------------------------------------------------------------------
-# Builders. Each reads from a source the caller already loaded. Failure is
-# logged, never raised: a missing notes file is not a reason to fail an
-# otherwise-runnable task. Builders return None to skip the section entirely
-# (different from an empty body, which renders the tags with no content).
-# ---------------------------------------------------------------------------
 
 
 def base(now: datetime) -> Section:
@@ -204,12 +118,6 @@ def channel_overrides(ctx: ChannelContext | None) -> Section:
         return Section("channel_overrides")
     body = _render_yaml_escaped(ctx.overrides)
     return Section("channel_overrides", body)
-
-
-def notes(text: str | None) -> Section:
-    if not text:
-        return Section("notes")
-    return Section("notes", _escape(text))
 
 
 def skills(catalogue: list[str] | None) -> Section:

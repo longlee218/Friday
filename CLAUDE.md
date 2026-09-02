@@ -16,10 +16,8 @@ one is wrong, raise it rather than quietly building something else.
 Work is broken into tickets under `.scratch/discord-mention-triage/issues/`,
 derived from `docs/SPEC.md`. Tickets 01–17 and 23–27 and 29–33 are done; 07
 was superseded and reopened as 28, and 28 is now retired in favour of 32 and
-33. **Open: 18–20** — the board's own repo and its UI, deferred by choice — and
-**42–45**, the per-family prompt modules: each family gets one module that owns
-its prompt's assembly, and the shared ten-slot bundle dissolves. 34–41 are
-done. All of them came out of watching real threads rather than
+33. **Open: 18–20 only** — the board's own repo and its UI, deferred by choice.
+34–45 are done. All of them came out of watching real threads rather than
 reading code: the reporter replied and nothing could hear the answer, sent the
 details in a second message and nothing read it, asked what a correlationId is
 and nothing could explain, and the operator answered by hand while the agent
@@ -257,11 +255,13 @@ not an implementation detail:
   task and are always kept, because them answering is what closes one. The
   task goes to `handled_by_operator` — not `done`, so it is reopenable and
   countable — and everything queued about it is withdrawn.
-- **Four prompt families, no shared text.** Triage gets the messages; an
-  extractor gets the schema and the messages; a graph node gets its own
-  instructions and the Node persona; the responder and the composing node get
-  the Responder persona, the room's context, examples, conversation and task.
-  Escaping is the one shared piece, in one module, and a test says so.
+- **Four prompt families, no shared text — and one prompt module per family.**
+  The wording lives in `prompts/*.md`; the assembly lives in
+  `friday.<family>.prompt`, one module that answers "what does this family's
+  prompt look like"; no family imports another's (grep test). What is shared
+  is mechanism: `Section`, the value renderers, and escaping — one seam, one
+  test. The responder's section order is load-bearing (stable-first is the
+  prompt-cache hit) and has its own test.
 - **Silence is not approval.** Only a classification the operator marked
   *right* becomes a few-shot example, and only a classifiable type at that. An
   unmarked classification is one nobody read.

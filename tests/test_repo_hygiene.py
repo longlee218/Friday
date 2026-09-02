@@ -201,3 +201,28 @@ def test_every_prompt_file_is_loaded_by_something():
         f"orphaned prompt files: {on_disk - set(loaded())}; "
         f"loaded from nowhere: {set(loaded()) - on_disk}"
     )
+
+
+def test_no_family_imports_another_familys_prompt_module():
+    """The rule tickets 42–45 bought: one prompt module per family, and no
+    family reaches into another's. The graph's composing node is Responder
+    *family* by persona, but it builds through the graph's module — sharing
+    the other family's builder would let one family's reshuffle silently
+    reshape another's prompt."""
+    import subprocess
+
+    modules = {
+        "triage": "friday/triage",
+        "extraction": "friday/extraction",
+        "responder": "friday/responder",
+        "dag": "friday/dag",
+    }
+    for family, root in modules.items():
+        others = [f"friday.{m}.prompt" for m in modules if m != family]
+        for other in others:
+            hits = subprocess.run(
+                ["grep", "-rl", "--include=*.py", other, root],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            assert not hits, f"{family} imports {other}: {hits}"

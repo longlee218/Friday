@@ -8,15 +8,23 @@ picks servers and reads config — four jobs in one place.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Acceptance criteria
 
-- [ ] `build_instructions(node, persona, skills)` in the graph's own prompt
+- [x] `build_instructions(node, persona, skills)` in the graph's own prompt
       module; the wiring function wires and assembles nothing
-- [ ] The per-node user turns (the evidence handed to analyze, the said/fix
+- [x] The per-node user turns (the evidence handed to analyze, the said/fix
       handed to compose) stay in the node functions — they are the node's
       logic, not prompt furniture; the boundary is written down in the module
-- [ ] Output byte-identical to today's, captured not eyeballed
-- [ ] The existing family tests (voice in compose, no voice in analyze) pass
+- [x] Output byte-identical to today's, captured not eyeballed
+- [x] The existing family tests (voice in compose, no voice in analyze) pass
       untouched
+
+## What it came to
+
+`friday/dag/prompt.py`: `build_instructions(node, persona, skills)` plus the
+`REASONING` set. The wiring function wires; the per-node user turns stayed in
+the node functions, per the boundary in the ticket. Texts load at import so a
+missing file fails at startup — lazily they had left the orphan-prompts test
+passing on test-order luck. Byte-identical, ten of ten.

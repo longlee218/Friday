@@ -127,7 +127,7 @@ class Harness:
 
     async def run(
         self,
-        prompt: "str | ContextBundle",
+        prompt: str,
         *,
         context: Any = None,
         calls: list | None = None,
@@ -135,18 +135,13 @@ class Harness:
     ) -> Any | None:
         """Run it. `None` means it did not answer.
 
-        Accepts a plain string (the scripted-test seam — unchanged) or a
-        `ContextBundle` (ticket 27) whose `.render()` produces text appended
-        to the user turn. The bundle is the one place every section of an
-        agent's knowledge is assembled; this method does not assemble it.
+        Takes the user turn as a string; each family's own `prompt` module is
+        what assembles it. This method assembles nothing. (There was a
+        ContextBundle it also accepted — one dataclass with a slot for every
+        family's sections, the last piece of shared shape after the families
+        split, dissolved with ticket 45.)
 
-        Note: a bundle is NOT a system prompt. The agent's role and tone
-        live in `instructions` (set at `Harness.__init__`); the bundle
-        contributes the per-call context. Mixing them here would put
-        "You are triage" into the user turn, which is what the bundle
-        was designed to avoid.
-
-        Every agent turns that into its own kind of work — a task for a human,
+        Every agent turns a non-answer into its own kind of work — a task for a human,
         or a fall back to a template — so none of them has to catch anything.
         The reason is kept in `last_error`, scrubbed, because it is stored
         against a task and a provider exception can quote an Authorization
@@ -155,11 +150,6 @@ class Harness:
         `extra_turns` is for an agent whose answer arrives as a tool call: the
         call and its result are two turns where a written answer is one.
         """
-        from friday.agent.instruction_prompt import ContextBundle
-
-        if isinstance(prompt, ContextBundle):
-            prompt = prompt.render()
-
         # Deferred: `llm_log` reaches `Hooks` through this module, so importing
         # it at module load time would be a cycle.
         from friday.agent.llm_log import LogHooks

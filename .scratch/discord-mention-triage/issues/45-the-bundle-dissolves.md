@@ -9,7 +9,7 @@ section type, the escaping, the value renderers.
 
 **Blocked by:** 42, 43 (the two families that still construct a bundle)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why a separate ticket
 
@@ -20,10 +20,19 @@ makes that ticket's green depend on landing order.
 
 ## Acceptance criteria
 
-- [ ] `ContextBundle` is gone, and so is every builder only it used
-- [ ] The shared module holds mechanism only — nothing in it names a family,
+- [x] `ContextBundle` is gone, and so is every builder only it used
+- [x] The shared module holds mechanism only — nothing in it names a family,
       a section order, or a piece of wording
-- [ ] The one-seam escaping test still passes, and the hygiene tests
+- [x] The one-seam escaping test still passes, and the hygiene tests
       (docs paths, `__all__`, prompt orphans) still pass
-- [ ] A grep test pins the new line: no family imports another family's
+- [x] A grep test pins the new line: no family imports another family's
       prompt module
+
+## What it came to
+
+`ContextBundle`, the `Builder` alias and the `notes()` section builder are
+gone — the last had no caller but tests, since promoted notes reach a prompt
+through the harness. The shared module now holds: `Section`, nine section
+builders, three value renderers, one escape. Nothing in it names a family or
+an order. New grep guard: no family imports another family's prompt module.
+Byte-identical, ten of ten, across all four tickets.

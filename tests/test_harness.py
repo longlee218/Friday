@@ -149,18 +149,14 @@ async def test_this_is_the_only_module_that_imports_the_sdk():
     assert set(hits) <= allowed, f"unexpected importer: {set(hits) - allowed}"
 
 
-async def test_run_accepts_a_context_bundle():
+async def test_run_accepts_a_rendered_section():
     """Ticket 27 widens the seam: a bundle's rendered string is the prompt,
-    and nothing else about the call changes. Plain string still works."""
+    and nothing else about the call changes."""
     from agents.testing import ScriptedModel, assistant_message
-    from friday.agent.instruction_prompt import ContextBundle, notes, task
+    from friday.agent.instruction_prompt import task
 
-    bundle = ContextBundle(
-        task=task("classify", None, None),
-        notes=notes(None),  # empty section, no body
-    )
     h = harness([assistant_message("done")])
-    result = await h.run(bundle)
+    result = await h.run(task("classify", None, None).render())
     assert result.final_output == "done"
 
 
