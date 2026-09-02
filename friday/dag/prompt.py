@@ -53,10 +53,13 @@ Answer in JSON with exactly these keys:
 Set actionable to false when you are guessing. A wrong "true" here spends a
 code change on a guess."""
 
-FIX_BUG = """You apply one small, obvious fix.
+FIX_BUG = """You work out one small, obvious fix.
 
-You are given a cause and the code it points at. Make the smallest change
-that addresses that cause and nothing else. Return the diff you applied.
+You are given a cause and the code it points at. Work out the smallest
+change that addresses that cause and nothing else, as a unified diff, and
+call apply_fix with it — the operator sees it before it reaches anyone, so
+call apply_fix even though you are not the one who gets to decide it goes
+ahead.
 
 Call hand_over instead, with your own finding as the reason, when: the
 change would touch a test, a migration, a schema, or anything holding a

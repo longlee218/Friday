@@ -781,6 +781,194 @@ async def test_a_one_node_type_hands_over_on_the_same_terms_as_api_issue(db):
     assert told, "the operator was never told"
 
 
+# --- ticket 07: a patch waits for the operator -----------------------------
+
+
+def _fix_bug_agent(*steps):
+    """A real Harness, wired the way `router.py` wires `fix_bug`'s — the two
+    tools, stopping at either — but scripted, so the seam is the model."""
+    from agents.testing import ScriptedModel
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.dag.api_issue import ComposeCapture, FIX_TOOLS
+
+    return Harness(
+        config=AgentConfig(
+            name="dag_fix", api_key="k",
+            base_url="https://example.invalid/v1", model="test-model",
+        ),
+        instructions="fix",
+        tools=FIX_TOOLS,
+        context_type=ComposeCapture,
+        tool_use_behavior={"stop_at_tool_names": [t.name for t in FIX_TOOLS]},
+        model=ScriptedModel(list(steps)),
+    )
+
+
+async def _wired_for_a_fix(db, fixer):
+    """A task, and the real `api_issue` graph with just enough wired to reach
+    `fix_bug` and, past it, a real `compose_reply` (no agent configured for
+    it, so it takes its own plain fallback — `Reply(cause + fix)` — which is
+    still the real node, not a stand-in, and is what proves the run actually
+    continued rather than ending the moment fix_bug did). `analyze_stack`
+    stands in for the investigation (it degrades to nothing without
+    `read_logs`, so this graph does not bother pretending to have one);
+    `source` is present so `fix_bug` does not skip on a missing server."""
+    from friday.dag import DAG, Edge, Node
+    from friday.dag.api_issue import _compose_reply, _fix_bug, _fix_bug_ok
+    from friday.dag.prepare import prepare_node, prepared_ok
+    from friday.dag.router import EDGE_ROUTER, register_dag
+    from friday.domain.models import ApiIssueParams
+    from tests.test_workflow_runner import make_task
+
+    async def analyze_stack(state, deps):
+        return {"cause": "off by one in the loop bound", "actionable": True}
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag(
+        "api_issue",
+        DAG(
+            name="api_issue",
+            nodes=(
+                prepare_node("api_issue", ApiIssueParams),
+                Node("analyze_stack", analyze_stack),
+                Node("fix_bug", _fix_bug),
+                Node("compose_reply", _compose_reply),
+            ),
+            edges=(
+                Edge("prepare", "analyze_stack", when=prepared_ok),
+                Edge("analyze_stack", "fix_bug"),
+                Edge("fix_bug", "compose_reply", when=_fix_bug_ok),
+            ),
+        ),
+    )
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    return task
+
+
+async def test_apply_fix_stops_the_run_until_the_operator_says_so(db):
+    """Nothing is applied on the first pass — the run stops holding its own
+    state, and the task waits like any hand-over does, with the interruption
+    stored alongside it rather than lost when the process moves on."""
+    from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
+    from friday.workflows.runner import WorkflowRunner
+    from agents.testing import function_call
+
+    fixer = _fix_bug_agent(
+        [function_call("apply_fix", {"diff": "--- a\n+++ b\n"}, call_id="1")]
+    )
+    try:
+        task = await _wired_for_a_fix(db, fixer)
+        DAG_DEPS_EXTRA["api_issue"] = {"fix_bug": fixer}
+        DAG_SERVERS["source"] = object()
+
+        await WorkflowRunner(db=db, auto_ask=True).run_once()
+
+        assert (await db.tasks())[0].state == "needs_human"
+        stored = await db.dag_interruption(task.id)
+        assert stored is not None, "the pending approval must be on the row"
+        assert stored["paused_at_node"] == "fix_bug"
+
+        pause = await db.dag_pause(task.id)
+        assert pause is not None
+        assert "needs approval" in pause[1]
+    finally:
+        DAG_DEPS_EXTRA.pop("api_issue", None)
+        DAG_SERVERS.pop("source", None)
+        from friday.dag.router import EDGE_ROUTER
+        EDGE_ROUTER.pop("api_issue", None)
+
+
+async def test_approving_resumes_the_exact_call_in_a_fresh_process(db):
+    """The whole point: a *different* Harness — standing in for a restart or
+    a redeploy — resumes the paused call and reaches `compose_reply` without
+    read_logs or analyze_stack running a second time."""
+    from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
+    from friday.workflows.runner import WorkflowRunner
+    from agents.testing import function_call
+
+    fixer = _fix_bug_agent(
+        [function_call("apply_fix", {"diff": "--- a\n+++ b\n"}, call_id="1")]
+    )
+    try:
+        task = await _wired_for_a_fix(db, fixer)
+        DAG_DEPS_EXTRA["api_issue"] = {"fix_bug": fixer}
+        DAG_SERVERS["source"] = object()
+        runner = WorkflowRunner(db=db, auto_ask=True)
+        await runner.run_once()
+
+        # A fresh Harness, exactly what a restarted process would build. It
+        # is never actually asked to decide anything — `apply_fix` is one of
+        # the tools this agent stops at, so its own return value (the diff)
+        # becomes the resumed call's result the moment it is approved, the
+        # same as it would if the call had never been interrupted at all.
+        resumed_fixer = _fix_bug_agent([])
+        DAG_DEPS_EXTRA["api_issue"] = {"fix_bug": resumed_fixer}
+
+        moved = await runner.decide_pending_action(task.id, approve=True)
+
+        assert moved.state == "review", (
+            "the run reached compose_reply and produced a real Reply, "
+            "which waits for approval at the outbox — not another hand-over"
+        )
+        assert await db.dag_interruption(task.id) is None, "cleared on resume"
+        (drafted,) = [r for r in await db.outbound() if r.kind == "reply"]
+        assert "off by one in the loop bound" in drafted.text
+        assert "--- a" in drafted.text, (
+            "the approved diff reached compose_reply as fix_bug's result"
+        )
+    finally:
+        DAG_DEPS_EXTRA.pop("api_issue", None)
+        DAG_SERVERS.pop("source", None)
+        from friday.dag.router import EDGE_ROUTER
+        EDGE_ROUTER.pop("api_issue", None)
+
+
+async def test_declining_hands_over_without_calling_the_model_again(db):
+    """A decline is code's decision, not a further turn with the model — the
+    fixer here would fail loudly if it were asked anything at all."""
+    from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
+    from friday.workflows.runner import WorkflowRunner
+    from agents.testing import function_call
+
+    fixer = _fix_bug_agent(
+        [function_call("apply_fix", {"diff": "--- a\n+++ b\n"}, call_id="1")]
+    )
+    try:
+        task = await _wired_for_a_fix(db, fixer)
+        DAG_DEPS_EXTRA["api_issue"] = {"fix_bug": fixer}
+        DAG_SERVERS["source"] = object()
+        runner = WorkflowRunner(db=db, auto_ask=True)
+        await runner.run_once()
+
+        moved = await runner.decide_pending_action(
+            task.id, approve=False, reason="too risky, I'll do it by hand"
+        )
+
+        assert moved.state == "needs_human"
+        assert await db.dag_interruption(task.id) is None
+        pause = await db.dag_pause(task.id)
+        assert pause == ("fix_bug", "too risky, I'll do it by hand")
+    finally:
+        DAG_DEPS_EXTRA.pop("api_issue", None)
+        DAG_SERVERS.pop("source", None)
+        from friday.dag.router import EDGE_ROUTER
+        EDGE_ROUTER.pop("api_issue", None)
+
+
+async def test_read_logs_and_find_code_path_need_no_approval(db):
+    """D17: the risk is in acting, not in investigating. Neither tool
+    server's node is marked `needs_approval` anywhere, and this is what
+    would fail if one accidentally were."""
+    from friday.dag.api_issue import NODE_SERVERS
+    from friday.dag.router import _API_ISSUE_AGENTS
+
+    assert set(NODE_SERVERS) == {"read_logs", "find_code_path", "fix_bug"}
+    # The only `needs_approval` tool anywhere in this graph is `apply_fix`,
+    # and it is wired to `fix_bug` alone (see router.py's `agents_for_api_issue`).
+    assert "fix_bug" in _API_ISSUE_AGENTS
+
+
 async def test_a_pause_records_the_node_that_paused_not_the_graph(db):
     """`paused_at_node` is read by a human deciding where to look. Storing
     the graph's name there answers a question nobody asked."""

@@ -52,8 +52,14 @@ ALLOWED: dict[TaskState, frozenset[TaskState]] = {
     TaskState.WAITING_FOR_DETAILS: frozenset(
         {TaskState.PENDING, TaskState.NEEDS_HUMAN, TaskState.DONE}
     ),
-    # A person can hand it back to the machine, or close it.
-    TaskState.NEEDS_HUMAN: frozenset({TaskState.PENDING, TaskState.DONE}),
+    # A person can hand it back to the machine, or close it — or, since
+    # ticket 07, decide a specific paused action themselves: approving or
+    # declining a patch resolves straight into whatever that produces
+    # (`REVIEW` for a reply, `WAITING_FOR_DETAILS` if the resumed run asks
+    # something), without a round trip through `PENDING` to get there.
+    TaskState.NEEDS_HUMAN: frozenset(
+        {TaskState.PENDING, TaskState.WAITING_FOR_DETAILS, TaskState.REVIEW, TaskState.DONE}
+    ),
     TaskState.REVIEW: frozenset(
         {TaskState.PENDING, TaskState.NEEDS_HUMAN, TaskState.DONE}
     ),

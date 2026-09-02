@@ -82,6 +82,24 @@ def hand_over(ctx: ToolContext[ComposeCapture], reason: str) -> str:
 #: agent-building code name the same two things once each.
 COMPOSE_TOOLS = [answer, hand_over]
 
+
+@tool(needs_approval=True)
+def apply_fix(diff: str) -> str:
+    """Propose this diff as the fix. Only call this once you are sure — the
+    operator sees exactly this diff before it reaches anyone.
+
+    Args:
+        diff: the change, as a unified diff, ready to be read as-is.
+    """
+    return diff
+
+
+#: fix_bug's own two tools — `apply_fix` (ticket 07, needs approval) beside
+#: `hand_over` (ticket 06, no approval needed: refusing to act is not the
+#: dangerous half). Kept apart from `COMPOSE_TOOLS`: compose_reply never
+#: applies anything, and fix_bug never answers a reporter.
+FIX_TOOLS = [apply_fix, hand_over]
+
 #: Which tool server each node needs. A node whose server is absent skips.
 LOKI = "loki"
 SOURCE = "source"
@@ -213,8 +231,19 @@ async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | HandOver | None:
     # refused correctly still had its refusal proposed as a patch.
     capture = ComposeCapture()
     result = await agent.run(
-        f"cause: {cause}\ncode: {state.get('find_code_path')}", context=capture
+        f"cause: {cause}\ncode: {state.get('find_code_path')}",
+        context=capture,
+        extra_turns=2,
     )
+    if result is not None and result.interruptions:
+        # `apply_fix` wants to run — D15's gate. The run stops holding its
+        # own state; `_run_dag` checkpoints it alongside this node, and
+        # `decide_pending_action` is what resumes or declines it. Nothing
+        # here decides which; that is the operator's call, not this node's.
+        return HandOver(
+            f"Found a fix. It needs approval before I use it. Cause: {cause}",
+            interruption=agent.checkpoint(result),
+        )
     if capture.action is not None:
         return capture.action
     return (result.final_output or "").strip() if result else None

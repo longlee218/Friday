@@ -11,6 +11,7 @@ happened to take.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 __all__ = ["Action", "Ask", "HandOver", "Reply"]
 
@@ -46,9 +47,17 @@ class HandOver:
     reaches its end without deciding anything hands over by code, with no
     model asked. `Park` was the name before there was a tool by that name to
     confuse it with.
+
+    `interruption` is set only for one specific shape of hand-over (ticket
+    07): a node's agent called a tool the SDK stopped to ask about — applying
+    a fix, so far — rather than one that decided nothing could be done. It is
+    the SDK's own run state, serialized, so approving resumes the exact call
+    that stopped rather than restarting the investigation to reach it again.
+    `None` for every ordinary hand-over, which is most of them.
     """
 
     reason: str
+    interruption: dict[str, Any] | None = None
 
 
 Action = Ask | Reply | HandOver

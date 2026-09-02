@@ -160,6 +160,12 @@ class DagState(Base):
     #: resume — the next node to run checkpoints without them.
     paused_at_node: Mapped[str | None]
     paused_question: Mapped[str | None]
+    #: The SDK's own run state (ticket 07), set only while a tool call inside
+    #: `paused_at_node` is waiting for the operator's yes or no — a dangerous
+    #: action, never a message; those wait at the outbox instead. Approving
+    #: resumes this exact call, in this process or a later one, rather than
+    #: re-running the node from scratch. Cleared alongside the pause columns.
+    interruption: Mapped[dict | None] = mapped_column(JSON, default=None)
     updated_at: Mapped[datetime] = mapped_column(IsoDateTime)
 
 

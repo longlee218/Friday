@@ -33,6 +33,7 @@ from agents import (
     RunConfig,
     RunContextWrapper,
     Runner,
+    RunState,
     function_tool,
     set_tracing_disabled,
 )
@@ -150,18 +151,79 @@ class Harness:
         `extra_turns` is for an agent whose answer arrives as a tool call: the
         call and its result are two turns where a written answer is one.
         """
+        return await self._settle(
+            self.agent,
+            prompt,
+            context=context,
+            calls=calls,
+            max_turns=self._config.max_turns + extra_turns,
+        )
+
+    def checkpoint(self, result: Any) -> dict[str, Any]:
+        """A run's pending tool approvals, serialized. `result.interruptions`
+        empty means there is nothing to resume — a node checks that itself
+        before calling this; it is not this method's job to.
+        """
+        return result.to_state().to_json()
+
+    async def resume(
+        self,
+        interruption: dict[str, Any],
+        *,
+        context: Any = None,
+        calls: list | None = None,
+    ) -> Any | None:
+        """Continue a run that was approved to go ahead — `checkpoint`'s
+        output, from this process or an earlier one.
+
+        `context` is a fresh instance of whatever type the paused call used,
+        not the one that call closed over — that object is gone once the
+        process that made it is. A tool called during the resumed turns
+        writes into this one the same way it wrote into the original; a
+        caller that wants to read what a tool did on resume reads it back
+        from here, same as it would from a fresh `run()`. The SDK logs a
+        warning about the serialized context not restoring on its own — it
+        does not, which is exactly why this parameter exists; passing one
+        is what fixes it, not a sign that something failed.
+
+        Approval only: a decline needs no further turn with the model — the
+        caller already knows it declined, and building whatever that becomes
+        (ticket 07: a `HandOver`) is its business, not a reason to ask the
+        model to react to its own refusal.
+
+        There is no `extra_turns` here: the SDK bakes `max_turns` into the
+        state at the call that paused, and a different value passed on
+        resume is silently ignored. The run that calls a `needs_approval`
+        tool needs enough headroom for both halves — reaching the call, and
+        whatever happens once it is approved — from its own `run()` call.
+        """
+        state = await RunState.from_json(
+            self.agent, interruption, context_override=context
+        )
+        (item,) = state.get_interruptions()
+        state.approve(item)
+        return await self._settle(
+            self.agent, state, context=None, calls=calls, max_turns=self._config.max_turns
+        )
+
+    async def _settle(
+        self, agent, input_: Any, *, context: Any, calls: list | None, max_turns: int
+    ) -> Any | None:
+        """Run to completion or to the first thing that stops it, and turn a
+        failure into `last_error` rather than an exception every caller would
+        otherwise have to catch identically."""
         # Deferred: `llm_log` reaches `Hooks` through this module, so importing
         # it at module load time would be a cycle.
         from friday.agent.llm_log import LogHooks
 
         self.last_error = None
-        self.agent.hooks = LogHooks(calls, model=self._config.model)
+        agent.hooks = LogHooks(calls, model=self._config.model)
         try:
             return await Runner.run(
-                self.agent,
-                prompt,
+                agent,
+                input_,
                 context=context,
-                max_turns=self._config.max_turns + extra_turns,
+                max_turns=max_turns,
                 run_config=RunConfig(tracing_disabled=True),
             )
         except Exception as exc:  # noqa: BLE001 - every failure becomes work

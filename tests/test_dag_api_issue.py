@@ -32,7 +32,7 @@ class StubAgent:
         self.prompts.append(prompt)
         if self._answer is None:
             return None
-        return SimpleNamespace(final_output=self._answer)
+        return SimpleNamespace(final_output=self._answer, interruptions=[])
 
 
 class _NullDB:
@@ -362,6 +362,46 @@ async def test_fix_bug_can_hand_over_instead_of_a_refusal_nobody_reads():
     assert outcome == HandOver("this touches a test file")
 
 
+async def test_fix_bug_stops_at_apply_fix_and_carries_the_checkpoint_to_resume_with():
+    """D15's gate, at the scripted-model seam: `apply_fix` is
+    `needs_approval=True`, so calling it stops the run rather than running
+    it — nothing was applied — and the node hands over with the SDK's own
+    state attached, not a plain reason string, so the exact call can be
+    resumed later rather than the investigation re-run to reach it again."""
+    from agents.testing import ScriptedModel, function_call
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.dag.api_issue import ComposeCapture, FIX_TOOLS, _fix_bug
+
+    fixer = Harness(
+        config=AgentConfig(
+            name="dag_fix", api_key="k",
+            base_url="https://example.invalid/v1", model="test-model",
+        ),
+        instructions="fix",
+        tools=FIX_TOOLS,
+        context_type=ComposeCapture,
+        tool_use_behavior={"stop_at_tool_names": [t.name for t in FIX_TOOLS]},
+        model=ScriptedModel(
+            [[function_call("apply_fix", {"diff": "--- a\n+++ b\n"}, call_id="1")]]
+        ),
+    )
+    state = (
+        DAGState.empty()
+        .with_result("analyze_stack", {"cause": "off by one"})
+        .with_result("find_code_path", "friday/checkout.py:20")
+    )
+    deps = DAGDeps(task=SimpleNamespace(), extra={"fix_bug": fixer}, servers={"source": object()})
+
+    outcome = await _fix_bug(state, deps)
+
+    assert isinstance(outcome, HandOver)
+    assert "off by one" in outcome.reason
+    assert outcome.interruption is not None
+    assert "current_agent" in outcome.interruption  # a real RunState.to_json() shape
+
+
 # --- resume -----------------------------------------------------------------
 
 
@@ -669,7 +709,9 @@ async def test_an_ordinary_fix_in_ordinary_code_still_goes_through():
 
     class Fixer:
         async def run(self, prompt, **kw):
-            return SimpleNamespace(final_output="--- a/x.py\n+++ b/x.py")
+            return SimpleNamespace(
+                final_output="--- a/x.py\n+++ b/x.py", interruptions=[]
+            )
 
     diff = await _fix_with(
         {"cause": "off-by-one in the loop bound", "actionable": True},

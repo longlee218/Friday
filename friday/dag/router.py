@@ -138,13 +138,16 @@ def agents_for_api_issue(
             }
         elif node == "fix_bug":
             # `CANNOT FIX` was a sentinel this node's own code never checked
-            # for — a refusal written as prose was proposed as the diff. The
-            # same `hand_over` tool compose_reply uses reports a refusal
-            # unambiguously instead.
-            tools = tools + [graph_names.hand_over]
+            # for — a refusal written as prose was proposed as the diff.
+            # `hand_over` reports a refusal unambiguously instead. `apply_fix`
+            # (ticket 07) is the one tool anywhere in this codebase marked
+            # `needs_approval` — proposing a fix is the one thing a node does
+            # that a word list and an unconfigured agent were the only gates
+            # on before this.
+            tools = tools + list(graph_names.FIX_TOOLS)
             context_type = graph_names.ComposeCapture
             agent_options["tool_use_behavior"] = {
-                "stop_at_tool_names": [graph_names.hand_over.name]
+                "stop_at_tool_names": [t.name for t in graph_names.FIX_TOOLS]
             }
         available = servers or {}
         wanted = graph_names.NODE_SERVERS.get(node)

@@ -7,6 +7,7 @@ import json
 import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
+from typing import Any
 
 from friday.dag import DAGDeps, DAGRunner, DAGState
 from friday.dag.router import dag_for
@@ -177,8 +178,13 @@ class WorkflowRunner:
             log.info("task %d: asked the operator to look", task.id)
 
     async def _act(self, task: Task) -> Task:
-        action = await self._plan(task)
+        return await self._route(task, await self._plan(task))
 
+    async def _route(self, task: Task, action: Action) -> Task:
+        """Given a decision, do what it says. Shared by the ordinary pass and
+        by `decide_pending_action` — an approval resuming a graph reaches the
+        same three outcomes a fresh pass does, and should be routed the same
+        way once it has one."""
         if isinstance(action, Reply):
             return await self._propose(task, action.text)
 
@@ -384,12 +390,144 @@ class WorkflowRunner:
             )
         return outcome
 
+    async def decide_pending_action(
+        self, task_id: int, *, approve: bool, reason: str | None = None
+    ) -> Task:
+        """The operator's yes or no on a paused tool call (ticket 07).
+
+        Nothing in this codebase calls this yet — Discord buttons or the
+        board will, once they exist (tickets 18–20) — but the mechanism
+        stands complete without them: resume in this process or a fresh one,
+        decline without asking the model anything further, either way routed
+        through `_route` exactly like a fresh pass's `Action` is.
+
+        A stale approval — the task moved on since — is not something this
+        checks for separately. `dag_state` is one row per task, replaced
+        whole on every checkpoint: the moment any later pass runs at all, it
+        overwrites `interruption` with whatever that pass left, `None` if
+        nothing did. Reaching this with a *specific* interruption still on
+        the row means nothing has touched it since — there is nothing later
+        to be stale relative to.
+        """
+        stored = await self._db.dag_interruption(task_id)
+        if stored is None:
+            raise ValueError(f"task {task_id} has no pending approval")
+
+        task = await self._db.task(task_id)
+        if task is None:
+            raise ValueError(f"task {task_id} does not exist")
+
+        dag = dag_for(task.type)
+        assert dag is not None, f"{task.type!r} is in PARAMS but has no registered graph"
+
+        from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
+
+        node_name = stored["paused_at_node"]
+        agent = DAG_DEPS_EXTRA.get(task.type, {}).get(node_name)
+
+        if not approve:
+            outcome: Action = HandOver(reason or "declined by the operator")
+        elif agent is None:
+            outcome = HandOver(f"{node_name} has no agent to resume with any more")
+        else:
+            # A fresh capture, not the one the original call closed over —
+            # that object does not survive the process it was made in. If a
+            # tool gets called during the resumed turns, it writes into this
+            # one; if none does, `capture.action` just stays `None` and
+            # `result.final_output` is read instead, the same fallback
+            # `_fix_bug`'s own first attempt uses.
+            from friday.dag.api_issue import ComposeCapture
+
+            capture = ComposeCapture()
+            result = await agent.resume(stored["interruption"], context=capture)
+            if result is None:
+                outcome = HandOver(f"could not resume: {agent.last_error}")
+            elif result.interruptions:
+                outcome = HandOver(
+                    "needs approval again", interruption=agent.checkpoint(result)
+                )
+            elif capture.action is not None:
+                outcome = await self._continue_from(
+                    task, dag, node_name, stored, capture.action
+                )
+            else:
+                resumed_text = (result.final_output or "").strip() or None
+                outcome = await self._continue_from(
+                    task, dag, node_name, stored, resumed_text
+                )
+
+        if isinstance(outcome, HandOver):
+            await self._record_pause(
+                task_id,
+                dag,
+                results=stored["results"],
+                fingerprint=stored["params_fingerprint"],
+                node=node_name,
+                hand_over=outcome,
+            )
+        # An Ask or Reply means the graph continued past `node_name` —
+        # `DAGRunner`'s own `on_checkpoint` already recorded that, interruption
+        # cleared along with it, node by node, the same as any other run.
+        return await self._route(task, outcome)
+
+    async def _continue_from(
+        self, task: Task, dag, node_name: str, stored: dict, resumed_value: Any
+    ) -> Action:
+        """The rest of the graph, picked up from exactly the node that
+        stopped — not restarted, which would spend the earlier nodes' work
+        again to reach the same call.
+
+        `resumed_value` is whatever `node_name` resolved to: an `Action`
+        (its agent called a tool while resuming, the same as any node's
+        agent can) or plain text (it did not, and the caller already fell
+        back the same way a fresh call would). Either way this only injects
+        it and lets the graph's own edges decide what happens past it —
+        `_fix_bug_ok`-style guards work the same on an injected value as on
+        one the node just returned.
+        """
+        from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
+
+        state = (
+            DAGState.from_dict(stored["results"])
+            .with_result(dag.entry, PARAMS[task.type](**task.params))
+            .with_result(node_name, resumed_value)
+        )
+        deps = DAGDeps(
+            task=task,
+            db=self._db,
+            servers=dict(DAG_SERVERS),
+            extra=dict(DAG_DEPS_EXTRA.get(task.type, {})),
+        )
+        fingerprint = stored["params_fingerprint"]
+
+        async def checkpoint(current: DAGState) -> None:
+            await self._db.save_dag_state(
+                task.id,
+                dag_name=dag.name,
+                results=_checkpointable(current, dag),
+                params_fingerprint=fingerprint,
+            )
+
+        runner = DAGRunner(dag, deps=deps, state=state, on_checkpoint=checkpoint)
+        try:
+            final = await runner.run()
+        except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
+            log.warning("task %d: %s failed resuming from %s — %s", task.id, dag.name, node_name, exc)
+            return HandOver(f"{dag.name} failed: {exc}")
+        return self._outcome(dag, final, runner.trail)
+
     async def _record_pause(
         self, task_id: int, dag, *, results: dict, fingerprint: str, node: str, hand_over: HandOver
     ) -> None:
         """A run ended on a `HandOver`: save which node said so and what it said,
         alongside the state so far, so `_raise_hands` can read this run's
-        actual reason rather than the task's bare type and parameters."""
+        actual reason rather than the task's bare type and parameters.
+
+        `hand_over.interruption`, when set, is a tool call waiting on the
+        operator's yes or no (ticket 07) — stored alongside so
+        `decide_pending_action` can find it by task id later, in this
+        process or another one.
+        """
         await self._db.save_dag_state(
             task_id,
             dag_name=dag.name,
@@ -397,6 +535,7 @@ class WorkflowRunner:
             params_fingerprint=fingerprint,
             paused_at_node=node,
             paused_question=hand_over.reason,
+            interruption=hand_over.interruption,
         )
 
     @staticmethod

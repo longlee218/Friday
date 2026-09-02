@@ -1410,6 +1410,12 @@ class Database:
         params_fingerprint: str,
         paused_at_node: str | None = None,
         paused_question: str | None = None,
+        #: The SDK's own run state, set only while a `needs_approval` tool
+        #: call inside `paused_at_node` is waiting on the operator (ticket
+        #: 07). `None` clears it — every ordinary checkpoint passes nothing,
+        #: which is what makes approving (or a fresh pass discarding stale
+        #: state) the only two ways it survives past the write that set it.
+        interruption: dict | None = None,
     ) -> None:
         """Record what a task's workflow graph has produced so far.
 
@@ -1424,6 +1430,7 @@ class Database:
             results=results,
             paused_at_node=paused_at_node,
             paused_question=paused_question,
+            interruption=interruption,
             updated_at=_now(),
         )
         async with self._sessions.begin() as session:
@@ -1438,6 +1445,7 @@ class Database:
                         "results": statement.excluded.results,
                         "paused_at_node": statement.excluded.paused_at_node,
                         "paused_question": statement.excluded.paused_question,
+                        "interruption": statement.excluded.interruption,
                         "updated_at": statement.excluded.updated_at,
                     },
                 )
@@ -1506,6 +1514,28 @@ class Database:
                 return None
             return row.paused_at_node, row.paused_question or ""
 
+    async def dag_interruption(self, task_id: int) -> dict | None:
+        """Everything `decide_pending_action` needs to resume or decline a
+        paused tool call — `None` unless one is actually waiting.
+
+        Read raw rather than through `load_dag_state`, which filters by a
+        fingerprint the caller does not have yet at this point: whether the
+        stored state is still good for the task's *current* parameters is
+        exactly what resuming has to check, not something to discard before
+        the check runs.
+        """
+        async with self._sessions() as session:
+            row = await session.get(schema.DagState, task_id)
+            if row is None or row.interruption is None:
+                return None
+            return {
+                "dag_name": row.dag_name,
+                "results": dict(row.results or {}),
+                "params_fingerprint": row.params_fingerprint or "",
+                "paused_at_node": row.paused_at_node,
+                "interruption": row.interruption,
+            }
+
     async def tasks_in_state(self, state: str, limit: int = 20) -> list[Task]:
         return await self._tasks(
             select(schema.Task)
@@ -1518,6 +1548,13 @@ class Database:
         return await self._tasks(
             select(schema.Task).order_by(schema.Task.id).limit(limit)
         )
+
+    async def task(self, task_id: int) -> Task | None:
+        """One task, freshest read — `decide_pending_action` needs current
+        params, not the ones a stored graph state was checkpointed against."""
+        async with self._sessions() as session:
+            row = await session.get(schema.Task, task_id)
+            return _task(row) if row is not None else None
 
     async def _tasks(self, query) -> list[Task]:
         async with self._sessions() as session:

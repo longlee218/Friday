@@ -132,11 +132,11 @@ agents:
       temperature: 0
     max_turns: 1
 
-  # Writes the patch. Commented out on purpose: this is the only agent in the
-  # system that edits a repository, and turning it on is a decision, not a
-  # default. It needs the `source` server as well.
+  # Proposes the patch. Commented out on purpose: turning it on is a
+  # decision, not a default. It needs the `source` server as well.
   # dag_fix:
-  #   # Returns a diff, or the words CANNOT FIX.
+  #   # Calls apply_fix (needs the operator's yes before it is used anywhere
+  #   # — the one tool in this codebase marked needs_approval) or hand_over.
   #   api_key: ${RESPONDER_API_KEY}
   #   base_url: "https://api.minimax.io/v1"
   #   model: "MiniMax-M3"

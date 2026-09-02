@@ -308,6 +308,18 @@ A fact about a **task**, not about a message: who approved and when. An
 outbound intent whose kind requires approval is only sendable while its task
 carries one.
 
+This is one of two gates, not the only one (ticket 07). A message reaching a
+person waits here, at the outbox, whatever kind of task produced it. An
+*action* — so far, only applying a fix — waits on the SDK's own tool
+approval instead: the tool is marked `needs_approval`, the run stops holding
+its state rather than after it, and the state is what `dag_state.interruption`
+holds while the operator has not yet said yes or no. Approving resumes the
+exact call — in this process or a later one, a restart or a redeploy between
+them — rather than re-running the investigation to reach it again; declining
+ends the run as a hand-over, no further turn spent asking the model to react
+to its own refusal. Reading logs and locating code ask for neither gate —
+the risk this exists for is in acting, not in investigating.
+
 ## Sender
 
 Which identity speaks: `discord_user` or `discord_bot`. Two Discord identities

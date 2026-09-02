@@ -238,6 +238,14 @@ not an implementation detail:
   message is a row; one loop delivers it. Approval is enforced as a predicate
   in the query that selects sendable rows, not as a check each caller must
   remember — see `_NEEDS_APPROVAL` in `friday/store/db.py`.
+- **A dangerous action gets a second gate, not the outbox's.** Messages wait
+  at the outbox regardless of which task produced them; applying a fix
+  (ticket 07, D15) is the one action a node can take, and it waits on the
+  SDK's own tool approval instead — the tool is marked `needs_approval`, the
+  run stops holding its state (`WorkflowRunner.decide_pending_action`), and
+  that state lives in `dag_state.interruption` until the operator says yes or
+  no. A word list matched against a model's own prose was the gate before
+  this; it is not a gate a persuasive message cannot argue past.
 - **One persona, two families, and the family is decided in code.**
   `PERSONA.md` says who the agents are and that people read Vietnamese, in one
   section per family: the agents whose output a person reads, and the agents
