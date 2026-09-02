@@ -8,7 +8,7 @@ are, and *everything assembled* is in the responder's own prompt module.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## What moves
 
@@ -31,12 +31,21 @@ explicit nulls: all already tested; those tests keep passing untouched.
 
 ## Acceptance criteria
 
-- [ ] The draft path assembles nothing inline; it calls the prompt module
-- [ ] Sections render stable-first, and the byte-identical-prefix test passes
+- [x] The draft path assembles nothing inline; it calls the prompt module
+- [x] Sections render stable-first, and the byte-identical-prefix test passes
       against the responder's own render
-- [ ] The composing graph node keeps producing the same message input (it is
+- [x] The composing graph node keeps producing the same message input (it is
       the same family; whether it shares this module or keeps its thinner
       assembly is the implementer's call — but the *text* it uses may not fork)
-- [ ] Escaping still happens at the one seam
-- [ ] Output byte-identical to today's for the same inputs, captured not
+- [x] Escaping still happens at the one seam
+- [x] Output byte-identical to today's for the same inputs, captured not
       eyeballed
+
+## What it came to
+
+`friday/responder/prompt.py`: `build_instructions(persona)` and a keyword-only
+`build_input(...)` rendering nine sections stable-first. The counterpart text
+loads at import, so a missing file fails at startup rather than at the first
+stranger. The prefix property has its own test against this builder. The
+composing node keeps its thinner assembly — same text files, no fork. All ten
+captured prompts byte-identical.

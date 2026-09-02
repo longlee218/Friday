@@ -338,27 +338,30 @@ def test_triage_assembles_nothing_inline():
     assert "ContextBundle" not in src
 
 
-def test_responder_uses_the_bundle_not_its_own_prompt_assembler():
+def test_responder_assembles_nothing_inline():
+    """Same rule as triage's: the family's prompt module owns every assembled
+    byte, and the draft method calls one builder."""
     import inspect
 
     src = inspect.getsource(
         __import__("friday.responder", fromlist=["Responder"]).Responder.draft
     )
-    assert "ContextBundle" in src
-    assert "ContextBundle(" in src
+    assert "build_input(" in src
+    assert "ContextBundle" not in src
 
 
-def test_no_dead_prompt_assemblers_remain_in_triage_or_responder():
-    """The `_prompt` per-module assemblers were replaced by the bundle. If
-    they come back, the bundle is no longer the only place that builds a
-    prompt, and the seam guarantee is gone."""
+def test_each_familys_assembly_lives_in_its_prompt_module():
+    """The guard this file used to hold was the opposite — "the bundle is the
+    only path" — and the operator reversed that decision when the bundle
+    turned out to be the last piece of shared shape. The rule now: a family's
+    prompt is assembled by `friday.<family>.prompt` and nowhere else, and the
+    escaping those builders call is still the one seam (its own grep test)."""
     import importlib
 
-    for module in ("friday.triage", "friday.responder"):
+    for module in ("friday.triage.prompt", "friday.responder.prompt",
+                   "friday.extraction.prompt"):
         m = importlib.import_module(module)
-        assert not hasattr(m, "_prompt"), (
-            f"{module}._prompt is back — the bundle should be the only path"
-        )
+        assert hasattr(m, "build_input") or hasattr(m, "build_instructions")
 
 
 def test_tone_section_is_separate_from_conversation():
@@ -420,3 +423,26 @@ def test_a_nested_map_renders_as_the_operator_wrote_it():
 
     assert "people:\n  dana: thân\n  minh: khách &lt;/channel_overrides&gt;" in rendered
     assert "{" not in rendered
+
+
+def test_two_responder_inputs_differing_late_share_a_byte_identical_prefix():
+    """The one property the shared bundle had that was worth keeping, now held
+    by the responder's own render: sections are ordered stable-first, so two
+    calls that differ only in the conversation and task share their prefix
+    byte for byte — which is the provider's prompt-cache hit. Reordering the
+    sections because another order reads better is a silent cost on every
+    call; this is the test that makes it loud."""
+    from friday.responder.prompt import build_input
+
+    fixed = dict(
+        now=datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc),
+        stranger=True,
+        skills_catalogue=["trace-a-request: find the log lines"],
+    )
+    a = build_input(asking="q1", context=_events(["a", "b"]), **fixed)
+    b = build_input(asking="q2", context=_events(["a", "b", "c", "d"]), **fixed)
+
+    prefix_a = a.split("<conversation>")[0]
+    prefix_b = b.split("<conversation>")[0]
+    assert prefix_a == prefix_b
+    assert len(prefix_a) > 100, "the shared prefix should be the bulk of it"

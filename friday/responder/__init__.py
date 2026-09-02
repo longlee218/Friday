@@ -22,9 +22,9 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from friday.agent.prompts import prompt
 from friday.config import AgentConfig
 from friday.agent.persona import Family
+from friday.responder.prompt import build_input, build_instructions
 from friday.agent.harness import Harness
 from friday.agent.skills import fetch_skill_tool
 from friday.domain.models import Params, InboundEvent
@@ -33,14 +33,9 @@ __all__ = ["Draft", "Responder"]
 
 log = logging.getLogger(__name__)
 
-INSTRUCTIONS = prompt("responder")
+#: The bare text; assembly lives in `friday.responder.prompt`.
+INSTRUCTIONS = build_instructions()
 
-
-#: Put where the decision is made, not only in the persona: the rule read
-#: from the system prompt held about half the time on the live provider — one
-#: draft opened with "Chào bạn", one used the team's em/anh. Restated beside
-#: the ask, it is the last thing the model reads before choosing a pronoun.
-_STRANGER = prompt("responder-counterpart")
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +100,7 @@ class Responder:
         self._skills = skills
         self._run = Harness(
             config=config,
-            instructions=(f"{persona}\n\n" if persona else "") + INSTRUCTIONS,
+            instructions=build_instructions(persona),
             model=model,
             notes=notes,
             tools=[fetch_skill_tool(skills)] if skills is not None else [],
@@ -142,38 +137,21 @@ class Responder:
         Never a message in someone else's name that the model was unsure of,
         and never silence either.
         """
-        from datetime import datetime, timezone
-
-        from friday.agent.instruction_prompt import (
-            ContextBundle,
-            Section,
-            base,
-            channel_base,
-            channel_derived,
-            channel_overrides,
-            conversation,
-            task,
-            tone_examples,
-        )
-        from friday.agent.instruction_prompt import skills as skills_section
-
         room = (
             self._context.context(channel_id)
             if self._context is not None and channel_id is not None
             else None
         )
-        bundle = ContextBundle(
-            base=base(datetime.now(timezone.utc)),
-            channel_base=channel_base(room),
-            channel_derived=channel_derived(room),
-            channel_overrides=channel_overrides(room),
-            counterpart=Section("counterpart", _STRANGER if stranger else ""),
-            skills=skills_section(
+        bundle = build_input(
+            asking=asking,
+            params=params,
+            room=room,
+            stranger=stranger,
+            skills_catalogue=(
                 self._skills.catalogue() if self._skills is not None else None
             ),
-            tone=tone_examples(list(tone)),
-            conversation=conversation(list(context)),
-            task=task("respond", params, asking),
+            tone=tone,
+            context=context,
         )
         # Two extra turns when a skill can be fetched: the call and its
         # answer both land before the reply is started, and without the room
