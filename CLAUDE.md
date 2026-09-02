@@ -23,6 +23,12 @@ details in a second message and nothing read it, asked what a correlationId is
 and nothing could explain, and the operator answered by hand while the agent
 went on asking. Each ticket names what blocks it; work the frontier.
 
+A second board, `.scratch/every-task-is-a-graph/`, holds the spec and tickets
+01–09 for folding `friday/workflows/` and `friday/dag/` into one engine — every
+task type a graph, `prepare` as node 0, node agents reporting through tools.
+All nine are open. Its spec's D1–D18 are the rationale; the tickets reference
+them rather than repeating them.
+
 This line goes stale faster than anything else in this file. Check it against
 the `**Status:**` line in each ticket before trusting it.
 
