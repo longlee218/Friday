@@ -56,7 +56,8 @@ async def gate(**kw):
 async def decide(**kw):
     """What the graph replies with once it *has* run and found nothing."""
     task = SimpleNamespace(params={"summary": "checkout is 500", **kw})
-    return await _compose_reply(DAGState.empty(), DAGDeps(task=task))
+    state = DAGState.empty().with_result("prepare", ApiIssueParams(**task.params))
+    return await _compose_reply(state, DAGDeps(task=task))
 
 
 async def test_a_report_with_nothing_to_trace_on_asks_for_details():

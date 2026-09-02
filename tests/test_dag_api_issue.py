@@ -35,6 +35,23 @@ class StubAgent:
         return SimpleNamespace(final_output=self._answer)
 
 
+class _NullDB:
+    """What `prepare`, the entry node, needs of a database — and no more.
+
+    `original_text_for` returning `None` skips extraction entirely (`prepare`
+    only extracts when there is text), so `prepare` validates exactly the
+    params these tests already constructed and passes them through
+    unchanged — which is what lets every test below stay about the
+    *investigating* nodes, not about extraction.
+    """
+
+    async def original_text_for(self, task_id: int) -> str | None:
+        return None
+
+    async def set_task_params(self, task_id: int, params: dict) -> None:
+        pass
+
+
 def deps(*, agents=None, servers=None, **params) -> DAGDeps:
     task = SimpleNamespace(
         id=1,
@@ -46,7 +63,7 @@ def deps(*, agents=None, servers=None, **params) -> DAGDeps:
             **params,
         },
     )
-    return DAGDeps(task=task, servers=servers or {}, extra=agents or {})
+    return DAGDeps(task=task, db=_NullDB(), servers=servers or {}, extra=agents or {})
 
 
 async def run(**kw) -> DAGState:
@@ -380,6 +397,7 @@ async def test_a_node_that_can_fetch_a_skill_has_room_to_answer_afterwards():
 
     from friday.dag import DAGDeps, DAGState
     from friday.dag.api_issue import _analyze_stack, _compose_reply
+    from friday.domain.models import ApiIssueParams
 
     class Recording:
         def __init__(self):
@@ -400,7 +418,9 @@ async def test_a_node_that_can_fetch_a_skill_has_room_to_answer_afterwards():
 
     writer = Recording()
     await _compose_reply(
-        DAGState.empty().with_result("analyze_stack", {"cause": "upstream"}),
+        DAGState.empty()
+        .with_result("prepare", ApiIssueParams(**task.params))
+        .with_result("analyze_stack", {"cause": "upstream"}),
         DAGDeps(task=task, extra={"compose_reply": writer}),
     )
     assert writer.extra_turns == 2

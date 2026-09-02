@@ -388,12 +388,16 @@ async def test_a_registered_dag_runs_instead_of_the_planner(db):
 
 async def test_the_dag_state_is_persisted_between_passes(db):
     """Checkpoint through the real store: the second pass must not re-run a
-    node the first pass finished."""
+    node the first pass finished — node 0 excepted, which reruns on every
+    pass and is never in what gets stored (ticket 03)."""
     from friday.domain.actions import Park
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 
     ran: list[str] = []
+
+    async def prepare(state: DAGState, deps: DAGDeps):
+        return dict(deps.task.params)
 
     async def expensive(state: DAGState, deps: DAGDeps):
         ran.append("expensive")
@@ -408,8 +412,8 @@ async def test_the_dag_state_is_persisted_between_passes(db):
         "api_issue",
         DAG(
             name="two_step",
-            nodes=(Node("expensive", expensive), Node("decide", decide)),
-            edges=(Edge("expensive", "decide"),),
+            nodes=(Node("prepare", prepare), Node("expensive", expensive), Node("decide", decide)),
+            edges=(Edge("prepare", "expensive"), Edge("expensive", "decide")),
         ),
     )
     try:
@@ -418,6 +422,7 @@ async def test_the_dag_state_is_persisted_between_passes(db):
         await WorkflowRunner(db=db, auto_ask=True).run_once()
 
         stored = await db.load_dag_state(task.id)
+        assert "prepare" not in stored, "node 0 must never be checkpointed"
         assert stored["expensive"] == "log lines"
         # A Park does not survive JSON; the marker records that the node ran,
         # which is all a resume needs to know.
@@ -623,8 +628,14 @@ async def test_answering_the_question_re_runs_the_nodes_that_asked_it(db):
 
     looked_up: list[str | None] = []
 
+    async def prepare(state: DAGState, deps: DAGDeps):
+        return dict(deps.task.params)
+
     async def read_logs(state: DAGState, deps: DAGDeps):
-        given = deps.task.params.get("correlation_id")
+        # Reads node 0's output, not `deps.task.params` directly — the point
+        # is that *this* node only reruns because the fingerprint changed,
+        # not because it is node 0 and node 0 always reruns regardless.
+        given = state["prepare"].get("correlation_id")
         looked_up.append(given)
         return "500 at checkout" if given else None
 
@@ -636,8 +647,8 @@ async def test_answering_the_question_re_runs_the_nodes_that_asked_it(db):
         "api_issue",
         DAG(
             name="trace",
-            nodes=(Node("read_logs", read_logs), Node("decide", decide)),
-            edges=(Edge("read_logs", "decide"),),
+            nodes=(Node("prepare", prepare), Node("read_logs", read_logs), Node("decide", decide)),
+            edges=(Edge("prepare", "read_logs"), Edge("read_logs", "decide")),
         ),
     )
     try:
@@ -675,6 +686,9 @@ async def test_state_survives_a_pass_that_changed_nothing(db):
 
     ran: list[str] = []
 
+    async def prepare(state: DAGState, deps: DAGDeps):
+        return dict(deps.task.params)
+
     async def expensive(state: DAGState, deps: DAGDeps):
         ran.append("expensive")
         return "log lines"
@@ -687,8 +701,8 @@ async def test_state_survives_a_pass_that_changed_nothing(db):
         "api_issue",
         DAG(
             name="stable",
-            nodes=(Node("expensive", expensive), Node("decide", decide)),
-            edges=(Edge("expensive", "decide"),),
+            nodes=(Node("prepare", prepare), Node("expensive", expensive), Node("decide", decide)),
+            edges=(Edge("prepare", "expensive"), Edge("expensive", "decide")),
         ),
     )
     try:
@@ -700,6 +714,45 @@ async def test_state_survives_a_pass_that_changed_nothing(db):
         EDGE_ROUTER.pop("api_issue", None)
 
     assert ran == ["expensive"], "unchanged parameters re-ran a finished node"
+
+
+async def test_the_three_message_table_holds_end_to_end(db):
+    """D7's worked example, against the real `api_issue` graph — no synthetic
+    stand-in, `workflow_graphs` already registered it.
+
+    "API lỗi" asks and the graph never starts. "cảm ơn anh" changes nothing,
+    so it asks again and the graph still never starts — there is nothing new
+    to trace on. The correlationId finally makes the report traceable, and
+    the graph runs for the first time.
+    """
+    from friday.workflows.runner import WorkflowRunner
+    from tests.test_workflow_runner import make_task
+
+    task = await make_task(db)  # "API lỗi" — no id, no curl
+
+    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    assert await db.load_dag_state(task.id) is None, "nothing to trace on yet"
+    asked = [r for r in await db.outbound() if r.kind == "ask_for_details"]
+    assert len(asked) == 1
+
+    # "cảm ơn anh" — a follow-up that supplies nothing new.
+    await db.move_task(task.id, "pending")
+    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    assert await db.load_dag_state(task.id) is None, "still nothing to trace on"
+    asked = [r for r in await db.outbound() if r.kind == "ask_for_details"]
+    assert len(asked) == 2, "the follow-up should still be answered, just not investigated"
+
+    # "cid là abc..." — now it is traceable.
+    await db.set_task_params(
+        task.id,
+        {**task.params, "correlation_id": "abcdef01-2345-6789-abcd-ef0123456789"},
+    )
+    await db.move_task(task.id, "pending")
+    await WorkflowRunner(db=db, auto_ask=True).run_once()
+
+    stored = await db.load_dag_state(task.id)
+    assert stored is not None, "the graph runs for the first time"
+    assert "prepare" not in stored, "node 0 is never checkpointed"
 
 
 async def test_a_pause_records_the_node_that_paused_not_the_graph(db):
@@ -831,15 +884,22 @@ async def test_the_same_question_is_not_asked_twice(db):
 
 
 async def test_a_malformed_value_is_challenged_before_the_graph_runs(db):
-    """The graph route used to skip extraction and validation entirely, so
-    `api_issue` — the only type with both an extractor and rules — got
-    neither. A correlationId of "not-a-uuid" reached the graph, looked
-    findable, and parked to the operator instead of asking the reporter to
-    send a real one."""
+    """Every graph's own node 0 validates (ticket 03) — a correlationId of
+    "not-a-uuid" must not reach node 1 looking findable, whatever graph is
+    registered for the type. This graph's node 0 uses the real `prepare`
+    rather than a stand-in, because a stand-in that always said yes would
+    prove nothing about the rule this test exists to guard."""
+    from friday.domain.actions import Ask
+    from friday.domain.models import ApiIssueParams
+    from friday.workflows import prepare as _validate
     from friday.workflows.runner import WorkflowRunner
     from tests.test_workflow_runner import make_task
 
     ran: list[str] = []
+
+    async def prepare(state: DAGState, deps: DAGDeps):
+        checked, problem = await _validate("api_issue", ApiIssueParams(**deps.task.params))
+        return problem if problem is not None else checked
 
     async def investigate(state: DAGState, deps: DAGDeps):
         ran.append("investigate")
@@ -847,7 +907,12 @@ async def test_a_malformed_value_is_challenged_before_the_graph_runs(db):
 
     EDGE_ROUTER.pop("api_issue", None)
     register_dag(
-        "api_issue", DAG(name="graph", nodes=(Node("investigate", investigate),))
+        "api_issue",
+        DAG(
+            name="graph",
+            nodes=(Node("prepare", prepare), Node("investigate", investigate)),
+            edges=(Edge("prepare", "investigate", when=lambda s: not isinstance(s["prepare"], Ask)),),
+        ),
     )
     try:
         await make_task(db, correlation_id="not-a-uuid")

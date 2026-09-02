@@ -202,20 +202,34 @@ def test_no_family_imports_another_familys_prompt_module():
             assert not hits, f"{family} imports {other}: {hits}"
 
 
-def test_the_graph_engine_and_the_loop_do_not_import_each_other_for_vocabulary():
-    """`Ask`, `Reply` and `Park` used to be defined in `friday/workflows/`, and
-    `friday/dag/` imported them from there — the graph engine reaching into the
-    loop for words that belong to neither. They live in
-    `friday.domain.actions` now; this pins the cycle staying gone rather than
-    quietly growing back the day someone needs one more shared name."""
-    import subprocess
+def test_the_graph_engine_does_not_import_vocabulary_from_the_loop():
+    """`Ask`, `Reply`, `Park` and `Action` used to be defined in
+    `friday/workflows/`, and `friday/dag/` imported them from there — the
+    graph engine reaching into the loop for words that belong to neither.
+    They live in `friday.domain.actions` now; this pins the cycle staying
+    gone rather than quietly growing back the day someone needs one more
+    shared name.
 
-    hits = subprocess.run(
-        ["grep", "-rl", "--include=*.py", "friday.workflows import", "friday/dag"],
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    assert not hits, f"friday/dag imports friday.workflows for vocabulary: {hits}"
+    Narrower than "no import of `friday.workflows` at all": `friday/dag/`
+    legitimately reuses `prepare` — extraction and validation are mechanism,
+    not vocabulary, and `friday.workflows` still owns that mechanism until
+    ticket 09 gives it a permanent home.
+    """
+    import ast
+    from pathlib import Path
+
+    vocabulary = {"Action", "Ask", "Park", "Reply"}
+    root = Path(__file__).resolve().parents[1] / "friday" / "dag"
+    offenders = {}
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "friday.workflows":
+                borrowed = {a.name for a in node.names} & vocabulary
+                if borrowed:
+                    offenders[str(path)] = borrowed
+
+    assert offenders == {}, f"friday/dag imports vocabulary from friday.workflows: {offenders}"
 
 
 def test_no_graph_node_can_create_a_task():

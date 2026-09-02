@@ -1,8 +1,8 @@
 """The first real graph: what to do about an API that is behaving wrongly.
 
 ```
-read_logs → find_code_path → analyze_stack ─┬→ fix_bug → compose_reply
-                                            └→ compose_reply
+prepare → read_logs → find_code_path → analyze_stack ─┬→ fix_bug → compose_reply
+                                                       └→ compose_reply
 ```
 
 Every node degrades rather than fails. A node whose tool server is not
@@ -15,9 +15,9 @@ That degradation is the point of shipping it this way. Replacing a working
 planner with a graph that only works once Loki is wired would be a regression
 dressed as progress.
 
-Whether a report is traceable at all is decided before any of this, by
-`_traceable` in `ApiIssueParams._RULES`. This graph never sees one that is
-not.
+Whether a report is traceable at all is decided by `prepare`, the entry node —
+`_traceable` in `ApiIssueParams._RULES` is one of the rules it checks. Nothing
+past `prepare` ever sees a report that fails it.
 
 Only `analyze_stack` and `compose_reply` call a model. The other three are
 tool work. That ratio is why the graph is worth having: it gives us
@@ -27,12 +27,14 @@ somewhere to *skip* the expensive step.
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from typing import Any
 
 from friday.dag import DAG, DAGDeps, DAGState, Edge, Node
 from friday.dag.pause import PauseForHuman
 from friday.domain.actions import Action, Ask, Park, Reply
 from friday.domain.models import ApiIssueParams
+from friday.workflows import prepare as _prepare_params
 
 __all__ = ["build_api_issue_dag"]
 
@@ -56,14 +58,43 @@ NODE_SERVERS = {
 # --- the nodes -------------------------------------------------------------
 
 
-def _params(deps: DAGDeps) -> ApiIssueParams:
-    """The task's parameters, as the type that declares what they mean."""
-    return ApiIssueParams(**deps.task.params)
+async def _prepare(state: DAGState, deps: DAGDeps) -> ApiIssueParams | Ask:
+    """Node 0: everything the reporter has said, filled in and checked.
+
+    Runs on every pass — there may be a new message since the last one — and
+    is never part of the checkpoint (`_run_dag` excludes it before saving);
+    only its *output* decides whether the rest of what was checkpointed is
+    still worth keeping. Reuses `friday.workflows.prepare` rather than
+    re-implementing extraction and validation a second time; that function
+    still serves the task types that have no graph of their own.
+    """
+    known = ApiIssueParams(**deps.task.params)
+    text = await deps.db.original_text_for(deps.task.id)
+    filled, problem = await _prepare_params("api_issue", known, text=text)
+
+    merged = {**deps.task.params, **asdict(filled)}
+    if merged != deps.task.params:
+        await deps.db.set_task_params(deps.task.id, merged)
+
+    return problem if problem is not None else filled
+
+
+def _prepared_ok(state: DAGState) -> bool:
+    """Whether `prepare` cleared the report to investigate."""
+    return not isinstance(state["prepare"], Ask)
+
+
+def _params(state: DAGState) -> ApiIssueParams:
+    """The parameters as `prepare` left them this pass — not `deps.task.params`,
+    which is a snapshot from before this pass's extraction ran."""
+    result = state["prepare"]
+    assert isinstance(result, ApiIssueParams), "reached with prepare unresolved"
+    return result
 
 
 async def _read_logs(state: DAGState, deps: DAGDeps) -> str | None:
     """Pull the log lines for this request, if there is anything to pull with."""
-    params = _params(deps)
+    params = _params(state)
     if not (params.correlation_id or params.curl):
         return None  # nothing to look up by
     agent = deps.extra.get("read_logs")
@@ -180,7 +211,7 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
     With no tools configured this reproduces the deterministic planner it
     replaced, which is what makes removing that planner safe.
     """
-    params = _params(deps)
+    params = _params(state)
     analysis = state.get("analyze_stack") or {}
     cause = analysis.get("cause") if isinstance(analysis, dict) else None
 
@@ -203,10 +234,10 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
 
     # Nothing found — and by the time this runs, that no longer means "we were
     # never given enough". `_traceable` in `ApiIssueParams._RULES` gates the
-    # route: a report with neither a correlationId nor a curl is turned back at
-    # `prepare()` and never reaches a node. So arriving here with nothing found
-    # means the investigation itself came up empty, which is a person's
-    # problem, not a question for the reporter.
+    # route: a report with neither a correlationId nor a curl is turned back
+    # at `prepare`, the entry node, and never reaches this one. So arriving
+    # here with nothing found means the investigation itself came up empty,
+    # which is a person's problem, not a question for the reporter.
     #
     # There was an `Ask` here, inherited from the deterministic planner this
     # graph replaced. It became unreachable when the rule moved into the gate,
@@ -243,6 +274,7 @@ def build_api_issue_dag() -> DAG:
     return DAG(
         name="api_issue",
         nodes=(
+            Node("prepare", _prepare),
             Node("read_logs", _read_logs),
             Node("find_code_path", _find_code_path),
             Node("analyze_stack", _analyze_stack),
@@ -250,6 +282,7 @@ def build_api_issue_dag() -> DAG:
             Node("compose_reply", _compose_reply),
         ),
         edges=(
+            Edge("prepare", "read_logs", when=_prepared_ok),
             Edge("read_logs", "find_code_path"),
             Edge("find_code_path", "analyze_stack"),
             Edge("analyze_stack", "fix_bug", when=_actionable),

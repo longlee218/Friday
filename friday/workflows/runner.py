@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict
 from datetime import datetime, timezone
 
 from friday.dag import DAGDeps, DAGRunner, DAGState, PauseForHuman
@@ -276,12 +277,15 @@ class WorkflowRunner:
         return not named and not await self._db.has_exchanged_with(author_id)
 
     async def _plan(self, task: Task) -> Action:
-        """Fill in, check, then route. In that order, for every task type.
+        """Route to a graph if this type has one; fill in, check, then route
+        by required parameters if it does not.
 
-        The order is the point. Extraction and validation used to live inside
-        `plan()`, which the graph route skips — so the one type that has both
-        an extractor and rules got neither, and a malformed correlationId
-        reached the graph looking findable.
+        A graph type's own entry node fills in and checks — see `_run_dag` —
+        so this only does it for the type that has no graph to do it inside.
+        Extraction still runs before validation on the deterministic path:
+        validation is what stops a hallucinated field from being believed, so
+        it has to see what the extractor produced and not only what triage
+        wrote.
         """
         params_type = PARAMS.get(task.type)
         if params_type is None:
@@ -294,16 +298,16 @@ class WorkflowRunner:
             # landing on rows written before it. Work, not a crash.
             return Park(f"cannot read {task.type} parameters: {exc}")
 
+        dag = dag_for(task.type)
+        if dag is not None:
+            return await self._run_dag(dag, task)
+
         params, problem = await prepare(
             task.type, params, text=await self._db.original_text_for(task.id)
         )
         task = await self._remember(task, params)
         if problem is not None:
             return problem
-
-        dag = dag_for(task.type)
-        if dag is not None:
-            return await self._run_dag(dag, task)
         return plan_by_required_parameters(task.type, params)
 
     async def _remember(self, task: Task, params) -> Task:
@@ -329,39 +333,71 @@ class WorkflowRunner:
     async def _run_dag(self, dag, task: Task) -> Action:
         """Run the graph registered for this task type.
 
-        The runner records each node before starting the next, so a crash
-        mid-graph resumes here rather than starting over. A node that cannot
-        decide raises `PauseForHuman`; that becomes a `Park` carrying the
-        question, which `_raise_hands` puts in front of the operator.
+        Node 0 — `dag.entry`, `prepare` for every graph today — is run once,
+        upfront, outside the checkpoint entirely: there is no fingerprint to
+        load state *by* until node 0 has produced one, and it must run on
+        every pass regardless of what is stored, because there may be a new
+        message since the last one. If it says the report cannot be worked
+        with, the graph never starts — same as today's deterministic path,
+        and there is nothing to check a fingerprint against yet either.
+
+        Past that, the runner records each remaining node before starting the
+        next, so a crash mid-graph resumes here rather than starting over. A
+        node that cannot decide raises `PauseForHuman`; that becomes a `Park`
+        carrying the question, which `_raise_hands` puts in front of the
+        operator.
         """
-        fingerprint = _fingerprint(task.params)
+        from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
+
+        deps = DAGDeps(
+            task=task,
+            db=self._db,
+            servers=dict(DAG_SERVERS),
+            extra=dict(DAG_DEPS_EXTRA.get(task.type, {})),
+        )
+
+        try:
+            prepared = await dag.node(dag.entry).run(DAGState.empty(), deps)
+        except PauseForHuman as pause:
+            # Node 0 asking to stop is not the ordinary case — the real
+            # `prepare` never does — but a synthetic or future graph's entry
+            # node might, and it gets the same treatment as any other node's
+            # pause. Nothing was written back, so the fingerprint to save
+            # against is whatever is already stored — the same one
+            # `_raise_hands` computes to find this row again.
+            await self._db.save_dag_state(
+                task.id,
+                dag_name=dag.name,
+                results={},
+                params_fingerprint=_fingerprint(task.params),
+                paused_at_node=pause.node or dag.entry,
+                paused_question=str(pause),
+            )
+            log.info("task %d: %s paused at %s — %s", task.id, dag.name, dag.entry, pause)
+            return Park(str(pause))
+        except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
+            log.warning("task %d: %s's %s failed — %s", task.id, dag.name, dag.entry, exc)
+            return Park(f"{dag.name} failed: {exc}")
+
+        if isinstance(prepared, (Ask, Reply, Park)):
+            return prepared
+
+        fingerprint = _fingerprint(_prepare_material(prepared))
         state = DAGState.from_dict(
             await self._db.load_dag_state(
                 task.id, dag_name=dag.name, params_fingerprint=fingerprint
             )
-        )
+        ).with_result(dag.entry, prepared)
 
         async def checkpoint(current: DAGState) -> None:
             await self._db.save_dag_state(
                 task.id,
                 dag_name=dag.name,
-                results=current.to_dict(),
+                results=_checkpointable(current, dag),
                 params_fingerprint=fingerprint,
             )
 
-        from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
-
-        runner = DAGRunner(
-            dag,
-            deps=DAGDeps(
-                task=task,
-                db=self._db,
-                servers=dict(DAG_SERVERS),
-                extra=dict(DAG_DEPS_EXTRA.get(task.type, {})),
-            ),
-            state=state,
-            on_checkpoint=checkpoint,
-        )
+        runner = DAGRunner(dag, deps=deps, state=state, on_checkpoint=checkpoint)
 
         try:
             final = await runner.run()
@@ -369,7 +405,7 @@ class WorkflowRunner:
             await self._db.save_dag_state(
                 task.id,
                 dag_name=dag.name,
-                results=runner.state.to_dict(),
+                results=_checkpointable(runner.state, dag),
                 params_fingerprint=fingerprint,
                 # The node, not the graph. The trail's last entry is the node
                 # that was running when it raised — appended before the node
@@ -428,6 +464,36 @@ def _as_params(task: Task):
         return None
 
 
+def _prepare_material(prepared) -> dict:
+    """Node 0's output, shaped for `_fingerprint`.
+
+    A dataclass — every real `prepare`, `ApiIssueParams` included — becomes
+    its fields. Anything already a mapping is used as-is, for a synthetic
+    graph's node 0 that returns a plain dict. Anything else is wrapped, so a
+    value that is not naturally a mapping gets a stable digest instead of
+    crashing the graph before its first real node runs.
+    """
+    from dataclasses import is_dataclass
+
+    if is_dataclass(prepared):
+        return asdict(prepared)
+    if isinstance(prepared, dict):
+        return prepared
+    return {"value": prepared}
+
+
+def _checkpointable(state: DAGState, dag) -> dict:
+    """What actually gets persisted: everything but node 0.
+
+    Node 0 re-reads what the reporter has said on every pass; storing its
+    result would let a restart skip a message that arrived after the last
+    checkpoint. `_run_dag` never asks `DAGRunner` to run node 0 through the
+    normal loop in the first place — this only has to keep it out of what
+    gets written, in the two places a run's state is saved.
+    """
+    return {k: v for k, v in state.to_dict().items() if k != dag.entry}
+
+
 def _fingerprint(params: dict) -> str:
     """A stable digest of the parameters a graph ran against.
 
@@ -445,8 +511,9 @@ def _fingerprint(params: dict) -> str:
     into a string. Joining `f"{key}={value}"` made `{"a": "b=c"}` and
     `{"a=b": "c"}` the same fingerprint, and `1` the same as `"1"` — both
     unreachable today, because every parameter is a `str | None` field named
-    by the dataclass. But this function is handed the raw JSON-decoded dict,
-    not the dataclass, so the type discipline it was relying on is not
+    by the dataclass. But this function is handed a plain dict — `asdict()`
+    of a graph's node 0 output, or the raw JSON-decoded storage — not the
+    dataclass itself, so the type discipline it was relying on is not
     enforced at its own edge. JSON does not need it to be.
     """
     from hashlib import blake2b
