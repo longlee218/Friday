@@ -29,7 +29,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from friday.agent.prompts import prompt
 from friday.dag import DAG, DAGDeps, DAGState, Edge, Node
 from friday.dag.pause import PauseForHuman
 from friday.domain.models import ApiIssueParams
@@ -52,20 +51,6 @@ NODE_SERVERS = {
     "find_code_path": SOURCE,
     "fix_bug": SOURCE,
 }
-
-
-# --- instructions ----------------------------------------------------------
-
-READ_LOGS = prompt("dag/read_logs")
-
-FIND_CODE = prompt("dag/find_code_path")
-
-ANALYZE = prompt("dag/analyze_stack")
-
-FIX = prompt("dag/fix_bug")
-
-
-COMPOSE = prompt("dag/compose_reply")
 
 
 # --- the nodes -------------------------------------------------------------

@@ -38,82 +38,37 @@ _API_ISSUE_AGENTS = {
 def agents_for_api_issue(
     config: Any, skills: Any = None, servers: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    from friday.agent.persona import Family
-
-    def persona(node: str) -> str:
-        # Only compose_reply writes to a person; everything else is a step.
-        if getattr(config, "persona", None) is None:
-            return ""
-        family = Family.RESPONDER if node == "compose_reply" else Family.NODE
-        text = config.persona.render(family)
-        return f"{text}\n\n" if text else ""
-
     """Build one agent per node that has a configuration block.
 
-    Instructions come from the graph module, so the prompt lives beside the
-    node that sends it. Configuration supplies only where the model is and
-    what it costs.
+    Wiring only: which config block, which tool server, which tools. What the
+    prompt says and how it is assembled is `friday.dag.prompt`'s business, and
+    the per-node texts live in `prompts/dag/`.
     """
-    from friday.dag import api_issue as graph
     from friday.agent.harness import Harness
     from friday.agent.skills import fetch_skill_tool
-
-    instructions = {
-        "read_logs": graph.READ_LOGS,
-        "find_code_path": graph.FIND_CODE,
-        "analyze_stack": graph.ANALYZE,
-        "fix_bug": graph.FIX,
-        "compose_reply": graph.COMPOSE,
-    }
-
-    # The nodes that reason get the skill library; the ones that only call a
-    # tool do not. "How to trace a request" is written down for whoever is
-    # deciding what the logs mean, not for the thing fetching them.
-    reasoning = {"analyze_stack", "compose_reply"}
+    from friday.dag.prompt import REASONING, build_instructions
 
     built: dict[str, Any] = {}
     for node, block in _API_ISSUE_AGENTS.items():
         agent_config = config.agents.get(block)
         if agent_config is None:
             continue
-        tools = (
-            [fetch_skill_tool(skills)]
-            if skills is not None and node in reasoning
-            else []
-        )
-        wants_skills = bool(tools)
+        wants_skills = skills is not None and node in REASONING
+        tools = [fetch_skill_tool(skills)] if wants_skills else []
         available = servers or {}
         wanted = graph_names.NODE_SERVERS.get(node)
         mcp = [available[wanted]] if wanted in available else []
         built[node] = Harness(
             config=agent_config,
-            instructions=persona(node)
-            + instructions[node]
-            + (_skills_block(skills) if wants_skills else ""),
+            instructions=build_instructions(
+                node,
+                persona=getattr(config, "persona", None),
+                skills=skills if wants_skills else None,
+            ),
             tools=tools,
             mcp_servers=mcp,
         )
     return built
-
-
-def _skills_block(skills: Any) -> str:
-    """The catalogue, appended to a reasoning node's instructions.
-
-    In the instructions rather than the per-call bundle because it is the
-    stable part: the same list every call, so it costs one cache entry rather
-    than one per task.
-
-    Rendered by `instruction_prompt.skills`, not by a second copy of it. A
-    description is written by the operator and lands inside a delimited
-    section; the renderer escapes it, and a hand-rolled `f"- {line}"` here did
-    not — so a description containing `</skills>` closed the section and
-    everything after it read as instructions. One concept, one renderer.
-    """
-    if skills is None or not len(skills):
-        return ""
-    from friday.agent.instruction_prompt import skills as skills_section
-
-    return "\n\n" + skills_section(skills.catalogue()).render()
 
 
 def register_dags(

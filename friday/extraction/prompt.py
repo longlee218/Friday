@@ -14,9 +14,13 @@ from friday.domain.models import Params
 
 __all__ = ["build_input", "build_instructions"]
 
+#: Loaded at import, like every prompt: a missing file fails at startup, not
+#: when the first extractor registers.
+_JOB = prompt("extractor")
+
 
 def build_instructions() -> str:
-    return prompt("extractor")
+    return _JOB
 
 
 def build_input(text: str, params_cls: type[Params]) -> str:

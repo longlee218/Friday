@@ -185,7 +185,7 @@ def test_every_prompt_file_is_loaded_by_something():
     from pathlib import Path
 
     # importing the four families loads every prompt they use
-    import friday.dag.api_issue  # noqa: F401
+    import friday.dag.prompt  # noqa: F401
     import friday.extraction  # noqa: F401
     import friday.responder  # noqa: F401
     import friday.triage  # noqa: F401
