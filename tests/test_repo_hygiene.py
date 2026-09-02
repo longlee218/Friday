@@ -216,3 +216,18 @@ def test_the_graph_engine_and_the_loop_do_not_import_each_other_for_vocabulary()
         text=True,
     ).stdout.strip()
     assert not hits, f"friday/dag imports friday.workflows for vocabulary: {hits}"
+
+
+def test_no_graph_node_can_create_a_task():
+    """D18: `create_task` is triage's tool, not a node's. Delegation inside a
+    graph is a node calling code deterministically, never a model spawning a
+    persistent task from partway through an investigation — a graph node
+    importing `friday.triage` is the only way it could reach the tool."""
+    import subprocess
+
+    hits = subprocess.run(
+        ["grep", "-rl", "--include=*.py", "friday.triage", "friday/dag"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert not hits, f"a graph node can reach friday.triage's create_task: {hits}"

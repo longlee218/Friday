@@ -20,7 +20,9 @@ CONFIG = AgentConfig(
 
 
 def api_issue_call():
-    return function_call("create_api_issue_task", {"confidence": 0.9}, call_id="1")
+    return function_call(
+        "create_task", {"task_type": "api_issue", "confidence": 0.9}, call_id="1"
+    )
 
 
 async def test_a_run_reports_both_sides_of_the_call():
@@ -34,7 +36,7 @@ async def test_a_run_reports_both_sides_of_the_call():
     assert call.model == "test-model"
     assert "You decide what a chat message is" in call.system_prompt
     assert "checkout is 500ing" in call.prompt
-    assert "create_api_issue_task" in call.output
+    assert "create_task" in call.output
     # ScriptedModel reports no usage; the plumbing is what is pinned here.
     # A live run fills these in — verified against MiniMax at 1037 in / 171 out.
     assert isinstance(call.input_tokens, int)
@@ -65,7 +67,7 @@ async def test_a_decision_can_be_traced_back_to_the_call_that_made_it(
     (decision,) = await db.decisions()
     (call,) = await db.model_calls(message_id=decision["message_id"])
     assert "checkout is 500ing" in call.prompt
-    assert "create_api_issue_task" in call.output
+    assert "create_task" in call.output
 
 
 async def test_a_credential_never_reaches_storage(inbox, provider, db):

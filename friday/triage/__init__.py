@@ -3,12 +3,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from friday.triage.prompt import build_input, build_instructions
 from friday.config import AgentConfig
 from friday.agent.harness import Harness, ToolContext, tool
 from friday.domain.models import InboundEvent, TaskType
 from friday.triage.prefilter import Sensitive
+from friday.workflows import PARAMS
 
 __all__ = ["Decided", "NeedsHuman", "TaskType", "Triage", "TriageOutcome"]
 
@@ -53,41 +55,37 @@ class _Capture:
 INSTRUCTIONS = build_instructions()
 
 
-@tool
-def create_api_issue_task(ctx: ToolContext[_Capture], confidence: float) -> str:
-    """An API is behaving incorrectly: an error, a wrong response, a failure.
+#: The task types triage may open — everything `PARAMS` fills the fields of.
+#: A model proposes one of these; `skip` is its own tool because it creates
+#: nothing, and a tool named `create_task` that creates nothing would be
+#: lying in its name.
+_TASK_TYPES = Literal[tuple(PARAMS)]
 
-    Args:
-        confidence: How certain you are of this classification, 0 to 1.
-    """
-    ctx.context.decided = Decided(type="api_issue", confidence=confidence)
-    return "recorded"
+#: Each type's description, as the model reads it — pulled from its own
+#: `Params` class docstring rather than written a second time here, so
+#: adding a task type is adding one class, not a class and a description of
+#: it in this module too.
+_TASK_TYPE_DOC = "\n".join(
+    f"        {name}: {cls.__doc__.strip()}" for name, cls in PARAMS.items()
+)
 
 
-@tool
-def create_access_request_task(
-    ctx: ToolContext[_Capture], confidence: float
+def create_task(
+    ctx: ToolContext[_Capture], task_type: _TASK_TYPES, confidence: float
 ) -> str:
-    """Someone is asking for permission or access to a project or repository.
-
-    Args:
-        confidence: How certain you are of this classification, 0 to 1.
-    """
-    ctx.context.decided = Decided(type="access_request", confidence=confidence)
+    ctx.context.decided = Decided(type=task_type, confidence=confidence)
     return "recorded"
 
 
-@tool
-def create_doc_question_task(
-    ctx: ToolContext[_Capture], confidence: float
-) -> str:
-    """A question about documentation, a specification, or intended behaviour.
+create_task.__doc__ = f"""Open a task: there is work here for a person.
 
-    Args:
-        confidence: How certain you are of this classification, 0 to 1.
-    """
-    ctx.context.decided = Decided(type="doc_question", confidence=confidence)
-    return "recorded"
+Args:
+    task_type: which kind of task this is —
+{_TASK_TYPE_DOC}
+    confidence: How certain you are of this classification, 0 to 1.
+"""
+
+create_task = tool(create_task)
 
 
 @tool
@@ -101,22 +99,17 @@ def skip(ctx: ToolContext[_Capture], confidence: float) -> str:
     return "recorded"
 
 
-TOOLS = [
-    create_api_issue_task,
-    create_access_request_task,
-    create_doc_question_task,
-    skip,
-]
+TOOLS = [create_task, skip]
 
 
 class Triage:
     """Decides what a mention is. Performs no writes.
 
-    The type and its parameters are expressed as one tool per type: each tool's
-    schema declares the parameters its own type needs, which is how the
-    discriminated union is encoded. Tool calling is used rather than a
-    structured output type because some OpenAI-compatible providers reject
-    `response_format: json_schema` outright.
+    `create_task` takes the type as a closed-enum argument rather than being
+    one tool per type: the type still comes from the model, but naming a
+    fourth type is adding a `Params` class, not a fourth tool. Tool calling is
+    used rather than a structured output type because some OpenAI-compatible
+    providers reject `response_format: json_schema` outright.
     """
 
     def __init__(

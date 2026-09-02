@@ -41,7 +41,7 @@ async def decide(triage, text="the api is wrong", context=()):
 
 async def test_an_api_problem_becomes_an_api_issue():
     triage = triage_with([
-        function_call("create_api_issue_task", {"confidence": 0.9}, call_id="1")
+        function_call("create_task", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")
     ])
 
     outcome = await decide(triage)
@@ -53,7 +53,7 @@ async def test_an_api_problem_becomes_an_api_issue():
 
 async def test_a_permission_request_becomes_an_access_request():
     triage = triage_with([
-        function_call("create_access_request_task", {"confidence": 0.95}, call_id="1")
+        function_call("create_task", {"task_type": "access_request", "confidence": 0.95}, call_id="1")
     ])
 
     assert (await decide(triage)).type == "access_request"
@@ -61,7 +61,7 @@ async def test_a_permission_request_becomes_an_access_request():
 
 async def test_a_question_about_docs_becomes_a_doc_question():
     triage = triage_with([
-        function_call("create_doc_question_task", {"confidence": 0.8}, call_id="1")
+        function_call("create_task", {"task_type": "doc_question", "confidence": 0.8}, call_id="1")
     ])
 
     assert (await decide(triage)).type == "doc_question"
@@ -80,7 +80,7 @@ async def test_a_message_carrying_nothing_still_decides():
     values at all. It must still produce a task — that is what triggers asking
     for the fields, and it is why classifying does not depend on extracting."""
     triage = triage_with([
-        function_call("create_api_issue_task", {"confidence": 0.6}, call_id="1")
+        function_call("create_task", {"task_type": "api_issue", "confidence": 0.6}, call_id="1")
     ])
 
     assert (await decide(triage)).type == "api_issue"
@@ -111,7 +111,7 @@ async def test_triage_needs_no_database():
     assert "db" not in inspect.signature(Triage.__init__).parameters
 
 
-def test_no_triage_tool_asks_for_anything_but_confidence():
+def test_no_triage_tool_asks_for_anything_but_a_type_and_confidence():
     """The line, held by the only thing that can hold it.
 
     A tool parameter is an instruction to the model, so a schema with
@@ -119,15 +119,33 @@ def test_no_triage_tool_asks_for_anything_but_confidence():
     Adding one back would put two producers on one field again — and the merge
     that reconciled them cost nineteen direct messages about one report before
     it was removed.
-    """
-    import inspect
 
+    `task_type` is not extraction: it is what used to be encoded as *which*
+    tool got called, and ticket 08 made it a parameter of one tool instead.
+    """
     from friday.triage import TOOLS
 
     for tool in TOOLS:
-        taken = set(inspect.signature(tool.on_invoke_tool).parameters)
         params = set(getattr(tool, "params_json_schema", {}).get("properties", {}))
-        assert params <= {"confidence"}, f"{tool.name} also asks for {params}"
+        assert params <= {"confidence", "task_type"}, f"{tool.name} also asks for {params}"
+
+
+def test_create_task_describes_every_type_from_its_own_params_class():
+    """D16: adding a task type is adding one `Params` class, not a class and a
+    second description of it here. `create_task`'s enum and its per-value
+    description are both read out of `PARAMS` at import time — this pins that
+    nobody hand-wrote either and let them drift."""
+    from friday.triage import TOOLS
+    from friday.workflows import PARAMS
+
+    (create_task,) = [t for t in TOOLS if t.name == "create_task"]
+    schema = create_task.params_json_schema["properties"]["task_type"]
+
+    assert set(schema["enum"]) == set(PARAMS)
+    for name, cls in PARAMS.items():
+        assert cls.__doc__.strip() in schema["description"], (
+            f"{name}'s own docstring is not in create_task's description"
+        )
 
 
 class NeverCalled(Model):
@@ -236,7 +254,7 @@ async def test_a_word_inside_an_identifier_is_not_the_word(text):
     """A hyphen or a suffix makes it a name. Holding every message about
     `salary-service` would make the list unusable in a codebase that has one."""
     triage = triage_with(
-        [function_call("create_api_issue_task", {"confidence": 0.9}, call_id="1")],
+        [function_call("create_task", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")],
     )
     triage._sensitive = WORDS
 
@@ -248,7 +266,7 @@ async def test_an_empty_list_holds_nothing():
     had without the feature, not someone else's guesses about what is sensitive
     in their workplace."""
     triage = triage_with(
-        [function_call("create_api_issue_task", {"confidence": 0.9}, call_id="1")],
+        [function_call("create_task", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")],
     )
 
     assert (await decide(triage, "lương tháng này về chưa")).type == "api_issue"

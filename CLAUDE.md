@@ -246,12 +246,16 @@ not an implementation detail:
   `instructions`, never the per-call input — shared bytes at the front of a
   prompt are the ones a provider's cache reuses across agents.
 - **Triage classifies and nothing else.** No parameters, no summary — a type
-  and a confidence. Everything a task knows is lifted out of the message by
-  `friday/extraction/`, one extractor per task type, reading every message
-  linked to the task. The tool schema is the enforcement: a tool parameter is
-  an instruction to the model, so `correlation_id` in the schema *is* triage
-  extracting whatever the prompt says, and a test pins that every triage tool
-  asks for nothing but `confidence`.
+  and a confidence, through one `create_task(task_type, confidence)` tool with
+  a closed enum of types (`skip` stays its own tool; it creates nothing).
+  Everything a task knows is lifted out of the message by `friday/extraction/`,
+  one extractor per task type, reading every message linked to the task. The
+  tool schema is the enforcement: a tool parameter is an instruction to the
+  model, so `correlation_id` in the schema *is* triage extracting whatever the
+  prompt says, and a test pins that no triage tool asks for anything but a
+  type and a `confidence`. Each type's description in the enum is read from
+  its own `Params` class's docstring, so a fourth type is a fourth class, not
+  a fourth tool.
 - **A classifiable task type without a configured extractor is broken**, not
   degraded: it opens tasks with no parameters and asks the reporter for what
   they already said. `friday/extraction/`'s `EXTRACTS` and `PARAMS` must

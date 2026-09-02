@@ -111,6 +111,12 @@ TaskType = Literal["api_issue", "access_request", "doc_question", "skip"]
 
 @dataclass(frozen=True, slots=True)
 class ApiIssueParams:
+    #: The docstring below reaches a model: triage's `create_task` tool reads
+    #: it as this type's description, one line each, the same place its
+    #: fields are defined. `AccessRequestParams` and `DocQuestionParams`
+    #: carry the same pattern.
+    """An API is behaving incorrectly: an error, a wrong response, a failure."""
+
     #: Every field has a default, because nothing fills them in at
     #: construction time any more. Triage classifies and stops; the task is
     #: opened with no parameters at all, and the extractor fills them from
@@ -180,6 +186,8 @@ class ApiIssueParams:
 
 @dataclass(frozen=True, slots=True)
 class AccessRequestParams:
+    """Someone is asking for permission or access to a project or repository."""
+
     project: str = field(
         default="",
         metadata={
@@ -205,6 +213,8 @@ class AccessRequestParams:
 
 @dataclass(frozen=True, slots=True)
 class DocQuestionParams:
+    """A question about documentation, a specification, or intended behaviour."""
+
     question: str = field(
         default="",
         metadata={
