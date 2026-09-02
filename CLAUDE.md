@@ -16,8 +16,10 @@ one is wrong, raise it rather than quietly building something else.
 Work is broken into tickets under `.scratch/discord-mention-triage/issues/`,
 derived from `docs/SPEC.md`. Tickets 01–17 and 23–27 and 29–33 are done; 07
 was superseded and reopened as 28, and 28 is now retired in favour of 32 and
-33. **Open: 18–20 only** — the board's own repo and its UI, deferred by choice.
-34–41 are done. All of them came out of watching real threads rather than
+33. **Open: 18–20** — the board's own repo and its UI, deferred by choice — and
+**42–45**, the per-family prompt modules: each family gets one module that owns
+its prompt's assembly, and the shared ten-slot bundle dissolves. 34–41 are
+done. All of them came out of watching real threads rather than
 reading code: the reporter replied and nothing could hear the answer, sent the
 details in a second message and nothing read it, asked what a correlationId is
 and nothing could explain, and the operator answered by hand while the agent
