@@ -131,7 +131,7 @@ What is actually on disk.
 | `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, which persona file to read, and the sensitive words that keep a message away from the model |
 | `PERSONA.md` | Who an agent is before it is told its job. Prose, read once at startup. One section per family — Responder, Node — and an agent's family is decided where it is built. Triage and the extractors get neither |
 | `friday/config.py` | Loads `config.yaml`, resolves `${VAR}`, stamps each `AgentConfig` with its persona. Outside the packages because it is read before any of them |
-| **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `states.py` (`TaskState`, `OutboundState`, and the legal transitions), `actions.py` (`Ask`/`Reply`/`Park`, what a decision about a task comes to), `validation.py` (the rule engine, one call site) |
+| **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `states.py` (`TaskState`, `OutboundState`, and the legal transitions), `actions.py` (`Ask`/`Reply`/`HandOver`, what a decision about a task comes to), `validation.py` (the rule engine, one call site) |
 | **`friday/store/`** | `schema.py` holds the mapped classes, `db.py` is the only store and converts at the edge — nothing above it knows SQLAlchemy exists |
 | **`friday/agent/`** | What it takes to call a model, and nothing about what to call it for: `harness.py` (the only module that may import the SDK), `instruction_prompt.py`, `persona.py`, `skills.py`, `mcp.py`, `llm_log.py` |
 | **`friday/memory/`** | What is kept between tasks, in tiers that never mix: `observations.py` (staged), `notes.py` (promoted, and only by an approved outcome), `channel_context.py` (per-channel YAML), `verdicts.py` (the operator marking a classification right) |
@@ -141,7 +141,7 @@ What is actually on disk.
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py` (the account), `bot.py` (approval cards) and `normalise.py`. Its `__init__.py` is empty on purpose |
 | `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages |
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
-| `friday/workflows/` | The simple path — fill in, check, ask, park — the `Ask`/`Reply`/`Park` actions, and the loop that acts on tasks |
+| `friday/workflows/` | `prepare` (extraction + validation, node 0 of every graph) and `plan_by_required_parameters` (a type with nothing past that node); the loop that acts on what a graph decides |
 | `friday/dag/` | The graph framework — nodes, edges, checkpointed resume. `dag/prepare.py` builds every graph's entry node; `dag/api_issue.py` is the one with an investigation past it; `dag/router.py` registers every graph, builds their node agents, and is what the composition root calls |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |

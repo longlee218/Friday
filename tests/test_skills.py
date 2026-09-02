@@ -305,7 +305,11 @@ def test_only_the_reasoning_nodes_of_a_graph_get_skills(tmp_path):
     agents = agents_for_api_issue(config, _library(tmp_path))
 
     assert [t.name for t in agents["analyze_stack"].agent.tools] == ["fetch_skill"]
-    assert [t.name for t in agents["compose_reply"].agent.tools] == ["fetch_skill"]
+    # compose_reply also gets answer/hand_over (ticket 06) — fetch_skill is
+    # still the only skill-related tool, which is what this test is about.
+    assert [t.name for t in agents["compose_reply"].agent.tools] == [
+        "fetch_skill", "answer", "hand_over",
+    ]
     assert agents["read_logs"].agent.tools == []
     # And the catalogue is in the reasoning node's instructions, where it is
     # the same every call.

@@ -203,7 +203,7 @@ def test_no_family_imports_another_familys_prompt_module():
 
 
 def test_the_graph_engine_does_not_import_vocabulary_from_the_loop():
-    """`Ask`, `Reply`, `Park` and `Action` used to be defined in
+    """`Ask`, `Reply`, `HandOver` and `Action` used to be defined in
     `friday/workflows/`, and `friday/dag/` imported them from there — the
     graph engine reaching into the loop for words that belong to neither.
     They live in `friday.domain.actions` now; this pins the cycle staying
@@ -218,7 +218,7 @@ def test_the_graph_engine_does_not_import_vocabulary_from_the_loop():
     import ast
     from pathlib import Path
 
-    vocabulary = {"Action", "Ask", "Park", "Reply"}
+    vocabulary = {"Action", "Ask", "HandOver", "Reply"}
     root = Path(__file__).resolve().parents[1] / "friday" / "dag"
     offenders = {}
     for path in root.rglob("*.py"):
@@ -245,3 +245,25 @@ def test_no_graph_node_can_create_a_task():
         text=True,
     ).stdout.strip()
     assert not hits, f"a graph node can reach friday.triage's create_task: {hits}"
+
+
+def test_park_is_gone_as_a_name():
+    """Ticket 06: `hand_over(reason)` replaces `Park`. The old name is a
+    single-word `\\bPark\\b` grep away from creeping back into a docstring or
+    a fresh copy-paste — one line in `friday/domain/actions.py` is the
+    deliberate exception, explaining the rename itself."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    allowed = {str(root / "friday" / "domain" / "actions.py")}
+    pattern = re.compile(r"\bPark\b")
+    offenders = {}
+    for path in (root / "friday").rglob("*.py"):
+        if str(path) in allowed:
+            continue
+        hits = pattern.findall(path.read_text())
+        if hits:
+            offenders[str(path.relative_to(root))] = len(hits)
+
+    assert offenders == {}, f"'Park' survives outside the rename note: {offenders}"

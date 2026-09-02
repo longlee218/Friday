@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["Action", "Ask", "Park", "Reply"]
+__all__ = ["Action", "Ask", "HandOver", "Reply"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,10 +35,20 @@ class Reply:
 
 
 @dataclass(frozen=True, slots=True)
-class Park:
-    """Nothing can be done automatically. A human picks it up."""
+class HandOver:
+    """Nothing can be done automatically. A human picks it up.
+
+    `reason` is quoted to the operator, never sent to a reporter under the
+    operator's name — a node's own finding ("the cause mentions a
+    migration"), or code's own ("no workflow for this yet"). Named for what
+    it does (ticket 06): a node's agent can call `hand_over(reason)` itself
+    to report this the same way it reports an answer, and a graph that
+    reaches its end without deciding anything hands over by code, with no
+    model asked. `Park` was the name before there was a tool by that name to
+    confuse it with.
+    """
 
     reason: str
 
 
-Action = Ask | Reply | Park
+Action = Ask | Reply | HandOver

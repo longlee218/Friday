@@ -78,7 +78,7 @@ class WorkflowConfig:
     #: Send the "which environment / correlationId?" question without waiting
     #: for approval. The only reply allowed out unreviewed: it is the same
     #: question every time, and a wrong classification costs the reporter one
-    #: unnecessary question. Everything else parks for a human.
+    #: unnecessary question. Everything else hands over to a human.
     auto_ask_for_details: bool = False
 
 

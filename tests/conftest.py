@@ -131,13 +131,14 @@ def workflow_graphs():
     """Register the workflow graphs the way the composition root does.
 
     Without this the tests exercise a route production never takes: a task
-    type with neither a planner nor a graph. `api_issue` moved into a graph in
-    ticket 33, so a runner test that does not register it is testing the
-    absence of a workflow rather than the workflow.
+    type with no registered graph. `api_issue` moved into a graph in ticket
+    33; every other classifiable type followed in ticket 04, so a runner test
+    that does not register them is testing the absence of a graph rather than
+    a graph.
 
     The config stand-in declares no agents, which is the state of a fresh
-    install — every node skips, and the graph's last node produces the same
-    ask-or-park the deterministic planner used to.
+    install — every node skips, and the graph's last node hands over rather
+    than investigating.
     """
     from types import SimpleNamespace
 

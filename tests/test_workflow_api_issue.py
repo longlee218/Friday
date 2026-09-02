@@ -16,7 +16,7 @@ from friday.dag.api_issue import _compose_reply
 from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
 from types import SimpleNamespace
 
-from friday.domain.actions import Ask, Park
+from friday.domain.actions import Ask, HandOver
 from friday.workflows import prepare
 
 
@@ -80,14 +80,14 @@ async def test_an_environment_alone_is_not_enough_to_trace():
     assert isinstance(await gate(environment="production"), Ask)
 
 
-async def test_a_graph_that_found_nothing_parks_rather_than_asking_again():
+async def test_a_graph_that_found_nothing_hands_over_rather_than_asking_again():
     """By the time a node runs, the reporter has already given something to
     trace on — `_traceable` saw to that. So "nothing found" is the
     investigation coming up empty, which is a person's problem, not another
     question for the reporter."""
     action = await decide(correlation_id=CID)
 
-    assert isinstance(action, Park)
+    assert isinstance(action, HandOver)
     assert "nothing was found" in action.reason
 
 
@@ -118,17 +118,17 @@ async def test_an_optional_parameter_is_never_asked_for():
     action = await _decide("doc_question", DocQuestionParams(question="how does X work?",
                                                     doc_ref=None))
 
-    assert isinstance(action, Park)
+    assert isinstance(action, HandOver)
 
 
-async def test_a_complete_request_parks_because_nothing_can_act_on_it_yet():
-    """Nothing grants access. Parking is honest; asking again would not be."""
+async def test_a_complete_request_hands_over_because_nothing_can_act_on_it_yet():
+    """Nothing grants access. Handing over is honest; asking again would not be."""
     action = await _decide(
         "access_request",
         AccessRequestParams(project="backend", permission="write", summary="s"),
     )
 
-    assert isinstance(action, Park)
+    assert isinstance(action, HandOver)
 
 
 async def test_the_summary_is_never_asked_for():
@@ -139,7 +139,7 @@ async def test_the_summary_is_never_asked_for():
                                               permission="write", summary="")
     )
 
-    assert isinstance(action, Park)
+    assert isinstance(action, HandOver)
 
 
 async def test_api_issue_keeps_its_own_rule():
@@ -151,7 +151,7 @@ async def test_api_issue_keeps_its_own_rule():
         curl=None,
     )
 
-    assert isinstance(await _decide("api_issue", traceable), Park)
+    assert isinstance(await _decide("api_issue", traceable), HandOver)
 
 
 async def test_a_malformed_correlation_id_is_caught_by_the_rule():
@@ -234,10 +234,10 @@ async def test_a_clarify_becomes_an_ask_once_code_has_nothing_to_say(monkeypatch
 # ---- the end of the simple path --------------------------------------------
 
 
-async def test_a_type_with_no_graph_parks_once_it_has_what_it_needs():
-    """The end of the simple path. Nothing here reaches a model: with every
-    required parameter present there is no question left to ask, and parking
-    is what "a human takes it from here" looks like."""
+async def test_plan_by_required_parameters_hands_over_once_everything_is_present():
+    """`plan_by_required_parameters` on its own, once `prepare` has left
+    nothing outstanding: no question left to ask, and hand-over is what
+    "a human takes it from here" looks like."""
     action = await _decide(
         "api_issue",
         ApiIssueParams(
@@ -245,7 +245,7 @@ async def test_a_type_with_no_graph_parks_once_it_has_what_it_needs():
         ),
     )
 
-    assert isinstance(action, Park)
+    assert isinstance(action, HandOver)
 
 
 # --- a later extraction fills blanks; it does not revise what it said --------

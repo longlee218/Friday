@@ -7,9 +7,9 @@ prepare → read_logs → find_code_path → analyze_stack ─┬→ fix_bug →
 
 Every node degrades rather than fails. A node whose tool server is not
 configured returns `None` and costs nothing — no model call, no error. The
-graph still reaches `compose_reply`, which parks: the report was traceable
-enough to get here, so nothing found means the investigation came up empty,
-not that the reporter left something out.
+graph still reaches `compose_reply`, which hands over: the report was
+traceable enough to get here, so nothing found means the investigation came
+up empty, not that the reporter left something out.
 
 That degradation is the point of shipping it this way. Replacing a working
 planner with a graph that only works once Loki is wired would be a regression
@@ -27,16 +27,60 @@ somewhere to *skip* the expensive step.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
+from friday.agent.harness import ToolContext, tool
 from friday.dag import DAG, DAGDeps, DAGState, Edge, Node
 from friday.dag.prepare import prepare_node, prepared_ok
-from friday.domain.actions import Action, Park, Reply
+from friday.domain.actions import Action, HandOver, Reply
 from friday.domain.models import ApiIssueParams
 
-__all__ = ["build_api_issue_dag"]
+__all__ = ["ComposeCapture", "build_api_issue_dag"]
 
 log = logging.getLogger(__name__)
+
+
+# --- what compose_reply's agent reports through -----------------------------
+
+
+@dataclass
+class ComposeCapture:
+    """Per-run scratch space for `compose_reply`'s tools — the same pattern
+    as triage's and the extractor's: the tool writes here rather than to a
+    module global, so concurrent runs cannot overwrite each other."""
+
+    action: Action | None = None
+
+
+@tool
+def answer(ctx: ToolContext[ComposeCapture], text: str) -> str:
+    """The reply to send. Room register, examples of the operator's voice and
+    any skill you fetched already shaped what you were told to say — write
+    the message itself, nothing more.
+
+    Args:
+        text: the reply, ready to go out once approved.
+    """
+    ctx.context.action = Reply(text)
+    return "recorded"
+
+
+@tool
+def hand_over(ctx: ToolContext[ComposeCapture], reason: str) -> str:
+    """Stop here instead of composing a reply. Quote your own finding — the
+    operator reads it directly; a reporter never does.
+
+    Args:
+        reason: what you found, in your own words.
+    """
+    ctx.context.action = HandOver(reason)
+    return "recorded"
+
+
+#: Both tools compose_reply's agent gets. One list so the graph and the
+#: agent-building code name the same two things once each.
+COMPOSE_TOOLS = [answer, hand_over]
 
 #: Which tool server each node needs. A node whose server is absent skips.
 LOKI = "loki"
@@ -132,13 +176,13 @@ async def _analyze_stack(state: DAGState, deps: DAGDeps) -> dict[str, Any]:
 _HANDS_OFF = ("migration", "schema", "credential", "secret", "password", "token")
 
 
-async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | Park | None:
+async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | HandOver | None:
     """Apply the fix, or stop and ask.
 
     Reached only when `analyze_stack` said the cause is actionable. Even then
     there are changes this should not make on its own, and the honest move is
     to stop rather than to widen what "actionable" was allowed to mean.
-    Returning a `Park` ends the run right here, the same as any node deciding
+    Returning a `HandOver` ends the run right here, the same as any node deciding
     what to send — `PauseForHuman` used to be a second way to do that, raised
     instead of returned; ticket 03 made "new text re-runs from node 1" do
     everything "resume from the paused node" did, so there was nothing left
@@ -151,26 +195,34 @@ async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | Park | None:
     subject = f"{cause}\n{where}".lower()
     touched = [word for word in _HANDS_OFF if word in subject]
     if touched:
-        return Park(
+        return HandOver(
             f"The cause mentions {touched[0]}, so I have not changed "
             f"anything. Cause: {cause} (I'll handle it / go ahead and fix it)"
         )
 
     agent = deps.extra.get("fix_bug")
     if agent is None or NODE_SERVERS["fix_bug"] not in deps.servers:
-        return Park(
+        return HandOver(
             f"I found the cause but cannot change code from here. Cause: {cause}"
         )
 
+    # `hand_over` here too: the prompt asks this agent to refuse when the fix
+    # is not obvious or touches more than it should, and a refusal in prose
+    # used to be read as the diff itself — the code never checked for the
+    # `CANNOT FIX` sentinel it asked the model to write, so a model that
+    # refused correctly still had its refusal proposed as a patch.
+    capture = ComposeCapture()
     result = await agent.run(
-        f"cause: {cause}\ncode: {state.get('find_code_path')}"
+        f"cause: {cause}\ncode: {state.get('find_code_path')}", context=capture
     )
+    if capture.action is not None:
+        return capture.action
     return (result.final_output or "").strip() if result else None
 
 
 def _fix_bug_ok(state: DAGState) -> bool:
     """Whether `fix_bug` decided to continue rather than stop the run here."""
-    return not isinstance(state.get("fix_bug"), Park)
+    return not isinstance(state.get("fix_bug"), HandOver)
 
 
 async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
@@ -178,7 +230,12 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
 
     This is the node that produces the graph's `Action`, and the only one that
     knows the difference between "we found something worth saying" and "we
-    need something from them first".
+    need something from them first". Its agent reports which by calling
+    `answer` or `hand_over` (ticket 06) — nothing here parses its prose
+    looking for one. A sentinel was a private protocol between the prompt and
+    this function, and a model that wandered off it — once, wearing a
+    Markdown code fence — had its prose read as the reply and proposed under
+    the operator's name.
 
     With no tools configured this reproduces the deterministic planner it
     replaced, which is what makes removing that planner safe.
@@ -199,9 +256,10 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
             store = deps.extra.get("context_store")
             room = store.context(deps.task.conversation.channel_id) if store else None
             prompt = "\n".join(p for p in (channel_sections(room), said) if p)
-            written = await agent.run(prompt, extra_turns=2)
-            if written is not None and (written.final_output or "").strip():
-                return Reply(written.final_output.strip())
+            capture = ComposeCapture()
+            written = await agent.run(prompt, context=capture, extra_turns=2)
+            if written is not None and capture.action is not None:
+                return capture.action
         return Reply(said)
 
     # Nothing found — and by the time this runs, that no longer means "we were
@@ -215,7 +273,7 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
     # graph replaced. It became unreachable when the rule moved into the gate,
     # and it worded the same question `_question` and `_ASKED_AS` word — the
     # second copy that drifts.
-    return Park(
+    return HandOver(
         "traceable, but nothing was found — no log server, or nothing to find"
     )
 

@@ -14,7 +14,8 @@ import pytest
 
 from friday.dag import DAGDeps, DAGRunner, DAGState
 from friday.dag.api_issue import build_api_issue_dag
-from friday.domain.actions import Ask, Park, Reply
+from friday.domain.actions import Action, Ask, HandOver, Reply
+from friday.domain.models import ApiIssueParams
 
 LOGS = "12:00:01 ERROR checkout.py:42 upstream timed out"
 UUID = "abcdef01-2345-6789-abcd-ef0123456789"
@@ -80,21 +81,21 @@ async def test_with_no_tools_the_graph_still_reaches_a_decision():
     It used to assert an `Ask` here, asking for the correlationId. That was the
     deterministic planner's answer, inherited when this graph replaced it, and
     it stopped being reachable when `_traceable` moved into the gate: a report
-    with nothing to trace on never reaches a node now. Parking is the honest
-    answer for a graph that ran and found nothing.
+    with nothing to trace on never reaches a node now. Handing over is the
+    honest answer for a graph that ran and found nothing.
     """
     state = await run(correlation_id=UUID)
 
     assert state["read_logs"] is None
     assert state["find_code_path"] is None
     assert state["analyze_stack"]["actionable"] is False
-    assert isinstance(state["compose_reply"], Park)
+    assert isinstance(state["compose_reply"], HandOver)
 
 
-async def test_a_traceable_report_parks_when_nothing_can_investigate_it():
+async def test_a_traceable_report_hands_over_when_nothing_can_investigate_it():
     state = await run(correlation_id=UUID)
 
-    assert isinstance(state["compose_reply"], Park)
+    assert isinstance(state["compose_reply"], HandOver)
     assert "nothing was found" in state["compose_reply"].reason
 
 
@@ -178,6 +179,103 @@ async def test_the_reply_carries_both_the_cause_and_the_fix():
     assert "patched" in written
 
 
+# --- compose_reply reports through answer/hand_over, not prose --------------
+
+
+async def _compose_with(agent) -> Action:
+    """Run `_compose_reply` with a cause already found, against a real agent
+    — the seam these two tests need, since a `StubAgent` never calls a tool
+    at all and would only ever exercise the `Reply(said)` fallback."""
+    from friday.dag.api_issue import _compose_reply
+
+    state = (
+        DAGState.empty()
+        .with_result("prepare", ApiIssueParams(summary="s", correlation_id=UUID))
+        .with_result("analyze_stack", {"cause": "upstream timed out"})
+    )
+    deps = DAGDeps(
+        task=SimpleNamespace(
+            id=1,
+            params={"summary": "s", "correlation_id": UUID},
+            conversation=SimpleNamespace(channel_id="c"),
+        ),
+        extra={"compose_reply": agent},
+    )
+    return await _compose_reply(state, deps)
+
+
+async def test_compose_reply_calls_answer_and_that_becomes_the_reply():
+    """The scripted-model seam: the agent calls `answer(text)` instead of
+    writing prose. That call, not `final_output`, is what the node reads."""
+    from agents.testing import ScriptedModel, function_call
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.dag.api_issue import ComposeCapture, COMPOSE_TOOLS
+
+    agent = Harness(
+        config=AgentConfig(
+            name="dag_compose", api_key="k",
+            base_url="https://example.invalid/v1", model="test-model",
+        ),
+        instructions="compose",
+        tools=COMPOSE_TOOLS,
+        context_type=ComposeCapture,
+        tool_use_behavior={"stop_at_tool_names": [tool.name for tool in COMPOSE_TOOLS]},
+        model=ScriptedModel(
+            [[function_call("answer", {"text": "đã fix rồi anh nhé"}, call_id="1")]]
+        ),
+    )
+
+    outcome = await _compose_with(agent)
+
+    assert outcome == Reply("đã fix rồi anh nhé")
+
+
+async def test_compose_reply_can_hand_over_instead_of_answering():
+    """The agent found the cause but does not want to compose a reply from
+    it — `hand_over`, not silence and not an invented `answer`."""
+    from agents.testing import ScriptedModel, function_call
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.dag.api_issue import ComposeCapture, COMPOSE_TOOLS
+
+    agent = Harness(
+        config=AgentConfig(
+            name="dag_compose", api_key="k",
+            base_url="https://example.invalid/v1", model="test-model",
+        ),
+        instructions="compose",
+        tools=COMPOSE_TOOLS,
+        context_type=ComposeCapture,
+        tool_use_behavior={"stop_at_tool_names": [tool.name for tool in COMPOSE_TOOLS]},
+        model=ScriptedModel(
+            [[function_call("hand_over", {"reason": "not confident this is right"}, call_id="1")]]
+        ),
+    )
+
+    outcome = await _compose_with(agent)
+
+    assert outcome == HandOver("not confident this is right")
+
+
+async def test_prose_with_no_tool_call_falls_back_to_the_raw_cause():
+    """A model that writes prose instead of calling either tool is not read
+    for what it said — the fallback is the same one a missing agent gets."""
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.dag.api_issue import ComposeCapture, COMPOSE_TOOLS
+
+    class Rambling:
+        async def run(self, prompt, **kw):
+            return SimpleNamespace(final_output="```\nsome prose, no tool call\n```")
+
+    outcome = await _compose_with(Rambling())
+
+    assert outcome == Reply("upstream timed out")
+
+
 # --- refusing rather than guessing ------------------------------------------
 
 
@@ -192,7 +290,7 @@ async def test_the_reply_carries_both_the_cause_and_the_fix():
 )
 async def test_a_cause_that_touches_something_dangerous_pauses(cause):
     """Widening what "actionable" is allowed to mean is how an agent ends up
-    editing a migration at three in the morning. Returning a `Park` ends the
+    editing a migration at three in the morning. Returning a `HandOver` ends the
     run right there — the same as any node deciding the graph's answer,
     which is what stopping is now, `PauseForHuman` having dissolved."""
     agents = _investigating(actionable=True)
@@ -207,7 +305,7 @@ async def test_a_cause_that_touches_something_dangerous_pauses(cause):
     )
 
     outcome = state["fix_bug"]
-    assert isinstance(outcome, Park)
+    assert isinstance(outcome, HandOver)
     assert cause in outcome.reason
     assert agents["fix_bug"].prompts == [], "it tried to patch anyway"
 
@@ -224,8 +322,44 @@ async def test_an_actionable_cause_with_no_source_server_pauses_rather_than_lyin
     )
 
     outcome = state["fix_bug"]
-    assert isinstance(outcome, Park)
+    assert isinstance(outcome, HandOver)
     assert "cannot change code" in outcome.reason
+
+
+async def test_fix_bug_can_hand_over_instead_of_a_refusal_nobody_reads():
+    """The scripted-model seam: `CANNOT FIX` was a sentinel this node's code
+    never checked for at all — a refusal in prose was silently treated as
+    the diff and proposed to the reporter as the fix. `hand_over` is read
+    unambiguously instead."""
+    from agents.testing import ScriptedModel, function_call
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.dag.api_issue import ComposeCapture, _fix_bug, hand_over
+
+    fixer = Harness(
+        config=AgentConfig(
+            name="dag_fix", api_key="k",
+            base_url="https://example.invalid/v1", model="test-model",
+        ),
+        instructions="fix",
+        tools=[hand_over],
+        context_type=ComposeCapture,
+        tool_use_behavior={"stop_at_tool_names": [hand_over.name]},
+        model=ScriptedModel(
+            [[function_call("hand_over", {"reason": "this touches a test file"}, call_id="1")]]
+        ),
+    )
+    state = (
+        DAGState.empty()
+        .with_result("analyze_stack", {"cause": "off by one"})
+        .with_result("find_code_path", "tests/test_x.py:10")
+    )
+    deps = DAGDeps(task=SimpleNamespace(), extra={"fix_bug": fixer}, servers={"source": object()})
+
+    outcome = await _fix_bug(state, deps)
+
+    assert outcome == HandOver("this touches a test file")
 
 
 # --- resume -----------------------------------------------------------------
@@ -248,7 +382,7 @@ async def test_resuming_after_a_pause_does_not_reread_the_logs():
 
     first = DAGRunner(dag, deps=d)
     first_final = await first.run()
-    assert isinstance(first_final["fix_bug"], Park)
+    assert isinstance(first_final["fix_bug"], HandOver)
 
     reads_before = len(agents["read_logs"].prompts)
     assert reads_before == 1
@@ -256,7 +390,7 @@ async def test_resuming_after_a_pause_does_not_reread_the_logs():
     # The operator answered; the graph runs again from where it stopped.
     second = DAGRunner(dag, deps=d, state=first.state)
     second_final = await second.run()
-    assert isinstance(second_final["fix_bug"], Park)
+    assert isinstance(second_final["fix_bug"], HandOver)
 
     assert len(agents["read_logs"].prompts) == reads_before, "it read the logs again"
 
@@ -390,7 +524,7 @@ def test_a_skill_description_cannot_break_out_of_its_section(tmp_path):
 async def test_a_node_that_can_fetch_a_skill_has_room_to_answer_afterwards():
     """`max_turns` defaults to 1. A node offered `fetch_skill` that used it
     would spend its only turn on the call and never write the analysis — the
-    tool call succeeds, the node returns nothing, and the graph parks.
+    tool call succeeds, the node returns nothing, and the graph hands over.
 
     The ceiling is raised at the call, not in config, because it is a ceiling
     and not a budget: a node with no tool still finishes in one turn.
@@ -524,7 +658,7 @@ async def test_the_guard_reads_the_file_the_fix_would_touch():
         code="migrations/versions/443468757024_baseline_schema.py:20",
     )
 
-    assert isinstance(outcome, Park)
+    assert isinstance(outcome, HandOver)
     assert "migration" in outcome.reason
 
 

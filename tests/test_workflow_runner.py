@@ -60,7 +60,7 @@ async def test_a_task_is_acted_on_only_once(db):
 
 
 async def test_a_report_that_can_be_traced_waits_for_a_human(db):
-    """Tracing is not built. Parking is honest; replying would not be."""
+    """Tracing is not built. Handing over is honest; replying would not be."""
     await make_task(db, correlation_id="7f3a91c2-dead-beef-cafe-1234567890ab")
 
     await WorkflowRunner(db=db, auto_ask=True).run_once()
@@ -261,7 +261,7 @@ async def test_announcing_costs_the_same_whether_there_are_five_tasks_or_one(db)
 async def test_extraction_runs_when_a_message_is_linked(db):
     """End-to-end: a message is recorded, a task is linked to it, the runner
     reads the text, the registered extractor fills fields, the planner gets
-    a complete Params and parks. Without the link to original_text, the
+    a complete Params and hands over. Without the link to original_text, the
     runner has nothing to extract from and the test would only prove the
     read path is plumbed."""
     from dataclasses import dataclass
@@ -338,7 +338,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
         await WorkflowRunner(db=db, auto_ask=False).run_once()
 
         # Extraction ran: the harness saw the reporter's text. The exact
-        # Park action depends on validate's verdict — what matters here
+        # HandOver action depends on validate's verdict — what matters here
         # is that the prompt was sent and the message's original text
         # reached the workflow.
         assert prompts_seen, "extractor was never called"

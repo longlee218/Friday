@@ -165,7 +165,7 @@ class DAGRunner:
     no recorded result.
 
     A node that cannot decide says so by returning an `Ask`, `Reply` or
-    `Park` like any other node deciding what the graph's answer is — there
+    `HandOver` like any other node deciding what the graph's answer is — there
     used to be a second way, `PauseForHuman`, raised rather than returned so
     the run could stop mid-node instead of ending after one. It dissolved
     once new reporter text re-running from node 1 (ticket 03) did everything
@@ -209,7 +209,7 @@ class DAGRunner:
     async def run(self) -> DAGState:
         """Run to the end. A node deciding to stop early is not this
         function's business to notice — the state carries its `Ask`, `Reply`
-        or `Park` like any other result, and the caller reads it off the
+        or `HandOver` like any other result, and the caller reads it off the
         trail (see `WorkflowRunner._outcome`)."""
         current = self._resume_point()
         steps = 0

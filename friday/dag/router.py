@@ -121,6 +121,31 @@ def agents_for_api_issue(
             continue
         wants_skills = skills is not None and node in REASONING
         tools = [fetch_skill_tool(skills)] if wants_skills else []
+        context_type = None
+        agent_options: dict[str, Any] = {}
+        if node == "compose_reply":
+            # The node that produces the graph's answer reports it by tool
+            # call (ticket 06) — `answer` or `hand_over` — never by prose a
+            # node function then has to parse. Stopping there and not on
+            # `fetch_skill` too (also available here — compose_reply is a
+            # REASONING node) is why this names the two tools rather than
+            # using `stop_on_first_tool`: fetching a skill mid-answer must
+            # not end the run before the answer itself is given.
+            tools = tools + list(graph_names.COMPOSE_TOOLS)
+            context_type = graph_names.ComposeCapture
+            agent_options["tool_use_behavior"] = {
+                "stop_at_tool_names": [t.name for t in graph_names.COMPOSE_TOOLS]
+            }
+        elif node == "fix_bug":
+            # `CANNOT FIX` was a sentinel this node's own code never checked
+            # for — a refusal written as prose was proposed as the diff. The
+            # same `hand_over` tool compose_reply uses reports a refusal
+            # unambiguously instead.
+            tools = tools + [graph_names.hand_over]
+            context_type = graph_names.ComposeCapture
+            agent_options["tool_use_behavior"] = {
+                "stop_at_tool_names": [graph_names.hand_over.name]
+            }
         available = servers or {}
         wanted = graph_names.NODE_SERVERS.get(node)
         mcp = [available[wanted]] if wanted in available else []
@@ -133,6 +158,8 @@ def agents_for_api_issue(
             ),
             tools=tools,
             mcp_servers=mcp,
+            context_type=context_type,
+            **agent_options,
         )
     return built
 
@@ -185,8 +212,8 @@ def register_dags(
             )
     else:
         log.info(
-            "api_issue graph: no node agents configured — it will park every "
-            "report rather than investigate one"
+            "api_issue graph: no node agents configured — it will hand over "
+            "every report rather than investigate one"
         )
 
     # Stored for the runner to hand down through `DAGDeps`. Kept here rather

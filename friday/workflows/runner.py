@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from friday.dag import DAGDeps, DAGRunner, DAGState
 from friday.dag.router import dag_for
 from friday.store.db import Database
-from friday.domain.actions import Action, Ask, Park, Reply
+from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.states import TaskState
 from friday.domain.models import Task
 from friday.outbox import Kind
@@ -282,14 +282,14 @@ class WorkflowRunner:
         a task any more."""
         params_type = PARAMS.get(task.type)
         if params_type is None:
-            return Park(f"unknown task type {task.type!r}")
+            return HandOver(f"unknown task type {task.type!r}")
 
         try:
             params_type(**task.params)
         except TypeError as exc:
             # Stored parameters that no longer fit their type — a schema change
             # landing on rows written before it. Work, not a crash.
-            return Park(f"cannot read {task.type} parameters: {exc}")
+            return HandOver(f"cannot read {task.type} parameters: {exc}")
 
         dag = dag_for(task.type)
         assert dag is not None, f"{task.type!r} is in PARAMS but has no registered graph"
@@ -307,7 +307,7 @@ class WorkflowRunner:
 
         Past that, the runner records each remaining node before starting the
         next, so a crash mid-graph resumes here rather than starting over. A
-        node that cannot decide returns an `Ask` or `Park` like any node
+        node that cannot decide returns an `Ask` or `HandOver` like any node
         deciding the graph's answer; when that is how the run ends, which
         node said so and what it said are saved alongside the checkpoint, so
         `_raise_hands` can put the specific question in front of the operator
@@ -326,20 +326,20 @@ class WorkflowRunner:
             prepared = await dag.node(dag.entry).run(DAGState.empty(), deps)
         except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
             log.warning("task %d: %s's %s failed — %s", task.id, dag.name, dag.entry, exc)
-            return Park(f"{dag.name} failed: {exc}")
+            return HandOver(f"{dag.name} failed: {exc}")
 
-        if isinstance(prepared, (Ask, Reply, Park)):
-            if isinstance(prepared, Park):
+        if isinstance(prepared, (Ask, Reply, HandOver)):
+            if isinstance(prepared, HandOver):
                 # Node 0 deciding the answer is not special — a one-node
                 # graph's only node is node 0 — so it gets the same
-                # pause-recording treatment as any later node's `Park` does.
+                # pause-recording treatment as any later node's `HandOver` does.
                 await self._record_pause(
                     task.id,
                     dag,
                     results={},
                     fingerprint=_fingerprint(task.params),
                     node=dag.entry,
-                    park=prepared,
+                    hand_over=prepared,
                 )
             return prepared
 
@@ -364,13 +364,13 @@ class WorkflowRunner:
             final = await runner.run()
         except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
             log.warning("task %d: %s failed — %s", task.id, dag.name, exc)
-            return Park(f"{dag.name} failed: {exc}")
+            return HandOver(f"{dag.name} failed: {exc}")
 
         outcome = self._outcome(dag, final, runner.trail)
-        if isinstance(outcome, Park):
+        if isinstance(outcome, HandOver):
             # The run ended here rather than deciding something to send — an
             # `Ask`/`Reply` is still headed for the reporter or the outbox, so
-            # only a `Park` is "stuck" in the sense the operator needs the
+            # only a `HandOver` is "stuck" in the sense the operator needs the
             # specific reason for. One more save alongside the ordinary
             # checkpoint the last node already wrote, so `_raise_hands` reads
             # this run's actual reason rather than the task's bare type.
@@ -380,14 +380,14 @@ class WorkflowRunner:
                 results=_checkpointable(final, dag),
                 fingerprint=fingerprint,
                 node=_last_action_node(final, runner.trail) or dag.name,
-                park=outcome,
+                hand_over=outcome,
             )
         return outcome
 
     async def _record_pause(
-        self, task_id: int, dag, *, results: dict, fingerprint: str, node: str, park: Park
+        self, task_id: int, dag, *, results: dict, fingerprint: str, node: str, hand_over: HandOver
     ) -> None:
-        """A run ended on a `Park`: save which node said so and what it said,
+        """A run ended on a `HandOver`: save which node said so and what it said,
         alongside the state so far, so `_raise_hands` can read this run's
         actual reason rather than the task's bare type and parameters."""
         await self._db.save_dag_state(
@@ -396,7 +396,7 @@ class WorkflowRunner:
             results=results,
             params_fingerprint=fingerprint,
             paused_at_node=node,
-            paused_question=park.reason,
+            paused_question=hand_over.reason,
         )
 
     @staticmethod
@@ -404,13 +404,13 @@ class WorkflowRunner:
         """What the graph decided, as an action.
 
         A graph that walked its whole path without producing an `Action` has
-        not said what to send, and parking is the honest answer. Inventing a
+        not said what to send, and handing over is the honest answer. Inventing a
         reply out of a value the graph never meant as one is not.
         """
         node = _last_action_node(final, trail)
         if node is not None:
             return final[node]
-        return Park(f"{dag.name} finished without deciding what to send")
+        return HandOver(f"{dag.name} finished without deciding what to send")
 
     async def _move(self, task: Task, state: str) -> Task:
         await self._db.move_task(task.id, state)
@@ -422,7 +422,7 @@ class WorkflowRunner:
 def _as_params(task: Task):
     """The task's parameters as their declared type, or None if they no longer
     fit it. Best effort: the responder is better off with no params than with
-    a crash, and `_plan` has already parked anything malformed."""
+    a crash, and `_plan` has already handed over anything malformed."""
     params_type = PARAMS.get(task.type)
     if params_type is None:
         return None
@@ -459,7 +459,7 @@ def _last_action_node(final: DAGState, trail: list[str]) -> str | None:
     reply. `None` if no node on the trail produced one at all.
     """
     for name in reversed(trail):
-        if final.has(name) and isinstance(final[name], (Ask, Reply, Park)):
+        if final.has(name) and isinstance(final[name], (Ask, Reply, HandOver)):
             return name
     return None
 

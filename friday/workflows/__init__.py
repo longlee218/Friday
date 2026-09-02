@@ -12,7 +12,7 @@ the branch that read what was left of it: a dispatcher with nothing to
 dispatch to is not extensibility, it is a second way to do what the graphs
 already do.
 
-`Ask`, `Reply` and `Park` live in `friday.domain.actions` — they are the
+`Ask`, `Reply` and `HandOver` live in `friday.domain.actions` — they are the
 vocabulary every path speaks, graphs included, so neither this module nor the
 graph engine defines them.
 
@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import fields
 from typing import get_args, get_type_hints
 
-from friday.domain.actions import Action, Ask, Park, Reply
+from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.models import (
     AccessRequestParams,
     ApiIssueParams,
@@ -47,7 +47,7 @@ __all__ = [
     "Ask",
     "MODEL_AUTHORED",
     "PARAMS",
-    "Park",
+    "HandOver",
     "Reply",
     "plan_by_required_parameters",
     "prepare",
@@ -100,7 +100,7 @@ async def prepare(
     a graph, `api_issue`, the only type that had an extractor *and* rules,
     got neither: its `_RULES` were unreachable in production, its configured
     extractor could never run, and a `correlation_id` of "not-a-uuid" reached
-    the graph, looked findable, and parked to the operator instead of asking
+    the graph, looked findable, and handed over to the operator instead of asking
     the reporter to resend it. Nothing failed; it just quietly stopped
     happening. Ticket 03 moved this inside the graph so there is nowhere left
     for it to be skipped from.
@@ -146,7 +146,7 @@ def plan_by_required_parameters(task_type: str, params: Params) -> Action:
     """
     problems = _problems(params)
     if not problems:
-        return Park(f"no workflow for {task_type} yet")
+        return HandOver(f"no workflow for {task_type} yet")
     return Ask(_question(problems))
 
 

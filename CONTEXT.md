@@ -103,7 +103,7 @@ not asked about again.
 
 ## Workflow
 
-What to do about a task. Returns an **action** — `Ask`, `Reply` or `Park` —
+What to do about a task. Returns an **action** — `Ask`, `Reply` or `HandOver` —
 never a side effect.
 
 Every task takes the same first two steps, whatever its type: **fill in** what
@@ -163,11 +163,22 @@ node 0 exactly when nothing it found has changed, and re-investigates when it
 has — otherwise asking the reporter a question and receiving an answer would
 change nothing.
 
-A node that cannot decide returns an `Ask` or `Park` and the run ends there,
+A node that cannot decide returns an `Ask` or `HandOver` and the run ends there,
 the same as any node deciding the graph's answer — an absent edge past it, not
 a special case. `PauseForHuman`, raised rather than returned, used to be a
 second way to do this; it dissolved (ticket 04) once new reporter text
 re-running from node 1 reached everywhere "resume from the paused node" did.
+
+The composing node's agent reports its conclusion by calling a tool —
+`answer(text)` or `hand_over(reason)` (ticket 06) — rather than by writing
+prose a node function then parses; `hand_over` alone is any node's, `fix_bug`
+included, to call when it cannot conclude. `CANNOT FIX`, `NOT FOUND`, a stray
+Markdown fence: a sentinel is a private protocol between a prompt and the
+function reading it, and a model that wanders off it fails silently, its
+prose read as the answer it never meant to give — `fix_bug`'s own code never
+checked for `CANNOT FIX` at all, so a refusal in prose was proposed as the
+diff. A graph that reaches its end without a node having answered hands over
+by code — "it did not say" is not a question to ask a model.
 
 An agent is a node inside a graph, never the thing driving it. Which agent a
 node gets, and which tool server, is composition — handed down through `deps`,

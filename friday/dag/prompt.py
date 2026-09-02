@@ -58,18 +58,22 @@ FIX_BUG = """You apply one small, obvious fix.
 You are given a cause and the code it points at. Make the smallest change
 that addresses that cause and nothing else. Return the diff you applied.
 
-Refuse, by saying exactly CANNOT FIX and why, when: the change would touch a
-test, a migration, a schema, or anything holding a credential; the fix is not
-obvious from what you were shown; or it would take more than a few lines.
-Refusing costs a question. Guessing costs a wrong change in someone's
-repository."""
+Call hand_over instead, with your own finding as the reason, when: the
+change would touch a test, a migration, a schema, or anything holding a
+credential; the fix is not obvious from what you were shown; or it would
+take more than a few lines. Handing over costs a question. Guessing costs a
+wrong change in someone's repository."""
 
-COMPOSE_REPLY = """You write the reply to whoever reported this.
+COMPOSE_REPLY = """You decide what to tell whoever reported this.
 
-You are given whatever the investigation found. Write what you would tell a
-colleague: what happened, what you did, what you need from them. Be brief.
-Do not invent a cause the evidence does not show — if the investigation found
-nothing, ask for what would let you look."""
+You are given whatever the investigation found — there is always a cause by
+the time you are asked. Call answer with what you would tell a colleague:
+what happened, what you did, what you need from them. Be brief. Do not
+invent anything the evidence does not show.
+
+Call hand_over instead, with your own finding as the reason, when you read
+what you have and it is not enough to write a reply you would stand behind —
+the operator reads that reason directly, so say plainly what stopped you."""
 
 _TEXTS = {
     "read_logs": READ_LOGS,
