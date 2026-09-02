@@ -198,8 +198,9 @@ def _prompt(text: str, params_cls: type[Params]) -> str:
     """The extractor prompt: the schema first, the text second.
 
     Schema first so the model sees what to fill before it reads what to fill
-    from. The fields' docstrings carry the rules — that is where
-    "correlation_id looks like a uuid" lives, not in this prompt.
+    from. Each field's meaning comes from its `doc` metadata on the params
+    class — the field and its meaning live on the same line, so they cannot
+    drift apart. This prompt carries only what is true of every field.
     """
     schema_lines = []
     for f in params_cls.__dataclass_fields__.values():  # type: ignore[attr-defined]

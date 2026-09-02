@@ -115,10 +115,44 @@ class ApiIssueParams:
     #: construction time any more. Triage classifies and stops; the task is
     #: opened with no parameters at all, and the extractor fills them from
     #: what the reporter actually wrote.
-    summary: str = ""
-    environment: str | None = None
-    correlation_id: str | None = None
-    curl: str | None = None
+    #:
+    #: `doc` is the field's meaning, *for the extraction model*. It renders
+    #: into the extractor's prompt, so it is written to the model: what to
+    #: look for, what shape it has, and that null beats a guess. These lines
+    #: lived in triage's tool docstrings until triage stopped extracting —
+    #: removing them then, instead of moving them here, left the extractor
+    #: reading a schema of "summary: summary". Same place as the field, so a
+    #: field and its meaning cannot drift apart again.
+    summary: str = field(
+        default="",
+        metadata={
+            "doc": "One line saying what is wrong, in Vietnamese, in your own "
+            "words. The only field you write rather than copy."
+        },
+    )
+    environment: str | None = field(
+        default=None,
+        metadata={
+            "doc": "Which environment they named: production, staging or dev. "
+            "'prod' is production, 'stg' is staging. null if none is named."
+        },
+    )
+    correlation_id: str | None = field(
+        default=None,
+        metadata={
+            "doc": "The correlation id, trace id, request id or x-request-id "
+            "in what they wrote, copied exactly — it is matched by machine. "
+            "Usually shaped like a uuid. null if absent."
+        },
+    )
+    curl: str | None = field(
+        default=None,
+        metadata={
+            "doc": "The curl command or raw request they included, verbatim "
+            "with its line breaks — somebody will paste it into a terminal. "
+            "null if absent."
+        },
+    )
 
     #: Validate catches what the LLM extractor got wrong. `environment` has to
     #: be one of the three environments we actually serve; `correlation_id`
@@ -146,15 +180,45 @@ class ApiIssueParams:
 
 @dataclass(frozen=True, slots=True)
 class AccessRequestParams:
-    project: str = ""
-    permission: str = ""
-    summary: str = ""
+    project: str = field(
+        default="",
+        metadata={
+            "doc": "The project, repository or system they want access to, "
+            "named as they named it. Empty if they did not say."
+        },
+    )
+    permission: str = field(
+        default="",
+        metadata={
+            "doc": "What kind of access: read, write, admin, or their own "
+            "words for it. Empty if they did not say."
+        },
+    )
+    summary: str = field(
+        default="",
+        metadata={
+            "doc": "One line saying who wants what, in Vietnamese, in your "
+            "own words."
+        },
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class DocQuestionParams:
-    question: str = ""
-    doc_ref: str | None = None
+    question: str = field(
+        default="",
+        metadata={
+            "doc": "What they want to know, kept close to their own phrasing "
+            "— rewording a question changes it."
+        },
+    )
+    doc_ref: str | None = field(
+        default=None,
+        metadata={
+            "doc": "The document, spec or page they referred to, if they "
+            "named one. null if none."
+        },
+    )
 
 
 #: Note there is no `SkipParams`. A skip opens no task, so it has no

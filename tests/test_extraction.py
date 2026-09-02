@@ -256,3 +256,32 @@ def _install(task_type, ext):
 
     _EXTRACTORS[task_type] = ext
 
+
+
+def test_every_extraction_field_tells_the_model_what_it_means():
+    """The prompt's schema line for a field is its `doc` metadata. Without it
+    the model was shown "- summary: summary" — the mechanism existed and
+    nothing fed it, because the descriptions lived in triage's tool docstrings
+    and were deleted with them instead of moved here."""
+    from dataclasses import fields as dataclass_fields
+
+    from friday.workflows import PARAMS
+
+    undocumented = [
+        f"{cls.__name__}.{f.name}"
+        for cls in set(PARAMS.values())
+        for f in dataclass_fields(cls)
+        if not (f.metadata or {}).get("doc")
+    ]
+
+    assert undocumented == [], f"fields the extractor cannot explain: {undocumented}"
+
+
+def test_the_doc_reaches_the_extractors_prompt():
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction import _prompt
+
+    prompt = _prompt("API lỗi", ApiIssueParams)
+
+    assert "copied exactly" in prompt
+    assert "- summary: summary" not in prompt
