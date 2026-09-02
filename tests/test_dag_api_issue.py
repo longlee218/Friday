@@ -318,10 +318,10 @@ def test_the_node_that_writes_a_patch_is_not_given_the_find_the_file_prompt():
     from friday.dag.workflows import agents_for_api_issue
 
     built = agents_for_api_issue(_every_node_configured())
-    from friday.agent.prompts import prompt
+    from friday.dag.prompt import FIND_CODE_PATH, FIX_BUG
 
-    assert built["fix_bug"].instructions == prompt("dag/fix_bug")
-    assert built["find_code_path"].instructions == prompt("dag/find_code_path")
+    assert built["fix_bug"].instructions == FIX_BUG
+    assert built["find_code_path"].instructions == FIND_CODE_PATH
 
 
 def test_a_node_is_handed_the_tool_server_it_needs():

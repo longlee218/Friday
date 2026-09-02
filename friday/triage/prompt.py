@@ -13,15 +13,29 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from friday.agent.instruction_prompt import conversation
-from friday.agent.prompts import prompt
 from friday.domain.models import InboundEvent
 
 __all__ = ["build_input", "build_instructions"]
 
 
+#: The job. Whole sentences to a model, so no comments inside — anything that
+#: must not ship lives up here. Nothing below names a field or a tool: the
+#: tools carry their own docstrings, and that schema is the real contract.
+INSTRUCTIONS = """You decide what a chat message is. Nothing else.
+
+Call exactly one tool. Which tool you call is the answer; the only thing you
+add is how certain you are of it.
+
+Do not copy values out of the message, do not summarise it, do not answer it.
+Something else reads the message for what it contains — your job is the label
+and your confidence in it.
+
+Messages about salary, personal matters, or social talk are always skip."""
+
+
 def build_instructions(examples: Sequence[tuple[str, str]] = ()) -> str:
     """The job, then the classifications the operator marked right."""
-    return prompt("triage") + _examples_block(examples)
+    return INSTRUCTIONS + _examples_block(examples)
 
 
 def build_input(events: Sequence[InboundEvent]) -> str:

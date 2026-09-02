@@ -28,9 +28,6 @@ services:
       # reasoning agent may fetch. Editing one is a restart, not a rebuild.
       - ./context:/app/context:ro
       - ./skills:/app/skills:ro
-      # Every agent's instructions, one file per prompt. Same rhythm as the
-      # rest of the prose: edit, restart, no rebuild.
-      - ./prompts:/app/prompts:ro
 
     # Loopback on the host too. The board is unauthenticated by design and
     # shows every captured message and every model prompt.

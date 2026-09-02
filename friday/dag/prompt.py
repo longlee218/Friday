@@ -18,7 +18,6 @@ from __future__ import annotations
 from typing import Any
 
 from friday.agent.persona import Family
-from friday.agent.prompts import prompt as _text
 
 __all__ = ["REASONING", "build_instructions"]
 
@@ -28,25 +27,63 @@ __all__ = ["REASONING", "build_instructions"]
 #: catalogue and the fetch tool.
 REASONING = frozenset({"analyze_stack", "compose_reply"})
 
-_TEXTS = {
-    "read_logs": "dag/read_logs",
-    "find_code_path": "dag/find_code_path",
-    "analyze_stack": "dag/analyze_stack",
-    "fix_bug": "dag/fix_bug",
-    "compose_reply": "dag/compose_reply",
-}
+#: One text per node. ANALYZE_STACK's `cause` / `actionable` / `evidence` are
+#: the JSON keys its parser reads — reworded freely, never renamed.
+READ_LOGS = """You look up log lines for one request.
 
-# Loaded at import, like every prompt: a missing file fails at startup, named,
-# rather than when the graph first builds its agents.
-for _name in _TEXTS.values():
-    _text(_name)
-del _name
+You are given a correlation id and an environment. Use the log tools to find
+the lines for that request in the last hour. Return the lines verbatim, oldest
+first. If you find nothing, say exactly: NO LOGS."""
+
+FIND_CODE_PATH = """You locate the code a stack trace points at.
+
+You are given log lines containing a stack trace. Use the file tools to find
+the file and line the topmost application frame refers to — not the framework
+frames. Return `path:line` and the surrounding ten lines. If the trace names
+no file you can find, say exactly: NOT FOUND."""
+
+ANALYZE_STACK = """You explain why one request failed.
+
+You are given log lines and, when it could be found, the code they point at.
+Answer in JSON with exactly these keys:
+  cause       — one sentence, what went wrong
+  actionable  — true only if the fix is obvious from what you were shown
+  evidence    — the specific log lines or code lines that show it
+
+Set actionable to false when you are guessing. A wrong "true" here spends a
+code change on a guess."""
+
+FIX_BUG = """You apply one small, obvious fix.
+
+You are given a cause and the code it points at. Make the smallest change
+that addresses that cause and nothing else. Return the diff you applied.
+
+Refuse, by saying exactly CANNOT FIX and why, when: the change would touch a
+test, a migration, a schema, or anything holding a credential; the fix is not
+obvious from what you were shown; or it would take more than a few lines.
+Refusing costs a question. Guessing costs a wrong change in someone's
+repository."""
+
+COMPOSE_REPLY = """You write the reply to whoever reported this.
+
+You are given whatever the investigation found. Write what you would tell a
+colleague: what happened, what you did, what you need from them. Be brief.
+Do not invent a cause the evidence does not show — if the investigation found
+nothing, ask for what would let you look."""
+
+_TEXTS = {
+    "read_logs": READ_LOGS,
+    "find_code_path": FIND_CODE_PATH,
+    "analyze_stack": ANALYZE_STACK,
+    "fix_bug": FIX_BUG,
+    "compose_reply": COMPOSE_REPLY,
+}
 
 
 def build_instructions(node: str, *, persona: Any = None, skills: Any = None) -> str:
     """One node's stable prompt: persona, job, catalogue. In that order —
     shared bytes at the front are the ones a provider's cache can reuse."""
-    return _persona(node, persona) + _text(_TEXTS[node]) + _catalogue(node, skills)
+    return _persona(node, persona) + _TEXTS[node] + _catalogue(node, skills)
 
 
 def _persona(node: str, persona: Any) -> str:
