@@ -307,10 +307,9 @@ A ticket, an edit to logic, a refactor — none of them are done until:
 1. **The whole suite passes.** `uv run pytest -q`, not a `-k` subset. Most of
    the constraints above are enforced by a test rather than by memory, so a
    green suite is the only evidence that the rules survived your change.
-2. **A subagent has checked the change, not you.** `scoutqa-test` for anything
-   the board serves on `:8086` — it drives a real browser, which is the only
-   way to know the page still renders — and `code-review` for the Python.
-   `scoutqa-test` needs the `scoutqa` CLI, which is not installed here yet.
+2. **A subagent has checked the change, not you.** `code-review` for the
+   Python — a second read catches what the person who just wrote it stops
+   seeing.
 3. **Any guard you added has been deleted once and watched go red.** A test
    that still passes without its guard was testing nothing.
 
