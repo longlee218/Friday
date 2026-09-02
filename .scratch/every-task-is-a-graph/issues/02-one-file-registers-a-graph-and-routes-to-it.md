@@ -7,7 +7,7 @@ from" is answered by reading one file. Behaviour unchanged, prompts identical.
 
 **Decisions:** D4
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why
 
@@ -22,13 +22,32 @@ graph or change how one is built.
 
 ## Acceptance criteria
 
-- [ ] Registering a graph, looking one up, and building its node agents are
+- [x] Registering a graph, looking one up, and building its node agents are
       all in the router module
-- [ ] The composition root's call site keeps its shape: one function registers
+- [x] The composition root's call site keeps its shape: one function registers
       every graph and the root learns nothing about any individual one
-- [ ] Re-registering in the same process still replaces rather than raising —
+- [x] Re-registering in the same process still replaces rather than raising —
       a second startup in a test process is not a wiring mistake
-- [ ] A node whose config block or tool server is absent still skips rather
+- [x] A node whose config block or tool server is absent still skips rather
       than fails, and still says so in the log
-- [ ] Every assembled prompt is byte-identical before and after, captured
-- [ ] The old registration module is gone and nothing imports it
+- [x] Every assembled prompt is byte-identical before and after, captured
+- [x] The old registration module is gone and nothing imports it
+
+## What it came to
+
+`friday/dag/workflows.py` is gone; its contents — `_API_ISSUE_AGENTS`,
+`agents_for_api_issue`, `register_dags`, `DAG_DEPS_EXTRA`, `DAG_SERVERS` —
+moved into `friday/dag/router.py`, unchanged, below the `EDGE_ROUTER` /
+`register_dag` / `dag_for` that were already there. No cycle to break: neither
+half imported the other, they were just read as one unit by every caller and
+filed as two.
+
+Six call sites updated (`run_agent.py`, `friday/workflows/runner.py`, a
+comment in `friday/dag/api_issue.py`, and four test files); one redundant
+import line in `tests/conftest.py` folded into the other. `friday.dag.router`
+now exports `register_dags` and `agents_for_api_issue` too, alongside the two
+names it already had.
+
+`friday/*/prompt.py` untouched, so byte identity holds by construction. 610
+passed, same count as before — this ticket added no new test, only moved code
+an existing test already covered.

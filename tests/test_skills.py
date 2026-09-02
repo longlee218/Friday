@@ -284,7 +284,7 @@ def test_only_the_reasoning_nodes_of_a_graph_get_skills(tmp_path):
     from types import SimpleNamespace
 
     from friday.config import AgentConfig
-    from friday.dag.workflows import agents_for_api_issue
+    from friday.dag.router import agents_for_api_issue
 
     def block(name):
         return AgentConfig(

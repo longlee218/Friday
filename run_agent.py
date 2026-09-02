@@ -150,7 +150,7 @@ async def _run(stack: AsyncExitStack) -> None:
     # the same reason: which task types have a graph is the graph module's
     # business, not this one's. Registration is explicit rather than a side
     # effect of importing, so a test can choose the path it exercises.
-    from friday.dag.workflows import register_dags
+    from friday.dag.router import register_dags
 
     register_dags(
         config,

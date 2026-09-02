@@ -349,7 +349,7 @@ class WorkflowRunner:
                 params_fingerprint=fingerprint,
             )
 
-        from friday.dag.workflows import DAG_DEPS_EXTRA, DAG_SERVERS
+        from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
 
         runner = DAGRunner(
             dag,

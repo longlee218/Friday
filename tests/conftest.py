@@ -141,8 +141,7 @@ def workflow_graphs():
     """
     from types import SimpleNamespace
 
-    from friday.dag.router import EDGE_ROUTER
-    from friday.dag.workflows import DAG_DEPS_EXTRA, DAG_SERVERS, register_dags
+    from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS, EDGE_ROUTER, register_dags
 
     register_dags(SimpleNamespace(agents={}), servers={})
     try:

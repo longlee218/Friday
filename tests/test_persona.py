@@ -151,7 +151,7 @@ def test_the_responder_and_the_composing_node_are_the_same_family():
     from types import SimpleNamespace
 
     from friday.config import AgentConfig
-    from friday.dag.workflows import _API_ISSUE_AGENTS, agents_for_api_issue
+    from friday.dag.router import _API_ISSUE_AGENTS, agents_for_api_issue
 
     config = _shipped()
     every_node = SimpleNamespace(

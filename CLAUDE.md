@@ -142,7 +142,7 @@ What is actually on disk.
 | `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages |
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
 | `friday/workflows/` | The simple path — fill in, check, ask, park — the `Ask`/`Reply`/`Park` actions, and the loop that acts on tasks |
-| `friday/dag/` | The graph framework — nodes, edges, checkpointed resume, `PauseForHuman`, and the edge router. `dag/api_issue.py` is the first graph; `dag/workflows.py` is what the composition root calls |
+| `friday/dag/` | The graph framework — nodes, edges, checkpointed resume, `PauseForHuman`. `dag/api_issue.py` is the first graph; `dag/router.py` registers every graph, builds their node agents, and is what the composition root calls |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `friday/board/` | The read-only page on `:8086`; its JSON API is `ops/api.py` |
@@ -220,7 +220,7 @@ not an implementation detail:
   reaches past it.
 - **Workflows are deterministic Python, and an agent is a node inside one.**
   The route is classify → edge router → graph: which task type has a graph is
-  `friday/dag/workflows.py`'s business, not the composition root's. The graph's
+  `friday/dag/router.py`'s business, not the composition root's. The graph's
   *shape* is code — a model never chooses the next step. Durable resume is
   built (ticket 32): a graph checkpoints after every node, and discards its
   state when the task's parameters change, because a conclusion drawn without

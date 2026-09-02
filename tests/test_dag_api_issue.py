@@ -296,7 +296,7 @@ def _every_node_configured():
     from types import SimpleNamespace
 
     from friday.config import AgentConfig
-    from friday.dag.workflows import _API_ISSUE_AGENTS
+    from friday.dag.router import _API_ISSUE_AGENTS
 
     return SimpleNamespace(
         agents={
@@ -315,7 +315,7 @@ def test_the_node_that_writes_a_patch_is_not_given_the_find_the_file_prompt():
     """They were the same string. `fix_bug` was instructed to locate code and
     then asked to return a diff, which is a prompt that cannot be obeyed."""
     from friday.dag import api_issue as graph
-    from friday.dag.workflows import agents_for_api_issue
+    from friday.dag.router import agents_for_api_issue
 
     built = agents_for_api_issue(_every_node_configured())
     from friday.dag.prompt import FIND_CODE_PATH, FIX_BUG
@@ -330,7 +330,7 @@ def test_a_node_is_handed_the_tool_server_it_needs():
     only invent the lines it was asked to look up."""
     from types import SimpleNamespace
 
-    from friday.dag.workflows import agents_for_api_issue
+    from friday.dag.router import agents_for_api_issue
 
     loki = SimpleNamespace(name="loki")
     built = agents_for_api_issue(_every_node_configured(), None, {"loki": loki})
@@ -347,7 +347,7 @@ def test_a_skill_description_cannot_break_out_of_its_section(tmp_path):
     section. A second, hand-rolled renderer here did not escape it, so a
     description containing a closing tag ended the section and everything
     after it read as instructions."""
-    from friday.dag.workflows import agents_for_api_issue
+    from friday.dag.router import agents_for_api_issue
     from friday.agent.skills import SkillLibrary
 
     (tmp_path / "evil").mkdir()
@@ -443,7 +443,7 @@ def test_a_node_and_its_wiring_read_the_same_requirement():
     """Which server a node needs was stated in two files. Adding a node meant
     editing both, and nothing caught the drift."""
     from friday.dag.api_issue import NODE_SERVERS
-    from friday.dag.workflows import agents_for_api_issue
+    from friday.dag.router import agents_for_api_issue
 
     built = agents_for_api_issue(_every_node_configured(), None, {"loki": object()})
 

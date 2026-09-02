@@ -44,7 +44,7 @@ SOURCE = "source"
 
 #: Node -> the server it cannot work without. Read twice, from here both
 #: times: the node checks it before spending a model call, and
-#: `dag/workflows.py` reads it to hand the agent the server it will look for.
+#: `dag/router.py` reads it to hand the agent the server it will look for.
 #: Stated in two files, those two would drift and nothing would catch it.
 NODE_SERVERS = {
     "read_logs": LOKI,
