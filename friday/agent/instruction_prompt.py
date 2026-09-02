@@ -305,8 +305,27 @@ def _render_yaml_escaped(d: dict[str, Any]) -> str:
 
     Used for sections that carry operator- or model-pasted text: an
     unescaped value that closes its own section is an injection.
+
+    A dict one level down — `people:` in a channel's overrides — renders as
+    indented lines, the way the operator wrote it in the file. It used to go
+    through `str()`, which for a dict is Python's repr: the model was shown
+    `{'dana': 'thân, gọi em'}`, an accident of the implementation language
+    where every other line of the prompt is `key: value`.
     """
-    return "\n".join(f"{k}: {html.escape(str(v), quote=False)}" for k, v in sorted(d.items()) if v is not None)
+    lines = []
+    for k, v in sorted(d.items()):
+        if v is None:
+            continue
+        if isinstance(v, dict):
+            lines.append(f"{k}:")
+            lines += (
+                f"  {ik}: {html.escape(str(iv), quote=False)}"
+                for ik, iv in sorted(v.items())
+                if iv is not None
+            )
+        else:
+            lines.append(f"{k}: {html.escape(str(v), quote=False)}")
+    return "\n".join(lines)
 
 
 def _render_params(params: Params) -> str:
