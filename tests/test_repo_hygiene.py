@@ -318,18 +318,51 @@ def test_a_reply_is_constructed_in_exactly_one_place():
     import ast
     from pathlib import Path
 
+    ACTIONS = "friday.domain.actions"
+
+    def constructions(tree: ast.AST) -> list[int]:
+        """Lines building a `Reply`, however this file spells it.
+
+        Three spellings, and matching only the first is the hole the family
+        guard had in a different form: `Reply(x)`, `actions.Reply(x)` after
+        importing the module, and `R(x)` after importing it under a name. A
+        check that sees one of the three is a check somebody routes around
+        without meaning to.
+        """
+        direct: set[str] = set()   # names bound to Reply itself
+        module: set[str] = set()   # names bound to the module holding it
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == ACTIONS:
+                direct.update(a.asname or a.name for a in node.names if a.name == "Reply")
+            elif isinstance(node, ast.Import):
+                module.update(
+                    a.asname or a.name for a in node.names if a.name == ACTIONS
+                )
+            elif isinstance(node, ast.ImportFrom) and node.module == "friday.domain":
+                module.update(a.asname or a.name for a in node.names if a.name == "actions")
+
+        found = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in direct:
+                found.append(node.lineno)
+            elif (
+                isinstance(func, ast.Attribute)
+                and func.attr == "Reply"
+                and isinstance(func.value, ast.Name)
+                and func.value.id in module
+            ):
+                found.append(node.lineno)
+        return found
+
     friday = Path(__file__).resolve().parents[1] / "friday"
     built_in: dict[str, list[int]] = {}
     for path in friday.rglob("*.py"):
-        for node in ast.walk(ast.parse(path.read_text())):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "Reply"
-            ):
-                built_in.setdefault(str(path.relative_to(friday.parent)), []).append(
-                    node.lineno
-                )
+        lines = constructions(ast.parse(path.read_text()))
+        if lines:
+            built_in[str(path.relative_to(friday.parent))] = lines
 
     assert list(built_in) == ["friday/dag/api_issue/graph.py"], (
         f"a Reply is what a reporter reads under the operator's name; it is "
