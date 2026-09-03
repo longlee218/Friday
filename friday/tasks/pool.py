@@ -289,8 +289,9 @@ class Pool:
         """The template, or the same thing in the operator's voice.
 
         **Only `Ask` comes through here, and that is not an inconsistency.**
-        A `Reply` was written by `compose_reply`, whose own prompt carries the
-        operator's voice, so it arrives in that voice. An `Ask` was assembled
+        A `Reply` arrives already written in the operator's voice by whatever
+        produced it — nothing does today, since the graph node that did went
+        with the five-node `api_issue`. An `Ask` was assembled
         by `_question()` — code, no model — so it has no voice until this
         gives it one. This brings asking up to where answering already starts;
         it does not treat the two differently.
