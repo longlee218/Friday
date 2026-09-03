@@ -823,3 +823,86 @@ async def test_talking_about_something_else_is_not_about_this_task(db):
 
     (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
     assert "trưa nay" not in told.text
+
+
+# --- ticket 12: a pending patch does not outlive its task -------------------
+
+
+async def _paused_on_a_patch(db):
+    """A task sitting exactly where ticket 07 leaves one: handed over, with an
+    approval waiting on the row."""
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    await db.move_task(task.id, TaskState.NEEDS_HUMAN)
+    await db.save_dag_state(
+        task.id,
+        dag_name="api_issue",
+        results={},
+        params_fingerprint="whatever",
+        paused_at_node="fix_bug",
+        paused_question="Found a fix. It needs approval before I use it.",
+        interruption={"current_agent": "dag_fix"},
+    )
+    return task
+
+
+async def test_the_operator_answering_withdraws_a_patch_waiting_on_them(db):
+    """"Everything queued about it is withdrawn" has to include the patch.
+
+    A queued reply is cancelled the moment the operator answers in-channel.
+    The approval waiting on `dag_state` was not, so it outlived the work it
+    belonged to — and approving it later ran the tool on a task a person had
+    already closed, then raised `IllegalTransition` on the way out.
+    """
+    task = await _paused_on_a_patch(db)
+    await _operator_said(db, "op-1", "để anh xử lý cái này")
+
+    await Pool(db=db, auto_ask=False).run_once()
+
+    assert (await db.tasks())[0].state == TaskState.HANDLED_BY_OPERATOR
+    assert await db.dag_interruption(task.id) is None, (
+        "a patch survived the task it belonged to"
+    )
+
+
+async def test_a_decision_is_refused_on_a_task_that_has_moved_on(db):
+    """The second half of the same guarantee, for every other way a task can
+    leave `needs_human` while an approval sits on it. Refused *before*
+    anything resumes, because resuming is what runs the tool."""
+    task = await _paused_on_a_patch(db)
+    await db.move_task(task.id, TaskState.DONE)
+
+    with pytest.raises(ValueError, match="no longer|state"):
+        await Pool(db=db, auto_ask=False).decide_pending_action(
+            task.id, approve=True
+        )
+
+
+async def test_a_decision_is_refused_when_the_parameters_have_moved(db):
+    """D7's rule, applied to the one place that reused a stored fingerprint
+    without ever re-checking it: a patch worked out before the reporter
+    answered is not a patch for the request that has their answer in it.
+
+    `decide_pending_action` used to argue this could not happen — any later
+    pass would have overwritten the row. A pass whose node 0 asks a question
+    writes nothing at all, so it can run, change the task, and leave the
+    approval sitting there.
+    """
+    from friday.tasks.pool import _fingerprint
+
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    await db.move_task(task.id, TaskState.NEEDS_HUMAN)
+    await db.save_dag_state(
+        task.id,
+        dag_name="api_issue",
+        results={},
+        params_fingerprint=_fingerprint(task.params),
+        paused_at_node="fix_bug",
+        paused_question="Found a fix. It needs approval before I use it.",
+        interruption={"current_agent": "dag_fix"},
+    )
+
+    # The reporter answers; extraction fills the environment in.
+    await db.set_task_params(task.id, {**task.params, "environment": "production"})
+
+    with pytest.raises(ValueError, match="different parameters"):
+        await Pool(db=db, auto_ask=False).decide_pending_action(task.id, approve=True)

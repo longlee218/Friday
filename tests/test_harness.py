@@ -262,3 +262,44 @@ async def test_a_second_needs_approval_call_is_still_an_interruption_on_resume()
 
     assert resumed is not None
     assert len(resumed.interruptions) == 1
+
+
+async def test_a_run_paused_on_two_approvals_becomes_work_rather_than_an_exception():
+    """Ticket 12. `resume` unpacked the pending approvals into a single name,
+    so a model that emitted two `apply_fix` calls in one turn — ordinary
+    parallel tool calling, nothing exotic — raised `ValueError` straight past
+    every caller.
+
+    That unpack sat outside the try/except the rest of this module lives by,
+    so the one rule the harness exists to enforce did not apply to it: a
+    failure is `None` and a `last_error`, which the caller turns into work for
+    a person. It is not an exception nobody catches, leaving the task wedged
+    with its approval row intact and no way to clear it.
+    """
+    from agents.testing import function_call
+    from friday.agent.harness import tool
+
+    ran: list[str] = []
+
+    @tool(needs_approval=True)
+    def apply_fix(diff: str) -> str:
+        ran.append(diff)
+        return "applied"
+
+    paused = harness(
+        [
+            function_call("apply_fix", {"diff": "one"}, call_id="1"),
+            function_call("apply_fix", {"diff": "two"}, call_id="2"),
+        ],
+        tools=[apply_fix],
+    )
+    result = await paused.run("fix it", extra_turns=2)
+    assert len(result.interruptions) == 2, "the premise: two at once"
+
+    resumed = harness([], tools=[apply_fix])
+
+    outcome = await resumed.resume(paused.checkpoint(result))
+
+    assert outcome is None, "a failure is None, not a raise"
+    assert resumed.last_error, "and it says why, for the task it becomes"
+    assert ran == [], "nothing was approved, so nothing ran"

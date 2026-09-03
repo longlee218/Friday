@@ -200,8 +200,20 @@ class Harness:
         state = await RunState.from_json(
             self.agent, interruption, context_override=context
         )
-        (item,) = state.get_interruptions()
-        state.approve(item)
+        pending = state.get_interruptions()
+        if len(pending) != 1:
+            # A model may emit two calls in one turn — ordinary parallel tool
+            # calling — and then one approval does not say which. Guessing
+            # would apply something nobody said yes to. This used to unpack
+            # into a single name, which raised past every caller from outside
+            # the try below, so the module's own rule — a failure is `None`
+            # and a `last_error`, never an exception — did not reach it.
+            self.last_error = (
+                f"expected one call awaiting approval, found {len(pending)}"
+            )
+            log.warning("%s cannot resume: %s", self._config.name, self.last_error)
+            return None
+        state.approve(pending[0])
         return await self._settle(
             self.agent, state, context=None, calls=calls, max_turns=self._config.max_turns
         )

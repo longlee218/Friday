@@ -1084,6 +1084,28 @@ class Database:
             )
             return open_here == 1 and any(r is None for (r,) in said)
 
+    async def clear_dag_interruption(self, task_id: int) -> bool:
+        """Withdraw a tool call waiting on the operator. Returns whether there
+        was one.
+
+        Only the `interruption` column: `paused_at_node` and
+        `paused_question` are the record of what the run stopped on, and that
+        stays true after the decision is moot. What must go is the *state a
+        resume would run from*, because the tool executes the moment anyone
+        approves it — so a patch left here outlives the work it belonged to
+        (ticket 12).
+        """
+        async with self._sessions.begin() as session:
+            result = await session.execute(
+                update(schema.DagState)
+                .where(
+                    schema.DagState.task_id == task_id,
+                    schema.DagState.interruption.is_not(None),
+                )
+                .values(interruption=None, updated_at=_now())
+            )
+            return bool(result.rowcount)
+
     async def cancel_outbound_for(self, task_id: int) -> int:
         """Withdraw everything queued about a task. Returns how many."""
         async with self._sessions.begin() as session:

@@ -359,6 +359,15 @@ ends the run as a hand-over, no further turn spent asking the model to react
 to its own refusal. Reading logs and locating code ask for neither gate —
 the risk this exists for is in acting, not in investigating.
 
+**An approval expires with the work it belonged to** (ticket 12). Approving
+runs the tool, and there is no undoing that and finding out afterwards, so
+three things are checked before anything resumes: the task is still waiting
+on a person, its parameters are still the ones the paused run was worked out
+against, and the call is still there to approve. The operator answering in
+the channel withdraws it outright, alongside the queued messages — the same
+sentence covers both, because a patch left behind is a side effect on work
+somebody already finished.
+
 ## Sender
 
 Which identity speaks: `discord_user` or `discord_bot`. Two Discord identities
