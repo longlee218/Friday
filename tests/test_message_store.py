@@ -73,7 +73,11 @@ async def test_a_message_kept_as_context_is_never_queued(inbox, provider, db):
     task it just acted on — the self-answering loop the scope check exists to
     prevent."""
     provider.emit(make_event(message_id="10", text="api is wrong"))
-    provider.emit(make_event(message_id="20", text="my own reply", is_own=True))
+    provider.emit(
+        make_event(
+            message_id="20", text="my own reply", is_own=True, mention_type=None
+        )
+    )
     await captured(inbox)
 
     assert "my own reply" in [m.text for m in await db.messages()]
@@ -103,7 +107,11 @@ async def test_an_unwatched_mention_type_is_never_queued(provider, db):
 async def test_context_is_not_reported_as_a_triage_decision(inbox, provider, db):
     """Context is kept, not judged. A row with no decision on it is not one."""
     provider.emit(make_event(message_id="10", text="api is wrong"))
-    provider.emit(make_event(message_id="20", text="my own reply", is_own=True))
+    provider.emit(
+        make_event(
+            message_id="20", text="my own reply", is_own=True, mention_type=None
+        )
+    )
     await captured(inbox)
 
     assert await db.decisions() == []

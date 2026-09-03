@@ -20,6 +20,9 @@ _NO_MENTION = "does not address the account"
 #: the two identities this process runs. This is "this process posted it",
 #: whichever of them did.
 _OURS = "posted by this process"
+#: What counts as the watched account deliberately addressing itself. `DM` is
+#: absent on purpose — see `_out_of_scope_reason`.
+_TAGGED = frozenset({MentionType.DIRECT, MentionType.ROLE})
 
 _LIVE_STREAM_ENDED = object()
 
@@ -264,12 +267,26 @@ class Inbox:
         `_NO_MENTION` is the one reason `_handle` may overrule: a reply to
         something we posted addresses us without naming us.
         """
-        if event.is_own:
-            # Never work, always kept. The account's own messages create no
-            # task — the agent would answer its own replies, and did — but they
-            # are stored whenever the conversation is tracked, because the
-            # operator answering somebody is what *ends* a task, and the
-            # workflow reads that from here. Two questions, two answers.
+        if event.is_own and event.mention_type not in _TAGGED:
+            # The account's own messages do not create work: the operator
+            # answering somebody is what *ends* a task, and the pool reads
+            # that from here. They are still kept whenever the conversation is
+            # tracked, because a conversation missing one side of itself does
+            # not read.
+            #
+            # **Unless they tagged themselves**, which nobody does by accident
+            # and which is the only way to exercise the whole path — gateway,
+            # mention detection, whitelist, turn, reply threading — without a
+            # second Discord account. It worked until ticket 37 made this
+            # unconditional; what that ticket was closing was the agent's own
+            # replies coming back through the gateway and opening a task each,
+            # and `we_sent` below now catches those by id or text whichever
+            # identity posted them.
+            #
+            # `DM` is deliberately not a tag. Every message in a one-to-one DM
+            # carries `MentionType.DM` whether or not anyone was named, so
+            # counting it here would make every "ok" the operator types in a
+            # DM open a task — the same loop, through a different door.
             return "written by the watched account"
         if event.mention_type is None:
             return _NO_MENTION

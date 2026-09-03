@@ -269,9 +269,14 @@ async def test_a_failure_leaves_the_cursor_where_it_was(inbox, provider, db):
 
 async def test_the_accounts_own_message_never_becomes_work(inbox, db):
     """Whether the operator typed it or this process posted it. The agent once
-    answered its own replies every minute in a real channel; and a self-mention
-    is not a test worth keeping that door open for."""
-    kept = await inbox._handle(make_event(message_id="mine", is_own=True))
+    answered its own replies every minute in a real channel.
+
+    "Own message" here means them talking to somebody — tagging nobody. An own
+    message that *tags the account* is the deliberate exception, and has its
+    own test below."""
+    kept = await inbox._handle(
+        make_event(message_id="mine", is_own=True, mention_type=None)
+    )
 
     assert kept is None
     assert inbox.dropped == {"written by the watched account": 1}
@@ -476,3 +481,48 @@ async def test_our_own_message_is_recognised_before_the_outbox_records_its_id(
     )
 
     assert await captured(inbox) == []
+
+
+async def test_tagging_yourself_is_work_because_nobody_does_it_by_accident(
+    inbox, provider, db
+):
+    """The only way to exercise the whole path — gateway, mention detection,
+    whitelist, turn, reply threading — without a second Discord account.
+
+    It worked until ticket 37 made the own-message rule unconditional, and
+    what that ticket was closing is covered below rather than by this door
+    staying shut.
+    """
+    provider.emit(
+        make_event(
+            message_id="self-tag",
+            text="@Lee api checkout trả 500",
+            is_own=True,
+            mention_type=MentionType.DIRECT,
+        )
+    )
+
+    events = await captured(inbox)
+
+    assert [e.provider_message_id for e in events] == ["self-tag"]
+    assert [m.provider_message_id for m in await db.untriaged_mentions()] == [
+        "self-tag"
+    ]
+
+
+async def test_the_operator_talking_in_a_dm_is_still_not_work(inbox, provider, db):
+    """The door the rule above must not open. Every message in a one-to-one DM
+    carries `MentionType.DM` whether or not anyone was named, so counting a DM
+    as a tag would make every "ok" the operator types open a task — the
+    self-answering loop again, through a different door."""
+    provider.emit(
+        make_event(
+            message_id="dm-ok",
+            text="ok a e check rồi phản hồi a nhé",
+            is_own=True,
+            mention_type=MentionType.DM,
+        )
+    )
+
+    assert await captured(inbox) == []
+    assert await db.untriaged_mentions() == []

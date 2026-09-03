@@ -306,8 +306,20 @@ not an implementation detail:
   been quiet for `turn_seconds` and are not typing, or somebody else spoke.
   Turns are computed when read, never stored: when a message arrives it is not
   yet known whether the turn is over.
-- **The operator's own message ends the work.** Their messages never create a
-  task and are always kept, because them answering is what closes one. The
+- **The operator's own message ends the work — unless they tagged themselves.**
+  Their messages are always kept, because them answering is what closes a
+  task, and they create no work: the agent answering its own replies is a loop
+  that ran every minute in a real channel. The one exception is a message from
+  the watched account that **tags** the watched account, which nobody does by
+  accident and which is the only way to exercise the gateway, mention
+  detection, the whitelist, the turn window and reply threading without a
+  second Discord account. Ticket 37 closed that door because `is_own` could
+  not tell the operator typing from this process posting; `Database.we_sent`
+  can, and the inbox calls it on every message, so the loop is caught by the
+  guard written for it rather than by keeping the door shut. **A DM is not a
+  tag**: every message in a one-to-one DM carries `MentionType.DM` whether or
+  not anyone was named, so counting it would make every "ok" the operator
+  types open a task — the same loop through a different door. The
   task goes to `handled_by_operator` — not `done`, so it is reopenable and
   countable — and everything queued about it is withdrawn.
 - **Four prompt families, no shared text — and one prompt module per family.**
