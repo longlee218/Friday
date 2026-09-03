@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from friday.agent.harness import ToolContext, tool
-from friday.dag import DAG, DAGDeps, DAGState, Edge, Node
+from friday.dag.engine import DAG, DAGDeps, DAGState, Edge, Node
 from friday.dag.prepare import prepare_node, prepared_ok
 from friday.domain.actions import Action, HandOver, Reply
 from friday.domain.models import ApiIssueParams

@@ -19,11 +19,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from friday.dag import DAG
+from friday.agent.harness import Harness
+from friday.agent.skills import fetch_skill_tool
+from friday.dag.engine import DAG
 from friday.dag import api_issue as graph_names
 from friday.dag.api_issue import build_api_issue_dag
-from friday.dag.prepare import prepare_node
-from friday.domain.models import Params
+from friday.dag.prepare import plan_by_required_parameters, prepare_node
+from friday.dag.prompt import REASONING, build_instructions
+from friday.domain.models import PARAMS, Params
 
 __all__ = [
     "EDGE_ROUTER",
@@ -73,8 +76,6 @@ def build_simple_dag(task_type: str, params_cls: type[Params]) -> DAG:
     worth a second node yet; build one when there are steps worth skipping,
     not before.
     """
-    from friday.dag.prepare import plan_by_required_parameters
-
     return DAG(
         name=task_type,
         nodes=(
@@ -110,10 +111,6 @@ def agents_for_api_issue(
     prompt says and how it is assembled is `friday.dag.prompt`'s business, and
     the per-node texts live in `prompts/dag/`.
     """
-    from friday.agent.harness import Harness
-    from friday.agent.skills import fetch_skill_tool
-    from friday.dag.prompt import REASONING, build_instructions
-
     built: dict[str, Any] = {}
     for node, block in _API_ISSUE_AGENTS.items():
         agent_config = config.agents.get(block)
@@ -176,23 +173,23 @@ def register_dags(
 ) -> None:
     """Register every graph this build knows about.
 
-    Idempotent: re-registering the same task type replaces it rather than
-    raising, because the composition root may run twice in a test process and
-    a second startup is not a wiring mistake.
+    Idempotent, and it says so once here rather than by disarming
+    `register_dag`'s guard at each call. It used to `pop` the key immediately
+    before every registration, which meant the "refuses to overwrite" check
+    could not fire anywhere but in a test — a guard deleted at every call site
+    that mattered (ticket 13). Starting from empty states the same intention
+    and leaves the guard live for everyone else.
 
     Every entry in `PARAMS` gets a graph: `api_issue` its own, everything else
     the one-node graph `build_simple_dag` builds. `dag_for` never answers "no
     graph" for a type this covers, which is every classifiable type there is.
     """
-    from friday.domain.models import PARAMS
-
-    EDGE_ROUTER.pop("api_issue", None)
+    EDGE_ROUTER.clear()
     register_dag("api_issue", build_api_issue_dag())
 
     for task_type, params_cls in PARAMS.items():
         if task_type == "api_issue":
             continue
-        EDGE_ROUTER.pop(task_type, None)
         register_dag(task_type, build_simple_dag(task_type, params_cls))
 
     agents = agents_for_api_issue(config, skills, servers)

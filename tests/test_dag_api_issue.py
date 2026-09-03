@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from friday.dag import DAGDeps, DAGRunner, DAGState
+from friday.dag.engine import DAGDeps, DAGRunner, DAGState
 from friday.dag.api_issue import build_api_issue_dag
 from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.models import ApiIssueParams
@@ -579,7 +579,7 @@ async def test_a_node_that_can_fetch_a_skill_has_room_to_answer_afterwards():
     """
     from types import SimpleNamespace
 
-    from friday.dag import DAGDeps, DAGState
+    from friday.dag.engine import DAGDeps, DAGState
     from friday.dag.api_issue import _analyze_stack, _compose_reply
     from friday.domain.models import ApiIssueParams
 
@@ -663,7 +663,7 @@ async def _fix_with(analysis, code=None, agent=None):
     """Run `_fix_bug` against one analysis, with the source server present."""
     from types import SimpleNamespace
 
-    from friday.dag import DAGDeps, DAGState
+    from friday.dag.engine import DAGDeps, DAGState
     from friday.dag.api_issue import _fix_bug
 
     state = DAGState.empty().with_result("analyze_stack", analysis)
@@ -687,7 +687,7 @@ async def test_an_actionable_verdict_with_no_cause_does_not_reach_the_fixer():
     reason — after which the composer saw a falsy cause and dropped the diff
     on the floor. The change was made and never mentioned."""
     from friday.dag.api_issue import _actionable
-    from friday.dag import DAGState
+    from friday.dag.engine import DAGState
 
     state = DAGState.empty().with_result(
         "analyze_stack", {"cause": None, "actionable": True}

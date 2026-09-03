@@ -143,7 +143,7 @@ What is actually on disk.
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py` (the account), `bot.py` (approval cards) and `normalise.py`. Its `__init__.py` is empty on purpose |
 | `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages |
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
-| `friday/dag/` | The graph framework — nodes, edges, checkpointed resume. `dag/prepare.py` builds every graph's entry node and holds the fill-and-validate mechanism (`prepare`, `plan_by_required_parameters`) it runs; `dag/api_issue.py` is the one with an investigation past it; `dag/router.py` registers every graph, builds their node agents, and is what the composition root calls |
+| `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds every graph's entry node and holds the fill-and-validate mechanism (`prepare`, `plan_by_required_parameters`) it runs; `dag/api_issue.py` is the one with an investigation past it; `dag/router.py` registers every graph, builds their node agents, and is what the composition root calls |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
@@ -246,8 +246,14 @@ not an implementation detail:
   SDK's own tool approval instead — the tool is marked `needs_approval`, the
   run stops holding its state (`Pool.decide_pending_action`), and
   that state lives in `dag_state.interruption` until the operator says yes or
-  no. A word list matched against a model's own prose was the gate before
-  this; it is not a gate a persuasive message cannot argue past.
+  no. A word list matched against a model's own prose was the *gate* before
+  this, and it is not a gate a persuasive message cannot argue past.
+  `_HANDS_OFF` in `friday/dag/api_issue.py` is still there and still runs —
+  deliberately, as a cheap pre-filter that costs no model call when the cause
+  or the file already names a migration, a schema or a credential. It is a
+  layer, not the gate; the gate is the approval. Saying so here because the
+  sentence above read as though the list were gone, which is the shape a
+  reader trusts and nothing contradicts (ticket 13).
 - **One persona, two families, and the family is decided in code.**
   `PERSONA.md` says who the agents are and that people read Vietnamese, in one
   section per family: the agents whose output a person reads, and the agents

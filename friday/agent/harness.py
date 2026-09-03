@@ -152,7 +152,6 @@ class Harness:
         call and its result are two turns where a written answer is one.
         """
         return await self._settle(
-            self.agent,
             prompt,
             context=context,
             calls=calls,
@@ -215,11 +214,11 @@ class Harness:
             return None
         state.approve(pending[0])
         return await self._settle(
-            self.agent, state, context=None, calls=calls, max_turns=self._config.max_turns
+            state, context=None, calls=calls, max_turns=self._config.max_turns
         )
 
     async def _settle(
-        self, agent, input_: Any, *, context: Any, calls: list | None, max_turns: int
+        self, input_: Any, *, context: Any, calls: list | None, max_turns: int
     ) -> Any | None:
         """Run to completion or to the first thing that stops it, and turn a
         failure into `last_error` rather than an exception every caller would
@@ -229,10 +228,10 @@ class Harness:
         from friday.agent.llm_log import LogHooks
 
         self.last_error = None
-        agent.hooks = LogHooks(calls, model=self._config.model)
+        self.agent.hooks = LogHooks(calls, model=self._config.model)
         try:
             return await Runner.run(
-                agent,
+                self.agent,
                 input_,
                 context=context,
                 max_turns=max_turns,

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.dag import DAG, DAGDeps, DAGRunner, Edge, Node
+from friday.dag.engine import DAG, DAGDeps, DAGRunner, Edge, Node
 from friday.dag.router import EDGE_ROUTER, dag_for, register_dag
 from friday.dag.state import UNSTORABLE, DAGState, MissingNodeResult
 
@@ -819,7 +819,7 @@ async def _wired_for_a_fix(db, fixer):
     stands in for the investigation (it degrades to nothing without
     `read_logs`, so this graph does not bother pretending to have one);
     `source` is present so `fix_bug` does not skip on a missing server."""
-    from friday.dag import DAG, Edge, Node
+    from friday.dag.engine import DAG, Edge, Node
     from friday.dag.api_issue import _compose_reply, _fix_bug, _fix_bug_ok
     from friday.dag.prepare import prepare_node, prepared_ok
     from friday.dag.router import EDGE_ROUTER, register_dag

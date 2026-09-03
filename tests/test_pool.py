@@ -201,7 +201,7 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     """This is the producer the approval path never had. A workflow that can
     actually answer something says so, and the operator decides whether it goes
     out under their name."""
-    from friday.dag import DAG, Node
+    from friday.dag.engine import DAG, Node
     from friday.dag.router import EDGE_ROUTER, register_dag
     from friday.domain.actions import Reply
 

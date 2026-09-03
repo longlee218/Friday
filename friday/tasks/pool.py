@@ -20,11 +20,10 @@ import asyncio
 import json
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
 from typing import Any
 
-from friday.dag import DAGDeps, DAGRunner, DAGState
-from friday.dag.router import dag_for
+from friday.dag.engine import DAGDeps, DAGRunner, DAGState
+from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS, dag_for
 from friday.store.db import Database
 from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.states import TaskState
@@ -340,17 +339,10 @@ class Pool:
         `_raise_hands` can put the specific question in front of the operator
         rather than the task's bare type and parameters.
         """
-        from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
-
-        deps = DAGDeps(
-            task=task,
-            db=self._db,
-            servers=dict(DAG_SERVERS),
-            extra=dict(DAG_DEPS_EXTRA.get(task.type, {})),
-        )
-
         try:
-            prepared = await dag.node(dag.entry).run(DAGState.empty(), deps)
+            prepared = await dag.node(dag.entry).run(
+                DAGState.empty(), self._deps_for(task)
+            )
         except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
             log.warning("task %d: %s's %s failed — %s", task.id, dag.name, dag.entry, exc)
             return HandOver(f"{dag.name} failed: {exc}")
@@ -387,23 +379,12 @@ class Pool:
             )
         ).with_result(dag.entry, prepared)
 
-        async def checkpoint(current: DAGState) -> None:
-            await self._db.save_dag_state(
-                task.id,
-                dag_name=dag.name,
-                results=_checkpointable(current, dag),
-                params_fingerprint=fingerprint,
-            )
+        outcome, final, trail = await self._walk(
+            dag, task=task, state=state, fingerprint=fingerprint
+        )
+        if final is None:
+            return outcome  # the run itself failed; there is no state to record
 
-        runner = DAGRunner(dag, deps=deps, state=state, on_checkpoint=checkpoint)
-
-        try:
-            final = await runner.run()
-        except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
-            log.warning("task %d: %s failed — %s", task.id, dag.name, exc)
-            return HandOver(f"{dag.name} failed: {exc}")
-
-        outcome = self._outcome(dag, final, runner.trail)
         if isinstance(outcome, HandOver):
             # The run ended here rather than deciding something to send — an
             # `Ask`/`Reply` is still headed for the reporter or the outbox, so
@@ -416,10 +397,69 @@ class Pool:
                 dag,
                 results=_checkpointable(final, dag),
                 fingerprint=fingerprint,
-                node=_last_action_node(final, runner.trail) or dag.name,
+                node=_last_action_node(final, trail) or dag.name,
                 hand_over=outcome,
             )
         return outcome
+
+    def _deps_for(self, task: Task) -> DAGDeps:
+        """What every node in this task's graph is handed.
+
+        The three things a node may reach for — the task, the store, and
+        whichever agents and tool servers `register_dags` built — assembled
+        in one place rather than at each of the three call sites that used to
+        spell it out identically.
+        """
+        return DAGDeps(
+            task=task,
+            db=self._db,
+            servers=dict(DAG_SERVERS),
+            extra=dict(DAG_DEPS_EXTRA.get(task.type, {})),
+        )
+
+    async def _walk(
+        self,
+        dag,
+        *,
+        task: Task,
+        state: DAGState,
+        fingerprint: str,
+        from_node: str | None = None,
+    ) -> tuple[Action, DAGState | None, list[str]]:
+        """Run the graph from `state`, recording each node before the next.
+
+        Returns what the graph decided, the state it ended in, and the path it
+        took — the last two are `None` and empty when the run itself failed,
+        which is the one case with no state worth recording.
+
+        Both callers had this identically: the same checkpoint closure, the
+        same runner, the same "a graph failure becomes work" except clause.
+        `from_node` only changes what the log line says.
+        """
+
+        async def checkpoint(current: DAGState) -> None:
+            await self._db.save_dag_state(
+                task.id,
+                dag_name=dag.name,
+                results=_checkpointable(current, dag),
+                params_fingerprint=fingerprint,
+            )
+
+        runner = DAGRunner(
+            dag, deps=self._deps_for(task), state=state, on_checkpoint=checkpoint
+        )
+        try:
+            final = await runner.run()
+        except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
+            log.warning(
+                "task %d: %s failed%s — %s",
+                task.id,
+                dag.name,
+                f" resuming from {from_node}" if from_node else "",
+                exc,
+            )
+            return HandOver(f"{dag.name} failed: {exc}"), None, []
+        return self._outcome(dag, final, runner.trail), final, runner.trail
 
     async def _params_now(self, task: Task) -> dict:
         """The task's parameters as the database holds them, not as this pass
@@ -490,8 +530,6 @@ class Pool:
         dag = dag_for(task.type)
         assert dag is not None, f"{task.type!r} is in PARAMS but has no registered graph"
 
-        from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
-
         node_name = stored["paused_at_node"]
         agent = DAG_DEPS_EXTRA.get(task.type, {}).get(node_name)
 
@@ -555,36 +593,19 @@ class Pool:
         `_fix_bug_ok`-style guards work the same on an injected value as on
         one the node just returned.
         """
-        from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
-
         state = (
             DAGState.from_dict(stored["results"])
             .with_result(dag.entry, PARAMS[task.type](**task.params))
             .with_result(node_name, resumed_value)
         )
-        deps = DAGDeps(
+        outcome, _final, _trail = await self._walk(
+            dag,
             task=task,
-            db=self._db,
-            servers=dict(DAG_SERVERS),
-            extra=dict(DAG_DEPS_EXTRA.get(task.type, {})),
+            state=state,
+            fingerprint=stored["params_fingerprint"],
+            from_node=node_name,
         )
-        fingerprint = stored["params_fingerprint"]
-
-        async def checkpoint(current: DAGState) -> None:
-            await self._db.save_dag_state(
-                task.id,
-                dag_name=dag.name,
-                results=_checkpointable(current, dag),
-                params_fingerprint=fingerprint,
-            )
-
-        runner = DAGRunner(dag, deps=deps, state=state, on_checkpoint=checkpoint)
-        try:
-            final = await runner.run()
-        except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
-            log.warning("task %d: %s failed resuming from %s — %s", task.id, dag.name, node_name, exc)
-            return HandOver(f"{dag.name} failed: {exc}")
-        return self._outcome(dag, final, runner.trail)
+        return outcome
 
     async def _record_pause(
         self, task_id: int, dag, *, results: dict, fingerprint: str, node: str, hand_over: HandOver

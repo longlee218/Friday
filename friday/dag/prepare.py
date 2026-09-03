@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import asdict, fields
 from typing import get_args, get_type_hints
 
-from friday.dag import DAGDeps, DAGState, Node
+from friday.dag.engine import DAGDeps, DAGState, Node
 from friday.domain.actions import Action, Ask, HandOver
 from friday.domain.models import MODEL_AUTHORED, Params
 from friday.domain.validation import Problem, validate

@@ -9,7 +9,7 @@ cannot fire start firing.
 
 **Decisions:** none — this is CLAUDE.md's Layout and Verifying-a-change rules
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why
 
@@ -58,16 +58,61 @@ and unused at `pool.py:436`; `Harness._settle`'s `agent` parameter is
 
 ## Acceptance criteria
 
-- [ ] The graph engine lives in `friday/dag/engine.py`; `friday/dag/__init__.py`
+- [x] The graph engine lives in `friday/dag/engine.py`; `friday/dag/__init__.py`
       carries a docstring and nothing that runs
-- [ ] Every function-local import that existed only to dodge the old cycle is
+- [x] Every function-local import that existed only to dodge the old cycle is
       back at the top of its file, or its remaining reason is written down
-- [ ] `register_dags` states its idempotency once, and `register_dag`'s guard
+- [x] `register_dags` states its idempotency once, and `register_dag`'s guard
       can fire — proven by deleting it and watching a test go red
-- [ ] `_HANDS_OFF` is either removed or documented in CLAUDE.md as a second
+- [x] `_HANDS_OFF` is either removed or documented in CLAUDE.md as a second
       layer, in the same commit
-- [ ] `pool.py`'s duplicated runner/checkpoint block is one function
-- [ ] The unused `DAG_SERVERS` import is gone
-- [ ] Every assembled prompt is byte-identical before and after — this ticket
+- [x] `pool.py`'s duplicated runner/checkpoint block is one function
+- [x] The unused `DAG_SERVERS` import is gone
+- [x] Every assembled prompt is byte-identical before and after — this ticket
       changes no text
-- [ ] CLAUDE.md's layout table reflects wherever the engine ends up
+- [x] CLAUDE.md's layout table reflects wherever the engine ends up
+
+## What it came to
+
+`friday/dag/__init__.py` is `friday/dag/engine.py` (`git mv`, so the history
+follows) and the package's `__init__.py` is eleven lines of docstring saying
+what each module in the package is for and why nothing runs here. Every
+importer moved to `friday.dag.engine`; `from friday.dag import api_issue as
+graph_names` stayed, because that was always a submodule import and never the
+problem.
+
+**All seven function-local imports went back to the top of their files** —
+five in `pool.py`, two more in `router.py` plus three others that had never
+needed to be local either. That was the concrete cost the rule was warning
+about, and it is the evidence the move was worth making rather than a tidy
+for its own sake: nothing is deferred any more, and the suite is green, so
+there was never a cycle left to dodge.
+
+**`register_dags` clears `EDGE_ROUTER` once** instead of popping each key
+immediately before registering it. Same idempotency, stated in one place, and
+`register_dag`'s refuse-to-overwrite guard is live again rather than deleted
+at every call site that mattered.
+
+**`_HANDS_OFF` stays, and CLAUDE.md now says so.** It is defence in depth, not
+the gate: it costs no model call when the cause or the file already names a
+migration or a credential, and the gate is the approval ticket 07 built. The
+sentence that read as though the list were gone is corrected in the same
+commit — CLAUDE.md is the file that warns it goes stale silently.
+
+**`pool.py`'s duplication is one `_walk`**, plus a `_deps_for` for the
+`DAGDeps` triplication. `_walk` returns what the graph decided, the state it
+ended in, and the path it took; the state and path are `None`/empty exactly
+when the run failed, which is the one case with nothing worth recording — so
+`_run_dag` still records a pause and `_continue_from` still does not, which
+was the real difference between the two and is now visible instead of buried
+in twelve identical lines.
+
+**Smaller things in the same sweep:** `Harness._settle` lost its `agent`
+parameter (it was `self.agent` at both call sites and the body mutated it);
+`DAG_SERVERS` is no longer imported unused; and `from datetime import
+datetime, timezone` — dead in `workflows/runner.py` before ticket 09 moved it
+and dead ever since — is gone.
+
+Every assembled prompt captured before and after and diffed byte-identical,
+three times across the ticket. 638 tests pass, unchanged: this ticket adds no
+behaviour and removes none.
