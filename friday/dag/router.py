@@ -19,18 +19,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from friday.agent.harness import Harness
-from friday.agent.skills import fetch_skill_tool
+from friday.dag.api_issue import graph as api_issue
+from friday.dag.api_issue.graph import build_api_issue_dag
 from friday.dag.engine import DAG
-from friday.dag import api_issue as graph_names
-from friday.dag.api_issue import build_api_issue_dag
 from friday.dag.prepare import plan_by_required_parameters, prepare_node
-from friday.dag.prompt import REASONING, build_instructions
 from friday.domain.models import PARAMS, Params
 
 __all__ = [
     "EDGE_ROUTER",
-    "agents_for_api_issue",
     "build_simple_dag",
     "dag_for",
     "register_dag",
@@ -88,82 +84,6 @@ def build_simple_dag(task_type: str, params_cls: type[Params]) -> DAG:
     )
 
 
-# --- building the agents behind a graph's nodes -----------------------------
-
-#: Which config block builds the agent for each `api_issue` node. A node whose
-#: block is absent runs without an agent, which every node in that graph is
-#: written to survive — it skips rather than fails.
-_API_ISSUE_AGENTS = {
-    "read_logs": "dag_read_logs",
-    "find_code_path": "dag_find_code",
-    "analyze_stack": "dag_analyze",
-    "fix_bug": "dag_fix",
-    "compose_reply": "dag_compose",
-}
-
-
-def agents_for_api_issue(
-    config: Any, skills: Any = None, servers: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """Build one agent per node that has a configuration block.
-
-    Wiring only: which config block, which tool server, which tools. What the
-    prompt says and how it is assembled is `friday.dag.prompt`'s business, and
-    the per-node texts live in `prompts/dag/`.
-    """
-    built: dict[str, Any] = {}
-    for node, block in _API_ISSUE_AGENTS.items():
-        agent_config = config.agents.get(block)
-        if agent_config is None:
-            continue
-        wants_skills = skills is not None and node in REASONING
-        tools = [fetch_skill_tool(skills)] if wants_skills else []
-        context_type = None
-        agent_options: dict[str, Any] = {}
-        if node == "compose_reply":
-            # The node that produces the graph's answer reports it by tool
-            # call (ticket 06) — `answer` or `hand_over` — never by prose a
-            # node function then has to parse. Stopping there and not on
-            # `fetch_skill` too (also available here — compose_reply is a
-            # REASONING node) is why this names the two tools rather than
-            # using `stop_on_first_tool`: fetching a skill mid-answer must
-            # not end the run before the answer itself is given.
-            tools = tools + list(graph_names.COMPOSE_TOOLS)
-            context_type = graph_names.ComposeCapture
-            agent_options["tool_use_behavior"] = {
-                "stop_at_tool_names": [t.name for t in graph_names.COMPOSE_TOOLS]
-            }
-        elif node == "fix_bug":
-            # `CANNOT FIX` was a sentinel this node's own code never checked
-            # for — a refusal written as prose was proposed as the diff.
-            # `hand_over` reports a refusal unambiguously instead. `apply_fix`
-            # (ticket 07) is the one tool anywhere in this codebase marked
-            # `needs_approval` — proposing a fix is the one thing a node does
-            # that a word list and an unconfigured agent were the only gates
-            # on before this.
-            tools = tools + list(graph_names.FIX_TOOLS)
-            context_type = graph_names.ComposeCapture
-            agent_options["tool_use_behavior"] = {
-                "stop_at_tool_names": [t.name for t in graph_names.FIX_TOOLS]
-            }
-        available = servers or {}
-        wanted = graph_names.NODE_SERVERS.get(node)
-        mcp = [available[wanted]] if wanted in available else []
-        built[node] = Harness(
-            config=agent_config,
-            instructions=build_instructions(
-                node,
-                persona=getattr(config, "persona", None),
-                skills=skills if wants_skills else None,
-            ),
-            tools=tools,
-            mcp_servers=mcp,
-            context_type=context_type,
-            **agent_options,
-        )
-    return built
-
-
 def register_dags(
     config: Any,
     *,
@@ -192,19 +112,13 @@ def register_dags(
             continue
         register_dag(task_type, build_simple_dag(task_type, params_cls))
 
-    agents = agents_for_api_issue(config, skills, servers)
+    # Each graph builds its own agents: which node gets which configuration
+    # block, tools and server is the graph's own business, and this module
+    # knowing the answer is what ticket 15 took out of it.
+    agents = api_issue.build_agents(config, skills, servers)
     if agents:
         log.info("api_issue graph: agents for %s", ", ".join(sorted(agents)))
-        # Which servers are *missing* — otherwise "why did read_logs never
-        # look anything up" has no answer anywhere. The node skips correctly;
-        # it just skips silently.
-        absent = sorted(
-            {
-                server
-                for node, server in graph_names.NODE_SERVERS.items()
-                if node in agents and server not in (servers or {})
-            }
-        )
+        absent = api_issue.absent_servers(agents, servers)
         if absent:
             log.info(
                 "api_issue graph: no %s server — the nodes needing it will skip",

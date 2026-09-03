@@ -795,7 +795,7 @@ def _fix_bug_agent(*steps):
     from agents.testing import ScriptedModel
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue import ComposeCapture, FIX_TOOLS
+    from friday.dag.api_issue.graph import ComposeCapture, FIX_TOOLS
 
     return Harness(
         config=AgentConfig(
@@ -820,7 +820,7 @@ async def _wired_for_a_fix(db, fixer):
     `read_logs`, so this graph does not bother pretending to have one);
     `source` is present so `fix_bug` does not skip on a missing server."""
     from friday.dag.engine import DAG, Edge, Node
-    from friday.dag.api_issue import _compose_reply, _fix_bug, _fix_bug_ok
+    from friday.dag.api_issue.graph import _compose_reply, _fix_bug, _fix_bug_ok
     from friday.dag.prepare import prepare_node, prepared_ok
     from friday.dag.router import EDGE_ROUTER, register_dag
     from friday.domain.models import ApiIssueParams
@@ -975,13 +975,20 @@ async def test_read_logs_and_find_code_path_need_no_approval(db):
     """D17: the risk is in acting, not in investigating. Neither tool
     server's node is marked `needs_approval` anywhere, and this is what
     would fail if one accidentally were."""
-    from friday.dag.api_issue import NODE_SERVERS
-    from friday.dag.router import _API_ISSUE_AGENTS
+    from friday.dag.api_issue.graph import NODES
 
-    assert set(NODE_SERVERS) == {"read_logs", "find_code_path", "fix_bug"}
-    # The only `needs_approval` tool anywhere in this graph is `apply_fix`,
-    # and it is wired to `fix_bug` alone (see router.py's `agents_for_api_issue`).
-    assert "fix_bug" in _API_ISSUE_AGENTS
+    # Asserted directly now that each node declares its own tools (ticket 15).
+    # It used to read "fix_bug has a config block" and take the rest on trust,
+    # because which node got which tools lived in an if/elif in another file.
+    gated = {
+        name
+        for name, spec in NODES.items()
+        if any(getattr(tool, "needs_approval", False) for tool in spec.tools)
+    }
+    assert gated == {"fix_bug"}, "only applying a fix waits for the operator"
+
+    touches_a_server = {name for name, spec in NODES.items() if spec.server}
+    assert touches_a_server == {"read_logs", "find_code_path", "fix_bug"}
 
 
 async def test_a_pause_records_the_node_that_paused_not_the_graph(db):

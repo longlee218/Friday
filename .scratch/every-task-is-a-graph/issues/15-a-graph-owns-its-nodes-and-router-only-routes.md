@@ -11,7 +11,7 @@ which task type.
 **Decisions:** none new — this is CLAUDE.md's Layout rule applied to a boundary
 that drifted
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why
 
@@ -62,22 +62,68 @@ Saying so here so the next reader knows it was declined rather than missed.
 
 ## Acceptance criteria
 
-- [ ] Each of `api_issue`'s nodes is declared once, with everything that
+- [x] Each of `api_issue`'s nodes is declared once, with everything that
       defines it, and both the graph the engine walks and the agent behind the
       node are derived from that single declaration
-- [ ] No module outside the graph's own package knows the name of any of its
+- [x] No module outside the graph's own package knows the name of any of its
       nodes — the router included
-- [ ] The router's remaining surface is the registry: which graph runs which
+- [x] The router's remaining surface is the registry: which graph runs which
       task type, the one-node graph for types with no investigation, and the
       startup call that registers them
-- [ ] The graph's prompt module holds its texts and assembles them through the
+- [x] The graph's prompt module holds its texts and assembles them through the
       shared section builders, not through its own copies of them
-- [ ] The engine still receives only a name and a function, and still contains
+- [x] The engine still receives only a name and a function, and still contains
       no reference to any particular graph
-- [ ] `register_dags` keeps its signature — the composition root is untouched
-- [ ] No behaviour changes: the suite passes with the same count, and the
+- [x] `register_dags` keeps its signature — the composition root is untouched
+- [x] No behaviour changes: the suite passes with the same count, and the
       per-node wiring is mutation-tested — which node gets which tools, which
       node is skipped when its configuration block is absent, which node skips
       when its tool server is missing
-- [ ] Every assembled prompt is byte-identical before and after
-- [ ] CLAUDE.md's layout table describes the package
+- [x] Every assembled prompt is byte-identical before and after
+- [x] CLAUDE.md's layout table describes the package
+
+## What it came to
+
+`friday/dag/api_issue/` is a package — `graph.py` and `prompt.py` moved with
+`git mv` so the history follows, `__init__.py` empty for ticket 13's reason.
+
+**The six tables are one.** `NODES` maps each name to a frozen `_Node` holding
+what it runs, its configuration block, its prompt, its family, its server, its
+tools, its capture type, whether it reasons, and whether its answer arrives as
+a tool call. Two functions read it and nothing else does: `build_api_issue_dag`
+projects `Node(name, spec.run)` for the engine, `build_agents` projects a
+`Harness`. The engine's side of that projection is unchanged — it still gets a
+name and a function.
+
+`NODE_SERVERS` is gone, and with it the comment that argued for the rule the
+other five tables broke. A node now asks `_has_server(deps, name)`, which reads
+the same row the builder reads, so the two readers the comment worried about
+are reading one declaration.
+
+**`prompt.py` stopped knowing which node is which.** `_TEXTS` and `REASONING`
+were two of the six, keyed by node name, in a module whose subject is wording.
+`build_instructions` takes the text, the family and whether the node reasons as
+arguments; the `if node == "compose_reply"` that picked a persona family is
+gone, because the family is a field on the node's own declaration now.
+
+**`router.py`: 236 lines to 150**, and it names no node of any graph — twelve
+mentions of `api_issue` remain and all twelve are the *task type*, which is
+exactly what a router is for. It asks the graph to build its own agents and
+logs what came back. Five imports it only needed for agent-building went with
+the code.
+
+Two tests got stronger rather than merely relocated, because one table can be
+asked questions three files could not:
+
+- The D17 approval test read "`fix_bug` has a configuration block" and took
+  the rest on trust. It now walks every node's declared tools and asserts that
+  the set carrying `needs_approval` is exactly `{"fix_bug"}`.
+- The Responder invariant's first half grepped for `Family.RESPONDER` in
+  allowed files; it now also asserts directly that `compose_reply` is the only
+  node *claiming* that family, then builds from each declaration to check the
+  claim is honoured.
+
+Verified: 642 tests, the same 642 as before. Prompts byte-identical. The four
+per-node guards mutation-tested — remove `compose_reply`'s tools, `fix_bug`'s
+tools, the skip for a node with no configuration block, or the skip for a node
+with no server, and a named test goes red for each.

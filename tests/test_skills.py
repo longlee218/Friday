@@ -284,7 +284,7 @@ def test_only_the_reasoning_nodes_of_a_graph_get_skills(tmp_path):
     from types import SimpleNamespace
 
     from friday.config import AgentConfig
-    from friday.dag.router import agents_for_api_issue
+    from friday.dag.api_issue.graph import build_agents
 
     def block(name):
         return AgentConfig(
@@ -302,7 +302,7 @@ def test_only_the_reasoning_nodes_of_a_graph_get_skills(tmp_path):
         }
     )
 
-    agents = agents_for_api_issue(config, _library(tmp_path))
+    agents = build_agents(config, _library(tmp_path))
 
     assert [t.name for t in agents["analyze_stack"].agent.tools] == ["fetch_skill"]
     # compose_reply also gets answer/hand_over (ticket 06) — fetch_skill is

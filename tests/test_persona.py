@@ -151,17 +151,17 @@ def test_the_responder_and_the_composing_node_are_the_same_family():
     from types import SimpleNamespace
 
     from friday.config import AgentConfig
-    from friday.dag.router import _API_ISSUE_AGENTS, agents_for_api_issue
+    from friday.dag.api_issue.graph import NODES, build_agents
 
     config = _shipped()
     every_node = SimpleNamespace(
         agents={
             block: AgentConfig(name=block, api_key="k", base_url="http://x/v1", model="m")
-            for block in _API_ISSUE_AGENTS.values()
+            for block in (spec.block for spec in NODES.values())
         },
         persona=config.persona,
     )
-    built = agents_for_api_issue(every_node)
+    built = build_agents(every_node)
 
     assert "How Long writes" in built["compose_reply"].instructions
     assert "How Long writes" not in built["analyze_stack"].instructions

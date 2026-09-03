@@ -150,7 +150,7 @@ What is actually on disk.
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py` (the account), `bot.py` (approval cards) and `normalise.py`. Its `__init__.py` is empty on purpose |
 | `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages |
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
-| `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds every graph's entry node and holds the fill-and-validate mechanism (`prepare`, `plan_by_required_parameters`) it runs; `dag/api_issue.py` is the one with an investigation past it; `dag/router.py` registers every graph, builds their node agents, and is what the composition root calls |
+| `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds every graph's entry node and holds the fill-and-validate mechanism (`prepare`, `plan_by_required_parameters`) it runs. `dag/api_issue/` is the one graph with an investigation past that node: `graph.py` declares each of its nodes **once** — what it runs, its config block, its prompt, its family, its server, its tools — and projects that into both the graph the engine walks and the agents behind it, `prompt.py` holds what each is told. `dag/router.py` maps a task type to a graph and nothing else; it does not know any graph's node names |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
@@ -266,7 +266,7 @@ not an implementation detail:
   that state lives in `dag_state.interruption` until the operator says yes or
   no. A word list matched against a model's own prose was the *gate* before
   this, and it is not a gate a persuasive message cannot argue past.
-  `_HANDS_OFF` in `friday/dag/api_issue.py` is still there and still runs —
+  `_HANDS_OFF` in `friday/dag/api_issue/graph.py` is still there and still runs —
   deliberately, as a cheap pre-filter that costs no model call when the cause
   or the file already names a migration, a schema or a credential. It is a
   layer, not the gate; the gate is the approval. Saying so here because the

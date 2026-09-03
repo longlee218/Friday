@@ -581,7 +581,7 @@ class Pool:
             # one; if none does, `capture.action` just stays `None` and
             # `result.final_output` is read instead, the same fallback
             # `_fix_bug`'s own first attempt uses.
-            from friday.dag.api_issue import ComposeCapture
+            from friday.dag.api_issue.graph import ComposeCapture
 
             capture = ComposeCapture()
             result = await agent.resume(stored["interruption"], context=capture)

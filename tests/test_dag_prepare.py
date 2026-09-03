@@ -12,7 +12,7 @@ state a fresh install is in, and assert the same outcomes the planner gave.
 from __future__ import annotations
 
 from friday.dag.engine import DAGDeps, DAGState
-from friday.dag.api_issue import _compose_reply
+from friday.dag.api_issue.graph import _compose_reply
 from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
 from types import SimpleNamespace
 

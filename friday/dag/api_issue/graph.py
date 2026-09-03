@@ -30,13 +30,21 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from friday.agent.harness import ToolContext, tool
+from friday.agent.harness import Harness, ToolContext, tool
+from friday.agent.persona import Family
+from friday.agent.skills import fetch_skill_tool
+from friday.dag.api_issue import prompt as prompts
 from friday.dag.engine import DAG, DAGDeps, DAGState, Edge, Node
 from friday.dag.prepare import prepare_node, prepared_ok
 from friday.domain.actions import Action, HandOver, Reply
 from friday.domain.models import ApiIssueParams
 
-__all__ = ["ComposeCapture", "build_api_issue_dag"]
+__all__ = [
+    "ComposeCapture",
+    "absent_servers",
+    "build_agents",
+    "build_api_issue_dag",
+]
 
 log = logging.getLogger(__name__)
 
@@ -104,15 +112,14 @@ FIX_TOOLS = [apply_fix, hand_over]
 LOKI = "loki"
 SOURCE = "source"
 
-#: Node -> the server it cannot work without. Read twice, from here both
-#: times: the node checks it before spending a model call, and
-#: `dag/router.py` reads it to hand the agent the server it will look for.
-#: Stated in two files, those two would drift and nothing would catch it.
-NODE_SERVERS = {
-    "read_logs": LOKI,
-    "find_code_path": SOURCE,
-    "fix_bug": SOURCE,
-}
+
+def _has_server(deps: DAGDeps, node: str) -> bool:
+    """Whether this node's tool server is there. Reads the same declaration
+    the agent builder reads — the node checks before spending a model call,
+    the builder hands the agent the server it will look for, and one table
+    answers both so the two cannot drift apart."""
+    server = NODES[node].server
+    return server is None or server in deps.servers
 
 
 # --- the nodes -------------------------------------------------------------
@@ -132,7 +139,7 @@ async def _read_logs(state: DAGState, deps: DAGDeps) -> str | None:
     if not (params.correlation_id or params.curl):
         return None  # nothing to look up by
     agent = deps.extra.get("read_logs")
-    if agent is None or NODE_SERVERS["read_logs"] not in deps.servers:
+    if agent is None or not _has_server(deps, "read_logs"):
         log.debug("api_issue: no log server configured, skipping read_logs")
         return None
 
@@ -152,7 +159,7 @@ async def _find_code_path(state: DAGState, deps: DAGDeps) -> str | None:
     if not isinstance(logs, str) or not logs:
         return None
     agent = deps.extra.get("find_code_path")
-    if agent is None or NODE_SERVERS["find_code_path"] not in deps.servers:
+    if agent is None or not _has_server(deps, "find_code_path"):
         return None
 
     result = await agent.run(logs)
@@ -219,7 +226,7 @@ async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | HandOver | None:
         )
 
     agent = deps.extra.get("fix_bug")
-    if agent is None or NODE_SERVERS["fix_bug"] not in deps.servers:
+    if agent is None or not _has_server(deps, "fix_bug"):
         return HandOver(
             f"I found the cause but cannot change code from here. Cause: {cause}"
         )
@@ -340,6 +347,86 @@ def _actionable(state: DAGState) -> bool:
     return bool(analysis.get("actionable") and analysis.get("cause"))
 
 
+@dataclass(frozen=True, slots=True)
+class _Node:
+    """Everything that defines one node of this graph, declared once.
+
+    Six things used to be keyed by these same five names, across three files:
+    node to server, node to configuration block, node to prompt, which nodes
+    reason, which nodes get which tools, and which persona family each is
+    built with. One of those six sat beside a comment arguing for exactly the
+    rule the other five broke. This is that comment's rule applied to all of
+    them (ticket 15).
+
+    Two things are projected out of it and nothing else reads it: the node the
+    engine walks (`build_api_issue_dag`) and the agent behind that node
+    (`build_agents`). The engine still receives a name and a function, and
+    still knows nothing about agents, configuration or prompts.
+    """
+
+    #: The function the engine runs. Every node has one; not every node has
+    #: an agent — `read_logs` with no log server still runs, and skips.
+    run: Any
+    #: Which `config.agents` block builds this node's agent. A node whose
+    #: block is absent runs without one, which every node here survives.
+    block: str
+    #: What that agent is told, before any per-call input.
+    prompt: str
+    #: Who reads what this node writes. `compose_reply` answers a reporter in
+    #: the operator's name; every other node is a step and writes to the next.
+    family: Family
+    #: The tool server it cannot work without, if it needs one.
+    server: str | None = None
+    #: Tools its agent reports through, and the scratch space they write to.
+    tools: tuple = ()
+    context: type | None = None
+    #: Whether it decides what evidence *means*, as opposed to fetching it.
+    #: "How to trace a request" is written for whoever reads the logs, not for
+    #: the thing that fetches them — so only these get the skills catalogue
+    #: and the fetch tool.
+    reasons: bool = False
+    #: Passed to the SDK when its answer arrives as a tool call rather than as
+    #: prose, so the run stops at that call instead of taking another turn.
+    stop_at_tools: bool = False
+
+
+#: Every node past `prepare`, in the order the graph walks them. `prepare` is
+#: node 0 of every graph and is built by `prepare_node`, not declared here: it
+#: has no agent, no prompt and no server of its own.
+NODES: dict[str, _Node] = {
+    "read_logs": _Node(
+        run=_read_logs, block="dag_read_logs", prompt=prompts.READ_LOGS,
+        family=Family.NODE, server=LOKI,
+    ),
+    "find_code_path": _Node(
+        run=_find_code_path, block="dag_find_code", prompt=prompts.FIND_CODE_PATH,
+        family=Family.NODE, server=SOURCE,
+    ),
+    "analyze_stack": _Node(
+        run=_analyze_stack, block="dag_analyze", prompt=prompts.ANALYZE_STACK,
+        family=Family.NODE, reasons=True,
+    ),
+    # `hand_over` beside `apply_fix` (ticket 06): the prompt asks this agent to
+    # refuse when the fix is not obvious, and a refusal written as prose was
+    # once proposed as the diff. `apply_fix` is the one tool in this codebase
+    # marked `needs_approval` (ticket 07).
+    "fix_bug": _Node(
+        run=_fix_bug, block="dag_fix", prompt=prompts.FIX_BUG,
+        family=Family.NODE, server=SOURCE, reasons=True,
+        tools=tuple(FIX_TOOLS), context=ComposeCapture, stop_at_tools=True,
+    ),
+    # The node that produces the graph's answer reports it by tool call, never
+    # by prose a node function then has to parse. It stops at `answer` and
+    # `hand_over` but *not* at `fetch_skill`, which it is also offered:
+    # fetching a skill mid-answer must not end the run before the answer.
+    "compose_reply": _Node(
+        run=_compose_reply, block="dag_compose", prompt=prompts.COMPOSE_REPLY,
+        family=Family.RESPONDER, reasons=True,
+        tools=tuple(COMPOSE_TOOLS), context=ComposeCapture, stop_at_tools=True,
+    ),
+}
+
+
 def build_api_issue_dag() -> DAG:
     """The graph. Agents are handed in through `deps`, not closed over here,
     so the shape can be tested without a model or a tool server."""
@@ -347,11 +434,7 @@ def build_api_issue_dag() -> DAG:
         name="api_issue",
         nodes=(
             prepare_node("api_issue", ApiIssueParams),
-            Node("read_logs", _read_logs),
-            Node("find_code_path", _find_code_path),
-            Node("analyze_stack", _analyze_stack),
-            Node("fix_bug", _fix_bug),
-            Node("compose_reply", _compose_reply),
+            *(Node(name, spec.run) for name, spec in NODES.items()),
         ),
         edges=(
             Edge("prepare", "read_logs", when=prepared_ok),
@@ -361,6 +444,64 @@ def build_api_issue_dag() -> DAG:
             Edge("analyze_stack", "compose_reply"),
             Edge("fix_bug", "compose_reply", when=_fix_bug_ok),
         ),
+    )
+
+
+def build_agents(
+    config: Any, skills: Any = None, servers: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """One agent per node that has a configuration block.
+
+    Reads the same declaration the graph is built from, so which node gets
+    which tools, which server and which persona is stated once. Lived in the
+    router until ticket 15, where it made the module that maps a task type to
+    a graph know the names of one graph's nodes.
+    """
+    built: dict[str, Any] = {}
+    for name, spec in NODES.items():
+        agent_config = config.agents.get(spec.block)
+        if agent_config is None:
+            continue
+        wants_skills = skills is not None and spec.reasons
+        tools = [fetch_skill_tool(skills)] if wants_skills else []
+        tools += list(spec.tools)
+        options: dict[str, Any] = {}
+        if spec.stop_at_tools:
+            options["tool_use_behavior"] = {
+                "stop_at_tool_names": [t.name for t in spec.tools]
+            }
+        available = servers or {}
+        mcp = [available[spec.server]] if spec.server in available else []
+        built[name] = Harness(
+            config=agent_config,
+            instructions=prompts.build_instructions(
+                spec.prompt,
+                family=spec.family,
+                reasons=spec.reasons,
+                persona=getattr(config, "persona", None),
+                skills=skills if wants_skills else None,
+            ),
+            tools=tools,
+            mcp_servers=mcp,
+            context_type=spec.context,
+            **options,
+        )
+    return built
+
+
+def absent_servers(agents: dict[str, Any], servers: dict[str, Any] | None) -> list[str]:
+    """Which servers the built agents wanted and did not get.
+
+    Worth saying out loud at startup: the node skips correctly without one, it
+    just skips silently, and "why did read_logs never look anything up" then
+    has no answer anywhere.
+    """
+    return sorted(
+        {
+            spec.server
+            for name, spec in NODES.items()
+            if name in agents and spec.server and spec.server not in (servers or {})
+        }
     )
 
 

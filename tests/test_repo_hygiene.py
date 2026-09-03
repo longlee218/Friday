@@ -280,10 +280,14 @@ def test_only_responder_family_agents_can_speak_for_the_operator():
     this is pinned directly rather than left to be implied by behaviour.
 
     Two things have to both hold: `Family.RESPONDER` is only ever named
-    inside `friday/responder/` (the operator's own voice) and the one node,
-    `compose_reply`, wired to it in `friday/dag/prompt.py`; and that wiring
-    itself sends `compose_reply` the Responder section and every other node
-    the Node section.
+    inside `friday/responder/` (the operator's own voice) and in the one node
+    declaration that claims it; and building from that declaration really
+    does send `compose_reply` the Responder section and every other node the
+    Node section.
+
+    Since ticket 15 the family is a field on a node's own declaration rather
+    than a branch on its name in a shared prompt module, so the first half
+    reads a table and the second builds from it. Same two questions.
 
     **This half only checks wiring, and wiring is not the whole invariant.**
     Text can reach a reporter without passing through an agent at all: the
@@ -302,7 +306,7 @@ def test_only_responder_family_agents_can_speak_for_the_operator():
     allowed = {
         root / "responder" / "__init__.py",
         root / "responder" / "prompt.py",
-        root / "dag" / "prompt.py",
+        root / "dag" / "api_issue" / "graph.py",
     }
     pattern = re.compile(r"Family\.RESPONDER")
     offenders = {}
@@ -313,20 +317,29 @@ def test_only_responder_family_agents_can_speak_for_the_operator():
         if hits:
             offenders[str(path.relative_to(root.parent))] = len(hits)
     assert offenders == {}, (
-        f"Family.RESPONDER used outside friday/responder/ and dag/prompt.py: "
+        f"Family.RESPONDER used outside friday/responder/ and the graph's "
+        f"own node declarations: "
         f"{offenders} — only the composer and the operator's own Responder may "
         f"write in that voice"
     )
 
     from friday.agent.persona import Family
-    from friday.dag.prompt import _TEXTS, build_instructions
+    from friday.dag.api_issue.graph import NODES
+    from friday.dag.api_issue.prompt import build_instructions
 
     class _Spy:
         def render(self, family: Family) -> str:
             return "RESPONDER" if family is Family.RESPONDER else "NODE"
 
-    for node in _TEXTS:
-        voice = build_instructions(node, persona=_Spy())
+    claimed = {n for n, spec in NODES.items() if spec.family is Family.RESPONDER}
+    assert claimed == {"compose_reply"}, (
+        f"only the node that answers a reporter may claim that voice: {claimed}"
+    )
+
+    for node, spec in NODES.items():
+        voice = build_instructions(
+            spec.prompt, family=spec.family, reasons=spec.reasons, persona=_Spy()
+        )
         expected = "RESPONDER" if node == "compose_reply" else "NODE"
         assert voice.startswith(expected), (
             f"{node} was built with the wrong persona family — only "

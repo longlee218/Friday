@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from friday.dag.engine import DAGDeps, DAGRunner, DAGState
-from friday.dag.api_issue import build_api_issue_dag
+from friday.dag.api_issue.graph import build_api_issue_dag
 from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.models import ApiIssueParams
 
@@ -189,7 +189,7 @@ async def _compose_with(agent) -> Action:
     """Run `_compose_reply` with a cause already found, against a real agent
     — the seam these two tests need, since a `StubAgent` never calls a tool
     at all and would only ever exercise the `Reply(said)` fallback."""
-    from friday.dag.api_issue import _compose_reply
+    from friday.dag.api_issue.graph import _compose_reply
 
     state = (
         DAGState.empty()
@@ -214,7 +214,7 @@ async def test_compose_reply_calls_answer_and_that_becomes_the_reply():
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue import ComposeCapture, COMPOSE_TOOLS
+    from friday.dag.api_issue.graph import ComposeCapture, COMPOSE_TOOLS
 
     agent = Harness(
         config=AgentConfig(
@@ -242,7 +242,7 @@ async def test_compose_reply_can_hand_over_instead_of_answering():
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue import ComposeCapture, COMPOSE_TOOLS
+    from friday.dag.api_issue.graph import ComposeCapture, COMPOSE_TOOLS
 
     agent = Harness(
         config=AgentConfig(
@@ -271,7 +271,7 @@ async def test_prose_with_no_tool_call_hands_over_rather_than_being_read():
     analysis found, never the sentence this model wandered into."""
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue import ComposeCapture, COMPOSE_TOOLS
+    from friday.dag.api_issue.graph import ComposeCapture, COMPOSE_TOOLS
 
     class Rambling:
         async def run(self, prompt, **kw):
@@ -343,7 +343,7 @@ async def test_fix_bug_can_hand_over_instead_of_a_refusal_nobody_reads():
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue import ComposeCapture, _fix_bug, hand_over
+    from friday.dag.api_issue.graph import ComposeCapture, _fix_bug, hand_over
 
     fixer = Harness(
         config=AgentConfig(
@@ -380,7 +380,7 @@ async def test_fix_bug_stops_at_apply_fix_and_carries_the_checkpoint_to_resume_w
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue import ComposeCapture, FIX_TOOLS, _fix_bug
+    from friday.dag.api_issue.graph import ComposeCapture, FIX_TOOLS, _fix_bug
 
     fixer = Harness(
         config=AgentConfig(
@@ -466,14 +466,14 @@ def test_the_string_false_is_not_permission_to_change_code():
     """`bool("false")` is True. A model answering in JSON writes the string
     often enough that taking the truthiness would read a refusal as a yes,
     and the thing on the other side of that yes edits someone's repository."""
-    from friday.dag.api_issue import _as_analysis
+    from friday.dag.api_issue.graph import _as_analysis
 
     analysis = _as_analysis('{"cause": "off by one", "actionable": "false"}')
     assert analysis["actionable"] is False
 
 
 def test_an_explicit_yes_is_taken_at_its_word():
-    from friday.dag.api_issue import _as_analysis
+    from friday.dag.api_issue.graph import _as_analysis
 
     for said in ("true", "True", "yes", True):
         import json
@@ -483,7 +483,7 @@ def test_an_explicit_yes_is_taken_at_its_word():
 
 
 def test_anything_unrecognised_resolves_towards_not_touching_the_code():
-    from friday.dag.api_issue import _as_analysis
+    from friday.dag.api_issue.graph import _as_analysis
 
     analysis = _as_analysis('{"cause": "x", "actionable": "probably"}')
     assert analysis["actionable"] is False
@@ -497,7 +497,7 @@ def _every_node_configured():
     from types import SimpleNamespace
 
     from friday.config import AgentConfig
-    from friday.dag.router import _API_ISSUE_AGENTS
+    from friday.dag.api_issue.graph import NODES
 
     return SimpleNamespace(
         agents={
@@ -507,7 +507,7 @@ def _every_node_configured():
                 base_url="http://localhost/v1",
                 model="m",
             )
-            for block in _API_ISSUE_AGENTS.values()
+            for block in (spec.block for spec in NODES.values())
         }
     )
 
@@ -515,11 +515,11 @@ def _every_node_configured():
 def test_the_node_that_writes_a_patch_is_not_given_the_find_the_file_prompt():
     """They were the same string. `fix_bug` was instructed to locate code and
     then asked to return a diff, which is a prompt that cannot be obeyed."""
-    from friday.dag import api_issue as graph
-    from friday.dag.router import agents_for_api_issue
+    from friday.dag.api_issue import graph
+    from friday.dag.api_issue.graph import build_agents
 
-    built = agents_for_api_issue(_every_node_configured())
-    from friday.dag.prompt import FIND_CODE_PATH, FIX_BUG
+    built = build_agents(_every_node_configured())
+    from friday.dag.api_issue.prompt import FIND_CODE_PATH, FIX_BUG
 
     assert built["fix_bug"].instructions == FIX_BUG
     assert built["find_code_path"].instructions == FIND_CODE_PATH
@@ -531,10 +531,10 @@ def test_a_node_is_handed_the_tool_server_it_needs():
     only invent the lines it was asked to look up."""
     from types import SimpleNamespace
 
-    from friday.dag.router import agents_for_api_issue
+    from friday.dag.api_issue.graph import build_agents
 
     loki = SimpleNamespace(name="loki")
-    built = agents_for_api_issue(_every_node_configured(), None, {"loki": loki})
+    built = build_agents(_every_node_configured(), None, {"loki": loki})
 
     assert built["read_logs"].tool_servers == [loki]
     # And only the ones it needs: the composer has nothing to look up.
@@ -548,7 +548,7 @@ def test_a_skill_description_cannot_break_out_of_its_section(tmp_path):
     section. A second, hand-rolled renderer here did not escape it, so a
     description containing a closing tag ended the section and everything
     after it read as instructions."""
-    from friday.dag.router import agents_for_api_issue
+    from friday.dag.api_issue.graph import build_agents
     from friday.agent.skills import SkillLibrary
 
     (tmp_path / "evil").mkdir()
@@ -562,7 +562,7 @@ def test_a_skill_description_cannot_break_out_of_its_section(tmp_path):
     skills = SkillLibrary(tmp_path).load()
     assert skills.problems == []
 
-    built = agents_for_api_issue(_every_node_configured(), skills)
+    built = build_agents(_every_node_configured(), skills)
     instructions = built["analyze_stack"].instructions
 
     assert "&lt;/skills&gt;" in instructions
@@ -580,7 +580,7 @@ async def test_a_node_that_can_fetch_a_skill_has_room_to_answer_afterwards():
     from types import SimpleNamespace
 
     from friday.dag.engine import DAGDeps, DAGState
-    from friday.dag.api_issue import _analyze_stack, _compose_reply
+    from friday.dag.api_issue.graph import _analyze_stack, _compose_reply
     from friday.domain.models import ApiIssueParams
 
     class Recording:
@@ -615,7 +615,7 @@ def test_fenced_json_is_read_as_json():
     Unfenced, the whole blob became the `cause` verbatim and a genuine
     `actionable: true` was lost — so the fix edge was never taken and the
     fenced text was proposed as the reply to send under the operator's name."""
-    from friday.dag.api_issue import _as_analysis
+    from friday.dag.api_issue.graph import _as_analysis
 
     analysis = _as_analysis(
         '```json\n{"cause": "upstream timed out", "actionable": true}\n```'
@@ -626,7 +626,7 @@ def test_fenced_json_is_read_as_json():
 
 
 def test_a_fence_with_no_language_tag_is_read_too():
-    from friday.dag.api_issue import _as_analysis
+    from friday.dag.api_issue.graph import _as_analysis
 
     assert _as_analysis('```\n{"cause": "x"}\n```')["cause"] == "x"
 
@@ -635,7 +635,7 @@ def test_prose_is_still_prose():
     """A model that ignored the format is still telling us something, and
     `actionable` stays false because a shape we did not ask for is not
     evidence of certainty."""
-    from friday.dag.api_issue import _as_analysis
+    from friday.dag.api_issue.graph import _as_analysis
 
     analysis = _as_analysis("the upstream is down, I think")
 
@@ -644,16 +644,16 @@ def test_prose_is_still_prose():
 
 
 def test_a_node_and_its_wiring_read_the_same_requirement():
-    """Which server a node needs was stated in two files. Adding a node meant
-    editing both, and nothing caught the drift."""
-    from friday.dag.api_issue import NODE_SERVERS
-    from friday.dag.router import agents_for_api_issue
+    """Which server a node needs is stated once, on the node's own
+    declaration, and the agent built for it is handed that same server. It
+    used to be stated in two files: adding a node meant editing both, and
+    nothing caught the drift (ticket 15)."""
+    from friday.dag.api_issue.graph import NODES, build_agents
 
-    built = agents_for_api_issue(_every_node_configured(), None, {"loki": object()})
+    built = build_agents(_every_node_configured(), None, {"loki": object()})
 
-    for node, server in NODE_SERVERS.items():
-        wants_loki = server == "loki"
-        assert bool(built[node].tool_servers) is wants_loki, node
+    for node, spec in NODES.items():
+        assert bool(built[node].tool_servers) is (spec.server == "loki"), node
 
 
 # --- what stands between a model and someone's repository -------------------
@@ -664,7 +664,7 @@ async def _fix_with(analysis, code=None, agent=None):
     from types import SimpleNamespace
 
     from friday.dag.engine import DAGDeps, DAGState
-    from friday.dag.api_issue import _fix_bug
+    from friday.dag.api_issue.graph import _fix_bug
 
     state = DAGState.empty().with_result("analyze_stack", analysis)
     if code is not None:
@@ -686,7 +686,7 @@ async def test_an_actionable_verdict_with_no_cause_does_not_reach_the_fixer():
     nothing, and the fixer was handed a migration to patch with no stated
     reason — after which the composer saw a falsy cause and dropped the diff
     on the floor. The change was made and never mentioned."""
-    from friday.dag.api_issue import _actionable
+    from friday.dag.api_issue.graph import _actionable
     from friday.dag.engine import DAGState
 
     state = DAGState.empty().with_result(
@@ -736,7 +736,7 @@ async def test_an_ordinary_fix_in_ordinary_code_still_goes_through():
 async def _compose_without_an_agent(*, fix=None) -> Action:
     """`_compose_reply` with a cause found and **no** `compose_reply` agent —
     what a fresh install and any deploy without a `dag_compose` block runs."""
-    from friday.dag.api_issue import _compose_reply
+    from friday.dag.api_issue.graph import _compose_reply
 
     state = (
         DAGState.empty()
