@@ -364,7 +364,9 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
     from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
-    from friday.extraction import _EXTRACTORS, _Capture, _clarify_tool, build_extractor
+    from friday.extraction import _EXTRACTORS, build_extractor
+    from friday.extraction.clarify import FieldsCapture
+    from friday.tools.ask_for_fields import ask_for_fields_tool
     from friday.store import schema
 
     ext = build_extractor(
@@ -375,13 +377,13 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
                 base_url="https://example.invalid/v1", model="test-model",
             ),
             instructions="extract",
-            tools=[_clarify_tool(ApiIssueParams)],
-            context_type=_Capture,
+            tools=[ask_for_fields_tool(ApiIssueParams)],
+            context_type=FieldsCapture,
             model=ScriptedModel(
                 [
                     [
                         function_call(
-                            "ask_clarification",
+                            "ask_for_fields",
                             {
                                 "fields": ["environment"],
                                 "because": "the curl doesn't say which server",

@@ -216,7 +216,7 @@ def test_the_skills_that_ship_with_the_repo_all_parse():
 
 def test_the_tool_is_bound_to_one_library(tmp_path):
     """What an agent can reach is composition, not something it declares."""
-    from friday.agent.skills import fetch_skill_tool
+    from friday.tools.fetch_skill import fetch_skill_tool
 
     write(tmp_path, "trace-a-request", SKILL)
     tool = fetch_skill_tool(SkillLibrary(tmp_path).load())

@@ -28,7 +28,7 @@ from pathlib import Path
 
 import yaml
 
-__all__ = ["Skill", "SkillLibrary", "fetch_skill_tool"]
+__all__ = ["Skill", "SkillLibrary"]
 
 log = logging.getLogger(__name__)
 
@@ -212,26 +212,3 @@ def _read(path: Path) -> Skill:
         if extra != path
     }
     return Skill(name=name, description=description, body=body.strip(), files=files)
-
-
-def fetch_skill_tool(library: SkillLibrary):
-    """The tool an agent calls to read a skill it decided it needs.
-
-    Bound to one library rather than reaching for a module global, the same
-    shape `remember_tool` uses: what an agent can reach is composition, not
-    something the agent declares.
-    """
-    from friday.agent.harness import tool
-
-    @tool
-    def fetch_skill(name: str) -> str:
-        """Read the full instructions for one of the available skills.
-
-        Args:
-            name: The skill's name as listed in the skills section — or, when
-                a fetched skill names more files, that file, like "tdd/tests.md".
-        """
-        log.info("skill fetched: %s", name)
-        return library.fetch(name)
-
-    return fetch_skill

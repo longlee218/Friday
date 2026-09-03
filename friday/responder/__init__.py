@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from friday.config import AgentConfig
 from friday.responder.prompt import build_input, build_instructions
 from friday.agent.harness import Harness
-from friday.agent.skills import fetch_skill_tool
+from friday.tools.fetch_skill import fetch_skill_tool
 from friday.domain.models import Params, InboundEvent
 
 __all__ = ["Draft", "Responder"]

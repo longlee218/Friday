@@ -27,7 +27,9 @@ import re
 from dataclasses import dataclass, fields
 from typing import Any, Literal
 
-from friday.agent.harness import Harness, ToolContext, tool
+from friday.agent.harness import Harness
+from friday.extraction.clarify import Clarify, FieldsCapture
+from friday.tools.ask_for_fields import ask_for_fields_tool
 from friday.domain.models import MODEL_AUTHORED, PARAMS, Params
 from friday.extraction.prompt import build_input, build_instructions
 
@@ -47,65 +49,6 @@ log = logging.getLogger(__name__)
 #: Task type -> the extractor that fills its parameters. Written by
 #: `register()`, read by `extract()` from inside `prepare()`.
 _EXTRACTORS: dict[str, "Extractor"] = {}
-
-
-@dataclass(frozen=True, slots=True)
-class Clarify:
-    """The extractor's own request: these fields, because of this.
-
-    Intent, not words — `fields` names which of the type's own fields it
-    means, closed to a per-type enum so the model cannot invent one that does
-    not exist. The Responder turns this into the sentence a reporter reads;
-    this module never writes one.
-    """
-
-    fields: tuple[str, ...]
-    because: str
-
-
-@dataclass
-class _Capture:
-    """Per-run scratch space for `ask_clarification`, same pattern as
-    triage's — the tool writes here rather than to a module global, so
-    concurrent runs cannot overwrite each other."""
-
-    clarify: Clarify | None = None
-
-
-def _clarify_tool(params_cls: type[Params]):
-    """Build `ask_clarification` for one type: a closed enum of that type's
-    own *askable* fields — everything but what the model itself writes (see
-    `MODEL_AUTHORED` in `friday.domain.models`). One function because every
-    type needs the identical shape, differing only in which fields it may name.
-    """
-    askable = tuple(f for f in params_cls.__dataclass_fields__ if f not in MODEL_AUTHORED)
-    FieldName = Literal[askable]
-
-    def ask_clarification(
-        ctx: ToolContext[_Capture], fields: list[FieldName], because: str
-    ) -> str:
-        ctx.context.clarify = Clarify(fields=tuple(fields), because=because)
-        return "recorded"
-
-    # `FieldName` is local to this call — `from __future__ import annotations`
-    # stringifies the signature above, and resolving it back would eval that
-    # string against the *module's* globals, where `FieldName` does not
-    # exist. Setting the real object here bypasses that eval for this one
-    # parameter.
-    ask_clarification.__annotations__["fields"] = list[FieldName]
-
-    ask_clarification.__doc__ = (
-        "Ask the reporter for specific fields, because something in what "
-        "they wrote makes this worth asking even though nothing here "
-        "requires it structurally — an ambiguity, a detail the report "
-        "implies but does not state.\n\n"
-        "Args:\n"
-        f"    fields: which of this type's own fields you mean — "
-        f"{', '.join(askable)}.\n"
-        "    because: why, in one short phrase — what you read that makes "
-        "this worth asking."
-    )
-    return tool(ask_clarification)
 
 
 class Extractor:
@@ -132,7 +75,7 @@ class Extractor:
         also called `ask_clarification` is independent of that — one extra
         turn covers the tool call landing before or after the field text.
         """
-        capture = _Capture()
+        capture = FieldsCapture()
         result = await self._harness.run(
             build_input(text, self._params_cls), context=capture, extra_turns=1
         )
@@ -231,8 +174,8 @@ def register(task_type: str, params_cls: type[Params], config: "AgentConfig") ->
         harness=Harness(
             config=config,
             instructions=build_instructions(),
-            tools=[_clarify_tool(params_cls)],
-            context_type=_Capture,
+            tools=[ask_for_fields_tool(params_cls)],
+            context_type=FieldsCapture,
         ),
         name=f"{task_type}_extractor",
     )

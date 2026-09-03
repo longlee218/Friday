@@ -207,7 +207,8 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
     from friday.domain.models import ApiIssueParams
-    from friday.extraction import Clarify, _Capture, _clarify_tool
+    from friday.extraction.clarify import Clarify, FieldsCapture
+    from friday.tools.ask_for_fields import ask_for_fields_tool
 
     config = AgentConfig(
         name="api_issue_ext",
@@ -220,13 +221,13 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
         harness=Harness(
             config=config,
             instructions="extract",
-            tools=[_clarify_tool(ApiIssueParams)],
-            context_type=_Capture,
+            tools=[ask_for_fields_tool(ApiIssueParams)],
+            context_type=FieldsCapture,
             model=ScriptedModel(
                 [
                     [
                         function_call(
-                            "ask_clarification",
+                            "ask_for_fields",
                             {
                                 "fields": ["correlation_id"],
                                 "because": "no id or curl anywhere in the report",
@@ -257,10 +258,10 @@ def test_ask_clarification_cannot_name_a_field_that_does_not_exist():
     schema itself is what stops the model asking about something that is
     not there or that it writes itself."""
     from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
-    from friday.extraction import _clarify_tool
+    from friday.tools.ask_for_fields import ask_for_fields_tool
 
     for params_cls in (ApiIssueParams, AccessRequestParams, DocQuestionParams):
-        schema = _clarify_tool(params_cls).params_json_schema
+        schema = ask_for_fields_tool(params_cls).params_json_schema
         enum = set(schema["properties"]["fields"]["items"]["enum"])
         assert enum == set(params_cls.__dataclass_fields__) - {"summary"}
 

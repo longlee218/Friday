@@ -184,7 +184,7 @@ async def test_a_summary_covers_the_channels_threads_too(db, tmp_path):
 # --- ticket 40: the room decides the register --------------------------------
 
 
-class _Capture(Model):
+class FieldsCapture(Model):
     """Records the user turn it was given, answers nothing."""
 
     def __init__(self, into: list[str]) -> None:
@@ -242,7 +242,7 @@ async def test_the_responder_writes_differently_in_a_different_room(tmp_path):
 
     responder = Responder(
         config=AgentConfig(name="r", api_key="k", base_url="http://x/v1", model="m"),
-        model=_Capture(prompts),
+        model=FieldsCapture(prompts),
         context_store=store,
     )
     for room in ("team", "client"):
@@ -260,7 +260,7 @@ async def test_a_room_with_no_file_leaves_the_prompt_as_it_was(tmp_path):
 
     responder = Responder(
         config=AgentConfig(name="r", api_key="k", base_url="http://x/v1", model="m"),
-        model=_Capture(prompts),
+        model=FieldsCapture(prompts),
         context_store=_room(tmp_path),
     )
     await responder.draft(asking="cho anh xin correlationId", channel_id="unknown-room")
@@ -282,7 +282,7 @@ async def test_a_named_person_reaches_the_prompt_beside_the_rooms_register(tmp_p
     prompts: list[str] = []
     responder = Responder(
         config=AgentConfig(name="r", api_key="k", base_url="http://x/v1", model="m"),
-        model=_Capture(prompts),
+        model=FieldsCapture(prompts),
         context_store=store,
     )
 

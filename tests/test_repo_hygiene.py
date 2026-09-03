@@ -375,11 +375,11 @@ def test_a_reply_is_constructed_in_exactly_one_place():
         if lines:
             built_in[str(path.relative_to(friday.parent))] = lines
 
-    assert list(built_in) == ["friday/dag/api_issue/graph.py"], (
+    assert list(built_in) == ["friday/tools/reply.py"], (
         f"a Reply is what a reporter reads under the operator's name; it is "
         f"built in one place, the `answer` tool: {built_in}"
     )
-    assert len(built_in["friday/dag/api_issue/graph.py"]) == 1, (
+    assert len(built_in["friday/tools/reply.py"]) == 1, (
         f"one construction, not several: {built_in}"
     )
 

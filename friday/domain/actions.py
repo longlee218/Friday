@@ -60,3 +60,36 @@ class HandOver:
 
 
 Action = Ask | Reply | HandOver
+
+
+# --- what triage concludes --------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Decided:
+    """Triage reached a conclusion: this message is of this type.
+
+    That is the whole of it. No parameters, no summary — triage classifies and
+    stops. Lifting values out of the message is a different job with a
+    different failure mode, it belongs to whoever needs those values, and
+    doing both there meant two producers for one set of fields and a merge to
+    reconcile them. See `friday/extraction/`.
+    """
+
+    type: str
+    confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class NeedsHuman:
+    """Triage could not conclude. The message still becomes work — never
+    silence, which is indistinguishable from the system working."""
+
+    reason: str
+
+
+#: What a classification comes to. Here rather than in `friday/triage/`
+#: because the tool that produces it lives in `friday/tools/`, and a tool
+#: importing the module that imports it is the cycle ticket 01 took out of
+#: `Ask`/`Reply`/`HandOver` for exactly this reason.
+TriageOutcome = Decided | NeedsHuman

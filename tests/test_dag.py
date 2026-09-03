@@ -795,7 +795,8 @@ def _fix_bug_agent(*steps):
     from agents.testing import ScriptedModel
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue.graph import ComposeCapture, FIX_TOOLS
+    from friday.tools.patch import FIX_TOOLS
+    from friday.tools.reply import ComposeCapture
 
     return Harness(
         config=AgentConfig(

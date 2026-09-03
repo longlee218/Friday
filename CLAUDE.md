@@ -152,6 +152,7 @@ What is actually on disk.
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
 | `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds every graph's entry node and holds the fill-and-validate mechanism (`prepare`, `plan_by_required_parameters`) it runs. `dag/api_issue/` is the one graph with an investigation past that node: `graph.py` declares each of its nodes **once** — what it runs, its config block, its prompt, its family, its server, its tools — and projects that into both the graph the engine walks and the agents behind it, `prompt.py` holds what each is told. `dag/router.py` maps a task type to a graph and nothing else; it does not know any graph's node names |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
+| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), concluding (`reply`, `classify`), acting (`patch`), reaching (`fetch_skill`). A test asserts the list and forbids declaring one anywhere else |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `friday/board/` | The read-only page on `:8086`; its JSON API is `ops/api.py` |
@@ -165,20 +166,33 @@ statement about PEP 420, not a licence to put implementation in `__init__.py` �
 importing any submodule runs the parent's `__init__.py` first, so whatever
 lives there is paid for by every import of the package.
 
-There is no `nodes/`, `procedures/`, `tools/`, `permissions/` or `hooks/`
-package, and their absence is a decision rather than an omission. (`memory/`
-was on that list until it existed — the six packages above were carved out of
-twenty-two loose modules once flat stopped scaling, which is the same rule
-applied at a later size, not a reversal of it.) The node vocabulary did come
-back, but as `friday/dag/` rather than a `nodes/` package: a node is a function
-in the graph that owns it, and four of the nine agent blocks in `config.yaml`
-are graph nodes calling a model. This paragraph said for months that only
-triage and the responder ever called one, which stopped being true the day the
-first graph shipped. Tools live beside the state they touch because that is the only place their guard can be
-enforced, and the four guards in this codebase answer four different questions
-about four different subjects — collapsing them into one package would cost
-locality and buy nothing. **Build one of these when a second caller appears,
-not before.**
+There is no `procedures/`, `permissions/` or `hooks/` package, and their
+absence is a decision rather than an omission. (`memory/` was on that list
+until it existed — the six packages above were carved out of twenty-two loose
+modules once flat stopped scaling, which is the same rule applied at a later
+size, not a reversal of it.) The node vocabulary did come back, but as
+`friday/dag/` rather than a `nodes/` package: a node is a function in the
+graph that owns it. **Build one of these when a second caller appears, not
+before.**
+
+`tools/` **was** on that list, on the argument that a tool belongs beside the
+state it touches because that is the only place its guard can be enforced.
+That argument does not survive contact with the question "what can the agents
+actually do?" — which has to be answerable, and was not. The tools were spread
+across four modules that each owned part of the answer, and two of them were
+invisible to a `grep` for `@tool` because they are wrapped by calling
+`tool(fn)` after `__doc__` is assigned. Nor was the guard argument true: what
+gates `apply_fix` is `needs_approval=True` on the decorator, which travels
+with the function; the captures are per-run dataclasses that travel with it
+too.
+
+So **every tool lives in `friday/tools/`**, one module per subject, and
+`tests/test_tools.py` enforces both halves of that: the list of tools is
+asserted rather than described, and no tool may be declared anywhere else.
+Both spellings are checked by reading the syntax, since grep sees only one of
+them. A tool that needs something injected — `fetch_skill` a skill library,
+`ask_for_fields` one type's field names — stays a factory; that is a
+different thing from living somewhere else.
 
 ## Architecture constraints
 

@@ -214,7 +214,7 @@ async def test_compose_reply_calls_answer_and_that_becomes_the_reply():
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue.graph import ComposeCapture, COMPOSE_TOOLS
+    from friday.tools.reply import COMPOSE_TOOLS, ComposeCapture
 
     agent = Harness(
         config=AgentConfig(
@@ -242,7 +242,7 @@ async def test_compose_reply_can_hand_over_instead_of_answering():
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue.graph import ComposeCapture, COMPOSE_TOOLS
+    from friday.tools.reply import COMPOSE_TOOLS, ComposeCapture
 
     agent = Harness(
         config=AgentConfig(
@@ -271,7 +271,7 @@ async def test_prose_with_no_tool_call_hands_over_rather_than_being_read():
     analysis found, never the sentence this model wandered into."""
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue.graph import ComposeCapture, COMPOSE_TOOLS
+    from friday.tools.reply import COMPOSE_TOOLS, ComposeCapture
 
     class Rambling:
         async def run(self, prompt, **kw):
@@ -343,7 +343,8 @@ async def test_fix_bug_can_hand_over_instead_of_a_refusal_nobody_reads():
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue.graph import ComposeCapture, _fix_bug, hand_over
+    from friday.dag.api_issue.graph import _fix_bug
+    from friday.tools.reply import ComposeCapture, hand_over
 
     fixer = Harness(
         config=AgentConfig(
@@ -380,7 +381,9 @@ async def test_fix_bug_stops_at_apply_fix_and_carries_the_checkpoint_to_resume_w
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.dag.api_issue.graph import ComposeCapture, FIX_TOOLS, _fix_bug
+    from friday.dag.api_issue.graph import _fix_bug
+    from friday.tools.patch import FIX_TOOLS
+    from friday.tools.reply import ComposeCapture
 
     fixer = Harness(
         config=AgentConfig(
