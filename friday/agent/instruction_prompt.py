@@ -522,7 +522,24 @@ Do:
 - wait for the answer rather than proceeding on an assumption."""
 
 
-def clarification_system(tool: str | None) -> Section:
+#: For an agent whose asking is *additive* — it reports rather than acts, so
+#: stopping to wait would throw away the part it already knows. Written from
+#: the sentence `friday/extraction/prompt.py` used to carry itself, which was
+#: deleted and replaced by the blocking text above; the model then had one
+#: prompt telling it both to wait for an answer and to always reply in JSON.
+_CLARIFY_ALONGSIDE = """If something is worth asking about — an ambiguity, a
+detail the request implies but does not state — ask, **and carry on with the
+part you can already answer**. Asking is not stopping here:
+
+- report everything you did work out, in the format you were asked for;
+- ask in the same turn about what you could not;
+- never withhold an answer you have because another part is unclear.
+
+A value you are unsure of is not the same as a value that is absent. Say what
+is absent, ask about what is unclear, and hand back both."""
+
+
+def clarification_system(tool: str | None, *, blocking: bool = True) -> Section:
     """Ask before acting — rendered only for an agent that has a way to ask.
 
     `tool` is the name of the call this agent makes to ask, and `None` means
@@ -534,10 +551,20 @@ def clarification_system(tool: str | None) -> Section:
     The agents that *can* ask do it by their own name — the graph's composer
     hands over, node 0 returns a question — so the name is passed in rather
     than assumed.
+
+    **`blocking` is not a style choice.** An agent that *acts* must ask before
+    acting: a patch applied on a guess is not undone by asking afterwards. An
+    agent that *reports* must not stop, because stopping throws away the part
+    it already worked out — and the extractor did exactly that: told to "wait
+    for the answer rather than proceeding", it could call its ask tool and
+    return no JSON at all, which `_parse` reads as `{}` and every field of a
+    `Params` defaults, so an empty extraction came back as a *successful* one
+    and the reporter was asked for everything they had just written.
     """
     if not tool:
         return Section("clarification_system")
-    body = f"{_CLARIFY_PRIORITY}\n\nAsk by calling `{_escape(tool)}`."
+    priority = _CLARIFY_PRIORITY if blocking else _CLARIFY_ALONGSIDE
+    body = f"{priority}\n\nAsk by calling `{_escape(tool)}`."
     return Section("clarification_system", body)
 
 

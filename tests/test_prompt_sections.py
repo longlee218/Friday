@@ -303,3 +303,57 @@ def test_only_the_agents_that_speak_for_the_operator_carry_a_voice():
     assert "<soul>" in responder()
     assert "<soul>" not in extractor()
     assert "<soul>" not in triage()
+
+
+# --- asking that stops, and asking that does not ----------------------------
+
+
+def test_an_agent_that_reports_is_never_told_to_stop_and_wait():
+    """The extractor reports; it does not act. Told to "wait for the answer
+    rather than proceeding", it can call its ask tool and return no JSON —
+    and `_parse` reads that as `{}`, every field of a `Params` has a default,
+    so an empty extraction comes back as a *successful* one and the reporter
+    is asked for everything they had just written.
+
+    The prompt this replaced carried the sentence that prevented it. It was
+    deleted in the rewrite and the blocking section put in its place, so one
+    prompt said both "wait before proceeding" and "always reply in JSON".
+    """
+    from friday.extraction.prompt import build_instructions
+
+    built = build_instructions()
+
+    assert "wait for the answer" not in built
+    assert "Never start working" not in built
+    assert "do both when both apply" in built, "asking and filling are separate"
+
+
+def test_an_agent_that_acts_is_told_to_ask_first():
+    """The other half, and the reason the flag exists rather than the section
+    simply being softened: a patch applied on a guess is not undone by asking
+    afterwards."""
+    from friday.agent.instruction_prompt import clarification_system
+
+    blocking = clarification_system("hand_over").render()
+
+    assert "CLARIFY -> PLAN -> ACT" in blocking
+    assert "Never start working and clarify" in blocking.replace("\n", " ")
+
+
+def test_an_empty_extraction_is_not_a_successful_one():
+    """The floor under the prompt fix. Whatever any prompt says, a model that
+    answers nothing must not be read as having found nothing — those are
+    different, and only one of them should reach the reporter as a question.
+    """
+    from friday.extraction import _parse
+
+    assert _parse("") == {}, "the parse itself is honest — it found nothing"
+
+    # And what the caller does with that is the part worth pinning: an
+    # all-defaulted Params is what an empty parse produces, so a caller that
+    # cannot tell it from a real extraction will ask for what it already has.
+    from friday.domain.models import ApiIssueParams
+
+    empty = ApiIssueParams(**_parse(""))
+    assert empty.correlation_id is None and empty.curl is None
+    assert not _parse(""), "an empty read is falsy — callers can tell"

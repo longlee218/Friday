@@ -9,9 +9,15 @@ puts `sản xuất` where `friday/domain/validation.py` wants `production`, the
 value fails its rule, and the reporter is asked to confirm what they already
 said. So there is no `soul` in this prompt and there should not be one.
 
-**It can ask, so it is told how.** `ask_for_fields` offers a closed enum of
-this type's own field names, which is why the clarification section is
-rendered here and not for triage: the door is actually in the room.
+**It can ask, so it is told how — but asking here does not stop the work.**
+`ask_for_fields` offers a closed enum of this type's own field names, which is
+why the clarification section is rendered here and not for triage: the door is
+actually in the room. It is rendered `blocking=False`, and that flag is the
+whole difference between this prompt working and this prompt silently
+breaking: told to wait for an answer before proceeding, the model can call the
+tool and return no JSON, `_parse` reads that as `{}`, every field of a `Params`
+has a default, and an empty extraction comes back as a *successful* one — so
+the reporter is asked for everything they just wrote.
 """
 
 from __future__ import annotations
@@ -42,7 +48,10 @@ of it, not only the first line.
 
 You are the only thing that reads this message for what it contains. Nothing
 produced these fields before you and nothing corrects them after, except a
-check that a value you did supply has the right shape."""
+check that a value you did supply has the right shape.
+
+Asking about a field and filling one are separate: do both when both apply,
+and reply in JSON for whatever you did find."""
 
 THINKING = [
     "Read everything they said before filling anything in.",
@@ -71,7 +80,7 @@ def build_instructions() -> str:
         trust_boundary(),
         job(JOB),
         thinking_style(THINKING),
-        clarification_system("ask_for_fields"),
+        clarification_system("ask_for_fields", blocking=False),
         memory_tool_system(available=False),
         critical_reminder(REMINDERS),
     )
