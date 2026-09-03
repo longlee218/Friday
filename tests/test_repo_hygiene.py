@@ -351,14 +351,22 @@ def test_a_reply_is_constructed_in_exactly_one_place():
             func = node.func
             if isinstance(func, ast.Name) and func.id in direct:
                 found.append(node.lineno)
-            elif (
-                isinstance(func, ast.Attribute)
-                and func.attr == "Reply"
-                and isinstance(func.value, ast.Name)
-                and func.value.id in module
-            ):
-                found.append(node.lineno)
+            elif isinstance(func, ast.Attribute) and func.attr == "Reply":
+                # `actions.Reply(x)` after importing the module under a name,
+                # or `friday.domain.actions.Reply(x)` spelled out in full —
+                # the second is a chain of Attributes, not a Name, and the
+                # first version of this saw only the first.
+                if _dotted(func.value) in module | {ACTIONS}:
+                    found.append(node.lineno)
         return found
+
+    def _dotted(node: ast.AST) -> str:
+        """`a.b.c` as a string, for matching a module named in full."""
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            return f"{_dotted(node.value)}.{node.attr}"
+        return ""
 
     friday = Path(__file__).resolve().parents[1] / "friday"
     built_in: dict[str, list[int]] = {}
@@ -374,3 +382,54 @@ def test_a_reply_is_constructed_in_exactly_one_place():
     assert len(built_in["friday/dag/api_issue/graph.py"]) == 1, (
         f"one construction, not several: {built_in}"
     )
+
+
+def test_a_reply_row_is_queued_in_exactly_one_place():
+    """The anchor above pins what the *graph* may decide; this pins what
+    actually reaches the reporter.
+
+    They are one hop apart, and the hop matters. `Pool._propose` queues a
+    `Kind.REPLY` row from a plain string, and today its only caller is the
+    `Reply` branch of `_route` — so pinning `Reply` construction covers it by
+    coincidence of there being one caller. A second `_propose(task, whatever)`
+    would put text in front of a reporter with no `Reply` constructed
+    anywhere, and the anchor above would not blink. Found by a review trying
+    exactly that.
+
+    `ask_for_details` also reaches the reporter and is deliberately not
+    pinned here: it is code's own question, and the risk this guards is in
+    answering rather than in asking.
+
+    **What neither anchor can see**, said out loud so nobody mistakes them for
+    a proof: a construction reached through `getattr`, a table of constructors,
+    or `dataclasses.replace` on an existing `Reply`. Static reading cannot
+    follow those, and no test here pretends to. They are contrived rather than
+    plausible — nothing in this codebase builds an action that way — so the
+    guards are worth what they cost and not more. If one ever appears, the
+    thing to change is the code, not this test.
+    """
+    import ast
+    from pathlib import Path
+
+    friday = Path(__file__).resolve().parents[1] / "friday"
+    queued: dict[str, list[int]] = {}
+    for path in friday.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not (isinstance(node, ast.Call) and node.keywords):
+                continue
+            for kw in node.keywords:
+                if kw.arg != "kind":
+                    continue
+                if (
+                    isinstance(kw.value, ast.Attribute)
+                    and kw.value.attr == "REPLY"
+                ):
+                    queued.setdefault(
+                        str(path.relative_to(friday.parent)), []
+                    ).append(node.lineno)
+
+    assert list(queued) == ["friday/tasks/pool.py"], (
+        f"a reply row is what a reporter reads under the operator's name; it "
+        f"is queued in one place, `_propose`: {queued}"
+    )
+    assert len(queued["friday/tasks/pool.py"]) == 1, f"one queue, not several: {queued}"

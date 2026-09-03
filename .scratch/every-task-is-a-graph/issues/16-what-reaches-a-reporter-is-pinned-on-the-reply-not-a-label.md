@@ -158,3 +158,43 @@ comment is the kind that quietly stops being true.
 Also: a comment describing the node texts had been left sitting above the
 voice constants, and CONTEXT.md pointed at a `## Reply` section that does not
 exist.
+
+## What the second review caught
+
+Both reviews independently found the coverage regression, which is worth
+noting on its own: two readers looking from different angles landed on the
+same missing loop.
+
+**The anchor was one hop away from the thing that matters.** What a reporter
+actually reads is a `Kind.REPLY` outbox row, queued by `Pool._propose` from a
+plain string. `Reply` construction is pinned, and `Reply` happens to be
+`_propose`'s only caller — so the anchor covered the real boundary *by
+coincidence of there being one caller*. A second `_propose(task, whatever)`
+would put text in front of a reporter with no `Reply` constructed anywhere,
+and the guard would not blink.
+
+Pinned directly now: `Kind.REPLY` is queued in exactly one place.
+Mutation-tested by turning the help-wanted row into a reply row.
+
+**A third evasion, and two that stay open on purpose.** The fully-qualified
+`friday.domain.actions.Reply(x)` is a chain of attributes rather than a name,
+and walked past — plausible enough to close, and closed. `getattr`, a table of
+constructors, and `dataclasses.replace` on an existing `Reply` cannot be
+followed by reading source, and the test now says so rather than leaving a
+reader to assume it is a proof. Nothing in this codebase builds an action that
+way; if something ever does, the code is what should change.
+
+**Independent confirmation of the byte-identity claim.** The reviewer
+extracted the three new constants and re-ran the old splitter over
+`60166f9:PERSONA.md`: `VOICE` equals the old Responder section exactly, and
+the two graph constants equal their sections plus the `"\n\n"` the old
+assembly added. Old `section + "\n\n" + text + catalogue` equals new
+`(section + "\n\n" + text) + catalogue`, for every node, with and without
+skills.
+
+**One behaviour did change, and it is an improvement worth knowing.** With
+`PERSONA.md` missing, agents used to run voiceless by design — `load` returned
+an empty `Persona` and every section rendered empty. The voice is
+unconditional now. There is no longer a way to start the system with agents
+that have no idea who they are, which is the right default, but it is a
+default that used to be a fallback.
