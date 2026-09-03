@@ -25,28 +25,42 @@ from friday.domain.actions import Ask
 
 __all__ = ["CLARIFICATION_TYPES", "Clarification", "ClarifyCapture", "ask_clarification"]
 
-#: Why the agent is stopping. A closed set, because the tool schema *is* the
-#: instruction: an open string invites the model to write a sentence here, and
-#: a sentence is not something the operator can count later.
-ClarificationType = Literal[
-    #: Something required was not given at all.
-    "missing_info",
-    #: More than one reading of the request is valid.
-    "ambiguous_requirement",
-    #: Several valid ways to do it, and the choice is not the agent's.
-    "approach_choice",
-    #: The action changes something that is hard to undo.
-    "risk_confirmation",
-    #: The agent has a recommendation and wants a yes before acting on it.
-    "suggestion",
-]
+#: Why the agent is stopping — the name, and what it means. **One source.**
+#: The meanings used to live in comments above a bare `Literal`, so the model
+#: was shown five strings and the line "why you are stopping" and had to guess
+#: what `approach_choice` meant as against `ambiguous_requirement`. Triage had
+#: already solved this: its task types carry their descriptions into the tool
+#: schema, because a tool parameter *is* an instruction to the model, and an
+#: enum member nobody defined is an instruction to guess.
+CLARIFICATION_TYPES: dict[str, str] = {
+    "missing_info": (
+        "something required was not given at all — you cannot proceed "
+        "without it, and no reading of the request supplies it"
+    ),
+    "ambiguous_requirement": (
+        "more than one reading of the request is valid, and they lead to "
+        "different work"
+    ),
+    "approach_choice": (
+        "you know what to do but there are several valid ways, and the "
+        "choice belongs to whoever asked, not to you"
+    ),
+    "risk_confirmation": (
+        "you are about to change something that is hard to undo, and nobody "
+        "has said yes to that specific change"
+    ),
+    "suggestion": (
+        "you have a recommendation and want a yes before acting on it — "
+        "nothing is blocking you, you are offering"
+    ),
+}
 
-CLARIFICATION_TYPES = (
-    "missing_info",
-    "ambiguous_requirement",
-    "approach_choice",
-    "risk_confirmation",
-    "suggestion",
+#: Built from the same dict, so a sixth kind is a sixth entry and cannot be
+#: added to one of them without the other.
+ClarificationType = Literal[tuple(CLARIFICATION_TYPES)]  # type: ignore[valid-type]
+
+_TYPE_DOC = "\n".join(
+    f"        {name}: {meaning}" for name, meaning in CLARIFICATION_TYPES.items()
 )
 
 
@@ -80,7 +94,6 @@ class ClarifyCapture:
     clarification: Clarification | None = None
 
 
-@tool
 def ask_clarification(
     ctx: ToolContext[ClarifyCapture],
     question: str,
@@ -88,18 +101,6 @@ def ask_clarification(
     context: str = "",
     options: list[str] | None = None,
 ) -> str:
-    """Stop and ask, before doing any of the work.
-
-    Call this the moment you notice something is unclear, missing or
-    ambiguous — not after starting. Whoever answers gets your question
-    verbatim, so ask the one thing you actually need.
-
-    Args:
-        question: what you need to know, in one sentence.
-        clarification_type: why you are stopping.
-        context: why you need it, if that is not obvious from the question.
-        options: the choices, when you are asking somebody to pick one.
-    """
     ctx.context.clarification = Clarification(
         question=question,
         kind=clarification_type,
@@ -107,3 +108,23 @@ def ask_clarification(
         options=tuple(options or ()),
     )
     return "asked"
+
+
+#: Written out rather than left as a docstring literal, because the kinds and
+#: their meanings come from `CLARIFICATION_TYPES` — the same trick
+#: `friday/triage/__init__.py` uses on `create_task`, for the same reason.
+ask_clarification.__doc__ = f"""Stop and ask, before doing any of the work.
+
+Call this the moment you notice something is unclear, missing or ambiguous —
+not after starting. Whoever answers gets your question verbatim, so ask the
+one thing you actually need, and ask nothing else in the same turn.
+
+Args:
+    question: what you need to know, in one sentence.
+    clarification_type: why you are stopping —
+{_TYPE_DOC}
+    context: why you need it, if that is not obvious from the question.
+    options: the choices, when you are asking somebody to pick one.
+"""
+
+ask_clarification = tool(ask_clarification)
