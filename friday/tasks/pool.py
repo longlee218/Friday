@@ -204,37 +204,67 @@ class Pool:
         """Given a decision, do what it says. Shared by the ordinary pass and
         by `decide_pending_action` — an approval resuming a graph reaches the
         same three outcomes a fresh pass does, and should be routed the same
-        way once it has one."""
+        way once it has one.
+
+        One branch per kind, and none of them falls through to another. Each
+        answers the same four questions — where the text came from, whether
+        anything has to reword it, which rows it becomes, and where the task
+        goes — and they only differ in the answers:
+
+            Ask       the reporter    reworded    1 row     -> asked
+            Reply     the reporter    as written  2 rows    -> review
+            HandOver  the operator    as written  0 rows    -> needs_human
+
+        `Reply` is the one that waits for approval, and it is *not* the one
+        addressed to the operator: it answers the reporter in their name,
+        which is exactly why somebody has to say yes first. The operator's own
+        two rows are the approval card `_propose` queues beside it, and the
+        help-wanted `_raise_hands` sends about a hand-over.
+        """
         if isinstance(action, Reply):
             return await self._propose(task, action.text)
-
         if isinstance(action, Ask):
-            asked = await self._db.outbound_count(task.id, kind=Kind.ASK_FOR_DETAILS)
-            if asked >= self._max_asks:
-                log.info(
-                    "task %d: asked %d times without an answer — a human's now",
-                    task.id,
-                    asked,
-                )
-                return await self._move(task, NEEDS_HUMAN)
+            return await self._ask(task, action)
+        return await self._hand_over(task, action)
 
-        if isinstance(action, Ask) and self._auto_ask:
-            text = await self._say(task, action.text)
-            await self._db.queue_outbound(
-                task_id=task.id,
-                conversation=task.conversation,
-                kind=Kind.ASK_FOR_DETAILS,
-                sender=self._sender,
-                text=text,
-                reply_to=await self._db.last_mention_in(task.conversation),
+    async def _ask(self, task: Task, ask: Ask) -> Task:
+        """Put the task's own missing details to the reporter.
+
+        Two guards first, both about whether to ask *at all*, before anything
+        is worded: the bound on how often one task may ask, and whether asking
+        is switched on. Failing either is a person's problem, not a reason to
+        stay quiet — an unanswered question that stops being asked has to
+        surface somewhere.
+        """
+        asked = await self._db.outbound_count(task.id, kind=Kind.ASK_FOR_DETAILS)
+        if asked >= self._max_asks:
+            log.info(
+                "task %d: asked %d times without an answer — a human's now",
+                task.id,
+                asked,
             )
-            log.info("task %d: asked — %r", task.id, text)
-            return await self._move(task, ASKED)
-
-        if isinstance(action, Ask):
+            return await self._move(task, NEEDS_HUMAN)
+        if not self._auto_ask:
             log.info("task %d: would ask, but auto_ask is off", task.id)
-        else:
-            log.info("task %d: %s", task.id, action.reason)
+            return await self._move(task, NEEDS_HUMAN)
+
+        text = await self._in_the_operators_voice(task, ask.text)
+        await self._db.queue_outbound(
+            task_id=task.id,
+            conversation=task.conversation,
+            kind=Kind.ASK_FOR_DETAILS,
+            sender=self._sender,
+            text=text,
+            reply_to=await self._db.last_mention_in(task.conversation),
+        )
+        log.info("task %d: asked — %r", task.id, text)
+        return await self._move(task, ASKED)
+
+    async def _hand_over(self, task: Task, hand_over: HandOver) -> Task:
+        """Nothing here can take it further. No row is queued at this point:
+        `_raise_hands` tells the operator later in the same pass, and it
+        carries this reason rather than the task's bare type."""
+        log.info("task %d: %s", task.id, hand_over.reason)
         return await self._move(task, NEEDS_HUMAN)
 
     async def _propose(self, task: Task, text: str) -> Task:
@@ -263,8 +293,15 @@ class Pool:
         # different columns, different thing to chase.
         return await self._move(task, REVIEW)
 
-    async def _say(self, task: Task, template: str) -> str:
+    async def _in_the_operators_voice(self, task: Task, template: str) -> str:
         """The template, or the same thing in the operator's voice.
+
+        **Only `Ask` comes through here, and that is not an inconsistency.**
+        A `Reply` was written by `compose_reply`, an agent already wearing the
+        Responder persona, so it arrives in that voice. An `Ask` was assembled
+        by `_question()` — code, no model — so it has no voice until this
+        gives it one. This brings asking up to where answering already starts;
+        it does not treat the two differently.
 
         Asking is the agent's own decision, whoever phrased it: the risk in
         this system is in *answering*, not in asking, and a request for a

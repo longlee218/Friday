@@ -146,6 +146,14 @@ already do.
 correlationId costs a question if it is wrong, and asserting a cause costs the
 operator's credibility with their own team.
 
+**All three are read by the reporter except one, and it is not the one that
+waits.** `Ask` and `Reply` both go to the person who reported the problem;
+`Reply` waits precisely *because* it answers them in the operator's name.
+`HandOver` is the one addressed to the operator, and it never reaches the
+reporter at all. The operator's other two messages are not actions: the
+approval card queued beside a `Reply`, and the help-wanted sent about a task
+sitting in `needs_human`.
+
 One rule holds for every type: **a task missing something it cannot work
 without has to say so.** Required-ness is read off the parameter type —
 `project: str` is required, `doc_ref: str | None` says outright that we can
