@@ -252,7 +252,9 @@ There was a `PERSONA.md` holding this for everyone, split by heading, with a
 `Family` label deciding which agent read which section. It went with ticket
 16 — knowing what an agent had actually been told required opening a second
 file, and the invariant the label was there to protect turned out not to be
-protected by it (see **Reply**).
+protected by it: the test written in terms of the label passed throughout the
+bug it existed to catch. What a reporter reads is pinned on the one place a
+`Reply` is built instead.
 
 Distinct from **tone**: the voice is written by hand and describes the shape,
 the tone examples are real messages the operator sent and are the evidence.

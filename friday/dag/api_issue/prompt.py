@@ -11,11 +11,12 @@ for the nodes declared as reasoning, the skills catalogue, in instructions
 rather than per call because a list that moved would cost the cache hit on
 everything after it.
 
-**This module holds wording and shape, never facts about which node is which.**
-Which family a node is, and whether it reasons, are properties of the node and
-are declared once beside it in `graph.py`; they arrive here as arguments. There
-used to be a `_TEXTS` dict and a `REASONING` set here, keyed by node name — two
-of the six tables over one keyspace that ticket 15 collapsed.
+**This module holds each agent's text in full, voice included** — that is what
+ticket 16 decided, and it is why knowing what an agent was told is one file
+rather than two. What it does *not* hold is anything keyed by node name: there
+was a `_TEXTS` dict and a `REASONING` set here, two of the six tables over one
+keyspace ticket 15 collapsed, and they are fields on the node's own row now.
+Whether a node reasons still arrives as an argument for the same reason.
 """
 
 from __future__ import annotations
@@ -25,8 +26,6 @@ from typing import Any
 
 __all__ = ["build_instructions"]
 
-#: One text per node. ANALYZE_STACK's `cause` / `actionable` / `evidence` are
-#: the JSON keys its parser reads — reworded freely, never renamed.
 #: Who a node is, before it is told its job. Inlined here rather than read
 #: from a shared file: an agent with a different purpose ends up with a
 #: different prompt however hard you try to share one, and the file this came
@@ -49,10 +48,13 @@ translated identifier no longer refers to anything.
 """
 
 #: The composer answers a reporter in the operator's name, so it gets the
-#: operator's voice rather than a step's. The same text is in
-#: `friday/responder/prompt.py`, and that is not an accident to be tidied
-#: away: they are two agents with two jobs, and the day one of them needs a
+#: operator's voice rather than a step's. `friday/responder/prompt.py` has its
+#: own copy, and the two are free to diverge — that is the point, not an
+#: accident to tidy away: two agents with two jobs, and the day one needs a
 #: sentence the other does not is the day sharing it would have been the bug.
+#: So this says where the other copy *is*, and claims nothing about it being
+#: the same; nothing checks that, and an unchecked claim is the kind that
+#: quietly stops being true.
 _RESPONDER_VOICE = """You are Long Lee's assistant.
 
 Long is a backend engineer. People message him on Discord about APIs that are
@@ -127,6 +129,8 @@ no longer refers to anything.
 """
 
 
+#: One text per node. ANALYZE_STACK's `cause` / `actionable` / `evidence` are
+#: the JSON keys its parser reads — reworded freely, never renamed.
 READ_LOGS = _NODE_VOICE + """You look up log lines for one request.
 
 You are given a correlation id and an environment. Use the log tools to find

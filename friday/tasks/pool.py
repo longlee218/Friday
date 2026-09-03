@@ -297,8 +297,8 @@ class Pool:
         """The template, or the same thing in the operator's voice.
 
         **Only `Ask` comes through here, and that is not an inconsistency.**
-        A `Reply` was written by `compose_reply`, an agent already wearing the
-        Responder persona, so it arrives in that voice. An `Ask` was assembled
+        A `Reply` was written by `compose_reply`, whose own prompt carries the
+        operator's voice, so it arrives in that voice. An `Ask` was assembled
         by `_question()` — code, no model — so it has no voice until this
         gives it one. This brings asking up to where answering already starts;
         it does not treat the two differently.

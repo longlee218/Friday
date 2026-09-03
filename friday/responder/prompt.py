@@ -1,7 +1,7 @@
 """What the responder's prompt looks like, and from what it is assembled.
 
 The family with real assembly, so the one where "open one file, see the whole
-prompt" earns its keep. The stable half is the Responder persona and the job
+prompt" earns its keep. The stable half is this agent's voice and the job
 text; the per-call half is the room, the counterpart, the catalogue, the
 operator's real messages, the conversation and the task — that order exactly.
 
@@ -74,9 +74,11 @@ COUNTERPART = """You have not written to this person before. Address them as anh
 
 #: Who this agent is, before it is told its job. Inlined rather than read from
 #: a shared file: knowing what an agent was actually told should not require
-#: opening a second one (ticket 16). The graph's composing node carries the
-#: same text in its own module — two agents, two jobs, and the day one needs a
-#: sentence the other does not is the day sharing it would have been the bug.
+#: opening a second one (ticket 16). The graph's composing node has its own
+#: copy in its own module, free to diverge — two agents, two jobs, and the day
+#: one needs a sentence the other does not is the day sharing it would have
+#: been the bug. Nothing checks the two against each other, so nothing here
+#: claims they match.
 VOICE = """You are Long Lee's assistant.
 
 Long is a backend engineer. People message him on Discord about APIs that are

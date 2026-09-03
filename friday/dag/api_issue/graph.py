@@ -463,7 +463,7 @@ def build_agents(
     """One agent per node that has a configuration block.
 
     Reads the same declaration the graph is built from, so which node gets
-    which tools, which server and which persona is stated once. Lived in the
+    which tools and which server is stated once. Lived in the
     router until ticket 15, where it made the module that maps a task type to
     a graph know the names of one graph's nodes.
     """

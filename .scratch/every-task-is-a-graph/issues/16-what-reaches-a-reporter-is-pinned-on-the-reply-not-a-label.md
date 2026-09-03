@@ -120,3 +120,41 @@ are told nothing about voice at all.
 
 638 tests pass (644 before; six loader tests removed with the loader, one
 family-anchored invariant test replaced by the Reply anchor).
+
+## What the review caught
+
+**A fourth spelling routed around the anchor.** The guard resolved imports to
+catch `Reply(x)`, `actions.Reply(x)` and an aliased `R(x)` — three, found by
+testing each. `from friday.domain.actions import *` then `Reply(x)` was the
+fourth and walked straight past.
+
+Worth recording how nearly it was missed twice. I re-ran the reviewer's
+mutation and it went red, so I judged the finding wrong. It went red for the
+wrong reason: I appended the star import to `graph.py`, which already imports
+`Reply` directly, so the name was bound either way. Repeating it in a module
+that had never imported `Reply` reproduced the hole exactly as reported. A
+mutation that passes for a reason you did not check is not a test of anything.
+
+**Coverage lost in the rewrite.** The test this replaced looped over every
+node asserting each non-composer carried the step's voice; the rewrite checked
+`analyze_stack` alone. So a node pasted with the operator's voice would have
+shipped — the precise shape of the bug the invariant exists to stop. It loops
+over `NODES` again, mutation-tested by giving `find_code_path` the operator's
+voice.
+
+**Five docstrings still described the deleted concept in the present tense**,
+in the modules this ticket rewrote — a prompt module claiming families "arrive
+here as arguments", a builder claiming "which persona is stated once", the
+pool describing an agent "wearing the Responder persona". CLAUDE.md's own
+warning is that a reversed decision goes stale silently; it was corrected and
+five smaller sites were not.
+
+**Two comments asserted something nothing checks** — that the two copies of
+the voice are the same text. The duplication is deliberate and an equality
+test would contradict the reason for it, so the comments now say where the
+other copy *is* and claim nothing about its contents. An unchecked claim in a
+comment is the kind that quietly stops being true.
+
+Also: a comment describing the node texts had been left sitting above the
+voice constants, and CONTEXT.md pointed at a `## Reply` section that does not
+exist.

@@ -179,8 +179,8 @@ def test_prompt_escaping_happens_at_one_seam():
 
 def test_no_family_imports_another_familys_prompt_module():
     """The rule tickets 42–45 bought: one prompt module per family, and no
-    family reaches into another's. The graph's composing node is Responder
-    *family* by persona, but it builds through the graph's module — sharing
+    family reaches into another's. The graph's composing node writes in the
+    operator's voice, but it builds through the graph's module — sharing
     the other family's builder would let one family's reshuffle silently
     reshape another's prompt.
 
@@ -323,17 +323,20 @@ def test_a_reply_is_constructed_in_exactly_one_place():
     def constructions(tree: ast.AST) -> list[int]:
         """Lines building a `Reply`, however this file spells it.
 
-        Three spellings, and matching only the first is the hole the family
-        guard had in a different form: `Reply(x)`, `actions.Reply(x)` after
-        importing the module, and `R(x)` after importing it under a name. A
-        check that sees one of the three is a check somebody routes around
-        without meaning to.
+        Four spellings: `Reply(x)`, `actions.Reply(x)` after importing the
+        module, `R(x)` after importing it under a name, and `Reply(x)` after
+        `import *`. A check that sees three of the four is a check somebody
+        routes around without meaning to — the first version of this saw one,
+        and the star import was found only by a review trying each in turn.
         """
         direct: set[str] = set()   # names bound to Reply itself
         module: set[str] = set()   # names bound to the module holding it
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module == ACTIONS:
-                direct.update(a.asname or a.name for a in node.names if a.name == "Reply")
+                for alias in node.names:
+                    # `import *` binds every public name, `Reply` among them.
+                    if alias.name in ("Reply", "*"):
+                        direct.add(alias.asname or "Reply")
             elif isinstance(node, ast.Import):
                 module.update(
                     a.asname or a.name for a in node.names if a.name == ACTIONS
