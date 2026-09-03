@@ -99,6 +99,36 @@ def test_a_factory_tool_is_reachable_too():
     assert fields.name == "ask_for_fields"
 
 
+def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
+    """`remember_tool` was a factory returning a plain async function with a
+    tool-shaped docstring — never `@tool`, never `tool(fn)`, so the SDK would
+    not have accepted it and the guard above could not see it. It sat in
+    `friday/memory/`, had no callers, and read like a working tool.
+
+    The check is by *shape*: a factory whose name ends `_tool` belongs in
+    `friday/tools/`, whether or not it ever got decorated. A thing that looks
+    like a tool and is not is worse than either.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "friday"
+    offenders = {}
+    for path in root.rglob("*.py"):
+        if path.is_relative_to(TOOLS):
+            continue
+        named = [
+            node.name
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.endswith("_tool")
+        ]
+        if named:
+            offenders[str(path.relative_to(root.parent))] = named
+
+    assert offenders == {}, f"tool-shaped and not in friday/tools/: {offenders}"
+
+
 def test_the_two_asking_tools_are_not_the_same_tool():
     """They answer different questions, and collapsing them would trade a
     constraint the code can check for a shorter list. `ask_for_fields` offers

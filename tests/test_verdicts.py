@@ -267,21 +267,25 @@ async def test_nothing_happens_when_nobody_is_listening():
 def test_no_examples_means_no_examples():
     """A fresh install has nothing marked, and stays that way until somebody
     reacts. The instructions must not grow an empty heading."""
-    from friday.triage import INSTRUCTIONS
-    from friday.triage.prompt import _examples
+    from friday.triage.prompt import build_instructions
 
-    # A `Section` with nothing in it renders to nothing at all — no empty
-    # tag for the model to read as "there were examples, and none of them".
-    assert _examples(()).render() == ""
+    # No examples means no examples section at all — not an empty tag for the
+    # model to read as "there were examples, and none of them".
+    assert "<examples>" not in build_instructions(())
 
 
 def test_examples_are_rendered_with_what_they_turned_out_to_be():
-    from friday.triage.prompt import _examples
+    """Asserted on the assembled prompt rather than on a private helper: the
+    helper was a wrapper that only delegated to `few_shot`, and a test against
+    it proved the wrapper worked rather than that the examples reach the
+    model."""
+    from friday.triage.prompt import build_instructions
 
-    block = _examples([("checkout is 500ing", "api_issue")]).render()
+    built = build_instructions([("checkout is 500ing", "api_issue")])
 
-    assert "checkout is 500ing" in block
-    assert "api_issue" in block
+    assert "<examples>" in built
+    assert "checkout is 500ing" in built
+    assert "api_issue" in built
 
 
 # --- the marks that must not cancel each other ------------------------------

@@ -86,10 +86,16 @@ class Harness:
         #: Tool servers outside this process. Which ones an agent gets is
         #: composition, not something the agent declares.
         mcp_servers: list | None = None,
-        #: What has been learned across earlier tasks. Appended to the
-        #: instructions rather than to the prompt, because that is the
-        #: stable early part — a byte that moves there costs a cache hit on
-        #: everything after it.
+        #: What has been learned across earlier tasks — `friday/memory/notes.py`
+        #: promotes them, and they arrive already rendered. In the
+        #: instructions rather than the per-call input because they change
+        #: only at a promotion, and a byte that moves early costs the cache
+        #: hit on everything after it.
+        #:
+        #: Model-written, so it goes through the one seam that escapes rather
+        #: than being concatenated on: a promoted note that closed its own
+        #: section could put a `<critical_reminder>` into the instructions of
+        #: every call that agent makes.
         notes: str = "",
         model=None,
         context_type: type | None = None,
@@ -100,7 +106,7 @@ class Harness:
         agent_class = Agent[context_type] if context_type else Agent
         self.agent = agent_class(
             name=config.name,
-            instructions=f"{instructions}\n\n{notes}" if notes else instructions,
+            instructions=_with_notes(instructions, notes),
             model=model or _chat_model(config),
             tools=tools or [],
             mcp_servers=mcp_servers or [],
@@ -241,6 +247,21 @@ class Harness:
             self.last_error = scrub(str(exc))
             log.warning("%s failed: %s", self._config.name, self.last_error)
             return None
+
+
+def _with_notes(instructions: str, notes: str) -> str:
+    """Instructions, then what has been learned, as a section like everything
+    else in a prompt.
+
+    Deferred import: `instruction_prompt` is where every other value is
+    escaped, and importing it at module load would be a cycle — it reaches
+    `Hooks` and the memory types through paths that come back here.
+    """
+    if not notes or not notes.strip():
+        return instructions
+    from friday.agent.instruction_prompt import memory
+
+    return f"{instructions}\n{memory(notes_body=notes).render()}"
 
 
 def _chat_model(config: AgentConfig) -> OpenAIChatCompletionsModel:

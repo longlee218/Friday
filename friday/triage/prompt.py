@@ -83,7 +83,11 @@ def build_instructions(examples: Sequence[tuple[str, str]] = ()) -> str:
         job(JOB),
         thinking_style(THINKING),
         clarification_system(None),
-        _examples(examples),
+        # Only classifications the operator marked *right*. An example
+        # nobody looked at teaches the classifier its own habits, and the
+        # drift has no floor because every generation is drawn from the last
+        # one's output.
+        few_shot(list(examples), verdict="what it turned out to be"),
         critical_reminder(REMINDERS),
     )
 
@@ -93,15 +97,3 @@ def build_input(events: Sequence[InboundEvent]) -> str:
     whole output is which tool was called and a number, and none of those
     would change it."""
     return user_input(conversation(list(events)).render())
-
-
-def _examples(examples: Sequence[tuple[str, str]]):
-    """Past classifications the operator vouched for, as few-shot examples.
-
-    Empty when nobody has vouched for anything, which is the state a fresh
-    install is in and the state it stays in until somebody reacts. That is
-    deliberate: an example nobody looked at teaches the classifier its own
-    habits, and the drift has no floor because every generation of examples
-    is drawn from the last one's output.
-    """
-    return few_shot(list(examples), verdict="what it turned out to be")

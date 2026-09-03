@@ -135,7 +135,7 @@ class Responder:
             if self._context is not None and channel_id is not None
             else None
         )
-        bundle = build_input(
+        said = build_input(
             asking=asking,
             params=params,
             room=room,
@@ -150,7 +150,7 @@ class Responder:
         # answer both land before the reply is started, and without the room
         # asking for a skill would mean never writing anything.
         result = await self._run.run(
-            bundle, calls=calls, extra_turns=2 if self._skills is not None else 0
+            said, calls=calls, extra_turns=2 if self._skills is not None else 0
         )
         if result is None:
             log.warning("falling back to the template")

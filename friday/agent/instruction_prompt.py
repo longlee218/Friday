@@ -432,8 +432,12 @@ def memory(
     the agent can still tell which is which, and an absent part contributes
     nothing rather than an empty heading.
 
-    Bodies arrive already escaped by whichever builder produced them; this
-    composes, it does not re-escape.
+    **Escaped here.** The contract used to say bodies arrive pre-escaped and
+    this only composes — written before there was a caller, and wrong the
+    moment there was one: notes are model-written text handed over raw, and
+    they land in *instructions*, so a note that closed its own section would
+    put a `<critical_reminder>` into every call that agent makes. Escaping
+    belongs where every other value is escaped.
 
     **Nothing calls this yet, and that is a finding rather than an oversight.**
     The three things it groups have three different lifetimes: `notes` are
@@ -452,7 +456,7 @@ def memory(
         ("notes", notes_body),
     ):
         if body and body.strip():
-            parts.append(f"[{label}]\n{body}")
+            parts.append(f"[{label}]\n{_escape(body)}")
     if not parts:
         return Section("memory")
     return Section("memory", "\n\n".join(parts))

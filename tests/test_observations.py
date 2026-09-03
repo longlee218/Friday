@@ -10,7 +10,8 @@ from __future__ import annotations
 import pytest
 
 from friday.domain.conversation import ConversationId
-from friday.memory.observations import Category, remember_tool
+from friday.memory.observations import Category
+from friday.tools.remember import remember_tool
 from friday.domain.states import TaskState
 
 WATCHED = ConversationId("fake", "watched")

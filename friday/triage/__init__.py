@@ -94,9 +94,9 @@ class Triage:
         # One extra turn: the answer arrives as a tool call, which is the call
         # and its result where a written answer would be one turn.
 
-        bundle = build_input(list(context) + [event])
+        said = build_input(list(context) + [event])
         result = await self._run.run(
-            bundle, context=capture, calls=calls, extra_turns=1
+            said, context=capture, calls=calls, extra_turns=1
         )
         if result is None:
             return NeedsHuman(f"triage failed: {self._run.last_error}")
