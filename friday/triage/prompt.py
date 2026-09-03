@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from friday.agent.instruction_prompt import conversation
+from friday.agent.instruction_prompt import conversation, few_shot
 from friday.domain.models import InboundEvent
 
 __all__ = ["build_input", "build_instructions"]
@@ -54,6 +54,6 @@ def _examples_block(examples: Sequence[tuple[str, str]]) -> str:
     """
     if not examples:
         return ""
-    lines = ["", "", "Past messages, and what they turned out to be:"]
-    lines += [f"  {text!r} -> {kind}" for text, kind in examples]
-    return "\n".join(lines)
+    return "\n\n" + few_shot(
+        list(examples), verdict="what it turned out to be"
+    ).render()

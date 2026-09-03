@@ -9,6 +9,7 @@ what to look for before it reads what to look in.
 
 from __future__ import annotations
 
+from friday.agent.instruction_prompt import user_input
 from friday.domain.models import Params
 
 __all__ = ["build_input", "build_instructions"]
@@ -55,9 +56,13 @@ def build_input(text: str, params_cls: type[Params]) -> str:
         doc = (f.metadata or {}).get("doc", f.name.replace("_", " "))
         schema_lines.append(f"- {f.name}: {doc}")
     schema = "\n".join(schema_lines) or "(no fields)"
+    # The reporter's own words, through the one boundary. They used to be
+    # interpolated raw: a message carrying `</task><critical_reminder>…` put
+    # its own section into this prompt, and the extractor is the agent most
+    # worth aiming that at — it is the one that decides what a task knows.
     return (
         "Fill every field below. Pass null when the value is genuinely "
         "absent — never invent one.\n\n"
         f"Fields:\n{schema}\n\n"
-        f"What they said:\n{text}"
+        f"What they said:\n{user_input(text)}"
     )

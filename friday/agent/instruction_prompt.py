@@ -426,6 +426,25 @@ def memory(
     return Section("memory", "\n\n".join(parts))
 
 
+def few_shot(examples: list[tuple[str, str]] | None, *, verdict: str) -> Section:
+    """Worked examples: a real message, and what it turned out to be.
+
+    Escaped, because these *are* real messages. They used to be rendered with
+    `!r`, which quotes a string without escaping it — so a message carrying a
+    section tag put that tag into the instructions of the highest-volume agent
+    in the system, where it would sit in every call until somebody unmarked
+    the example.
+
+    `verdict` names the second column, because "what it turned out to be" is
+    a classification for one caller and could be something else for the next.
+    """
+    if not examples:
+        return Section("examples")
+    lines = [f"A message, and {verdict}:", ""]
+    lines += [f"- {_escape(text)} -> {_escape(kind)}" for text, kind in examples]
+    return Section("examples", "\n".join(lines))
+
+
 # ---------------------------------------------------------------------------
 # Asking before acting
 # ---------------------------------------------------------------------------

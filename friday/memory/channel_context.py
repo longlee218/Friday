@@ -239,4 +239,17 @@ class ContextRebuilder:
 
 
 def _transcript(messages) -> str:
-    return "\n".join(f"{m.author_name}: {m.text}" for m in messages)
+    """The conversation, through the one boundary that escapes it.
+
+    `instruction_prompt.conversation` renders exactly this and escapes both
+    halves, with a comment saying why: on Discord a nickname is as
+    attacker-controlled as a message. This path built its own string and
+    escaped neither — and its output is stored as the channel's derived
+    summary, which every later prompt for that room reads.
+    """
+    # Deferred: `instruction_prompt` imports `ChannelContext` from this
+    # module, so importing it at load time is a cycle. Same reason
+    # `harness.py` defers `llm_log`.
+    from friday.agent.instruction_prompt import conversation, user_input
+
+    return user_input(conversation(list(messages)).render())
