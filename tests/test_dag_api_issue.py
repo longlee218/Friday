@@ -524,8 +524,13 @@ def test_the_node_that_writes_a_patch_is_not_given_the_find_the_file_prompt():
     built = build_agents(_every_node_configured())
     from friday.dag.api_issue.prompt import FIND_CODE_PATH, FIX_BUG
 
-    assert built["fix_bug"].instructions == FIX_BUG
-    assert built["find_code_path"].instructions == FIND_CODE_PATH
+    # Containment, not equality: each node's text is now wrapped in the shared
+    # sections every agent is assembled from. What this test is about is that
+    # the two texts do not cross over, which is the thing that was wrong.
+    assert FIX_BUG in built["fix_bug"].instructions
+    assert FIND_CODE_PATH not in built["fix_bug"].instructions
+    assert FIND_CODE_PATH in built["find_code_path"].instructions
+    assert FIX_BUG not in built["find_code_path"].instructions
 
 
 def test_a_node_is_handed_the_tool_server_it_needs():

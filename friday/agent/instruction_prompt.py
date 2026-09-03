@@ -213,6 +213,35 @@ def task(task_type: str, params: Params | None, asking: str | None) -> Section:
 # ---------------------------------------------------------------------------
 
 
+def assemble(*sections: Section) -> str:
+    """The one joiner. Every agent's prompt is built by calling this.
+
+    Not a convenience: it is what makes "the same format" a fact rather than
+    an intention. Four modules each had their own `"\n".join(...)` over their
+    own list, so four prompts could drift apart in shape while every one of
+    them looked locally reasonable — and one of them had no sections at all.
+
+    Empty sections vanish here rather than at the caller, so a caller may pass
+    every section it *might* have and let absence sort itself out. That is the
+    property that lets these calls read as a declaration of what an agent is
+    told rather than as a chain of conditionals.
+    """
+    return "\n".join(part for part in (s.render() for s in sections) if part)
+
+
+def job(text: str) -> Section:
+    """What this agent does — the body of its instructions.
+
+    Deliberately last of the builders to arrive, and deliberately dumb: it
+    wraps prose somebody wrote, and the prose stays the author's. What it buys
+    is that the job sits in a named section like everything else, so a model
+    reading the prompt can tell where the job ends and a reminder begins.
+    """
+    if not text or not text.strip():
+        return Section("job")
+    return Section("job", text.strip())
+
+
 def role(name: str, definition: str, action: str) -> Section:
     """Who this agent is, in one sentence, at the very front of the prompt.
 
@@ -243,6 +272,22 @@ def soul(text: str) -> Section:
     if not text or not text.strip():
         return Section("soul")
     return Section("soul", html.escape(text, quote=True))
+
+
+def counterpart(text: str) -> Section:
+    """Who is on the other end, when that changes how to write to them.
+
+    Empty for somebody the operator has written to before, which is most
+    people — so this renders nothing most of the time, and its presence is
+    itself the signal that this one is a stranger.
+
+    Here rather than hand-built at its one caller because the shape of a
+    section belongs to one module; a section built past the builders is a
+    section whose shape nobody owns.
+    """
+    if not text or not text.strip():
+        return Section("counterpart")
+    return Section("counterpart", _escape(text))
 
 
 def response_style(rules: list[str] | None) -> Section:

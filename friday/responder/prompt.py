@@ -18,6 +18,13 @@ from datetime import datetime, timezone
 
 from friday.agent.instruction_prompt import (
     Section,
+    assemble,
+    counterpart,
+    job,
+    memory_tool_system,
+    role,
+    soul,
+    trust_boundary,
     base,
     channel_base,
     channel_derived,
@@ -152,9 +159,26 @@ no longer refers to anything."""
 
 
 def build_instructions() -> str:
-    """Who it is, then the job. Voice first: shared bytes at the front of a
-    prompt are the ones a provider's cache reuses across calls."""
-    return f"{VOICE}\n\n{INSTRUCTIONS}"
+    """Who it is, then the job — through the shared builders, like every
+    other agent.
+
+    Voice first: shared bytes at the front of a prompt are the ones a
+    provider's cache reuses across calls. This used to be an f-string joining
+    two constants, which produced the same bytes and said nothing about their
+    shape; the sections say which part is identity and which is the job, and a
+    model reading the prompt can tell them apart.
+
+    It asks by handing over rather than by a tool of its own, so
+    `clarification_system` names nothing here — the composing node has
+    `hand_over`, and this one falls back to a template instead.
+    """
+    return assemble(
+        role("Friday", "Long Lee's assistant", "you write the reply he would send"),
+        soul(VOICE),
+        trust_boundary(),
+        job(INSTRUCTIONS),
+        memory_tool_system(available=False),
+    )
 
 
 def build_input(
@@ -174,7 +198,7 @@ def build_input(
         channel_base(room),
         channel_derived(room),
         channel_overrides(room),
-        Section("counterpart", COUNTERPART if stranger else ""),
+        counterpart(COUNTERPART if stranger else ""),
         skills_section(skills_catalogue),
         tone_examples(list(tone)),
         conversation(list(context)),

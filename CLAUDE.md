@@ -359,10 +359,31 @@ not an implementation detail:
   alias, and a grep for the dotted name never saw it). Three of the four are
   `friday.<family>.prompt`; the graph nodes' is `friday.dag.api_issue.prompt`,
   inside the graph that owns those nodes since ticket 15 — deriving the module
-  name from the family is what silently disarmed that test when it moved. What
-  is shared
-  is mechanism: `Section`, the value renderers, and escaping — one seam, one
-  test. The responder's section order is load-bearing (stable-first is the
+  name from the family is what silently disarmed that test when it moved.
+
+  **What is shared is mechanism, and every agent is assembled from it.** The
+  seam owns the shape of a section, the escaping at its boundary, and the one
+  joiner: `assemble(*sections)`. A prompt module supplies wording and says
+  which sections it wants; it never builds a `Section` by hand and never joins
+  them itself. Two `ast` tests enforce both halves, because before them four
+  modules each had their own `"\n".join(...)` over their own list — so four
+  prompts could drift apart in shape while each looked locally reasonable, and
+  the summariser had no sections at all, just a bare string feeding a model
+  whose output every later prompt for that room reads.
+
+  **A section that describes a tool renders only if the agent has the tool.**
+  `clarification_system(None)` and `memory_tool_system(available=False)` are
+  not defensive typing; they are the fix for the failure this system has
+  already paid for — 79% of the highest-volume prompt here was once
+  instructions for writing replies it never writes. An agent told about a door
+  that is not in the room goes looking for it.
+
+  **Only the two agents that speak for the operator carry a `soul`.** Not
+  cosmetic: an extractor told to write in Vietnamese puts `sản xuất` where
+  `friday/domain/validation.py` wants `production`, the value fails its rule,
+  and the reporter is asked to confirm what they already said. Tested.
+
+  The responder's section order is load-bearing (stable-first is the
   prompt-cache hit) and has its own test.
 - **Silence is not approval.** Only a classification the operator marked
   *right* becomes a few-shot example, and only a classifiable type at that. An

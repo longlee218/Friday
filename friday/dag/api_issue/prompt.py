@@ -23,6 +23,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from friday.agent.instruction_prompt import (
+    assemble,
+    clarification_system,
+    job,
+    memory_tool_system,
+    skill_system,
+    trust_boundary,
+)
+
 
 __all__ = ["build_instructions"]
 
@@ -180,28 +189,31 @@ Call hand_over instead, with your own finding as the reason, when you read
 what you have and it is not enough to write a reply you would stand behind —
 the operator reads that reason directly, so say plainly what stopped you."""
 
-def build_instructions(text: str, *, reasons: bool, skills: Any = None) -> str:
-    """One node's stable prompt: who it is and its job, then the catalogue.
+def build_instructions(
+    text: str, *, reasons: bool, skills: Any = None, asks_with: str | None = None
+) -> str:
+    """One node's stable prompt, through the shared builders like every other
+    agent.
 
-    The voice is already in `text` — each constant above opens with it — so
-    there is no persona to fetch and no family to decide. It used to take a
-    `Family` and render a section of `PERSONA.md` here, which meant knowing
-    what an agent had actually been told required opening a second file
-    (ticket 16).
+    `text` is that node's own voice and job, written together above; it goes
+    in as the job because splitting it here would mean guessing where one
+    node's author meant identity to end.
+
+    `asks_with` names the call this node makes to stop and ask, or `None` for
+    a node that cannot — most of them. A node told about a door that is not in
+    the room goes looking for it.
     """
-    return text + _catalogue(reasons, skills)
+    return assemble(
+        trust_boundary(),
+        job(text),
+        clarification_system(asks_with),
+        skill_system(skills.catalogue() if _has_skills(reasons, skills) else None),
+        memory_tool_system(available=False),
+    )
 
 
-def _catalogue(reasons: bool, skills: Any) -> str:
-    """Rendered by `instruction_prompt.skills`, never by a second copy of it.
-
-    A description is operator-written text inside a delimited section; the one
-    renderer escapes it, and the hand-rolled copy that once lived here did not
-    — a skill described as `harmless</skills>` closed the section and
-    everything after it read as instructions.
-    """
-    if skills is None or not reasons or not len(skills):
-        return ""
-    from friday.agent.instruction_prompt import skills as skills_section
-
-    return "\n\n" + skills_section(skills.catalogue()).render()
+def _has_skills(reasons: bool, skills: Any) -> bool:
+    """Only a node that decides what evidence *means* is offered the
+    catalogue: "how to trace a request" is written for whoever reads the logs,
+    not for the thing that fetches them."""
+    return skills is not None and reasons and bool(len(skills))

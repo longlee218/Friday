@@ -264,19 +264,21 @@ async def test_nothing_happens_when_nobody_is_listening():
 # --- the examples the classifier is given -----------------------------------
 
 
-def test_no_examples_means_no_examples_block():
+def test_no_examples_means_no_examples():
     """A fresh install has nothing marked, and stays that way until somebody
     reacts. The instructions must not grow an empty heading."""
     from friday.triage import INSTRUCTIONS
-    from friday.triage.prompt import _examples_block
+    from friday.triage.prompt import _examples
 
-    assert _examples_block(()) == ""
+    # A `Section` with nothing in it renders to nothing at all — no empty
+    # tag for the model to read as "there were examples, and none of them".
+    assert _examples(()).render() == ""
 
 
 def test_examples_are_rendered_with_what_they_turned_out_to_be():
-    from friday.triage.prompt import _examples_block
+    from friday.triage.prompt import _examples
 
-    block = _examples_block([("checkout is 500ing", "api_issue")])
+    block = _examples([("checkout is 500ing", "api_issue")]).render()
 
     assert "checkout is 500ing" in block
     assert "api_issue" in block

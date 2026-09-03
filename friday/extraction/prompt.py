@@ -1,47 +1,80 @@
 """What an extractor's prompt looks like, and from what it is assembled.
 
-The stable half is one job text shared by every extractor — copy verbatim,
-null beats a guess — because the extractors differ only in which fields they
-fill. The per-call half is those fields' own descriptions, read off the params
-class, then everything the reporter said. Schema first, so the model knows
-what to look for before it reads what to look in.
+Assembled from the shared section builders, like every other agent. One job
+text serves every extractor because they differ only in which fields they
+fill; the fields themselves are per call, read off the params class.
+
+**A voice would actively hurt here.** An extractor told to write in Vietnamese
+puts `sản xuất` where `friday/domain/validation.py` wants `production`, the
+value fails its rule, and the reporter is asked to confirm what they already
+said. So there is no `soul` in this prompt and there should not be one.
+
+**It can ask, so it is told how.** `ask_for_fields` offers a closed enum of
+this type's own field names, which is why the clarification section is
+rendered here and not for triage: the door is actually in the room.
 """
 
 from __future__ import annotations
 
-from friday.agent.instruction_prompt import user_input
+from friday.agent.instruction_prompt import (
+    assemble,
+    clarification_system,
+    critical_reminder,
+    job,
+    memory_tool_system,
+    role,
+    thinking_style,
+    trust_boundary,
+    user_input,
+)
 from friday.domain.models import Params
 
 __all__ = ["build_input", "build_instructions"]
 
 #: The job. "Reply in JSON only, with the schema fields as keys" is a contract
 #: with `_parse` in this package — reworded freely, but the JSON promise stays.
-INSTRUCTIONS = """You fill structured fields from what someone wrote.
+JOB = """You fill structured fields from what someone wrote.
 
 You are shown the field schema — the names and what each one is for — and
 everything the reporter has said about this, oldest first. The answer to a
 question they were asked is in there as an ordinary later message, so read all
 of it, not only the first line.
 
-For every field, copy the matching value verbatim. Pass null when the value is
-genuinely absent — never invent one, and never paraphrase a field that asks for
-a literal value. A wrong correlationId sends someone looking through the wrong
-request; a null one costs a question.
-
 You are the only thing that reads this message for what it contains. Nothing
 produced these fields before you and nothing corrects them after, except a
-check that a value you did supply has the right shape.
+check that a value you did supply has the right shape."""
 
-If something is worth asking the reporter about — an ambiguity, a detail the
-report implies but does not state — call ask_clarification with which fields
-you mean and why. That is separate from filling fields: do both when both
-apply, and still reply in JSON for whatever you did find.
+THINKING = [
+    "Read everything they said before filling anything in.",
+    "For each field, find the value they actually wrote — not one you can infer.",
+    "If a field is not there, it is null. Absent is an answer.",
+]
 
-Reply in JSON only, with the schema fields as keys."""
+#: These three have each cost something. The first: a paraphrased
+#: correlationId sends somebody through the wrong request. The second is a
+#: contract with this package's own parser. The third is what `null` buys.
+REMINDERS = [
+    "Copy matching values verbatim — never paraphrase a field that asks for a "
+    "literal value.",
+    "Reply in JSON only, with the schema fields as keys.",
+    "A wrong value costs somebody an afternoon; a null one costs a question.",
+]
+
+#: Kept as an attribute because tests pin sentences in it.
+INSTRUCTIONS = JOB
 
 
 def build_instructions() -> str:
-    return INSTRUCTIONS
+    """Who it is, the job, how to read, how to ask, what not to get wrong."""
+    return assemble(
+        role("Friday", "a field extractor", "you lift values out of what someone wrote"),
+        trust_boundary(),
+        job(JOB),
+        thinking_style(THINKING),
+        clarification_system("ask_for_fields"),
+        memory_tool_system(available=False),
+        critical_reminder(REMINDERS),
+    )
 
 
 def build_input(text: str, params_cls: type[Params]) -> str:
@@ -50,19 +83,15 @@ def build_input(text: str, params_cls: type[Params]) -> str:
     Each field's meaning is its `doc` metadata on the params class — the field
     and its meaning live on the same line there, so they cannot drift apart.
     This renders them; it does not define them.
+
+    The reporter's own words go through the one boundary. They used to be
+    interpolated raw: a message carrying `</task><critical_reminder>…` put its
+    own section into this prompt, and the extractor is the agent most worth
+    aiming that at — it is the one that decides what a task knows.
     """
     schema_lines = []
     for f in params_cls.__dataclass_fields__.values():  # type: ignore[attr-defined]
         doc = (f.metadata or {}).get("doc", f.name.replace("_", " "))
         schema_lines.append(f"- {f.name}: {doc}")
     schema = "\n".join(schema_lines) or "(no fields)"
-    # The reporter's own words, through the one boundary. They used to be
-    # interpolated raw: a message carrying `</task><critical_reminder>…` put
-    # its own section into this prompt, and the extractor is the agent most
-    # worth aiming that at — it is the one that decides what a task knows.
-    return (
-        "Fill every field below. Pass null when the value is genuinely "
-        "absent — never invent one.\n\n"
-        f"Fields:\n{schema}\n\n"
-        f"What they said:\n{user_input(text)}"
-    )
+    return f"Fields:\n{schema}\n\nWhat they said:\n{user_input(text)}"
