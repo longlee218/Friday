@@ -142,27 +142,6 @@ def channel_overrides(ctx: ChannelContext | None) -> Section:
     return Section("channel_overrides", body)
 
 
-def skills(catalogue: list[str] | None) -> Section:
-    """One line per skill: the name, and what it is for.
-
-    Never the bodies. The agent reads this to decide whether any of them is
-    worth having, then calls `fetch_skill` for the one it wants — which is
-    what keeps a hundred skills affordable. A hundred descriptions is a page;
-    a hundred bodies is a context window.
-
-    An install with no skills gets no section at all, rather than a heading
-    with nothing under it.
-    """
-    if not catalogue:
-        return Section("skills")
-    lines = [
-        "Call fetch_skill(name) to read one in full before acting on it.",
-        "",
-    ]
-    lines += [f"- {_escape(line)}" for line in catalogue]
-    return Section("skills", "\n".join(lines))
-
-
 def conversation(events: list[InboundEvent]) -> Section:
     if not events:
         return Section("conversation")
@@ -390,6 +369,12 @@ def user_input(text: str) -> str:
 def skill_system(catalogue: list[str] | None, *, index: bool = True) -> Section:
     """One line per skill: what it is called and what it is for, numbered.
 
+    There were two of these — a `skills()` that rendered a `<skills>` section
+    without the count or the index, and this one — with the responder reading
+    from the first and the graph nodes from the second. Two builders for one
+    concept is two shapes of the same section, which is the thing this module
+    exists to stop.
+
     Never the bodies. The agent reads this to decide whether any of them is
     worth having, then calls `fetch_skill` for the one it wants — which is
     what keeps a hundred skills affordable. A hundred descriptions is a page;
@@ -457,6 +442,16 @@ def memory(
 
     Bodies arrive already escaped by whichever builder produced them; this
     composes, it does not re-escape.
+
+    **Nothing calls this yet, and that is a finding rather than an oversight.**
+    The three things it groups have three different lifetimes: `notes` are
+    built once at startup and live in `instructions`, `channel` changes when
+    something is learned, and `conversation` changes every call. This module's
+    ordering rule is *by how often a section changes*, because a byte that
+    moves early costs the cache hit on everything after it — so grouping them
+    means either paying for notes on every call or freezing a conversation
+    into the instructions. Wiring it needs that trade decided first, and
+    deciding it quietly inside a builder would be the wrong place.
     """
     parts = []
     for label, body in (

@@ -26,7 +26,7 @@ from friday.agent.instruction_prompt import (
     channel_derived,
     channel_overrides,
     conversation,
-    skills,
+    skill_system,
     task,
 )
 
@@ -151,12 +151,12 @@ def test_channel_base_section_uses_plain_renderer():
 
 
 def test_skills_section_skipped_when_no_catalogue():
-    assert skills(None).render() == ""
-    assert skills([]).render() == ""
+    assert skill_system(None).render() == ""
+    assert skill_system([]).render() == ""
 
 
 def test_skills_section_lists_each_skill_with_name_only():
-    out = skills(["fetch_skill", "list_skills"]).render()
+    out = skill_system(["fetch_skill", "list_skills"]).render()
     assert "fetch_skill" in out
     assert "list_skills" in out
 

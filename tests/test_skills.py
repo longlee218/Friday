@@ -268,9 +268,9 @@ def test_the_responder_without_skills_carries_no_tool():
 
 
 def test_the_catalogue_reaches_the_prompt_the_responder_builds(tmp_path):
-    from friday.agent.instruction_prompt import skills as skills_section
+    from friday.agent.instruction_prompt import skill_system
 
-    rendered = skills_section(_library(tmp_path).catalogue()).render()
+    rendered = skill_system(_library(tmp_path).catalogue()).render()
 
     assert "trace-a-request" in rendered
     assert "fetch_skill" in rendered

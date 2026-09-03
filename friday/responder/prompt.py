@@ -19,9 +19,11 @@ from datetime import datetime, timezone
 from friday.agent.instruction_prompt import (
     Section,
     assemble,
+    skill_system,
     counterpart,
     job,
     memory_tool_system,
+    response_style,
     role,
     soul,
     trust_boundary,
@@ -33,7 +35,6 @@ from friday.agent.instruction_prompt import (
     task,
     tone_examples,
 )
-from friday.agent.instruction_prompt import skills as skills_section
 from friday.domain.models import InboundEvent, Params
 
 __all__ = ["build_input", "build_instructions"]
@@ -46,9 +47,6 @@ INSTRUCTIONS = """You write chat replies as a specific backend engineer.
 
 You are shown examples of how they actually write, the conversation so far, and
 what needs to be said. Write that message the way they would write it.
-
-Match their language, their length, and their register. If their examples are
-in Vietnamese, reply in Vietnamese. They are usually brief.
 
 When you ask for something the reporter may not know how to find, say how —
 in one sentence, drawn from a skill that covers it. If a skill covers it, fetch
@@ -69,9 +67,17 @@ particular people and how to address each; it wins over the room's register for
 that person and nobody else.
 
 Do not address anyone by @-mention. The message is posted as a reply to
-theirs, so it is already attached to them.
+theirs, so it is already attached to them."""
 
-Write only the message. No preamble, no quotes, no explanation."""
+#: What was three sentences inside the job text. They are style rules, they are
+#: short, and a model follows a list of four where it skims a paragraph of
+#: prose — which is the whole reason `response_style` renders a list.
+STYLE = [
+    "Match their language, their length and their register.",
+    "If their examples are in Vietnamese, reply in Vietnamese.",
+    "They are usually brief. Be brief.",
+    "Write only the message: no preamble, no quotes, no explanation.",
+]
 
 #: Injected as the `<counterpart>` section when writing to somebody the
 #: operator has no history with. The pronouns here are the one thing meant to
@@ -177,6 +183,7 @@ def build_instructions() -> str:
         soul(VOICE),
         trust_boundary(),
         job(INSTRUCTIONS),
+        response_style(STYLE),
         memory_tool_system(available=False),
     )
 
@@ -199,7 +206,7 @@ def build_input(
         channel_derived(room),
         channel_overrides(room),
         counterpart(COUNTERPART if stranger else ""),
-        skills_section(skills_catalogue),
+        skill_system(skills_catalogue),
         tone_examples(list(tone)),
         conversation(list(context)),
         task("respond", params, asking),
