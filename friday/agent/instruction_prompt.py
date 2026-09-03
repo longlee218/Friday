@@ -101,15 +101,7 @@ def channel_sections(ctx: ChannelContext | None) -> str:
     """
     if ctx is None:
         return ""
-    return "\n".join(
-        part
-        for part in (
-            channel_base(ctx).render(),
-            channel_derived(ctx).render(),
-            channel_overrides(ctx).render(),
-        )
-        if part
-    )
+    return assemble(channel_base(ctx), channel_derived(ctx), channel_overrides(ctx))
 
 
 def channel_base(ctx: ChannelContext | None) -> Section:

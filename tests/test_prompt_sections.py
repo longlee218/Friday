@@ -224,12 +224,20 @@ def test_every_agents_instructions_are_built_by_the_one_assembler():
     drift apart in shape while every one looked locally reasonable — and the
     summariser had no sections at all, just a bare string.
 
-    Read by `ast`, so a module that stops calling `assemble` is caught even if
-    it still imports it.
+    Two halves, because checking one of them is how this guard was wrong when
+    it was written: it asked whether `assemble` appeared *anywhere in the
+    module*, and the responder's `build_instructions` calls it — so the module
+    passed while `build_input`, the per-call half that carries nine sections
+    and the reporter's own words, hand-joined them. A review found that, not
+    this test.
+
+    So: `assemble` must be called, **and** nothing may join rendered sections
+    itself. The second half is the one that catches a new function.
     """
     import ast
 
     missing = []
+    hand_joined: dict[str, list[int]] = {}
     for path in _prompt_modules():
         tree = ast.parse(path.read_text())
         calls = {
@@ -240,7 +248,25 @@ def test_every_agents_instructions_are_built_by_the_one_assembler():
         if "assemble" not in calls:
             missing.append(path.name)
 
+        for node in ast.walk(tree):
+            # `"...".join(<anything mentioning .render()>)` — the shape of a
+            # module doing the seam's job for itself.
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "join"
+            ):
+                continue
+            renders = any(
+                isinstance(inner, ast.Attribute) and inner.attr == "render"
+                for arg in node.args
+                for inner in ast.walk(arg)
+            )
+            if renders:
+                hand_joined.setdefault(path.name, []).append(node.lineno)
+
     assert missing == [], f"an agent's prompt is not assembled through the seam: {missing}"
+    assert hand_joined == {}, f"a module joined sections itself: {hand_joined}"
 
 
 def test_no_prompt_module_builds_a_section_by_hand():
@@ -357,3 +383,93 @@ def test_an_empty_extraction_is_not_a_successful_one():
     empty = ApiIssueParams(**_parse(""))
     assert empty.correlation_id is None and empty.curl is None
     assert not _parse(""), "an empty read is falsy — callers can tell"
+
+
+def test_only_a_prompt_whose_input_uses_the_markers_claims_them():
+    """`trust_boundary` describes a convention — "anything a person sent you
+    arrives wrapped like this". An agent told that, whose input never contains
+    the markers, has been told about a door that is not in the room, which is
+    the failure this module's own docstring warns about.
+
+    It was in five prompts and only three agents wrapped anything. The
+    responder's untrusted content is escaped inside `<conversation>` and
+    `<task>` — a boundary, but a different one — so it no longer claims a
+    convention it does not follow; the graph's nodes wrap their inputs now,
+    so they do.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "friday"
+
+    def calls(path: Path) -> set[str]:
+        return {
+            node.func.id
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+
+    #: Where each agent's *input* is built, beside where its prompt is built.
+    pairs = {
+        "triage": (root / "triage" / "prompt.py", root / "triage" / "prompt.py"),
+        "extraction": (
+            root / "extraction" / "prompt.py",
+            root / "extraction" / "prompt.py",
+        ),
+        "responder": (
+            root / "responder" / "prompt.py",
+            root / "responder" / "prompt.py",
+        ),
+        "summariser": (
+            root / "memory" / "channel_context.py",
+            root / "memory" / "channel_context.py",
+        ),
+        "api_issue": (
+            root / "dag" / "api_issue" / "prompt.py",
+            root / "dag" / "api_issue" / "graph.py",
+        ),
+    }
+
+    for agent, (prompt_module, input_module) in pairs.items():
+        claims = "trust_boundary" in calls(prompt_module)
+        wraps = "user_input" in calls(input_module)
+        assert claims == wraps, (
+            f"{agent}: claims the marker convention={claims}, "
+            f"actually wraps its input={wraps}"
+        )
+
+
+def test_every_node_that_runs_an_agent_wraps_what_it_hands_it():
+    """Per function, not per module — because per module is how the guard
+    above was first written, and removing the wrap from one of five nodes
+    left it green.
+
+    Each node builds its own input by interpolation: a correlation id lifted
+    from a reporter's message, log lines from a tool server, a cause another
+    model wrote. All of it is somebody else's text arriving in a prompt.
+    """
+    import ast
+    from pathlib import Path
+
+    graph = Path(__file__).resolve().parents[1] / "friday" / "dag" / "api_issue" / "graph.py"
+    unwrapped = []
+    for node in ast.walk(ast.parse(graph.read_text())):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        names = [
+            inner.func.attr
+            for inner in ast.walk(node)
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)
+        ]
+        if "run" not in names:
+            continue
+        wraps = any(
+            isinstance(inner, ast.Call)
+            and isinstance(inner.func, ast.Name)
+            and inner.func.id == "user_input"
+            for inner in ast.walk(node)
+        )
+        if not wraps:
+            unwrapped.append(node.name)
+
+    assert unwrapped == [], f"a node hands a model text it did not wrap: {unwrapped}"

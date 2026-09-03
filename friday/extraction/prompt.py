@@ -27,7 +27,6 @@ from friday.agent.instruction_prompt import (
     clarification_system,
     critical_reminder,
     job,
-    memory_tool_system,
     role,
     thinking_style,
     trust_boundary,
@@ -81,7 +80,6 @@ def build_instructions() -> str:
         job(JOB),
         thinking_style(THINKING),
         clarification_system("ask_for_fields", blocking=False),
-        memory_tool_system(available=False),
         critical_reminder(REMINDERS),
     )
 

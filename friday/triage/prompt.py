@@ -29,7 +29,6 @@ from friday.agent.instruction_prompt import (
     critical_reminder,
     few_shot,
     job,
-    memory_tool_system,
     role,
     thinking_style,
     trust_boundary,
@@ -84,7 +83,6 @@ def build_instructions(examples: Sequence[tuple[str, str]] = ()) -> str:
         job(JOB),
         thinking_style(THINKING),
         clarification_system(None),
-        memory_tool_system(available=False),
         _examples(examples),
         critical_reminder(REMINDERS),
     )

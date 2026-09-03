@@ -17,16 +17,13 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from friday.agent.instruction_prompt import (
-    Section,
     assemble,
     skill_system,
     counterpart,
     job,
-    memory_tool_system,
     response_style,
     role,
     soul,
-    trust_boundary,
     base,
     channel_base,
     channel_derived,
@@ -181,10 +178,8 @@ def build_instructions() -> str:
     return assemble(
         role("Friday", "Long Lee's assistant", "you write the reply he would send"),
         soul(VOICE),
-        trust_boundary(),
         job(INSTRUCTIONS),
         response_style(STYLE),
-        memory_tool_system(available=False),
     )
 
 
@@ -211,4 +206,4 @@ def build_input(
         conversation(list(context)),
         task("respond", params, asking),
     ]
-    return "\n".join(p for p in (s.render() for s in parts) if p)
+    return assemble(*parts)

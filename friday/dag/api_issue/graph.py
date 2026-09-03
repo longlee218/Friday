@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from friday.agent.harness import Harness
+from friday.agent.instruction_prompt import user_input
 from friday.tools.fetch_skill import fetch_skill_tool
 from friday.dag.api_issue import prompt as prompts
 from friday.dag.engine import DAG, DAGDeps, DAGState, Edge, Node, NodeFn
@@ -96,8 +97,10 @@ async def _read_logs(state: DAGState, deps: DAGDeps) -> str | None:
         return None
 
     result = await agent.run(
-        f"correlation id: {params.correlation_id}\n"
-        f"environment: {params.environment or 'unknown'}"
+        user_input(
+            f"correlation id: {params.correlation_id}\n"
+            f"environment: {params.environment or 'unknown'}"
+        )
     )
     if result is None:
         return None
@@ -114,7 +117,7 @@ async def _find_code_path(state: DAGState, deps: DAGDeps) -> str | None:
     if agent is None:
         return None
 
-    result = await agent.run(logs)
+    result = await agent.run(user_input(logs))
     if result is None:
         return None
     found = (result.final_output or "").strip()
@@ -139,7 +142,9 @@ async def _analyze_stack(state: DAGState, deps: DAGDeps) -> dict[str, Any]:
     # Two extra turns: this node may be offered `fetch_skill`, and the call
     # plus its answer both land before the analysis is written. `max_turns` is
     # a ceiling, not a budget — a node with no tool still finishes in one.
-    result = await agent.run(f"logs:\n{logs}\n\ncode:\n{code}", extra_turns=2)
+    result = await agent.run(
+        user_input(f"logs:\n{logs}\n\ncode:\n{code}"), extra_turns=2
+    )
     if result is None:
         return {"cause": None, "actionable": False, "evidence": []}
 
@@ -190,7 +195,7 @@ async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | HandOver | None:
     # refused correctly still had its refusal proposed as a patch.
     capture = ComposeCapture()
     result = await agent.run(
-        f"cause: {cause}\ncode: {state.get('find_code_path')}",
+        user_input(f"cause: {cause}\ncode: {state.get('find_code_path')}"),
         context=capture,
         extra_turns=2,
     )
@@ -252,7 +257,9 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
 
             store = deps.extra.get("context_store")
             room = store.context(deps.task.conversation.channel_id) if store else None
-            prompt = "\n".join(p for p in (channel_sections(room), said) if p)
+            prompt = "\n".join(
+                p for p in (channel_sections(room), user_input(said)) if p
+            )
             capture = ComposeCapture()
             written = await agent.run(prompt, context=capture, extra_turns=2)
             if written is not None and capture.action is not None:

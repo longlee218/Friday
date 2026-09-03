@@ -25,9 +25,7 @@ from typing import Any
 
 from friday.agent.instruction_prompt import (
     assemble,
-    clarification_system,
     job,
-    memory_tool_system,
     skill_system,
     trust_boundary,
 )
@@ -189,9 +187,7 @@ Call hand_over instead, with your own finding as the reason, when you read
 what you have and it is not enough to write a reply you would stand behind —
 the operator reads that reason directly, so say plainly what stopped you."""
 
-def build_instructions(
-    text: str, *, reasons: bool, skills: Any = None, asks_with: str | None = None
-) -> str:
+def build_instructions(text: str, *, reasons: bool, skills: Any = None) -> str:
     """One node's stable prompt, through the shared builders like every other
     agent.
 
@@ -199,16 +195,15 @@ def build_instructions(
     in as the job because splitting it here would mean guessing where one
     node's author meant identity to end.
 
-    `asks_with` names the call this node makes to stop and ask, or `None` for
-    a node that cannot — most of them. A node told about a door that is not in
-    the room goes looking for it.
+    No clarification section: none of these nodes has a tool to ask with. It
+    took an `asks_with` parameter that nothing ever passed, which is a hook
+    for a need that does not exist — the node that gains one can add the
+    section then, against a real caller.
     """
     return assemble(
         trust_boundary(),
         job(text),
-        clarification_system(asks_with),
         skill_system(skills.catalogue() if _has_skills(reasons, skills) else None),
-        memory_tool_system(available=False),
     )
 
 

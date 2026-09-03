@@ -53,8 +53,7 @@ def _summary_instructions() -> str:
         assemble,
         critical_reminder,
         job,
-        memory_tool_system,
-        role,
+            role,
         trust_boundary,
     )
 
@@ -62,7 +61,6 @@ def _summary_instructions() -> str:
         role("Friday", "a summariser", "you write down what a room is about"),
         trust_boundary(),
         job(SUMMARY_JOB),
-        memory_tool_system(available=False),
         critical_reminder(SUMMARY_REMINDERS),
     )
 
