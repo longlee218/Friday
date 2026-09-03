@@ -421,9 +421,12 @@ NODES: dict[str, _Node] = {
     # refuse when the fix is not obvious, and a refusal written as prose was
     # once proposed as the diff. `apply_fix` is the one tool in this codebase
     # marked `needs_approval` (ticket 07).
+    # Not a reasoning node, and that is deliberate: it is handed a cause
+    # somebody else decided, and its job is to write the diff or refuse. The
+    # skills catalogue is for whoever decides what evidence *means*.
     "fix_bug": _Node(
         run=_fix_bug, block="dag_fix", prompt=prompts.FIX_BUG,
-        family=Family.NODE, server=SOURCE, reasons=True,
+        family=Family.NODE, server=SOURCE,
         tools=tuple(FIX_TOOLS), context=ComposeCapture, stop_at_tools=True,
     ),
     # The node that produces the graph's answer reports it by tool call, never

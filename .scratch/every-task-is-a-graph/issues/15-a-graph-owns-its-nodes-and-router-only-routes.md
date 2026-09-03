@@ -158,3 +158,33 @@ gets handed to the engine.
 
 Re-verified after all of it: 642 tests, prompts byte-identical, and the
 merged readiness check mutation-tested red.
+
+## The regression this ticket shipped, and why the check missed it
+
+A spec review found that `fix_bug` was declared `reasons=True` while the set
+it replaced was `{"analyze_stack", "compose_reply"}`. That flag hands a node
+the `fetch_skill` tool and the whole skills catalogue in its instructions —
+so the change quietly gave both to the one agent that proposes a
+`needs_approval` diff. Not reachable in production, because `dag_fix` is
+commented out in `config.yaml`, but wrong, and shipped under a commit message
+claiming no behaviour change.
+
+**The byte-identity check that should have caught it was vacuous.** The
+capture script's `FakeSkills.__len__` returned `0`, and `_catalogue` returns
+`""` for an empty library — so the catalogue section was empty for every
+node in every capture, and `reasons` had no effect on the output being
+compared. The check had that hole for several tickets. It cost nothing until
+a change landed inside the blind spot, which is what a blind spot is for.
+
+Fixed: the fake carries one skill now, the baseline was recaptured from the
+commit *before* this ticket with that fake, and the comparison run again —
+byte-identical for all five nodes, this time having actually exercised the
+flag.
+
+**The suite could not have caught it either**, and that is the part worth
+keeping. `test_only_the_reasoning_nodes_of_a_graph_get_skills` built three
+config blocks — read_logs, analyze_stack, compose_reply — so nothing ever
+built `fix_bug` and nothing asserted its tools. It builds **every** node
+from `NODES` now and asserts, per node, that the `fetch_skill` tool and the
+catalogue appear exactly when that node declares `reasons`. Mutation-tested
+by restoring `reasons=True`: red.
