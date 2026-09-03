@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from friday.agent.harness import Harness, ToolContext, tool
-from friday.agent.persona import Family
 from friday.agent.skills import fetch_skill_tool
 from friday.dag.api_issue import prompt as prompts
 from friday.dag.engine import DAG, DAGDeps, DAGState, Edge, Node, NodeFn
@@ -383,9 +382,6 @@ class _Node:
     block: str
     #: What that agent is told, before any per-call input.
     prompt: str
-    #: Who reads what this node writes. `compose_reply` answers a reporter in
-    #: the operator's name; every other node is a step and writes to the next.
-    family: Family
     #: The tool server it cannot work without, if it needs one.
     server: str | None = None
     #: Tools its agent reports through, and the scratch space they write to.
@@ -407,15 +403,15 @@ class _Node:
 NODES: dict[str, _Node] = {
     "read_logs": _Node(
         run=_read_logs, block="dag_read_logs", prompt=prompts.READ_LOGS,
-        family=Family.NODE, server=LOKI,
+        server=LOKI,
     ),
     "find_code_path": _Node(
         run=_find_code_path, block="dag_find_code", prompt=prompts.FIND_CODE_PATH,
-        family=Family.NODE, server=SOURCE,
+        server=SOURCE,
     ),
     "analyze_stack": _Node(
         run=_analyze_stack, block="dag_analyze", prompt=prompts.ANALYZE_STACK,
-        family=Family.NODE, reasons=True,
+        reasons=True,
     ),
     # `hand_over` beside `apply_fix` (ticket 06): the prompt asks this agent to
     # refuse when the fix is not obvious, and a refusal written as prose was
@@ -426,7 +422,7 @@ NODES: dict[str, _Node] = {
     # skills catalogue is for whoever decides what evidence *means*.
     "fix_bug": _Node(
         run=_fix_bug, block="dag_fix", prompt=prompts.FIX_BUG,
-        family=Family.NODE, server=SOURCE,
+        server=SOURCE,
         tools=tuple(FIX_TOOLS), context=ComposeCapture, stop_at_tools=True,
     ),
     # The node that produces the graph's answer reports it by tool call, never
@@ -435,7 +431,7 @@ NODES: dict[str, _Node] = {
     # fetching a skill mid-answer must not end the run before the answer.
     "compose_reply": _Node(
         run=_compose_reply, block="dag_compose", prompt=prompts.COMPOSE_REPLY,
-        family=Family.RESPONDER, reasons=True,
+        reasons=True,
         tools=tuple(COMPOSE_TOOLS), context=ComposeCapture, stop_at_tools=True,
     ),
 }
@@ -490,9 +486,7 @@ def build_agents(
             config=agent_config,
             instructions=prompts.build_instructions(
                 spec.prompt,
-                family=spec.family,
                 reasons=spec.reasons,
-                persona=getattr(config, "persona", None),
                 skills=skills if wants_skills else None,
             ),
             tools=tools,

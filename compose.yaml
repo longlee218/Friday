@@ -20,10 +20,6 @@ services:
       # Read-only and mounted rather than copied: changing a model, a threshold
       # or the watched channels is a restart, not a rebuild.
       - ./config.yaml:/app/config.yaml:ro
-      # Same reason, and the same directory: `persona.file` is resolved beside
-      # config.yaml, so mounting one without the other leaves every agent
-      # running with no persona and nothing saying so.
-      - ./PERSONA.md:/app/PERSONA.md:ro
       # What the operator wrote down: per-channel context, and the skills any
       # reasoning agent may fetch. Editing one is a restart, not a rebuild.
       - ./context:/app/context:ro

@@ -136,9 +136,6 @@ class Config:
     #: install has nothing marked, and waiting for the first reaction before
     #: the classifier sees any example at all is a worse start than none.
     triage_examples: tuple[tuple[str, str], ...] = ()
-    #: `PERSONA.md`, read once. Each builder asks for its family's section;
-    #: which family an agent is in is decided there, not here.
-    persona: Any = None
     #: Words that keep a message away from the model. The operator adds to
     #: this as they notice things, so it is a line in `config.yaml` and a
     #: restart rather than a commit.
@@ -176,18 +173,9 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
     except yaml.YAMLError as exc:
         raise ConfigError(f"Could not parse {path}: {exc}") from exc
 
-    from friday.agent.persona import load as load_persona
-
-    # Relative to the configuration file, not the working directory: the two
-    # differ in a container, and the file that names it is the one it sits
-    # beside.
-    persona_path = (raw.get("persona") or {}).get("file", "PERSONA.md")
-    persona = load_persona(path.parent / persona_path)
-
     ingest = raw.get("ingest") or {}
     return Config(
         agents=_agents(_expand(raw.get("agents") or {})),
-        persona=persona,
         workflows=WorkflowConfig(
             max_asks=int((raw.get("workflows") or {}).get("max_asks", 3)),
             use_responder=bool(

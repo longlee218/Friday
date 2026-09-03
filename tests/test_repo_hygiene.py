@@ -298,78 +298,43 @@ def test_park_is_gone_as_a_name():
     assert offenders == {}, f"'Park' survives outside the rename note: {offenders}"
 
 
-def test_only_responder_family_agents_can_speak_for_the_operator():
-    """The invariant new to ticket 09: only Responder-family agents produce
-    text that reaches a reporter. A node inside an investigation is a step,
-    not a voice — give the wrong node the Responder persona and every test
-    that checks *whether* a reply gets sent still passes; only its *tone*
-    quietly changes, under the operator's name, to something they never
-    wrote. Nothing else in the suite would catch that, which is exactly why
-    this is pinned directly rather than left to be implied by behaviour.
+def test_a_reply_is_constructed_in_exactly_one_place():
+    """What a reporter reads in the operator's name comes from one tool call,
+    and this is the anchor the invariant hangs on.
 
-    Two things have to both hold: `Family.RESPONDER` is only ever named
-    inside `friday/responder/` (the operator's own voice) and in the one node
-    declaration that claims it; and building from that declaration really
-    does send `compose_reply` the Responder section and every other node the
-    Node section.
+    It used to hang on a persona label — "only Responder-family agents produce
+    text that reaches a reporter" — and that label did not catch the bug it
+    exists to prevent. Ticket 10 was `_compose_reply`'s agentless fallback
+    returning `Reply(cause + diff)` straight to the reporter, and the
+    family-anchored test passed the whole time: there was no mis-assigned
+    family to find, because there was no agent at all.
 
-    Since ticket 15 the family is a field on a node's own declaration rather
-    than a branch on its name in a shared prompt module, so the first half
-    reads a table and the second builds from it. Same two questions.
-
-    **This half only checks wiring, and wiring is not the whole invariant.**
-    Text can reach a reporter without passing through an agent at all: the
-    composing node's own fallback replied with the analysis's prose and a raw
-    diff whenever no agent was configured, and this test passed the entire
-    time, because there was no mis-wired family to find. The behavioural half
-    lives in `tests/test_dag_api_issue.py` —
-    `test_an_unconfigured_composer_does_not_reply_in_a_nodes_voice` and
-    `test_an_unconfigured_composer_never_puts_a_diff_in_front_of_a_reporter`
-    (ticket 10). Neither half is sufficient alone.
+    Anchored on the construction instead, that bug is a second `Reply(` in the
+    graph and is caught by inspection rather than by somebody thinking to add
+    a behavioural test afterwards. The `answer` tool is the one place; the
+    `Ask` a reporter also reads is code's own question, deliberately, and the
+    risk this guards is in answering rather than in asking.
     """
-    import re
+    import ast
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / "friday"
-    allowed = {
-        root / "responder" / "__init__.py",
-        root / "responder" / "prompt.py",
-        root / "dag" / "api_issue" / "graph.py",
-    }
-    pattern = re.compile(r"Family\.RESPONDER")
-    offenders = {}
-    for path in root.rglob("*.py"):
-        if path in allowed:
-            continue
-        hits = pattern.findall(path.read_text())
-        if hits:
-            offenders[str(path.relative_to(root.parent))] = len(hits)
-    assert offenders == {}, (
-        f"Family.RESPONDER used outside friday/responder/ and the graph's "
-        f"own node declarations: "
-        f"{offenders} — only the composer and the operator's own Responder may "
-        f"write in that voice"
+    friday = Path(__file__).resolve().parents[1] / "friday"
+    built_in: dict[str, list[int]] = {}
+    for path in friday.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "Reply"
+            ):
+                built_in.setdefault(str(path.relative_to(friday.parent)), []).append(
+                    node.lineno
+                )
+
+    assert list(built_in) == ["friday/dag/api_issue/graph.py"], (
+        f"a Reply is what a reporter reads under the operator's name; it is "
+        f"built in one place, the `answer` tool: {built_in}"
     )
-
-    from friday.agent.persona import Family
-    from friday.dag.api_issue.graph import NODES
-    from friday.dag.api_issue.prompt import build_instructions
-
-    class _Spy:
-        def render(self, family: Family) -> str:
-            return "RESPONDER" if family is Family.RESPONDER else "NODE"
-
-    claimed = {n for n, spec in NODES.items() if spec.family is Family.RESPONDER}
-    assert claimed == {"compose_reply"}, (
-        f"only the node that answers a reporter may claim that voice: {claimed}"
+    assert len(built_in["friday/dag/api_issue/graph.py"]) == 1, (
+        f"one construction, not several: {built_in}"
     )
-
-    for node, spec in NODES.items():
-        voice = build_instructions(
-            spec.prompt, family=spec.family, reasons=spec.reasons, persona=_Spy()
-        )
-        expected = "RESPONDER" if node == "compose_reply" else "NODE"
-        assert voice.startswith(expected), (
-            f"{node} was built with the wrong persona family — only "
-            f"compose_reply may speak in the operator's voice"
-        )

@@ -23,7 +23,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from friday.config import AgentConfig
-from friday.agent.persona import Family
 from friday.responder.prompt import build_input, build_instructions
 from friday.agent.harness import Harness
 from friday.agent.skills import fetch_skill_tool
@@ -63,11 +62,6 @@ class Responder:
             notes=notes,
             skills=skills,
             context_store=context_store,
-            persona=(
-                config.persona.render(Family.RESPONDER)
-                if getattr(config, "persona", None)
-                else ""
-            ),
         )
         log.info(
             "responder on %s — its drafts need approval before they go out",
@@ -82,11 +76,10 @@ class Responder:
         model=None,
         notes: str = "",
         skills=None,
-        persona: str = "",
         context_store=None,
     ) -> None:
         #: Where the room's register lives. None means every channel writes
-        #: the way the persona alone says, which is what shipped before.
+        #: the way the voice alone says, which is what shipped before.
         self._context = context_store
         #: How many of the operator's real messages to show as tone examples.
         #: The responder's knob, read where the responder is built — the
@@ -100,7 +93,7 @@ class Responder:
         self._skills = skills
         self._run = Harness(
             config=config,
-            instructions=build_instructions(persona),
+            instructions=build_instructions(),
             model=model,
             notes=notes,
             tools=[fetch_skill_tool(skills)] if skills is not None else [],

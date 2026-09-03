@@ -1,14 +1,6 @@
 # Structured configuration. Secrets live in .env, never here.
 database_path: ./data/friday.db
 
-# ── Persona ────────────────────────────────────────────────────────────────
-# Who every agent is, before it is told its job. Prose, because it is a page of
-# writing meant to be edited as writing. Which agents get which section is
-# decided where each agent is built — it is not a knob, and the last time it
-# was one it went stale the first time an agent's job changed.
-persona:
-  file: PERSONA.md
-
 # ── Agents ─────────────────────────────────────────────────────────────────
 # One block per step that calls a model, each self-contained: where the model
 # lives, which key reaches it, and how it should behave. They are different jobs

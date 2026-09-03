@@ -230,20 +230,33 @@ agent's instructions: a prompt is a request and a filter is not. A log server
 offers whatever it offers, and nothing about answering "why did this request
 fail" should be able to delete a log stream.
 
-## Persona
+## Voice
 
-Who an agent is, as distinct from what it does. One file for the whole system,
-because "you are Long Lee's assistant, and people read Vietnamese" is not a
-fact any single agent owns.
+How an agent is told to write, as distinct from what it is told to do. It is
+part of that agent's own prompt, in that agent's own module — there is no
+separate file and no label deciding who gets which section.
 
-Three **modes**, chosen per agent: the full thing, the identity and language
-rule without the voice, or nothing. The middle one exists because an agent
-filling in a field something else validates must not also be told to write in
-Vietnamese — `environment` has to be `production`, not `sản xuất`.
+Two agents carry the operator's voice, because a person reads what they write
+under that name: the **responder**, and the graph node that composes a reply.
+Every other graph node is told the opposite — it is a step, it writes to the
+next step, it invents nothing. Triage and the extractors are told nothing
+about voice at all: one picks a tool, the other copies values, and a word
+spent on voice there is paid for on the highest-volume calls in the system to
+change nothing.
 
-Distinct from **tone**: the persona is written by hand and describes the shape,
+The two who share the voice hold two copies of it, deliberately. They are
+different agents with different jobs, and the day one needs a sentence the
+other does not is the day sharing it would have been the bug.
+
+There was a `PERSONA.md` holding this for everyone, split by heading, with a
+`Family` label deciding which agent read which section. It went with ticket
+16 — knowing what an agent had actually been told required opening a second
+file, and the invariant the label was there to protect turned out not to be
+protected by it (see **Reply**).
+
+Distinct from **tone**: the voice is written by hand and describes the shape,
 the tone examples are real messages the operator sent and are the evidence.
-Where they disagree the examples win, and the persona says so itself.
+Where they disagree the examples win, and the voice says so itself.
 
 ## Harness
 

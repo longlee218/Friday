@@ -138,12 +138,11 @@ What is actually on disk.
 | `serve_board.py` | The board alone, against the live database, without connecting to Discord |
 | `init_channel.py` | One-off: create a channel's context file for the operator to fill in |
 | `poke.py` | Put a message in the queue by hand, as if somebody had reported it. The only way to test end to end without a second Discord account — the watched account's own messages never open work, deliberately (ticket 37), so a self-mention does nothing. Skips the gateway and the scope check and nothing else; `FRIDAY_DB` points it at a throwaway copy |
-| `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, which persona file to read, and the sensitive words that keep a message away from the model |
-| `PERSONA.md` | Who an agent is before it is told its job. Prose, read once at startup. One section per family — Responder, Node — and an agent's family is decided where it is built. Triage and the extractors get neither |
-| `friday/config.py` | Loads `config.yaml`, resolves `${VAR}`, stamps each `AgentConfig` with its persona. Outside the packages because it is read before any of them |
+| `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, and the sensitive words that keep a message away from the model |
+| `friday/config.py` | Loads `config.yaml` and resolves `${VAR}`. Outside the packages because it is read before any of them |
 | **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `states.py` (`TaskState`, `OutboundState`, and the legal transitions), `actions.py` (`Ask`/`Reply`/`HandOver`, what a decision about a task comes to), `validation.py` (the rule engine, one call site) |
 | **`friday/store/`** | `schema.py` holds the mapped classes, `db.py` is the only store and converts at the edge — nothing above it knows SQLAlchemy exists |
-| **`friday/agent/`** | What it takes to call a model, and nothing about what to call it for: `harness.py` (the only module that may import the SDK), `instruction_prompt.py`, `persona.py`, `skills.py`, `mcp.py`, `llm_log.py` |
+| **`friday/agent/`** | What it takes to call a model, and nothing about what to call it for: `harness.py` (the only module that may import the SDK), `instruction_prompt.py`, `skills.py`, `mcp.py`, `llm_log.py` |
 | **`friday/memory/`** | What is kept between tasks, in tiers that never mix: `observations.py` (staged), `notes.py` (promoted, and only by an approved outcome), `channel_context.py` (per-channel YAML), `verdicts.py` (the operator marking a classification right) |
 | **`friday/ops/`** | Alive and safe, deciding nothing: `liveness.py`, `redact.py`, `api.py` |
 | **`friday/text/`** | `transform.py` splits code out before cleaning the prose; `param_hygiene.py` cleans one value. Decides nothing |
@@ -273,19 +272,35 @@ not an implementation detail:
   layer, not the gate; the gate is the approval. Saying so here because the
   sentence above read as though the list were gone, which is the shape a
   reader trusts and nothing contradicts (ticket 13).
-- **One persona, two families, and the family is decided in code.**
-  `PERSONA.md` says who the agents are and that people read Vietnamese, in one
-  section per family: the agents whose output a person reads, and the agents
-  that are a step inside an investigation. Triage and the extractors get
-  neither. There was a per-agent `persona:` knob in `config.yaml` with three
-  modes; it is gone. It went stale the first time an agent's job changed —
-  triage kept the mode describing how to write replies, and 79% of the
-  highest-volume prompt in the system was instructions for something it never
-  does. What the knob was guarding still holds: an agent carrying the voice
-  writes `sản xuất` where `friday/domain/validation.py` wants `production`, and
-  the reporter is asked to confirm what they already said. It goes in
+- **An agent's voice is part of its own prompt, and what reaches a reporter is
+  pinned on the `Reply`, not on a label.** Two agents write in the operator's
+  voice because a person reads what they write under that name — the responder
+  and the graph node that composes a reply — and each carries that text in its
+  own module. Every other graph node is told the opposite. Triage and the
+  extractors are told nothing about voice: 79% of the highest-volume prompt in
+  the system was once instructions for writing replies it never writes.
+
+  **This reverses "one persona, two families".** There was a `PERSONA.md` split
+  by heading and a `Family` label deciding which agent read which section, and
+  before that a per-agent `persona:` knob with three modes. The knob went
+  because it rotted the first time an agent's job changed; the file and the
+  label go now for a sharper reason: **the invariant they existed to protect
+  was not protected by them.** "Only Responder-family agents produce text that
+  reaches a reporter" had a test written in terms of the family, and that test
+  passed throughout ticket 10 — a composing node with no agent sending a
+  reporter an unreviewed diff — because there was no mis-assigned family to
+  find. The anchor is `Reply` construction now: it is built in exactly one
+  place, the `answer` tool, and a test says so. Reintroducing ticket 10's shape
+  turns that test red and left the family test green, which is the whole
+  argument in one run.
+
+  What the old knob was guarding still holds and is still enforced, just by the
+  prompts themselves: an agent carrying the voice writes `sản xuất` where
+  `friday/domain/validation.py` wants `production`. The voice goes in
   `instructions`, never the per-call input — shared bytes at the front of a
-  prompt are the ones a provider's cache reuses across agents.
+  prompt are the ones a provider's cache reuses across calls. The two agents
+  that share it hold two copies, deliberately: different jobs diverge, and
+  sharing the text only postpones that.
 - **Triage classifies and nothing else.** No parameters, no summary — a type
   and a confidence, through one `create_task(task_type, confidence)` tool with
   a closed enum of types (`skip` stays its own tool; it creates nothing).
