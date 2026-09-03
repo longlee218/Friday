@@ -7,7 +7,7 @@ database and the application is testable without a model.
 from __future__ import annotations
 
 from conftest import captured, make_event
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from friday.domain.conversation import ConversationId
 from friday.triage import Decided, NeedsHuman
@@ -511,3 +511,70 @@ async def test_what_this_process_posted_is_not_part_of_their_turn(inbox, provide
 
     (seen,) = triage.seen
     assert "cho anh xin" not in seen.text
+
+
+# --- a message we sent must not wedge the queue -----------------------------
+
+
+async def _one_of_ours_in_the_queue(db, *, text="Alive. 79 messages held."):
+    """The production shape: a message this process posted, sitting untriaged.
+
+    The bot DMs the operator; that DM comes back through the *user* gateway,
+    where `is_own` is decided against the user account and so reads False for
+    anything the bot wrote. A DM bypasses the channel whitelist, so it lands
+    in the queue as work.
+    """
+    from friday.outbox import Kind
+
+    task = await db.create_task(
+        conversation=ConversationId("fake", "watched"),
+        type="api_issue", state="pending", confidence=0.9, params={},
+    )
+    row = await db.queue_outbound(
+        task_id=task.id, conversation=task.conversation, kind=Kind.HELP_WANTED,
+        sender="discord_bot", text=text,
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id="ours-echo")
+    await db.record_message(
+        make_event(
+            message_id="ours-echo", text=text, author_id="bot",
+            created_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+        )
+    )
+    return task
+
+
+async def test_a_message_we_sent_does_not_take_the_process_down(db):
+    """`turn_from` excludes anything we posted, so the turn of a message we
+    posted is *empty* — and empty with `closed_by_someone_else` False, which
+    is the one combination `_still_open` was never written for. `turn[-1]`
+    raised `IndexError` out of `run_forever`, inside the TaskGroup, taking
+    ingest, the outbox, the board and the heartbeat down with it.
+
+    Worse than a crash: the row is never marked triaged, so it stays at the
+    head of the queue and every restart dies on it. A boot loop.
+    """
+    await _one_of_ours_in_the_queue(db)
+    triage = StubTriage()
+
+    acted = await runner(db, triage).run_once()
+
+    assert acted == [], "a message we sent is not work"
+    assert triage.seen == [], "and it never reaches the model"
+    assert await db.untriaged_mentions() == [], (
+        "it must leave the queue, or the next pass finds it again for ever"
+    )
+
+
+async def test_one_unreadable_message_does_not_stop_the_others(db):
+    """Per-message isolation. Whatever else goes wrong with one row, the rest
+    of the batch is still triaged and the loop still comes back."""
+    await _one_of_ours_in_the_queue(db)
+    real = make_event(message_id="20", text="API lỗi rồi anh ơi")
+    await db.record_message(real)
+
+    acted = await runner(db, StubTriage(api_issue())).run_once()
+
+    assert [t.type for t in acted] == ["api_issue"], (
+        "the good message was triaged despite the bad one ahead of it"
+    )

@@ -203,6 +203,17 @@ not an implementation detail:
   **empty** for that to hold: importing any submodule runs it first, and a
   re-export there is eager, so one convenience import would pull the unofficial
   library back into the official bot and into normalisation.
+
+  **`is_own` only knows one of the two.** It is decided on the user gateway as
+  `author.id == me.id`, so everything the *bot* posts reads as a stranger's
+  message. "Is this ours?" is `Database.we_sent` — matched on the sent id or
+  the text, the second closing the window between the outbox posting and
+  recording the id it got back — and the inbox calls it on every message.
+  Without that call the bot's DM to the operator came back through the user
+  gateway, and because a DM bypasses the channel whitelist it entered the
+  triage queue: the agent classified its own liveness summary and sent the
+  operator "Nothing I can do with this" quoting itself. `we_sent` was written
+  for this and spent a week with no callers.
 - **Inbound messages are deduplicated on `(provider, provider_message_id)`.**
   Two delivery paths (gateway and REST backfill) feed the same pipeline, so
   every handler must be idempotent on that key.

@@ -145,21 +145,59 @@ class TriageRunner:
         """
         touched: list[Task] = []
         for event in await self._db.untriaged_mentions(self._batch_size):
-            turn, closed_by_someone_else = await self._db.turn_from(event)
-            if not closed_by_someone_else and self._still_open(turn):
+            try:
+                task = await self._triage_one(event)
+            except Exception:  # noqa: BLE001 - one bad row is not the batch
+                # Per message, because this runs inside the TaskGroup that
+                # also holds ingest, the outbox, the board and the heartbeat.
+                # An exception here took all of them down, and because it
+                # escaped before `mark_triaged`, the row stayed at the head of
+                # the queue and every restart died on it — a boot loop out of
+                # one message. Left untriaged deliberately: it is still work
+                # nobody has looked at, which is what the queue is for.
+                log.exception(
+                    "triage failed on %s — leaving it queued and going on",
+                    event.provider_message_id,
+                )
                 continue
-            said = replace(event, text="\n".join(m.text for m in turn if m.text))
-            outcome = await self._decide(said)
-            task = await self._apply(event, outcome)
-            await self._db.mark_triaged(
-                event, task.id if task else None, decision=_record(outcome)
-            )
             if task is not None:
                 touched.append(task)
         return touched
 
+    async def _triage_one(self, event: InboundEvent) -> Task | None:
+        """One message: read its turn, decide, apply, mark it read."""
+        turn, closed_by_someone_else = await self._db.turn_from(event)
+        if not turn:
+            # `turn_from` shows only what it can attribute to the reporter, and
+            # it excludes anything this process posted — so an empty turn means
+            # the queued message is one of ours. Nothing to classify: mark it
+            # read so it leaves the queue, and never call the model on an empty
+            # string. The inbox now catches these on the way in (`we_sent`);
+            # this is the floor under that, and what stops a row already in the
+            # queue from wedging every restart.
+            log.info(
+                "%s is a message we posted — nothing to triage",
+                event.provider_message_id,
+            )
+            await self._db.mark_triaged(event, None, decision={"type": "ours"})
+            return None
+        if not closed_by_someone_else and self._still_open(turn):
+            return None
+        said = replace(event, text="\n".join(m.text for m in turn if m.text))
+        outcome = await self._decide(said)
+        task = await self._apply(event, outcome)
+        await self._db.mark_triaged(
+            event, task.id if task else None, decision=_record(outcome)
+        )
+        return task
+
     def _still_open(self, turn: list[InboundEvent]) -> bool:
-        """They may not be finished: too recent, or still typing."""
+        """They may not be finished: too recent, or still typing.
+
+        Never called with an empty turn — `_triage_one` settles that case
+        before this, because "the last thing they said" has no answer when
+        they are not in the list at all.
+        """
         last = turn[-1]
         quiet_for = (datetime.now(timezone.utc) - last.created_at).total_seconds()
         if quiet_for < self._turn_seconds:

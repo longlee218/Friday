@@ -16,6 +16,10 @@ log = logging.getLogger(__name__)
 #: Named because `_handle` overrules exactly this one, and a string compared
 #: in two places is a string that gets edited in one of them.
 _NO_MENTION = "does not address the account"
+#: Not "from the watched account" — that is `is_own`, and it only knows one of
+#: the two identities this process runs. This is "this process posted it",
+#: whichever of them did.
+_OURS = "posted by this process"
 
 _LIVE_STREAM_ENDED = object()
 
@@ -188,6 +192,25 @@ class Inbox:
                 event.provider_message_id,
             )
             reason = None
+        if reason is None and await self._db.we_sent(
+            event.provider, event.provider_message_id, event.text
+        ):
+            # Last, and it overrules the reply rule above: a message this
+            # process posted is never work, even when it replies to us.
+            #
+            # `is_own` does not cover this. It is decided on the user gateway
+            # as `author.id == me.id`, and `me` is the *user* account — so
+            # everything the **bot** posts reads as a stranger's. The bot DMs
+            # the operator, that DM arrives back through the user gateway, and
+            # a DM bypasses the channel whitelist, so it went into the triage
+            # queue. The agent classified its own liveness summary and sent
+            # the operator "Nothing I can do with this" quoting itself.
+            #
+            # `we_sent` matches on the id *or* the text, which is what closes
+            # the window between the outbox posting and recording the id it
+            # got back. It was written for exactly this and its only caller
+            # was removed by ticket 37, leaving the guard dead.
+            reason = _OURS
         if reason:
             self.dropped[reason] = self.dropped.get(reason, 0) + 1
             if await self._db.conversation_is_tracked(event):

@@ -399,3 +399,80 @@ async def test_context_is_still_never_queued(db, provider, config):
     await inbox._handle(make_event(message_id="chatter", mention_type=None))
 
     assert await db.untriaged_mentions() == []
+
+
+async def test_a_message_this_process_posted_is_never_work_whichever_identity_sent_it(
+    inbox, provider, db
+):
+    """Two Discord identities run in one process, and `is_own` only knows one.
+
+    It is decided as `author.id == me.id` on the *user* gateway, so anything
+    the **bot** posted reads as somebody else's message. The bot DMs the
+    operator, that DM comes back through the user gateway, and a DM bypasses
+    the channel whitelist — so the agent queued its own status report as work
+    and produced a help-wanted saying "Nothing I can do with this" about its
+    own liveness summary.
+
+    `we_sent` is the guard for exactly this, matched on the id *or* the text
+    so the echo cannot beat the outbox's write. Ticket 37 removed its only
+    caller and left it dead.
+    """
+    from friday.outbox import Kind
+
+    task = await db.create_task(
+        conversation=ConversationId("fake", "watched"),
+        type="api_issue", state="pending", confidence=0.9, params={},
+    )
+    row = await db.queue_outbound(
+        task_id=task.id, conversation=task.conversation, kind=Kind.HELP_WANTED,
+        sender="discord_bot", text="Alive. 79 messages held, 3 tasks.",
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id="bot-dm-1")
+
+    # Comes back as an ordinary inbound mention: the bot is not the watched
+    # account, so `is_own` is False.
+    provider.emit(
+        make_event(
+            message_id="bot-dm-1",
+            text="Alive. 79 messages held, 3 tasks.",
+            author_id="the-bot",
+            author_name="Friday",
+            mention_type=MentionType.DM,
+        )
+    )
+
+    events = await captured(inbox)
+
+    assert events == [], "the agent queued its own message as work"
+    assert await db.untriaged_mentions() == []
+
+
+async def test_our_own_message_is_recognised_before_the_outbox_records_its_id(
+    inbox, provider, db
+):
+    """The race `we_sent` was written to close: the outbox posts, the gateway
+    delivers our own message back, and only then does the outbox record the id
+    it got. In that window the id says nothing, so the text has to answer."""
+    from friday.outbox import Kind
+
+    task = await db.create_task(
+        conversation=ConversationId("fake", "watched"),
+        type="api_issue", state="pending", confidence=0.9, params={},
+    )
+    await db.queue_outbound(
+        task_id=task.id, conversation=task.conversation, kind=Kind.HELP_WANTED,
+        sender="discord_bot", text="Alive. 79 messages held, 3 tasks.",
+    )
+    # No mark_outbound_sent: the id has not come back yet.
+
+    provider.emit(
+        make_event(
+            message_id="not-recorded-yet",
+            text="Alive. 79 messages held, 3 tasks.",
+            author_id="the-bot",
+            author_name="Friday",
+            mention_type=MentionType.DM,
+        )
+    )
+
+    assert await captured(inbox) == []
