@@ -24,12 +24,19 @@ and nothing could explain, and the operator answered by hand while the agent
 went on asking. Each ticket names what blocks it; work the frontier.
 
 A second board, `.scratch/every-task-is-a-graph/`, holds the spec and tickets
-01–09 for folding two packages into one engine — every task type a graph,
-`prepare` as node 0, node agents reporting through tools. All nine are done:
-the old loop package is gone, folded into `friday/tasks/` (the pool) and
-`friday/dag/` (the graph engine and its `prepare` mechanism). Its spec's
-D1–D18 are the rationale; the tickets reference them rather than repeating
-them.
+01–13, and all thirteen are done. 01–09 folded two packages into one engine —
+every task type a graph, `prepare` as node 0, node agents reporting through
+tools — and the old loop package is gone, split between `friday/tasks/` (the
+pool) and `friday/dag/`. Its spec's D1–D18 are the rationale; the tickets
+reference them rather than repeating them.
+
+10–13 came out of reviewing that work rather than planning it, and three of
+them were real bugs the board had shipped: the composer replied to reporters
+in a node's voice with an unreviewed diff in it, a one-node graph's only
+hand-over never reached the operator, and an approved patch outlived the task
+it belonged to. Worth knowing when reading the board: nine tickets' worth of
+green suite did not catch any of the three, and one of them was pinned as
+correct by the board's own test.
 
 The two paragraphs above go stale faster than anything else in this file.
 Check them against the `**Status:**` line in each ticket before trusting them.
