@@ -135,7 +135,16 @@ def plan_by_required_parameters(task_type: str, params: Params) -> Action:
     """
     problems = _problems(params)
     if not problems:
-        return HandOver(f"no workflow for {task_type} yet")
+        # Quoted to the operator verbatim (CONTEXT.md, *Hand-over*), so it has
+        # to be true. It used to read "no workflow for {task_type} yet", which
+        # stopped being true the day every type got a graph — this *is* that
+        # type's graph, running — and said it in the vocabulary ticket 09
+        # retired. What actually happened is that there was nothing to ask
+        # about and nothing further this type knows how to do (ticket 11).
+        return HandOver(
+            f"{task_type}: everything needed is here, and there is "
+            f"no investigation past this point — over to you"
+        )
     return Ask(_question(problems))
 
 

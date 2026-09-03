@@ -352,11 +352,21 @@ class Pool:
                 # Node 0 deciding the answer is not special — a one-node
                 # graph's only node is node 0 — so it gets the same
                 # pause-recording treatment as any later node's `HandOver` does.
+                #
+                # Fingerprinted against the parameters as they stand *now*,
+                # not the `task` handed to this pass: node 0 writes what it
+                # filled in back before it returns, so that snapshot is one
+                # write out of date the moment it hands over. `_raise_hands`
+                # keys `dag_pauses` on the current parameters, and a pause
+                # stored under any other fingerprint is filtered straight
+                # back out — the row was written and never read, so a
+                # one-node graph's only reason never reached anyone
+                # (ticket 11).
                 await self._record_pause(
                     task.id,
                     dag,
                     results={},
-                    fingerprint=_fingerprint(task.params),
+                    fingerprint=_fingerprint(await self._params_now(task)),
                     node=dag.entry,
                     hand_over=prepared,
                 )
@@ -402,6 +412,19 @@ class Pool:
                 hand_over=outcome,
             )
         return outcome
+
+    async def _params_now(self, task: Task) -> dict:
+        """The task's parameters as the database holds them, not as this pass
+        was handed them.
+
+        Node 0 writes back what it filled in (`prepare_node`'s
+        `set_task_params`) and then returns, so `task.params` is stale from
+        that moment on. Every reader of a pause keys on what is stored, so
+        the writer has to as well. Falls back to the snapshot if the row has
+        gone: a fingerprint that matches nothing is what was already wrong.
+        """
+        current = await self._db.task(task.id)
+        return dict(current.params) if current is not None else dict(task.params)
 
     async def decide_pending_action(
         self, task_id: int, *, approve: bool, reason: str | None = None

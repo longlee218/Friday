@@ -771,11 +771,16 @@ async def test_a_one_node_type_hands_over_on_the_same_terms_as_api_issue(db):
     await db.move_task(task.id, "pending")
     await Pool(db=db, auto_ask=True).run_once()
 
+    # `dag_pause` reads the row directly, without the fingerprint filter
+    # `_raise_hands` applies — which is why this passed for as long as the
+    # operator-facing path was broken. See
+    # `test_a_node_0_hand_over_still_reaches_the_operator` for the half that
+    # goes through the filter.
     pause = await db.dag_pause(task.id)
     assert pause is not None, "hand-over must record why, same as api_issue does"
     node, question = pause
     assert node == "prepare", "the one node this graph has"
-    assert "no workflow for access_request" in question
+    assert "no investigation past this point" in question
 
     told = [r for r in await db.outbound() if r.kind == "help_wanted"]
     assert told, "the operator was never told"
@@ -1245,3 +1250,62 @@ async def test_the_operator_is_not_told_the_same_thing_nineteen_times(db):
 
     told = [r for r in await db.outbound() if r.kind == "help_wanted"]
     assert len(told) == 3, f"told the operator {len(told)} times"
+
+
+# --- ticket 11 --------------------------------------------------------------
+
+
+async def test_a_node_0_hand_over_still_reaches_the_operator(db, monkeypatch):
+    """A one-node graph's only node is node 0, so its hand-over is the only
+    reason those graphs can ever produce — and the operator was never shown it.
+
+    `prepare` writes back the parameters it filled in *before* it returns, so
+    the task's params have already moved by the time the pause is recorded.
+    Recording that pause against the pre-pass snapshot, while `_raise_hands`
+    keys on the current one, meant `dag_pauses` filtered the row straight back
+    out and the operator got the bare type and parameters.
+
+    Uses the real `prepare_node` — a synthetic node 0 does not write params
+    back, which is exactly why the existing pause tests never caught this.
+    """
+    import friday.dag.prepare as prepare_module
+    from friday.dag.router import build_simple_dag
+    from friday.domain.models import ApiIssueParams
+    from friday.tasks.pool import Pool
+    from tests.conftest import make_event
+    from tests.test_pool import make_task
+
+    traced = "abcdef01-2345-6789-abcd-ef0123456789"
+
+    async def fills_something_in(task_type, text):
+        """An extractor that finds a field — the ordinary case, and what moves
+        the parameters out from under the pause."""
+        return (
+            ApiIssueParams(
+                summary="checkout 500",
+                environment="production",
+                correlation_id=traced,
+            ),
+            None,
+        )
+
+    monkeypatch.setattr(prepare_module, "_extract", fills_something_in)
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag("api_issue", build_simple_dag("api_issue", ApiIssueParams))
+    try:
+        task = await make_task(db, correlation_id=traced)
+        await db.record_message(make_event(message_id="m1", text="API lỗi"))
+        await db.mark_triaged(
+            make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        )
+        await Pool(db=db, auto_ask=True).run_once()
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+
+    (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
+    assert "prepare" in told.text, (
+        "the operator was told there is work, but not what stopped it — "
+        "the pause was stored under a fingerprint nothing reads it back by"
+    )
+    assert "no investigation past this point" in told.text

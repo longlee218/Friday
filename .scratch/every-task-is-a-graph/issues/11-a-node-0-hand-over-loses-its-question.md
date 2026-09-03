@@ -8,7 +8,7 @@ already does. Today it is written to the row and then filtered back out.
 
 **Decisions:** D7, D8, D14
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Why
 
@@ -57,12 +57,45 @@ parameters are complete and there is nothing further to do.
 
 ## Acceptance criteria
 
-- [ ] A node-0 hand-over's reason reaches the operator's help-wanted message
-- [ ] The fingerprint a node-0 pause is stored under is computed from the same
+- [x] A node-0 hand-over's reason reaches the operator's help-wanted message
+- [x] The fingerprint a node-0 pause is stored under is computed from the same
       thing every other pause uses, so the two ends cannot disagree again
-- [ ] Driven at the pool's `run_once` seam: a task whose extraction fills a
+- [x] Driven at the pool's `run_once` seam: a task whose extraction fills a
       parameter, then hands over at node 0, and the queued help-wanted row
       carries the reason
-- [ ] The test is watched go red against the current code before the fix
-- [ ] `plan_by_required_parameters`'s reason no longer says "no workflow …
+- [x] The test is watched go red against the current code before the fix
+- [x] `plan_by_required_parameters`'s reason no longer says "no workflow …
       yet", and says what is actually true
+
+## What it came to
+
+`_run_dag`'s node-0 hand-over branch fingerprints
+`await self._params_now(task)` instead of `task.params`. `_params_now` reads
+the row back: node 0 writes what it filled in and *then* returns, so the
+snapshot this pass was handed is one write out of date at exactly the moment
+the pause is recorded. Every reader keys on what is stored, so the writer has
+to as well.
+
+Refetching rather than threading the filled params out of the node keeps the
+node's contract — a node returns its result, not its result plus bookkeeping
+— and costs one query on a path that is rare by construction. It falls back
+to the snapshot if the row has gone, which is no worse than what it replaced.
+
+The false sentence went with it. `plan_by_required_parameters` returned
+`HandOver(f"no workflow for {task_type} yet")` — quoted to the operator
+verbatim, untrue since ticket 04 gave every type a graph (this *is* that
+type's graph, running), and phrased in the vocabulary ticket 09 retired. It
+now says what happened: everything needed is here, there is no investigation
+past this point, over to you.
+
+The new test uses the **real** `prepare_node` with a stubbed extractor, which
+is the whole reason it catches what the existing pause tests missed: those
+build a synthetic node 0, and a synthetic node 0 never writes params back, so
+the two fingerprints agreed by accident and the round trip looked fine.
+
+One existing test asserted the old wording. It reads the row through
+`db.dag_pause`, which has no fingerprint filter — which is precisely why it
+stayed green while the operator-facing path was broken, and it now carries a
+line saying so and pointing at the test that does go through the filter.
+
+634 tests pass (633 before, +1).
