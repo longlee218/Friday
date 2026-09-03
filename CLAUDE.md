@@ -310,10 +310,15 @@ not an implementation detail:
   task goes to `handled_by_operator` — not `done`, so it is reopenable and
   countable — and everything queued about it is withdrawn.
 - **Four prompt families, no shared text — and one prompt module per family.**
-  Wording and assembly both live in `friday.<family>.prompt` — one module
-  that answers "what does this family's prompt look like", the contract notes
-  as comments directly above each text; no family imports another's (grep
-  test). What is shared
+  Wording and assembly both live in that family's own `prompt` module — one
+  module that answers "what does this family's prompt look like", the contract
+  notes as comments directly above each text; no family imports another's (an
+  `ast` test, not a grep: `from x.y import prompt` names the module in the
+  alias, and a grep for the dotted name never saw it). Three of the four are
+  `friday.<family>.prompt`; the graph nodes' is `friday.dag.api_issue.prompt`,
+  inside the graph that owns those nodes since ticket 15 — deriving the module
+  name from the family is what silently disarmed that test when it moved. What
+  is shared
   is mechanism: `Section`, the value renderers, and escaping — one seam, one
   test. The responder's section order is load-bearing (stable-first is the
   prompt-cache hit) and has its own test.

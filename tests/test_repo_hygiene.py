@@ -182,24 +182,52 @@ def test_no_family_imports_another_familys_prompt_module():
     family reaches into another's. The graph's composing node is Responder
     *family* by persona, but it builds through the graph's module — sharing
     the other family's builder would let one family's reshuffle silently
-    reshape another's prompt."""
-    import subprocess
+    reshape another's prompt.
+
+    Read by `ast`, not by grep, because a module can be named three ways and
+    grep only ever caught two of them: `from x.y.prompt import Z` was found,
+    `from x.y import prompt` was not. That hole predates ticket 15 and was
+    invisible while the module name happened to be short.
+
+    The root and the module name are listed separately: the dag family's
+    prompt module moved inside the graph that owns it at ticket 15, so the
+    name is no longer `friday.<family>.prompt`. Deriving it from the family
+    is what killed this guard silently — nothing imports a module that does
+    not exist, so the check passed no matter what any family did.
+    """
+    import ast
+    from pathlib import Path
 
     modules = {
-        "triage": "friday/triage",
-        "extraction": "friday/extraction",
-        "responder": "friday/responder",
-        "dag": "friday/dag",
+        "triage": ("friday/triage", "friday.triage.prompt"),
+        "extraction": ("friday/extraction", "friday.extraction.prompt"),
+        "responder": ("friday/responder", "friday.responder.prompt"),
+        "dag": ("friday/dag", "friday.dag.api_issue.prompt"),
     }
-    for family, root in modules.items():
-        others = [f"friday.{m}.prompt" for m in modules if m != family]
-        for other in others:
-            hits = subprocess.run(
-                ["grep", "-rl", "--include=*.py", other, root],
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            assert not hits, f"{family} imports {other}: {hits}"
+    repo = Path(__file__).resolve().parents[1]
+
+    def imported_modules(tree: ast.AST) -> set[str]:
+        """Every module this file pulls in, however it spells it."""
+        found: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                found.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                found.add(node.module)
+                # `from friday.dag.api_issue import prompt` names the module
+                # in the *alias*, not in `node.module`.
+                found.update(f"{node.module}.{a.name}" for a in node.names)
+        return found
+
+    offenders = {}
+    for family, (root, _own) in modules.items():
+        others = {name for other, (_r, name) in modules.items() if other != family}
+        for path in (repo / root).rglob("*.py"):
+            reached = imported_modules(ast.parse(path.read_text())) & others
+            if reached:
+                offenders[str(path.relative_to(repo))] = sorted(reached)
+
+    assert offenders == {}, f"a family reached into another's prompt: {offenders}"
 
 
 def test_the_graph_engine_only_imports_vocabulary_from_the_domain():

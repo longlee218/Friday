@@ -34,7 +34,7 @@ from friday.agent.harness import Harness, ToolContext, tool
 from friday.agent.persona import Family
 from friday.agent.skills import fetch_skill_tool
 from friday.dag.api_issue import prompt as prompts
-from friday.dag.engine import DAG, DAGDeps, DAGState, Edge, Node
+from friday.dag.engine import DAG, DAGDeps, DAGState, Edge, Node, NodeFn
 from friday.dag.prepare import prepare_node, prepared_ok
 from friday.domain.actions import Action, HandOver, Reply
 from friday.domain.models import ApiIssueParams
@@ -113,13 +113,23 @@ LOKI = "loki"
 SOURCE = "source"
 
 
-def _has_server(deps: DAGDeps, node: str) -> bool:
-    """Whether this node's tool server is there. Reads the same declaration
-    the agent builder reads — the node checks before spending a model call,
-    the builder hands the agent the server it will look for, and one table
-    answers both so the two cannot drift apart."""
+def _agent_for(deps: DAGDeps, node: str):
+    """This node's agent, or `None` if it cannot work.
+
+    Two conditions, and every node has both: an agent was built for it, and
+    the tool server it named is there. The server comes off the same
+    declaration the agent builder reads, so the node checking before it
+    spends a model call and the builder handing that agent its server cannot
+    drift apart. A node that declared no server passes that half by default.
+
+    What each caller does with `None` is its own business — three of them
+    return nothing and let the next node see absence, one hands over.
+    """
+    agent = deps.extra.get(node)
+    if agent is None:
+        return None
     server = NODES[node].server
-    return server is None or server in deps.servers
+    return agent if server is None or server in deps.servers else None
 
 
 # --- the nodes -------------------------------------------------------------
@@ -138,9 +148,9 @@ async def _read_logs(state: DAGState, deps: DAGDeps) -> str | None:
     params = _params(state)
     if not (params.correlation_id or params.curl):
         return None  # nothing to look up by
-    agent = deps.extra.get("read_logs")
-    if agent is None or not _has_server(deps, "read_logs"):
-        log.debug("api_issue: no log server configured, skipping read_logs")
+    agent = _agent_for(deps, "read_logs")
+    if agent is None:
+        log.debug("api_issue: no agent or no log server, skipping read_logs")
         return None
 
     result = await agent.run(
@@ -158,8 +168,8 @@ async def _find_code_path(state: DAGState, deps: DAGDeps) -> str | None:
     logs = state.get("read_logs")
     if not isinstance(logs, str) or not logs:
         return None
-    agent = deps.extra.get("find_code_path")
-    if agent is None or not _has_server(deps, "find_code_path"):
+    agent = _agent_for(deps, "find_code_path")
+    if agent is None:
         return None
 
     result = await agent.run(logs)
@@ -179,7 +189,7 @@ async def _analyze_stack(state: DAGState, deps: DAGDeps) -> dict[str, Any]:
     if not isinstance(logs, str) or not logs:
         return {"cause": None, "actionable": False, "evidence": []}
 
-    agent = deps.extra.get("analyze_stack")
+    agent = _agent_for(deps, "analyze_stack")
     if agent is None:
         return {"cause": None, "actionable": False, "evidence": []}
 
@@ -225,8 +235,8 @@ async def _fix_bug(state: DAGState, deps: DAGDeps) -> str | HandOver | None:
             f"anything. Cause: {cause} (I'll handle it / go ahead and fix it)"
         )
 
-    agent = deps.extra.get("fix_bug")
-    if agent is None or not _has_server(deps, "fix_bug"):
+    agent = _agent_for(deps, "fix_bug")
+    if agent is None:
         return HandOver(
             f"I found the cause but cannot change code from here. Cause: {cause}"
         )
@@ -292,7 +302,7 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
     if cause:
         fix = state.get("fix_bug")
         said = f"{cause}" if not fix else f"{cause}\n\n{fix}"
-        agent = deps.extra.get("compose_reply")
+        agent = _agent_for(deps, "compose_reply")
         if agent is not None:
             # Same family as the responder, same room. The register of the
             # channel this goes back into is part of what to say.
@@ -364,9 +374,10 @@ class _Node:
     still knows nothing about agents, configuration or prompts.
     """
 
-    #: The function the engine runs. Every node has one; not every node has
-    #: an agent — `read_logs` with no log server still runs, and skips.
-    run: Any
+    #: The function the engine runs — the engine's own type, since this is
+    #: what `build_api_issue_dag` hands it. Every node has one; not every node
+    #: has an agent, and `read_logs` with no log server still runs and skips.
+    run: NodeFn
     #: Which `config.agents` block builds this node's agent. A node whose
     #: block is absent runs without one, which every node here survives.
     block: str

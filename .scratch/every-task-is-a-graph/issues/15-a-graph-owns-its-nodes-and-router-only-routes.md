@@ -127,3 +127,34 @@ Verified: 642 tests, the same 642 as before. Prompts byte-identical. The four
 per-node guards mutation-tested — remove `compose_reply`'s tools, `fix_bug`'s
 tools, the skip for a node with no configuration block, or the skip for a node
 with no server, and a named test goes red for each.
+
+## What the review caught
+
+A standards review found a guard this ticket had killed, and it was the kind
+this repo has been bitten by before: **`test_no_family_imports_another_familys_prompt_module` derived the module
+name from the family** — `friday.<family>.prompt` — and grepped for it. Once
+the graph's module moved to `friday.dag.api_issue.prompt`, that grep looked
+for a module that does not exist, so it passed no matter what any family did.
+Nothing failed. Proved by adding the import to `friday/responder/prompt.py`
+and watching the test stay green.
+
+Fixing it turned up a **second hole that predates this ticket**: grep found
+`from x.y.prompt import Z` and missed `from x.y import prompt`, because the
+dotted module name never appears in the second form. The check reads the
+imports with `ast` now and all three spellings are caught — proved by
+mutating each one in turn.
+
+Two documentation claims went stale in a commit that edited documentation.
+`friday/dag/__init__.py` still said the router "builds their agents", which
+is the thing this ticket removed, and CLAUDE.md's prompt-family rule still
+said all four modules are `friday.<family>.prompt`. Both corrected, and
+CLAUDE.md now records *why* the exception exists rather than just stating it.
+
+Two judgement calls taken: the two-part readiness check each node repeated —
+agent present, and its server there — is one `_agent_for(deps, name)`, which
+also drops one restatement of the node's own name per node; and `_Node.run`
+carries the engine's own `NodeFn` rather than `Any`, since that field is what
+gets handed to the engine.
+
+Re-verified after all of it: 642 tests, prompts byte-identical, and the
+merged readiness check mutation-tested red.
