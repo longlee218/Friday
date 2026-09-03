@@ -884,7 +884,7 @@ async def test_approving_resumes_the_exact_call_in_a_fresh_process(db):
     a redeploy — resumes the paused call and reaches `compose_reply` without
     read_logs or analyze_stack running a second time."""
     from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
-    from friday.tasks.pool import Pool
+    from friday.tasks.pool import Pool, _fingerprint
     from agents.testing import function_call
 
     fixer = _fix_bug_agent(
@@ -907,15 +907,25 @@ async def test_approving_resumes_the_exact_call_in_a_fresh_process(db):
 
         moved = await runner.decide_pending_action(task.id, approve=True)
 
-        assert moved.state == "review", (
-            "the run reached compose_reply and produced a real Reply, "
-            "which waits for approval at the outbox — not another hand-over"
-        )
         assert await db.dag_interruption(task.id) is None, "cleared on resume"
-        (drafted,) = [r for r in await db.outbound() if r.kind == "reply"]
-        assert "off by one in the loop bound" in drafted.text
-        assert "--- a" in drafted.text, (
+
+        # `compose_reply` has no agent wired here, so since ticket 10 it hands
+        # over rather than replying — no Responder-family agent is present to
+        # write anything a reporter should read. What proves the resume worked
+        # is *what the hand-over carries*: the cause `analyze_stack` produced
+        # before the pause, and the diff the approved `apply_fix` returned.
+        # Neither could be there unless the run picked up at `fix_bug` and
+        # walked on to `compose_reply`.
+        assert moved.state == "needs_human"
+        (_, question) = (await db.dag_pauses({task.id: _fingerprint(task.params)}))[
+            task.id
+        ]
+        assert "off by one in the loop bound" in question
+        assert "--- a" in question, (
             "the approved diff reached compose_reply as fix_bug's result"
+        )
+        assert not [r for r in await db.outbound() if r.kind == "reply"], (
+            "nothing a Responder did not write may be queued for a reporter"
         )
     finally:
         DAG_DEPS_EXTRA.pop("api_issue", None)

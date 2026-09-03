@@ -204,6 +204,13 @@ so the shape of a graph can be tested without a model or a server. A node whose
 agent or server is absent skips and returns nothing; the graph still reaches
 its last node, which is the only one that decides what to send.
 
+**The last node is the exception**: when *it* has no agent, the graph hands
+over rather than answering (ticket 10). Everything it holds by then —
+the analysis's cause, a proposed diff — is Node-family text, and only
+Responder-family agents produce what a reporter reads. It replied once,
+carrying both verbatim, which put an unreviewed patch in front of the person
+who filed the report; the operator is who that material was always for.
+
 ## Tool server
 
 Tools that live outside this process, reached over MCP. A server is

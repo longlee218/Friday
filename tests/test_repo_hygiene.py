@@ -284,6 +284,16 @@ def test_only_responder_family_agents_can_speak_for_the_operator():
     `compose_reply`, wired to it in `friday/dag/prompt.py`; and that wiring
     itself sends `compose_reply` the Responder section and every other node
     the Node section.
+
+    **This half only checks wiring, and wiring is not the whole invariant.**
+    Text can reach a reporter without passing through an agent at all: the
+    composing node's own fallback replied with the analysis's prose and a raw
+    diff whenever no agent was configured, and this test passed the entire
+    time, because there was no mis-wired family to find. The behavioural half
+    lives in `tests/test_dag_api_issue.py` —
+    `test_an_unconfigured_composer_does_not_reply_in_a_nodes_voice` and
+    `test_an_unconfigured_composer_never_puts_a_diff_in_front_of_a_reporter`
+    (ticket 10). Neither half is sufficient alone.
     """
     import re
     from pathlib import Path

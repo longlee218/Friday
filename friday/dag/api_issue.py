@@ -266,8 +266,17 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
     Markdown code fence — had its prose read as the reply and proposed under
     the operator's name.
 
-    With no tools configured this reproduces the deterministic planner it
-    replaced, which is what makes removing that planner safe.
+    With no agent configured it hands over instead of answering. It used to
+    reply — `Reply(f"{cause}\n\n{fix}")`, reproducing the deterministic
+    planner this graph replaced — and that was the planner's bug carried
+    forward, not a feature worth preserving (ticket 10): `cause` is
+    `analyze_stack`'s own sentence and `fix` is `fix_bug`'s raw unified diff,
+    both Node family, and a `Reply` is queued under the operator's name and
+    sent to whoever reported the bug. So the one configuration the docs call
+    the ordinary degraded mode was the one that broke the invariant — only
+    Responder-family agents produce text a reporter reads — and posted an
+    unreviewed patch to them besides. Handing over puts the same two things
+    in front of the operator, which is who they were always for.
     """
     params = _params(state)
     analysis = state.get("analyze_stack") or {}
@@ -289,7 +298,11 @@ async def _compose_reply(state: DAGState, deps: DAGDeps) -> Action:
             written = await agent.run(prompt, context=capture, extra_turns=2)
             if written is not None and capture.action is not None:
                 return capture.action
-        return Reply(said)
+        # No agent, or one that answered nothing: the investigation found
+        # something and no Responder-family agent is here to say it. The
+        # operator reads `said` as a finding — the one audience Node-family
+        # prose and a diff were ever meant for.
+        return HandOver(f"Found something, but nobody wrote a reply: {said}")
 
     # Nothing found — and by the time this runs, that no longer means "we were
     # never given enough". `_traceable` in `ApiIssueParams._RULES` gates the

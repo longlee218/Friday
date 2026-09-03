@@ -134,7 +134,10 @@ async def test_the_state_accumulates_as_the_graph_walks():
     assert state["read_logs"] == LOGS
     assert state["find_code_path"] == "checkout.py:42"
     assert state["analyze_stack"]["cause"] == "upstream timed out"
-    assert isinstance(state["compose_reply"], Reply)
+    # A `HandOver` rather than a `Reply` because no `compose_reply` agent is
+    # configured here — see ticket 10. What this test is about is that every
+    # node ran and its result landed in the state.
+    assert isinstance(state["compose_reply"], HandOver)
 
 
 async def test_fix_bug_is_skipped_when_the_cause_is_not_actionable():
@@ -162,7 +165,7 @@ async def test_fix_bug_runs_when_the_cause_is_actionable():
     )
 
     assert state["fix_bug"] == "patched"
-    assert isinstance(state["compose_reply"], Reply)
+    assert isinstance(state["compose_reply"], HandOver)
 
 
 async def test_the_reply_carries_both_the_cause_and_the_fix():
@@ -260,9 +263,12 @@ async def test_compose_reply_can_hand_over_instead_of_answering():
     assert outcome == HandOver("not confident this is right")
 
 
-async def test_prose_with_no_tool_call_falls_back_to_the_raw_cause():
+async def test_prose_with_no_tool_call_hands_over_rather_than_being_read():
     """A model that writes prose instead of calling either tool is not read
-    for what it said — the fallback is the same one a missing agent gets."""
+    for what it said — the fallback is the same one a missing agent gets,
+    which since ticket 10 is a hand-over rather than a reply. The prose
+    itself still goes nowhere: what the operator is shown is the cause the
+    analysis found, never the sentence this model wandered into."""
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
     from friday.dag.api_issue import ComposeCapture, COMPOSE_TOOLS
@@ -273,7 +279,9 @@ async def test_prose_with_no_tool_call_falls_back_to_the_raw_cause():
 
     outcome = await _compose_with(Rambling())
 
-    assert outcome == Reply("upstream timed out")
+    assert isinstance(outcome, HandOver)
+    assert "upstream timed out" in outcome.reason
+    assert "some prose" not in outcome.reason
 
 
 # --- refusing rather than guessing ------------------------------------------
@@ -720,3 +728,61 @@ async def test_an_ordinary_fix_in_ordinary_code_still_goes_through():
     )
 
     assert diff.startswith("--- a/x.py")
+
+
+# --- ticket 10: the agentless composer must not speak to a reporter ---------
+
+
+async def _compose_without_an_agent(*, fix=None) -> Action:
+    """`_compose_reply` with a cause found and **no** `compose_reply` agent —
+    what a fresh install and any deploy without a `dag_compose` block runs."""
+    from friday.dag.api_issue import _compose_reply
+
+    state = (
+        DAGState.empty()
+        .with_result("prepare", ApiIssueParams(summary="s", correlation_id=UUID))
+        .with_result("analyze_stack", {"cause": "upstream timed out"})
+    )
+    if fix is not None:
+        state = state.with_result("fix_bug", fix)
+    return await _compose_reply(
+        state,
+        DAGDeps(
+            task=SimpleNamespace(
+                id=1,
+                params={"summary": "s", "correlation_id": UUID},
+                conversation=SimpleNamespace(channel_id="c"),
+            ),
+            extra={},
+        ),
+    )
+
+
+async def test_an_unconfigured_composer_does_not_reply_in_a_nodes_voice():
+    """The invariant: only Responder-family agents produce text that reaches
+    a reporter. With no agent here, nothing in that family has touched a
+    word — `analyze_stack`'s `cause` is a Node-family sentence — so it must
+    not become a `Reply`, which is queued under the operator's name and sent
+    to whoever reported the bug."""
+    outcome = await _compose_without_an_agent()
+
+    assert isinstance(outcome, HandOver), (
+        "an agentless composer sent a reporter text no Responder wrote"
+    )
+    assert "upstream timed out" in outcome.reason, (
+        "the operator still needs to see what was found"
+    )
+
+
+async def test_an_unconfigured_composer_never_puts_a_diff_in_front_of_a_reporter():
+    """Ticket 07 built a gate so a patch waits for the operator. This path
+    used to route the same patch to the *reporter* with no gate at all: not
+    applied anywhere, but a code change proposed verbatim to whoever filed
+    the ticket."""
+    diff = "--- a/checkout.py\n+++ b/checkout.py\n@@\n-    x\n+    y"
+
+    outcome = await _compose_without_an_agent(fix=diff)
+
+    assert not isinstance(outcome, Reply), "a raw diff was queued as a reply"
+    assert isinstance(outcome, HandOver)
+    assert diff in outcome.reason, "the operator is the one who should see it"
