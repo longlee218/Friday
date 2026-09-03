@@ -17,7 +17,7 @@ from friday.domain.validation import (
     Problem,
     validate,
 )
-from friday.workflows import _problems, _question
+from friday.dag.prepare import _problems, _question
 
 
 # --- the engine --------------------------------------------------------
@@ -221,7 +221,7 @@ def test_question_includes_validation_message_when_it_carries_information():
 def test_validate_is_only_invoked_from_one_call_site():
     """Ticket 30's seam guarantee. The whole point is one call site: the
     engine must not be invoked from anywhere but `_problems` in
-    `friday/workflows/__init__.py`. `friday.models` and `friday.extraction`
+    `friday/dag/prepare.py`. `friday.models` and `friday.extraction`
     may import the rule vocabulary to declare what fields are valid; that
     is not a call site, that is data.
 
@@ -244,8 +244,8 @@ def test_validate_is_only_invoked_from_one_call_site():
 
     # Imports of `from friday.domain.validation import ...` are declarations of
     # rules; that is data, not a call site. The seam guarantees the rule
-    # *engine* only runs from one place, which is `friday/workflows/__init__.py`.
-    allowed = {"friday/workflows/__init__.py"}
+    # *engine* only runs from one place, which is `friday/dag/prepare.py`.
+    allowed = {"friday/dag/prepare.py"}
     assert set(hits) <= allowed, f"unexpected caller: {set(hits) - allowed}"
 
 
@@ -254,11 +254,12 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
     records when it runs; pass params whose rule should fail; assert the
     planner never saw the call.
 
-    Driven through the two calls `WorkflowRunner._plan` makes, in that order,
+    Driven through the two calls `prepare_node`'s node runs, in that order,
     rather than through a wrapper only tests used.
     """
     from friday.domain.validation import Matches
-    from friday.workflows import PARAMS, plan_by_required_parameters, prepare
+    from friday.domain.models import PARAMS
+    from friday.dag.prepare import plan_by_required_parameters, prepare
 
     @dataclass
     class StrictParams:

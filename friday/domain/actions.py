@@ -1,11 +1,10 @@
 """What a decision about a task comes to.
 
-Every path that decides what to do with a task — the deterministic one in
-`friday/workflows/` and the graphs in `friday/dag/` — ends in one of these.
-They are vocabulary, not mechanism, which is why they live here rather than in
-either: a graph node importing them from the loop, or the loop importing them
-from the graph engine, was an import cycle with no reason for the direction it
-happened to take.
+Every graph in `friday/dag/` ends in one of these, and the pool in
+`friday/tasks/` is what acts on it. They are vocabulary, not mechanism, which
+is why they live here rather than in either: a graph node importing them from
+the pool, or the pool importing them from the graph engine, was an import
+cycle with no reason for the direction it happened to take.
 """
 
 from __future__ import annotations

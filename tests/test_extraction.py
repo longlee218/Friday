@@ -292,7 +292,7 @@ def test_extracts_covers_every_task_type_that_opens_a_task():
     """`PARAMS` is the set of types that become tasks. Any of them without an
     entry here has nothing filling its fields."""
     from friday.extraction import EXTRACTS
-    from friday.workflows import PARAMS
+    from friday.domain.models import PARAMS
 
     assert set(EXTRACTS) == set(PARAMS)
 
@@ -343,7 +343,7 @@ def test_every_extraction_field_tells_the_model_what_it_means():
     and were deleted with them instead of moved here."""
     from dataclasses import fields as dataclass_fields
 
-    from friday.workflows import PARAMS
+    from friday.domain.models import PARAMS
 
     undocumented = [
         f"{cls.__name__}.{f.name}"

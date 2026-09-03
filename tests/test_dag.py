@@ -341,20 +341,20 @@ def test_an_unregistered_task_type_has_no_dag():
     """`None` here means the type was never registered at all — a task type
     nothing in `PARAMS` knows about. That is different from a `PARAMS` entry
     with no graph, which `register_dags` now never leaves true and
-    `WorkflowRunner._plan` asserts against rather than falling back to a
+    `Pool._plan` asserts against rather than falling back to a
     second way of deciding what to do."""
     assert dag_for("no_such_type_32") is None
 
 
-# --- integration with WorkflowRunner ---------------------------------------
+# --- integration with Pool ---------------------------------------
 
 
 async def test_a_registered_dag_runs_instead_of_the_planner(db):
     """The route ticket 32 buys: a task type with a DAG goes to the graph,
     and the graph's Action is what the runner acts on."""
     from friday.domain.actions import Reply
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     async def answers(state: DAGState, deps: DAGDeps):
         return Reply("traced it: the upstream timed out")
@@ -364,7 +364,7 @@ async def test_a_registered_dag_runs_instead_of_the_planner(db):
     try:
         await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
 
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
 
         reply = [r for r in await db.outbound() if r.kind == "reply"]
         assert reply, "the DAG's Reply never reached the outbox"
@@ -378,8 +378,8 @@ async def test_the_dag_state_is_persisted_between_passes(db):
     node the first pass finished — node 0 excepted, which reruns on every
     pass and is never in what gets stored (ticket 03)."""
     from friday.domain.actions import HandOver
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     ran: list[str] = []
 
@@ -406,7 +406,7 @@ async def test_the_dag_state_is_persisted_between_passes(db):
     try:
         task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
 
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
 
         stored = await db.load_dag_state(task.id)
         assert "prepare" not in stored, "node 0 must never be checkpointed"
@@ -426,8 +426,8 @@ async def test_a_hand_over_gives_the_task_the_question(db):
     `doc_question`'s real one-node graphs take when what is missing needs a
     human, not the reporter."""
     from friday.domain.actions import HandOver
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     async def unsure(state: DAGState, deps: DAGDeps):
         return HandOver("The fix touches a migration. Apply it? (apply / leave it)")
@@ -437,7 +437,7 @@ async def test_a_hand_over_gives_the_task_the_question(db):
     try:
         task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
 
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
 
         pause = await db.dag_pause(task.id)
         assert pause is not None
@@ -453,8 +453,8 @@ async def test_a_hand_over_gives_the_task_the_question(db):
 async def test_a_dag_that_finishes_without_an_action_hands_over_rather_than_inventing(db):
     """A graph that returns a string has not said what to send. Handing over
     is honest; turning the value into a reply is not."""
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     async def shrugs(state: DAGState, deps: DAGDeps):
         return "some notes nobody asked to send"
@@ -464,7 +464,7 @@ async def test_a_dag_that_finishes_without_an_action_hands_over_rather_than_inve
     try:
         await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
 
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
 
         sent = [r for r in await db.outbound() if r.kind == "reply"]
         assert sent == [], "a value the graph never meant as a reply was sent"
@@ -481,7 +481,7 @@ async def test_a_bookkeeping_node_declared_last_does_not_discard_the_reply():
     node tuple instead of the path throws that decision away — then hands
     over with a reason that is not true."""
     from friday.domain.actions import Reply
-    from friday.workflows.runner import WorkflowRunner
+    from friday.tasks.pool import Pool
 
     async def compose(s, d):
         return Reply("the real answer")
@@ -497,7 +497,7 @@ async def test_a_bookkeeping_node_declared_last_does_not_discard_the_reply():
     runner = DAGRunner(dag)
     final = await runner.run()
 
-    assert WorkflowRunner._outcome(dag, final, runner.trail) == Reply(
+    assert Pool._outcome(dag, final, runner.trail) == Reply(
         "the real answer"
     )
 
@@ -506,7 +506,7 @@ async def test_a_node_returning_none_after_the_decision_does_not_discard_it():
     """`None` means "nothing to record", which the node docstring encourages.
     It must not also mean "forget what the graph decided"."""
     from friday.domain.actions import Reply
-    from friday.workflows.runner import WorkflowRunner
+    from friday.tasks.pool import Pool
 
     async def compose(s, d):
         return Reply("answer")
@@ -522,14 +522,14 @@ async def test_a_node_returning_none_after_the_decision_does_not_discard_it():
     runner = DAGRunner(dag)
     final = await runner.run()
 
-    assert WorkflowRunner._outcome(dag, final, runner.trail) == Reply("answer")
+    assert Pool._outcome(dag, final, runner.trail) == Reply("answer")
 
 
 async def test_the_trail_records_resumed_nodes_too():
     """A resumed run must be able to answer "what did this decide?" the same
     way a fresh one does, even though it re-ran nothing."""
     from friday.domain.actions import Reply
-    from friday.workflows.runner import WorkflowRunner
+    from friday.tasks.pool import Pool
 
     async def compose(s, d):
         return Reply("answer")
@@ -541,7 +541,7 @@ async def test_the_trail_records_resumed_nodes_too():
     final = await runner.run()
 
     assert runner.trail == ["compose"]
-    assert WorkflowRunner._outcome(dag, final, runner.trail) == Reply("answer")
+    assert Pool._outcome(dag, final, runner.trail) == Reply("answer")
 
 
 async def test_a_conditional_edge_reading_a_dropped_marker_reruns_the_node(db):
@@ -611,8 +611,8 @@ async def test_answering_the_question_re_runs_the_nodes_that_asked_it(db):
     read no logs at all: the system asked a question, got the answer, and ignored it.
     """
     from friday.domain.actions import Ask, HandOver
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     looked_up: list[str | None] = []
 
@@ -643,7 +643,7 @@ async def test_answering_the_question_re_runs_the_nodes_that_asked_it(db):
         # A curl makes the report traceable, so the graph runs — without one it
         # never starts, which is what `_traceable` is for.
         task = await make_task(db, curl="curl -X GET /pay")
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
         assert looked_up == [None]
 
         # They answered. The task goes back to pending with the id filled in.
@@ -652,7 +652,7 @@ async def test_answering_the_question_re_runs_the_nodes_that_asked_it(db):
         )
         await db.move_task(task.id, "pending")
 
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
     finally:
         EDGE_ROUTER.pop("api_issue", None)
 
@@ -669,8 +669,8 @@ async def test_state_survives_a_pass_that_changed_nothing(db):
     buy nothing.
     """
     from friday.domain.actions import HandOver
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     ran: list[str] = []
 
@@ -695,9 +695,9 @@ async def test_state_survives_a_pass_that_changed_nothing(db):
     )
     try:
         task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
         await db.move_task(task.id, "pending")
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
     finally:
         EDGE_ROUTER.pop("api_issue", None)
 
@@ -713,19 +713,19 @@ async def test_the_three_message_table_holds_end_to_end(db):
     to trace on. The correlationId finally makes the report traceable, and
     the graph runs for the first time.
     """
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     task = await make_task(db)  # "API lỗi" — no id, no curl
 
-    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    await Pool(db=db, auto_ask=True).run_once()
     assert await db.load_dag_state(task.id) is None, "nothing to trace on yet"
     asked = [r for r in await db.outbound() if r.kind == "ask_for_details"]
     assert len(asked) == 1
 
     # "cảm ơn anh" — a follow-up that supplies nothing new.
     await db.move_task(task.id, "pending")
-    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    await Pool(db=db, auto_ask=True).run_once()
     assert await db.load_dag_state(task.id) is None, "still nothing to trace on"
     asked = [r for r in await db.outbound() if r.kind == "ask_for_details"]
     assert len(asked) == 2, "the follow-up should still be answered, just not investigated"
@@ -736,7 +736,7 @@ async def test_the_three_message_table_holds_end_to_end(db):
         {**task.params, "correlation_id": "abcdef01-2345-6789-abcd-ef0123456789"},
     )
     await db.move_task(task.id, "pending")
-    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    await Pool(db=db, auto_ask=True).run_once()
 
     stored = await db.load_dag_state(task.id)
     assert stored is not None, "the graph runs for the first time"
@@ -749,7 +749,7 @@ async def test_a_one_node_type_hands_over_on_the_same_terms_as_api_issue(db):
     reruns on every pass regardless of stored state; a complete report hands
     over with the specific reason recorded, not the task's bare type."""
     from friday.domain.conversation import ConversationId
-    from friday.workflows.runner import WorkflowRunner
+    from friday.tasks.pool import Pool
 
     task = await db.create_task(
         conversation=ConversationId("fake", "watched"),
@@ -759,7 +759,7 @@ async def test_a_one_node_type_hands_over_on_the_same_terms_as_api_issue(db):
         params={"project": "", "permission": "", "summary": ""},
     )
 
-    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    await Pool(db=db, auto_ask=True).run_once()
     asked = [r for r in await db.outbound() if r.kind == "ask_for_details"]
     assert len(asked) == 1
     assert "project" in asked[0].text
@@ -769,7 +769,7 @@ async def test_a_one_node_type_hands_over_on_the_same_terms_as_api_issue(db):
         task.id, {"project": "backend", "permission": "write", "summary": "s"}
     )
     await db.move_task(task.id, "pending")
-    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    await Pool(db=db, auto_ask=True).run_once()
 
     pause = await db.dag_pause(task.id)
     assert pause is not None, "hand-over must record why, same as api_issue does"
@@ -819,7 +819,7 @@ async def _wired_for_a_fix(db, fixer):
     from friday.dag.prepare import prepare_node, prepared_ok
     from friday.dag.router import EDGE_ROUTER, register_dag
     from friday.domain.models import ApiIssueParams
-    from tests.test_workflow_runner import make_task
+    from tests.test_pool import make_task
 
     async def analyze_stack(state, deps):
         return {"cause": "off by one in the loop bound", "actionable": True}
@@ -851,7 +851,7 @@ async def test_apply_fix_stops_the_run_until_the_operator_says_so(db):
     state, and the task waits like any hand-over does, with the interruption
     stored alongside it rather than lost when the process moves on."""
     from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
-    from friday.workflows.runner import WorkflowRunner
+    from friday.tasks.pool import Pool
     from agents.testing import function_call
 
     fixer = _fix_bug_agent(
@@ -862,7 +862,7 @@ async def test_apply_fix_stops_the_run_until_the_operator_says_so(db):
         DAG_DEPS_EXTRA["api_issue"] = {"fix_bug": fixer}
         DAG_SERVERS["source"] = object()
 
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
 
         assert (await db.tasks())[0].state == "needs_human"
         stored = await db.dag_interruption(task.id)
@@ -884,7 +884,7 @@ async def test_approving_resumes_the_exact_call_in_a_fresh_process(db):
     a redeploy — resumes the paused call and reaches `compose_reply` without
     read_logs or analyze_stack running a second time."""
     from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
-    from friday.workflows.runner import WorkflowRunner
+    from friday.tasks.pool import Pool
     from agents.testing import function_call
 
     fixer = _fix_bug_agent(
@@ -894,7 +894,7 @@ async def test_approving_resumes_the_exact_call_in_a_fresh_process(db):
         task = await _wired_for_a_fix(db, fixer)
         DAG_DEPS_EXTRA["api_issue"] = {"fix_bug": fixer}
         DAG_SERVERS["source"] = object()
-        runner = WorkflowRunner(db=db, auto_ask=True)
+        runner = Pool(db=db, auto_ask=True)
         await runner.run_once()
 
         # A fresh Harness, exactly what a restarted process would build. It
@@ -928,7 +928,7 @@ async def test_declining_hands_over_without_calling_the_model_again(db):
     """A decline is code's decision, not a further turn with the model — the
     fixer here would fail loudly if it were asked anything at all."""
     from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS
-    from friday.workflows.runner import WorkflowRunner
+    from friday.tasks.pool import Pool
     from agents.testing import function_call
 
     fixer = _fix_bug_agent(
@@ -938,7 +938,7 @@ async def test_declining_hands_over_without_calling_the_model_again(db):
         task = await _wired_for_a_fix(db, fixer)
         DAG_DEPS_EXTRA["api_issue"] = {"fix_bug": fixer}
         DAG_SERVERS["source"] = object()
-        runner = WorkflowRunner(db=db, auto_ask=True)
+        runner = Pool(db=db, auto_ask=True)
         await runner.run_once()
 
         moved = await runner.decide_pending_action(
@@ -973,8 +973,8 @@ async def test_a_pause_records_the_node_that_paused_not_the_graph(db):
     """`paused_at_node` is read by a human deciding where to look. Storing
     the graph's name there answers a question nobody asked."""
     from friday.domain.actions import HandOver
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     async def fine(state: DAGState, deps: DAGDeps):
         return "ok"
@@ -993,7 +993,7 @@ async def test_a_pause_records_the_node_that_paused_not_the_graph(db):
     )
     try:
         task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
         assert await db.dag_pause(task.id) == ("fix_bug", "this needs a migration")
     finally:
         EDGE_ROUTER.pop("api_issue", None)
@@ -1004,8 +1004,8 @@ async def test_the_question_a_graph_paused_on_reaches_the_operator(db):
     there is work must carry it, or they open the board to find out what the
     system already knew."""
     from friday.domain.actions import HandOver
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     async def stops(state: DAGState, deps: DAGDeps):
         return HandOver("the cause mentions a migration, I have not touched it")
@@ -1014,7 +1014,7 @@ async def test_the_question_a_graph_paused_on_reaches_the_operator(db):
     register_dag("api_issue", DAG(name="pauses", nodes=(Node("fix_bug", stops),)))
     try:
         await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
     finally:
         EDGE_ROUTER.pop("api_issue", None)
 
@@ -1044,8 +1044,8 @@ async def test_a_second_pause_asks_a_second_question(db):
     and the task would sit in NEEDS_HUMAN with nobody told.
     """
     from friday.domain.actions import HandOver
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     asked: list[str] = []
 
@@ -1062,11 +1062,11 @@ async def test_a_second_pause_asks_a_second_question(db):
     register_dag("api_issue", DAG(name="asks", nodes=(Node("triage_it", stops),)))
     try:
         task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
 
         await db.set_task_params(task.id, {**task.params, "environment": "production"})
         await db.move_task(task.id, "pending")
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
     finally:
         EDGE_ROUTER.pop("api_issue", None)
 
@@ -1080,8 +1080,8 @@ async def test_the_same_question_is_not_asked_twice(db):
     """The other half. A notification that repeats is one you learn to
     ignore, and a task sitting untouched has nothing new to say."""
     from friday.domain.actions import HandOver
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     async def stops(state: DAGState, deps: DAGDeps):
         return HandOver("which environment?")
@@ -1090,10 +1090,10 @@ async def test_the_same_question_is_not_asked_twice(db):
     register_dag("api_issue", DAG(name="asks", nodes=(Node("triage_it", stops),)))
     try:
         task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
         await db.move_task(task.id, "pending")
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
     finally:
         EDGE_ROUTER.pop("api_issue", None)
 
@@ -1109,9 +1109,9 @@ async def test_a_malformed_value_is_challenged_before_the_graph_runs(db):
     prove nothing about the rule this test exists to guard."""
     from friday.domain.actions import Ask
     from friday.domain.models import ApiIssueParams
-    from friday.workflows import prepare as _validate
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.dag.prepare import prepare as _validate
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     ran: list[str] = []
 
@@ -1134,7 +1134,7 @@ async def test_a_malformed_value_is_challenged_before_the_graph_runs(db):
     )
     try:
         await make_task(db, correlation_id="not-a-uuid")
-        await WorkflowRunner(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
     finally:
         EDGE_ROUTER.pop("api_issue", None)
 
@@ -1148,7 +1148,7 @@ def test_the_fingerprint_does_not_confuse_a_separator_for_a_field_boundary():
     fingerprint, and `1` the same as `"1"`. Unreachable with today's `str |
     None` fields, but this is handed the raw JSON-decoded dict, so the type
     discipline it relied on is not enforced at its own edge."""
-    from friday.workflows.runner import _fingerprint
+    from friday.tasks.pool import _fingerprint
 
     assert _fingerprint({"a": "b=c"}) != _fingerprint({"a=b": "c"})
     assert _fingerprint({"correlation_id": 1}) != _fingerprint({"correlation_id": "1"})
@@ -1158,7 +1158,7 @@ def test_an_absent_field_and_an_empty_one_are_the_same_absence():
     """`""` and `None` and not-there mean the same for a `str | None` field.
     Discarding a graph's work over that distinction costs tool calls for
     nothing."""
-    from friday.workflows.runner import _fingerprint
+    from friday.tasks.pool import _fingerprint
 
     assert _fingerprint({"a": "x", "b": ""}) == _fingerprint({"a": "x"})
     assert _fingerprint({"a": "x", "b": None}) == _fingerprint({"a": "x"})
@@ -1172,8 +1172,8 @@ async def test_a_pause_computed_against_other_parameters_is_not_announced(db):
     a node completes — so a run that discards its state and then fails leaves
     the old question sitting there. Announcing it asks the reporter the very
     thing they just answered, with their answer visible in the same message."""
-    from friday.workflows.runner import WorkflowRunner, _fingerprint
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool, _fingerprint
+    from tests.test_pool import make_task
 
     task = await make_task(db)
     await db.save_dag_state(
@@ -1220,13 +1220,13 @@ async def test_the_operator_is_not_told_the_same_thing_nineteen_times(db):
     not overwrite. This is the bound underneath it, for whatever moves the
     text next.
     """
-    from friday.workflows.runner import WorkflowRunner
-    from tests.test_workflow_runner import make_task
+    from friday.tasks.pool import Pool
+    from tests.test_pool import make_task
 
     task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     await db.move_task(task.id, "needs_human")
 
-    runner = WorkflowRunner(db=db, auto_ask=True, max_asks=3)
+    runner = Pool(db=db, auto_ask=True, max_asks=3)
     for reworded in range(8):
         await db.set_task_params(
             task.id, {**task.params, "summary": f"API is broken, take {reworded}"}

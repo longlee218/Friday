@@ -136,7 +136,7 @@ def test_create_task_describes_every_type_from_its_own_params_class():
     description are both read out of `PARAMS` at import time — this pins that
     nobody hand-wrote either and let them drift."""
     from friday.triage import TOOLS
-    from friday.workflows import PARAMS
+    from friday.domain.models import PARAMS
 
     (create_task,) = [t for t in TOOLS if t.name == "create_task"]
     schema = create_task.params_json_schema["properties"]["task_type"]

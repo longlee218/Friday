@@ -202,34 +202,35 @@ def test_no_family_imports_another_familys_prompt_module():
             assert not hits, f"{family} imports {other}: {hits}"
 
 
-def test_the_graph_engine_does_not_import_vocabulary_from_the_loop():
+def test_the_graph_engine_only_imports_vocabulary_from_the_domain():
     """`Ask`, `Reply`, `HandOver` and `Action` used to be defined in
     `friday/workflows/`, and `friday/dag/` imported them from there — the
     graph engine reaching into the loop for words that belong to neither.
-    They live in `friday.domain.actions` now; this pins the cycle staying
-    gone rather than quietly growing back the day someone needs one more
-    shared name.
-
-    Narrower than "no import of `friday.workflows` at all": `friday/dag/`
-    legitimately reuses `prepare` — extraction and validation are mechanism,
-    not vocabulary, and `friday.workflows` still owns that mechanism until
-    ticket 09 gives it a permanent home.
+    They live in `friday.domain.actions` now (D3), and `friday/workflows/`
+    is gone (ticket 09): this pins the vocabulary staying in the one place
+    both the graph engine and the pool read it from, rather than a shared
+    import creeping back in through whichever of the two happens to define
+    it this time.
     """
     import ast
     from pathlib import Path
 
     vocabulary = {"Action", "Ask", "HandOver", "Reply"}
-    root = Path(__file__).resolve().parents[1] / "friday" / "dag"
+    friday = Path(__file__).resolve().parents[1] / "friday"
     offenders = {}
-    for path in root.rglob("*.py"):
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module == "friday.workflows":
-                borrowed = {a.name for a in node.names} & vocabulary
-                if borrowed:
-                    offenders[str(path)] = borrowed
+    for package in ("dag", "tasks"):
+        for path in (friday / package).rglob("*.py"):
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module != "friday.domain.actions":
+                    borrowed = {a.name for a in node.names} & vocabulary
+                    if borrowed:
+                        offenders[str(path)] = borrowed
 
-    assert offenders == {}, f"friday/dag imports vocabulary from friday.workflows: {offenders}"
+    assert offenders == {}, (
+        f"friday/dag or friday/tasks imports vocabulary from somewhere but "
+        f"friday.domain.actions: {offenders}"
+    )
 
 
 def test_no_graph_node_can_create_a_task():
@@ -267,3 +268,57 @@ def test_park_is_gone_as_a_name():
             offenders[str(path.relative_to(root))] = len(hits)
 
     assert offenders == {}, f"'Park' survives outside the rename note: {offenders}"
+
+
+def test_only_responder_family_agents_can_speak_for_the_operator():
+    """The invariant new to ticket 09: only Responder-family agents produce
+    text that reaches a reporter. A node inside an investigation is a step,
+    not a voice — give the wrong node the Responder persona and every test
+    that checks *whether* a reply gets sent still passes; only its *tone*
+    quietly changes, under the operator's name, to something they never
+    wrote. Nothing else in the suite would catch that, which is exactly why
+    this is pinned directly rather than left to be implied by behaviour.
+
+    Two things have to both hold: `Family.RESPONDER` is only ever named
+    inside `friday/responder/` (the operator's own voice) and the one node,
+    `compose_reply`, wired to it in `friday/dag/prompt.py`; and that wiring
+    itself sends `compose_reply` the Responder section and every other node
+    the Node section.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "friday"
+    allowed = {
+        root / "responder" / "__init__.py",
+        root / "responder" / "prompt.py",
+        root / "dag" / "prompt.py",
+    }
+    pattern = re.compile(r"Family\.RESPONDER")
+    offenders = {}
+    for path in root.rglob("*.py"):
+        if path in allowed:
+            continue
+        hits = pattern.findall(path.read_text())
+        if hits:
+            offenders[str(path.relative_to(root.parent))] = len(hits)
+    assert offenders == {}, (
+        f"Family.RESPONDER used outside friday/responder/ and dag/prompt.py: "
+        f"{offenders} — only the composer and the operator's own Responder may "
+        f"write in that voice"
+    )
+
+    from friday.agent.persona import Family
+    from friday.dag.prompt import _TEXTS, build_instructions
+
+    class _Spy:
+        def render(self, family: Family) -> str:
+            return "RESPONDER" if family is Family.RESPONDER else "NODE"
+
+    for node in _TEXTS:
+        voice = build_instructions(node, persona=_Spy())
+        expected = "RESPONDER" if node == "compose_reply" else "NODE"
+        assert voice.startswith(expected), (
+            f"{node} was built with the wrong persona family — only "
+            f"compose_reply may speak in the operator's voice"
+        )

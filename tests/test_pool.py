@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from conftest import make_event
 from friday.domain.conversation import ConversationId
-from friday.workflows.runner import ASKED, WorkflowRunner
+from friday.tasks.pool import ASKED, Pool
 from friday.domain.states import TaskState
 
 
@@ -31,7 +31,7 @@ async def make_task(db, **params):
 async def test_a_report_missing_details_is_asked_about(db):
     await make_task(db)
 
-    acted = await WorkflowRunner(db=db, auto_ask=True).run_once()
+    acted = await Pool(db=db, auto_ask=True).run_once()
 
     (queued,) = await db.outbound()
     assert queued.kind == "ask_for_details"
@@ -43,7 +43,7 @@ async def test_a_report_missing_details_is_asked_about(db):
 async def test_nothing_is_sent_when_auto_asking_is_off(db):
     await make_task(db)
 
-    await WorkflowRunner(db=db, auto_ask=False).run_once()
+    await Pool(db=db, auto_ask=False).run_once()
 
     assert [r for r in await db.outbound() if r.sender == "discord_user"] == []
     assert (await db.tasks())[0].state == "needs_human"
@@ -51,7 +51,7 @@ async def test_nothing_is_sent_when_auto_asking_is_off(db):
 
 async def test_a_task_is_acted_on_only_once(db):
     await make_task(db)
-    runner = WorkflowRunner(db=db, auto_ask=True)
+    runner = Pool(db=db, auto_ask=True)
 
     await runner.run_once()
     await runner.run_once()
@@ -63,7 +63,7 @@ async def test_a_report_that_can_be_traced_waits_for_a_human(db):
     """Tracing is not built. Handing over is honest; replying would not be."""
     await make_task(db, correlation_id="7f3a91c2-dead-beef-cafe-1234567890ab")
 
-    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    await Pool(db=db, auto_ask=True).run_once()
 
     assert [r for r in await db.outbound() if r.sender == "discord_user"] == []
     assert (await db.tasks())[0].state == "needs_human"
@@ -73,7 +73,7 @@ async def test_types_without_a_workflow_wait_for_a_human(db):
     await db.create_task(conversation=ConversationId("fake", "watched"), type="doc_question",
                          state="pending", confidence=0.9, params={"question": "?"})
 
-    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    await Pool(db=db, auto_ask=True).run_once()
 
     assert [r for r in await db.outbound() if r.sender == "discord_user"] == []
     assert (await db.tasks())[0].state == "needs_human"
@@ -84,7 +84,7 @@ async def test_a_task_stops_being_asked_after_a_few_tries(db):
     it becomes a human's problem, which is what a human is for."""
     opened = await make_task(db)
     # Debounce off: this is about the bound on asking, not about bursts.
-    runner = WorkflowRunner(db=db, auto_ask=True, max_asks=2)
+    runner = Pool(db=db, auto_ask=True, max_asks=2)
 
     for _ in range(3):
         await db.move_task(opened.id, TaskState.PENDING)
@@ -115,7 +115,7 @@ async def test_the_responder_is_told_what_to_say(db):
     await make_task(db)
     responder = StubResponder("ok")
 
-    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+    await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
     assert "correlationId" in responder.asked[0]
 
@@ -124,7 +124,7 @@ async def test_the_template_still_goes_out_when_the_responder_cannot(db):
     """Never a wrong reply in the operator's name; never silence either."""
     await make_task(db)
 
-    await WorkflowRunner(db=db, auto_ask=True, responder=StubResponder(None)).run_once()
+    await Pool(db=db, auto_ask=True, responder=StubResponder(None)).run_once()
 
     (queued,) = await db.outbound()
     assert queued.kind == "ask_for_details"
@@ -134,7 +134,7 @@ async def test_the_template_still_goes_out_when_the_responder_cannot(db):
 async def test_without_a_responder_nothing_changes(db):
     await make_task(db)
 
-    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    await Pool(db=db, auto_ask=True).run_once()
 
     assert [r.kind for r in await db.outbound()] == ["ask_for_details"]
 
@@ -142,7 +142,7 @@ async def test_without_a_responder_nothing_changes(db):
 async def test_a_task_waiting_on_the_reporter_still_is(db):
     await make_task(db)
 
-    acted = await WorkflowRunner(db=db, auto_ask=True).run_once()
+    acted = await Pool(db=db, auto_ask=True).run_once()
 
     assert acted[0].state == ASKED
 
@@ -155,7 +155,7 @@ async def test_asking_for_details_is_the_agents_own_decision(db):
     answers and for trouble, not for questions."""
     await make_task(db)
 
-    acted = await WorkflowRunner(
+    acted = await Pool(
         db=db, auto_ask=True, responder=StubResponder("cho anh xin correlationId")
     ).run_once()
 
@@ -169,7 +169,7 @@ async def test_asking_for_details_is_the_agents_own_decision(db):
 async def test_a_task_it_cannot_handle_is_brought_to_the_operator(db):
     """Otherwise it sits in a column nobody is watching."""
     task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")  # traceable, unactionable
-    runner = WorkflowRunner(db=db, auto_ask=True)
+    runner = Pool(db=db, auto_ask=True)
 
     await runner.run_once()
 
@@ -183,7 +183,7 @@ async def test_a_task_it_cannot_handle_is_brought_to_the_operator(db):
 async def test_the_operator_is_told_once(db):
     """A card per poll is a notification that trains you to ignore it."""
     await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
-    runner = WorkflowRunner(db=db, auto_ask=True)
+    runner = Pool(db=db, auto_ask=True)
 
     await runner.run_once()
     await runner.run_once()
@@ -215,7 +215,7 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     register_dag("api_issue", DAG(name="answers", nodes=(Node("answer", answers),)))
 
     await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
-    runner = WorkflowRunner(db=db, auto_ask=True)
+    runner = Pool(db=db, auto_ask=True)
 
     try:
         acted = await runner.run_once()
@@ -251,7 +251,7 @@ async def test_announcing_costs_the_same_whether_there_are_five_tasks_or_one(db)
         task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
         await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
-    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    await Pool(db=db, auto_ask=True).run_once()
 
     # One `tasks_in_state` for the pending sweep, one for the announcement.
     assert queries == ["tasks_in_state", "tasks_in_state", "dag_pauses", "announced"]
@@ -335,7 +335,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
                 .values(task_id=task.id)
             )
 
-        await WorkflowRunner(db=db, auto_ask=False).run_once()
+        await Pool(db=db, auto_ask=False).run_once()
 
         # Extraction ran: the harness saw the reporter's text. The exact
         # HandOver action depends on validate's verdict — what matters here
@@ -415,7 +415,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
                 .values(task_id=task.id)
             )
 
-        await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+        await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
         (row,) = await db.outbound()
         assert row.text == "anh check giúp em cái server nhé", (
@@ -443,7 +443,7 @@ async def test_the_responder_is_told_what_this_task_actually_knows(db):
     responder = StubResponder("cho anh xin cái correlationId nhé")
     await make_task(db, environment="production")
 
-    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+    await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
     (given,) = responder.given_params
     assert isinstance(given, ApiIssueParams)
@@ -592,7 +592,7 @@ async def test_the_operator_answering_closes_the_task_and_withdraws_the_draft(db
     )
     await _operator_said(db, "op-1", "à cái này do cache, anh clear rồi")
 
-    await WorkflowRunner(db=db, auto_ask=True).run_once()
+    await Pool(db=db, auto_ask=True).run_once()
 
     (closed,) = await db.tasks()
     assert closed.state == TaskState.HANDLED_BY_OPERATOR
@@ -617,7 +617,7 @@ async def test_a_message_this_process_posted_is_not_the_operator_answering(db):
     await db.mark_outbound_sent(row.id, sent_message_id="ours-1")
     await _operator_said(db, "ours-1", "cho anh xin cái correlationId nhé")
 
-    await WorkflowRunner(db=db, auto_ask=False).run_once()
+    await Pool(db=db, auto_ask=False).run_once()
 
     assert (await db.tasks())[0].state != "handled_by_operator"
 
@@ -629,7 +629,7 @@ async def test_with_several_open_tasks_and_no_reply_nothing_closes(db):
     b = await make_task(db, curl="curl -X GET /pay")
     await _operator_said(db, "op-1", "để anh xem")
 
-    await WorkflowRunner(db=db, auto_ask=False).run_once()
+    await Pool(db=db, auto_ask=False).run_once()
 
     states = {t.id: t.state for t in await db.tasks()}
     assert "handled_by_operator" not in states.values()
@@ -646,7 +646,7 @@ async def test_a_reply_picks_the_task_out_of_several(db):
     await db.mark_triaged(make_event(message_id="report-b"), b.id, decision={"type": "api_issue"})
     await _operator_said(db, "op-1", "cái curl đó thiếu header", reply_to="report-b")
 
-    await WorkflowRunner(db=db, auto_ask=False).run_once()
+    await Pool(db=db, auto_ask=False).run_once()
 
     states = {t.id: t.state for t in await db.tasks()}
     assert states[b.id] == TaskState.HANDLED_BY_OPERATOR
@@ -674,7 +674,7 @@ async def test_someone_the_operator_never_wrote_to_is_a_stranger(db):
     await db.record_message(make_event(message_id="m1", author_id="newcomer"))
     await db.mark_triaged(make_event(message_id="m1", author_id="newcomer"), task.id, decision={"type": "api_issue"})
 
-    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+    await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
     assert responder.strangers == [True]
 
@@ -693,7 +693,7 @@ async def test_an_exchange_in_either_direction_makes_them_known(db):
         context_only=True,
     )
 
-    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+    await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
     assert responder.strangers == [False]
 
@@ -717,7 +717,7 @@ async def test_being_written_down_for_the_room_makes_them_known(db, tmp_path):
     await db.record_message(make_event(message_id="m1", author_name="reporter"))
     await db.mark_triaged(make_event(message_id="m1", author_name="reporter"), task.id, decision={"type": "api_issue"})
 
-    await WorkflowRunner(db=db, auto_ask=True, responder=responder).run_once()
+    await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
     assert responder.strangers == [False]
 
@@ -774,7 +774,7 @@ async def test_the_operator_is_told_what_the_reporter_asked(db):
     await _reporter_said(db, "m2", "correlationId là cái gì a nhỉ?", secs=30, reply_to="m1")
     await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
-    await WorkflowRunner(db=db, auto_ask=False).run_once()
+    await Pool(db=db, auto_ask=False).run_once()
 
     (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
     assert "correlationId là cái gì a nhỉ?" in told.text
@@ -785,7 +785,7 @@ async def test_nothing_is_added_when_they_said_nothing_since(db):
     await _reporter_said(db, "m1", "API lỗi rồi", secs=0, task_id=task.id)
     await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
-    await WorkflowRunner(db=db, auto_ask=False).run_once()
+    await Pool(db=db, auto_ask=False).run_once()
 
     (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
     assert "they last said" not in told.text
@@ -804,7 +804,7 @@ async def test_our_own_question_is_not_what_they_last_said(db):
     await _reporter_said(db, "ours", "cho anh xin correlationId", secs=10, reply_to="m1")
     await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
-    await WorkflowRunner(db=db, auto_ask=False).run_once()
+    await Pool(db=db, auto_ask=False).run_once()
 
     (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
     assert "they last said" not in told.text
@@ -819,7 +819,7 @@ async def test_talking_about_something_else_is_not_about_this_task(db):
     await _reporter_said(db, "m2", "trưa nay ăn gì mọi người", secs=30)
     await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
-    await WorkflowRunner(db=db, auto_ask=False).run_once()
+    await Pool(db=db, auto_ask=False).run_once()
 
     (told,) = [r for r in await db.outbound() if r.kind == "help_wanted"]
     assert "trưa nay" not in told.text

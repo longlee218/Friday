@@ -24,10 +24,12 @@ and nothing could explain, and the operator answered by hand while the agent
 went on asking. Each ticket names what blocks it; work the frontier.
 
 A second board, `.scratch/every-task-is-a-graph/`, holds the spec and tickets
-01–09 for folding `friday/workflows/` and `friday/dag/` into one engine — every
-task type a graph, `prepare` as node 0, node agents reporting through tools.
-All nine are open. Its spec's D1–D18 are the rationale; the tickets reference
-them rather than repeating them.
+01–09 for folding two packages into one engine — every task type a graph,
+`prepare` as node 0, node agents reporting through tools. All nine are done:
+the old loop package is gone, folded into `friday/tasks/` (the pool) and
+`friday/dag/` (the graph engine and its `prepare` mechanism). Its spec's
+D1–D18 are the rationale; the tickets reference them rather than repeating
+them.
 
 The two paragraphs above go stale faster than anything else in this file.
 Check them against the `**Status:**` line in each ticket before trusting them.
@@ -141,8 +143,8 @@ What is actually on disk.
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py` (the account), `bot.py` (approval cards) and `normalise.py`. Its `__init__.py` is empty on purpose |
 | `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages |
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
-| `friday/workflows/` | `prepare` (extraction + validation, node 0 of every graph) and `plan_by_required_parameters` (a type with nothing past that node); the loop that acts on what a graph decides |
-| `friday/dag/` | The graph framework — nodes, edges, checkpointed resume. `dag/prepare.py` builds every graph's entry node; `dag/api_issue.py` is the one with an investigation past it; `dag/router.py` registers every graph, builds their node agents, and is what the composition root calls |
+| `friday/dag/` | The graph framework — nodes, edges, checkpointed resume. `dag/prepare.py` builds every graph's entry node and holds the fill-and-validate mechanism (`prepare`, `plan_by_required_parameters`) it runs; `dag/api_issue.py` is the one with an investigation past it; `dag/router.py` registers every graph, builds their node agents, and is what the composition root calls |
+| `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `friday/board/` | The read-only page on `:8086`; its JSON API is `ops/api.py` |
@@ -230,7 +232,7 @@ not an implementation detail:
   missing or hand over, which is all most types need — and `api_issue` gets
   an investigation past that same node. `dag_for` never answers "no graph"
   for a type `PARAMS` knows about; there is no second way to decide what to
-  do with a task any more, and `WorkflowRunner._plan` asserts on the
+  do with a task any more, and `Pool._plan` asserts on the
   invariant rather than falling back to one. Build a multi-node graph when
   there are steps worth skipping, not before — a one-node graph is that
   principle under one name, not an exception to it.
@@ -242,7 +244,7 @@ not an implementation detail:
   at the outbox regardless of which task produced them; applying a fix
   (ticket 07, D15) is the one action a node can take, and it waits on the
   SDK's own tool approval instead — the tool is marked `needs_approval`, the
-  run stops holding its state (`WorkflowRunner.decide_pending_action`), and
+  run stops holding its state (`Pool.decide_pending_action`), and
   that state lives in `dag_state.interruption` until the operator says yes or
   no. A word list matched against a model's own prose was the gate before
   this; it is not a gate a persuasive message cannot argue past.

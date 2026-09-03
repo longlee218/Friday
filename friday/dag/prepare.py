@@ -1,22 +1,45 @@
-"""Node 0, shared by every graph.
+"""Node 0, shared by every graph, and the fill-and-validate mechanism it runs.
 
 D2: "extract and validate" is the entrypoint of every graph — see ticket 03
 — not a gate in front of one, and not a copy per graph either. Every graph
 needs exactly the same shape here: read everything the reporter has said,
 fill in the parameters, write them back, check them. One function builds it.
+
+`prepare` and the rest of this module used to live in `friday/workflows/`,
+back when a second module still existed to hold a fallback for a type with no
+graph. Ticket 09 dissolved it: `prepare_node` was already this module's only
+caller of `prepare`, so the mechanism moved to sit beside it rather than
+staying behind an import.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, fields
+from typing import get_args, get_type_hints
 
 from friday.dag import DAGDeps, DAGState, Node
-from friday.domain.actions import Action, Ask
-from friday.domain.models import Params
-from friday.workflows import prepare as _prepare_params
+from friday.domain.actions import Action, Ask, HandOver
+from friday.domain.models import MODEL_AUTHORED, Params
+from friday.domain.validation import Problem, validate
+from friday.extraction import Clarify, extract as _extract
 
-__all__ = ["prepare_node", "prepared_ok"]
+__all__ = ["plan_by_required_parameters", "prepare", "prepare_node", "prepared_ok"]
+
+#: Field names that read badly as a question. Anything absent falls back to the
+#: field name, which is usually fine — "the project", "the permission".
+_ASKED_AS = {
+    "environment": "which environment you're on",
+    "correlation_id": "the correlationId",
+    "curl": "the curl you used",
+    #: The cross-field rule's sentinel. Either field answers it, so the
+    #: phrasing names both — asking for "the correlation_id or curl" would be
+    #: reading a rule out loud instead of asking a question.
+    "_traceable": "the correlationId, or the curl you used",
+    "question": "what you would like to know",
+    "permission": "what access you need",
+    "doc_ref": "which document you mean",
+}
 
 
 def prepare_node(
@@ -41,7 +64,7 @@ def prepare_node(
     async def _prepare(state: DAGState, deps: DAGDeps) -> Params | Action:
         known = params_cls(**deps.task.params)
         text = await deps.db.original_text_for(deps.task.id)
-        filled, problem = await _prepare_params(task_type, known, text=text)
+        filled, problem = await prepare(task_type, known, text=text)
 
         merged = {**deps.task.params, **asdict(filled)}
         if merged != deps.task.params:
@@ -57,3 +80,165 @@ def prepare_node(
 def prepared_ok(state: DAGState) -> bool:
     """Whether `prepare` cleared the report to continue past node 0."""
     return not isinstance(state["prepare"], Ask)
+
+
+async def prepare(
+    task_type: str,
+    params: Params,
+    *,
+    text: str | None = None,
+) -> tuple[Params, Action | None]:
+    """Fill the parameters in, then check them. Node 0 of every graph.
+
+    Returns the parameters to work with, and an `Ask` when they are not fit to
+    work with at all — a field missing, or one whose value the type's rules
+    reject.
+
+    Extraction runs before validation on purpose: validation is what stops a
+    hallucinated field from being believed, so it has to see what the extractor
+    produced and not only what triage wrote.
+
+    **Code is still the floor** (D12). The extractor may call
+    `ask_clarification` — it just read the whole thread, and may catch an
+    ambiguity no structural rule does — but a value the type's own rules
+    reject is challenged with the code template regardless of what the model
+    asked about instead. A model's question is honoured only once code has
+    nothing to say and only for fields the fill actually left blank: asking
+    again for something already answered is not a question this exists to ask.
+    """
+    clarify: Clarify | None = None
+    if text is not None:
+        extracted, clarify = await _extract(task_type, text)
+        if extracted is not None:
+            params = _fill(params, extracted)
+
+    problems = _problems(params)
+    if problems:
+        return params, Ask(_question(problems))
+
+    if clarify is not None:
+        still_missing = tuple(f for f in clarify.fields if not getattr(params, f, None))
+        if still_missing:
+            return params, Ask(_question_from_clarify(Clarify(still_missing, clarify.because)))
+
+    return params, None
+
+
+def plan_by_required_parameters(task_type: str, params: Params) -> Action:
+    """Ask for whatever the type says is not optional and is not there, or
+    whatever `validate` says is wrong.
+
+    Required-ness is read off the annotations rather than declared a second
+    time: `project: str` is required, `doc_ref: str | None` says outright that
+    we can manage without it. A list kept by hand would drift from the schema
+    the model is actually asked to fill.
+    """
+    problems = _problems(params)
+    if not problems:
+        return HandOver(f"no workflow for {task_type} yet")
+    return Ask(_question(problems))
+
+
+def _problems(params: Params) -> list[Problem]:
+    """What is wrong with the params, structural first then semantic.
+
+    Both run from this one place, so no other module has to remember to call
+    them. Returns `Problem` objects directly — the previous version stringified
+    and parsed back, which lost the structure the caller needs.
+    """
+    return [*_missing(params), *validate(params)]
+
+
+def _fill(known: Params, extracted: Params) -> Params:
+    """Fill in the blanks. Never rewrite a field that already has a value.
+
+    This is not the old `_merge`. That reconciled two producers — triage
+    lifted values out of the message and so did the extractor — and had to
+    decide which won. There is one producer now: triage classifies and stops,
+    and every field here comes from the extractor.
+
+    What is left is a different guard, for a different failure. A model asked
+    the same question twice does not give the same answer, and this runs again
+    on every follow-up. Letting the second run rewrite the first cost nineteen
+    direct messages about one report, each carrying a differently worded
+    summary: a reworded value is a *changed* value, so the graph discarded its
+    work and the operator was told again.
+
+    So the first answer for a field stands. A later run may fill what is still
+    blank — which is exactly what a follow-up supplying the correlationId is —
+    and may not revise what it already said.
+    """
+    if not isinstance(extracted, type(known)):
+        # Defensive: a misregistered extractor cannot silently rewrite a task
+        # type's parameters with another type's.
+        return known
+    from dataclasses import replace as _replace
+
+    return _replace(
+        known,
+        **{
+            f.name: getattr(extracted, f.name)
+            for f in fields(extracted)
+            if getattr(extracted, f.name) is not None
+            and not getattr(known, f.name)
+        },
+    )
+
+
+def _missing(params: Params) -> list[Problem]:
+    """The structural half of `_problems`: fields that should be there but are not.
+
+    Optional-ness is read off the annotations. A field marked `str | None` is
+    not required; a field the model always writes (see `MODEL_AUTHORED`) is
+    not checked here either. The validation engine handles everything else:
+    if a value is present but malformed, that is its problem, not this one's.
+    """
+    optional = {
+        name
+        for name, hint in get_type_hints(type(params)).items()
+        if type(None) in get_args(hint)
+    }
+    return [
+        Problem(field=f.name)
+        for f in fields(params)
+        if f.name not in optional
+        and f.name not in MODEL_AUTHORED
+        and not getattr(params, f.name)
+    ]
+
+
+def _question(problems: list[Problem]) -> str:
+    """Render the joined problems as one operator-facing question.
+
+    The field name drives which natural-language form to use; the message is
+    appended only when it carries information the form does not (i.e. when it
+    came from the validation engine, not the structural check).
+
+    Deduplicates by field: a single field reported by both layers (or by two
+    rules in `_RULES`) should not appear twice in the sentence. When the same
+    field carries both a structural and a semantic problem, the semantic one
+    wins because it carries more information.
+    """
+    assert problems, "_question called with empty problems"
+    seen: dict[str, str] = {}
+    for problem in problems:
+        existing = seen.get(problem.field, "")
+        if existing and problem.message:
+            continue
+        seen[problem.field] = problem.message
+    parts: list[str] = []
+    for field, message in seen.items():
+        asked_as = _ASKED_AS.get(field, f"the {field.replace('_', ' ')}")
+        parts.append(f"{asked_as} ({message})" if message else asked_as)
+    return "Could you tell me " + " and ".join(parts) + "?"
+
+
+def _question_from_clarify(clarify: Clarify) -> str:
+    """Render a `Clarify` the same shape `_question` renders `Problem`s —
+    content for the Responder to write from, not a sentence to send verbatim.
+    Every reporter-facing Ask goes through the Responder before it is ever
+    sent; this only has to say what needs asking.
+    """
+    parts = [_ASKED_AS.get(f, f"the {f.replace('_', ' ')}") for f in clarify.fields]
+    question = "Could you tell me " + " and ".join(parts) + "?"
+    return f"{question} ({clarify.because})" if clarify.because else question

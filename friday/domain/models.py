@@ -237,6 +237,19 @@ class DocQuestionParams:
 #: stopped producing anything but a type and a confidence.
 Params = ApiIssueParams | AccessRequestParams | DocQuestionParams
 
+#: Task type -> its parameters dataclass. Every classifiable type is here;
+#: `register_dags` builds a graph for each entry and `create_task`'s tool
+#: schema is generated from it. `skip` is deliberately absent — see above.
+PARAMS: dict[str, type] = {
+    "api_issue": ApiIssueParams,
+    "access_request": AccessRequestParams,
+    "doc_question": DocQuestionParams,
+}
+
+#: Written by the model about the message, not supplied by the person who
+#: sent it. Asking someone for a summary of their own message is nonsense.
+MODEL_AUTHORED = frozenset({"summary"})
+
 
 @dataclass(frozen=True, slots=True)
 class Observation:

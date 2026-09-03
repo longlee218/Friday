@@ -101,7 +101,25 @@ rules reject is challenged with the code template regardless of what was
 asked instead, and a field the model names that turns out already filled is
 not asked about again.
 
-## Workflow
+## Pool
+
+The loop. Pulls pending tasks and hosts their graphs — nothing about *what*
+to do with a task is this module's decision, only *when* and *whether what
+came back may be sent*. Four things, every pass: stand down for a task the
+operator answered themselves, announce to the operator whatever nobody can
+act on, host the graph for whatever tasks are pending, and turn what came
+back into rows — a reply queued for approval, a question sent outright, a
+task moved to `needs_human`.
+
+Lives in its own `friday/tasks/` package, not inside the graph engine:
+hosting a graph is one of the four things it does, not what it is. It shares
+no vocabulary of its own — `Ask`, `Reply` and `HandOver` come from the
+domain, same as the graph engine reads them, which is what lets the two stop
+importing each other. Was a differently-named loop package once, before
+every task type ran through the same graph engine and there was no second
+thing left in it to share a package with.
+
+## Deciding an action
 
 What to do about a task. Returns an **action** — `Ask`, `Reply` or `HandOver` —
 never a side effect.
@@ -286,6 +304,20 @@ looks like as it rots, one copy quietly going unused.
 The only module that delivers. Holds outbound intents, dispatches each to the
 adapter its `sender` names, retries within a bound, and surfaces what it could
 not send. Nothing else calls a provider's `send()`.
+
+## Hand-over
+
+An `Action` a node's agent produces, by calling `hand_over(reason)`, when it
+cannot conclude — the fix is not obvious, the evidence is not enough to write
+a reply, the type is one nothing here knows how to work with. `reason` is the
+agent's own finding, quoted to the operator directly; it is not a message
+under the operator's name to anyone else, so it never waits at the outbox.
+The task moves to `needs_human` and the pool announces it, once, with
+whatever the paused node actually said.
+
+**Not "handled by the operator"**, the state this ends in only after a
+person acts on it. A hand-over is the system saying it does not know what to
+do; the operator answering is a different fact entirely, recorded below.
 
 ## Handled by the operator
 

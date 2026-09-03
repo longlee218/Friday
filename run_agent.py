@@ -30,7 +30,7 @@ from friday.responder import Responder
 from friday.agent.skills import SkillLibrary
 from friday.domain.states import TaskState
 from friday.triage.runner import TriageRunner
-from friday.workflows.runner import WorkflowRunner
+from friday.tasks.pool import Pool
 
 log = logging.getLogger("friday")
 
@@ -167,7 +167,7 @@ async def _run(stack: AsyncExitStack) -> None:
     responder = Responder.build(
         config, notes=learned, skills=skills, context_store=context_store
     )
-    workflows = WorkflowRunner.build(config, db=db, responder=responder)
+    pool = Pool.build(config, db=db, responder=responder)
     async def decided(*, task_id: int, approved: bool, by: str) -> None:
         """What a button press means.
 
@@ -260,7 +260,7 @@ async def _run(stack: AsyncExitStack) -> None:
         async with asyncio.TaskGroup() as group:
             group.create_task(ingest(inbox))
             group.create_task(runner.run_forever())
-            group.create_task(workflows.run_forever())
+            group.create_task(pool.run_forever())
             group.create_task(outbox.run_forever())
             if bot is not None:
                 group.create_task(bot.start())

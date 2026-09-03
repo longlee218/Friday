@@ -8,9 +8,8 @@ from typing import Literal
 from friday.triage.prompt import build_input, build_instructions
 from friday.config import AgentConfig
 from friday.agent.harness import Harness, ToolContext, tool
-from friday.domain.models import InboundEvent, TaskType
+from friday.domain.models import PARAMS, InboundEvent, TaskType
 from friday.triage.prefilter import Sensitive
-from friday.workflows import PARAMS
 
 __all__ = ["Decided", "NeedsHuman", "TaskType", "Triage", "TriageOutcome"]
 

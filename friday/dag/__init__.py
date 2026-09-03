@@ -210,7 +210,7 @@ class DAGRunner:
         """Run to the end. A node deciding to stop early is not this
         function's business to notice — the state carries its `Ask`, `Reply`
         or `HandOver` like any other result, and the caller reads it off the
-        trail (see `WorkflowRunner._outcome`)."""
+        trail (see `Pool._outcome`)."""
         current = self._resume_point()
         steps = 0
 

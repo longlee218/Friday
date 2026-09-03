@@ -15,7 +15,7 @@ An extractor also carries `ask_clarification` (ticket 05): the model has just
 read everything the reporter said, and may know something is missing that no
 structural rule catches. It names *which* of its own fields, and why — never
 words, so the tool cannot be argued into phrasing that bypasses the operator's
-voice — and `friday.workflows.prepare` turns that into an `Ask` the Responder
+voice — and `friday.dag.prepare.prepare` turns that into an `Ask` the Responder
 writes. Code stays the floor regardless: a field the structural rules reject
 is challenged with the code template whether or not the model asked about it.
 """
@@ -28,7 +28,7 @@ from dataclasses import dataclass, fields
 from typing import Any, Literal
 
 from friday.agent.harness import Harness, ToolContext, tool
-from friday.domain.models import Params
+from friday.domain.models import MODEL_AUTHORED, PARAMS, Params
 from friday.extraction.prompt import build_input, build_instructions
 
 __all__ = [
@@ -75,11 +75,9 @@ class _Capture:
 def _clarify_tool(params_cls: type[Params]):
     """Build `ask_clarification` for one type: a closed enum of that type's
     own *askable* fields — everything but what the model itself writes (see
-    `MODEL_AUTHORED` in `friday.workflows`). One function because every type
-    needs the identical shape, differing only in which fields it may name.
+    `MODEL_AUTHORED` in `friday.domain.models`). One function because every
+    type needs the identical shape, differing only in which fields it may name.
     """
-    from friday.workflows import MODEL_AUTHORED
-
     askable = tuple(f for f in params_cls.__dataclass_fields__ if f not in MODEL_AUTHORED)
     FieldName = Literal[askable]
 
@@ -221,7 +219,6 @@ def register(task_type: str, params_cls: type[Params], config: "AgentConfig") ->
     never fill in. Refusing at startup costs a restart.
     """
     from friday.agent.harness import Harness
-    from friday.workflows import PARAMS
 
     if PARAMS.get(task_type) is not params_cls:
         raise ValueError(

@@ -37,7 +37,7 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 #: Task type -> the DAG that runs it. Populated by `register_dags` at
-#: startup; read by `WorkflowRunner._plan`.
+#: startup; read by `Pool._plan`.
 EDGE_ROUTER: dict[str, DAG] = {}
 
 
@@ -59,7 +59,7 @@ def register_dag(task_type: str, dag: DAG) -> DAG:
 
 def dag_for(task_type: str) -> DAG | None:
     """The DAG for this task type. `None` for a type `register_dags` has
-    covered is a wiring bug — `WorkflowRunner._plan` asserts on it rather
+    covered is a wiring bug — `Pool._plan` asserts on it rather
     than falling back to a second way of deciding what to do."""
     return EDGE_ROUTER.get(task_type)
 
@@ -73,7 +73,7 @@ def build_simple_dag(task_type: str, params_cls: type[Params]) -> DAG:
     worth a second node yet; build one when there are steps worth skipping,
     not before.
     """
-    from friday.workflows import plan_by_required_parameters
+    from friday.dag.prepare import plan_by_required_parameters
 
     return DAG(
         name=task_type,
@@ -184,7 +184,7 @@ def register_dags(
     the one-node graph `build_simple_dag` builds. `dag_for` never answers "no
     graph" for a type this covers, which is every classifiable type there is.
     """
-    from friday.workflows import PARAMS
+    from friday.domain.models import PARAMS
 
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", build_api_issue_dag())
@@ -231,7 +231,7 @@ def register_dags(
     DAG_SERVERS.update(servers or {})
 
 
-#: Node name -> agent, per task type. Read by `WorkflowRunner` when it builds
+#: Node name -> agent, per task type. Read by `Pool` when it builds
 #: `DAGDeps`; empty until `register_dags` runs.
 DAG_DEPS_EXTRA: dict[str, dict[str, Any]] = {}
 

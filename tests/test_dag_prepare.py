@@ -17,18 +17,19 @@ from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestio
 from types import SimpleNamespace
 
 from friday.domain.actions import Ask, HandOver
-from friday.workflows import prepare
+from friday.dag.prepare import prepare
 
 
 async def _decide(task_type, params, *, text=None):
-    """The simple path, exactly as `WorkflowRunner._plan` walks it.
+    """The simple path, exactly as `build_simple_dag`'s node wires it —
+    `prepare_node`'s `on_ready` is `plan_by_required_parameters`.
 
     There was a `plan()` doing this, and every test here called it. Production
-    did not — `_plan` calls these two and routes to a graph in between — so a
+    did not — the node calls these two and routes to a graph in between — so a
     convenience wrapper had become a second path that only tests took, which is
     how five tests came to hold an unreachable branch elsewhere in this file.
     """
-    from friday.workflows import plan_by_required_parameters, prepare
+    from friday.dag.prepare import plan_by_required_parameters, prepare
 
     params, problem = await prepare(task_type, params, text=text)
     return problem or plan_by_required_parameters(task_type, params)
@@ -176,7 +177,7 @@ async def _prepare_with_clarify(params_obj, clarify, *, extracted=None, monkeypa
     """`prepare()` with `extract()` stood in for, so the ordering between
     code's own floor and a model's `Clarify` can be tested without a real
     extractor or model."""
-    import friday.workflows as wf
+    import friday.dag.prepare as wf
 
     async def stub_extract(task_type, text):
         return extracted, clarify
@@ -257,7 +258,7 @@ def test_a_second_extraction_does_not_reword_the_first():
     first cost nineteen direct messages about one report, each carrying a
     differently worded summary — a reworded value is a *changed* value, so the
     graph discarded its work and the operator was told again."""
-    from friday.workflows import _fill
+    from friday.dag.prepare import _fill
 
     filled = _fill(
         ApiIssueParams(summary="checkout is 500ing", environment="production"),
@@ -271,7 +272,7 @@ def test_a_second_extraction_does_not_reword_the_first():
 def test_a_later_extraction_fills_what_is_still_blank():
     """Which is exactly what a follow-up supplying the correlationId is, and
     the only way it reaches the task now that triage does not lift it out."""
-    from friday.workflows import _fill
+    from friday.dag.prepare import _fill
 
     filled = _fill(
         ApiIssueParams(summary="checkout is 500ing"),
@@ -289,7 +290,7 @@ def test_a_later_extraction_fills_what_is_still_blank():
 
 def test_an_empty_string_counts_as_a_blank():
     """A field the model wrote as "" is not a value someone supplied."""
-    from friday.workflows import _fill
+    from friday.dag.prepare import _fill
 
     assert _fill(
         ApiIssueParams(summary="s", environment=""),

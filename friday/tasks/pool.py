@@ -1,4 +1,18 @@
-"""Running workflows over tasks that are ready for one."""
+"""The pool: pulls pending tasks and hosts their graphs.
+
+Four things, every pass — nothing else: stand down for a task the operator
+answered themselves, announce to the operator whatever nobody can act on, host
+the graph for whatever tasks are pending, and turn what came back into rows.
+Deciding *what* to do with a task is the graph's business (`friday/dag/`); this
+owns *when* and *whether what came back may be sent*, and does not import the
+graph engine's vocabulary — `Ask`, `Reply`, `HandOver` come from the domain,
+which both sides read, so the two no longer import each other.
+
+Was `friday/workflows/runner.py`'s `WorkflowRunner`, renamed and moved here in
+ticket 09 once every task type ran through the graph engine (tickets 01–08)
+and there was no second thing left in `friday/workflows/` for this to share a
+package with.
+"""
 
 from __future__ import annotations
 
@@ -14,11 +28,10 @@ from friday.dag.router import dag_for
 from friday.store.db import Database
 from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.states import TaskState
-from friday.domain.models import Task
+from friday.domain.models import PARAMS, Task
 from friday.outbox import Kind
-from friday.workflows import PARAMS
 
-__all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "REVIEW", "WorkflowRunner"]
+__all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "REVIEW", "Pool"]
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +42,7 @@ REVIEW = TaskState.REVIEW
 HANDLED = TaskState.HANDLED_BY_OPERATOR
 
 
-class WorkflowRunner:
+class Pool:
     """Turns a pending task into an action.
 
     Produces outbound intents; it never delivers one. Deciding what to say and
@@ -43,8 +56,8 @@ class WorkflowRunner:
     """
 
     @classmethod
-    def build(cls, config, *, db: Database, responder=None) -> "WorkflowRunner":
-        """The loop, built from the `workflows:` block.
+    def build(cls, config, *, db: Database, responder=None) -> "Pool":
+        """The pool, built from the `workflows:` block.
 
         Nothing about an agent reaches here: an agent is a node inside a graph,
         and `register_dags` built those. This decides *when* a task is worked
