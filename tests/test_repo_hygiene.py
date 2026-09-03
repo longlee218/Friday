@@ -202,7 +202,6 @@ def test_no_family_imports_another_familys_prompt_module():
         "triage": ("friday/triage", "friday.triage.prompt"),
         "extraction": ("friday/extraction", "friday.extraction.prompt"),
         "responder": ("friday/responder", "friday.responder.prompt"),
-        "dag": ("friday/dag", "friday.dag.api_issue.prompt"),
     }
     repo = Path(__file__).resolve().parents[1]
 
@@ -375,13 +374,20 @@ def test_a_reply_is_constructed_in_exactly_one_place():
         if lines:
             built_in[str(path.relative_to(friday.parent))] = lines
 
-    assert list(built_in) == ["friday/tools/reply.py"], (
+    # **Nothing builds one today.** The `answer` tool was the single
+    # construction site and it went with the five-node `api_issue` graph, so
+    # the system can currently only ask a reporter or hand over to the
+    # operator — it cannot answer. That is a consequence of removing the
+    # graph, not an accident, and this is where it is visible.
+    #
+    # The rule survives the emptiness: when something produces a Reply again,
+    # it is one place, and this fails until that is true.
+    assert len(built_in) <= 1, (
         f"a Reply is what a reporter reads under the operator's name; it is "
-        f"built in one place, the `answer` tool: {built_in}"
+        f"built in one place or in none: {built_in}"
     )
-    assert len(built_in["friday/tools/reply.py"]) == 1, (
-        f"one construction, not several: {built_in}"
-    )
+    for path, lines in built_in.items():
+        assert len(lines) == 1, f"one construction, not several: {built_in}"
 
 
 def test_a_reply_row_is_queued_in_exactly_one_place():

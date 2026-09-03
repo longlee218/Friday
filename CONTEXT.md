@@ -146,6 +146,12 @@ already do.
 correlationId costs a question if it is wrong, and asserting a cause costs the
 operator's credibility with their own team.
 
+**Nothing produces a `Reply` today.** The tool that built one belonged to the
+five-node `api_issue` graph, and that graph is gone — so the system can ask a
+reporter or hand over to the operator, and cannot answer. The vocabulary and
+the outbox path for a reply are intact and unused, waiting for a graph that
+concludes something.
+
 **All three are read by the reporter except one, and it is not the one that
 waits.** `Ask` and `Reply` both go to the person who reported the problem;
 `Reply` waits precisely *because* it answers them in the operator's name.

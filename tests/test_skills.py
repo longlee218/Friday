@@ -278,58 +278,6 @@ def test_the_catalogue_reaches_the_prompt_the_responder_builds(tmp_path):
     assert "Query the log store" not in rendered
 
 
-def test_only_the_reasoning_nodes_of_a_graph_get_skills(tmp_path):
-    """"How to trace a request" is written down for whoever decides what the
-    logs mean, not for the thing fetching them."""
-    from types import SimpleNamespace
-
-    from friday.config import AgentConfig
-    from friday.dag.api_issue.graph import build_agents
-
-    def block(name):
-        return AgentConfig(
-            name=name,
-            api_key="sk-x",
-            base_url="https://example.invalid/v1",
-            model="m",
-        )
-
-    # **Every** node, not the three this used to build. Leaving `fix_bug` out
-    # meant nothing asserted its tool list, and ticket 15 handed it the
-    # catalogue and a `fetch_skill` tool by declaring `reasons=True` on the
-    # one agent that proposes a `needs_approval` diff. The suite stayed green
-    # because no test built it.
-    from friday.dag.api_issue.graph import NODES
-
-    config = SimpleNamespace(
-        agents={spec.block: block(name) for name, spec in NODES.items()}
-    )
-
-    agents = build_agents(config, _library(tmp_path))
-
-    reasoning = {n for n, s in NODES.items() if s.reasons}
-    assert reasoning == {"analyze_stack", "compose_reply"}, (
-        "deciding what evidence means is what earns the catalogue — writing "
-        "the diff from a cause somebody else decided does not"
-    )
-    for node in NODES:
-        has_fetch = "fetch_skill" in [t.name for t in agents[node].agent.tools]
-        assert has_fetch is (node in reasoning), node
-        in_prompt = "trace-a-request" in agents[node].agent.instructions
-        assert in_prompt is (node in reasoning), node
-
-    assert [t.name for t in agents["analyze_stack"].agent.tools] == ["fetch_skill"]
-    # compose_reply also gets answer/hand_over (ticket 06) — fetch_skill is
-    # still the only skill-related tool, which is what this test is about.
-    assert [t.name for t in agents["compose_reply"].agent.tools] == [
-        "fetch_skill", "answer", "hand_over",
-    ]
-    assert agents["read_logs"].agent.tools == []
-    # And the catalogue is in the reasoning node's instructions, where it is
-    # the same every call.
-    assert "trace-a-request" in agents["analyze_stack"].agent.instructions
-    assert "trace-a-request" not in agents["read_logs"].agent.instructions
-
 
 def test_a_file_saved_with_a_byte_order_mark_still_loads(tmp_path):
     """UTF-8 with a BOM is what Notepad writes by default. Rejecting it tells

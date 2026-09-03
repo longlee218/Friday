@@ -121,19 +121,11 @@ class Pool:
         """
         for task in await self._db.tasks_the_operator_handled():
             withdrawn = await self._db.cancel_outbound_for(task.id)
-            # A queued message is not the only thing waiting on this task. A
-            # tool call held for the operator's yes runs the moment anyone
-            # says yes, so leaving it here means a patch applied to work a
-            # person already closed — and then an `IllegalTransition` on the
-            # way out, because the task is no longer somewhere a decision can
-            # move it from (ticket 12).
-            dropped = await self._db.clear_dag_interruption(task.id)
             await self._db.move_task(task.id, HANDLED)
             log.info(
-                "task %d: the operator answered it — closing%s%s",
+                "task %d: the operator answered it — closing%s",
                 task.id,
                 f", {withdrawn} queued message(s) withdrawn" if withdrawn else "",
-                ", a pending approval withdrawn" if dropped else "",
             )
 
     async def _raise_hands(self) -> None:
@@ -511,139 +503,6 @@ class Pool:
         current = await self._db.task(task.id)
         return dict(current.params) if current is not None else dict(task.params)
 
-    async def decide_pending_action(
-        self, task_id: int, *, approve: bool, reason: str | None = None
-    ) -> Task:
-        """The operator's yes or no on a paused tool call (ticket 07).
-
-        Nothing in this codebase calls this yet — Discord buttons or the
-        board will, once they exist (tickets 18–20) — but the mechanism
-        stands complete without them: resume in this process or a fresh one,
-        decline without asking the model anything further, either way routed
-        through `_route` exactly like a fresh pass's `Action` is.
-
-        **Staleness is checked here, in three ways**, and it used to be
-        argued away instead. The argument was that `dag_state` is one row per
-        task, replaced whole on every checkpoint, so any later pass would have
-        overwritten `interruption` and reaching this with one still set meant
-        nothing had touched the task since. That is not true: a pass whose
-        node 0 returns an `Ask` records nothing at all and returns, so it can
-        run, move the task, and leave the approval sitting there (ticket 12).
-
-        So: the task must still be where a decision can move it from, its
-        parameters must still be the ones the paused run was computed
-        against, and the row must still carry an interruption. Each is
-        checked *before* anything resumes, because resuming is what executes
-        the tool — there is no undoing it afterwards and finding out.
-        """
-        stored = await self._db.dag_interruption(task_id)
-        if stored is None:
-            raise ValueError(f"task {task_id} has no pending approval")
-
-        task = await self._db.task(task_id)
-        if task is None:
-            raise ValueError(f"task {task_id} does not exist")
-
-        if task.state != NEEDS_HUMAN:
-            # Where a paused run leaves its task, and the only state a
-            # decision about it can move it out of. Anywhere else and someone
-            # or something has already settled this task — approving would
-            # run the tool and *then* fail on the move.
-            raise ValueError(
-                f"task {task_id} is {task.state}, not {NEEDS_HUMAN} — it has "
-                f"moved on and this decision no longer applies to it"
-            )
-
-        if _fingerprint(await self._params_now(task)) != stored["params_fingerprint"]:
-            # What D7 exists for, applied to the one place that reused a
-            # stored fingerprint without ever re-checking it: a patch worked
-            # out before the reporter answered is not a patch for the request
-            # that has their answer in it.
-            raise ValueError(
-                f"task {task_id} has different parameters than the run that "
-                f"stopped for approval — it will be worked out again"
-            )
-
-        dag = dag_for(task.type)
-        assert dag is not None, f"{task.type!r} is in PARAMS but has no registered graph"
-
-        node_name = stored["paused_at_node"]
-        agent = DAG_DEPS_EXTRA.get(task.type, {}).get(node_name)
-
-        if not approve:
-            outcome: Action = HandOver(reason or "declined by the operator")
-        elif agent is None:
-            outcome = HandOver(f"{node_name} has no agent to resume with any more")
-        else:
-            # A fresh capture, not the one the original call closed over —
-            # that object does not survive the process it was made in. If a
-            # tool gets called during the resumed turns, it writes into this
-            # one; if none does, `capture.action` just stays `None` and
-            # `result.final_output` is read instead, the same fallback
-            # `_fix_bug`'s own first attempt uses.
-            from friday.dag.api_issue.graph import ComposeCapture
-
-            capture = ComposeCapture()
-            result = await agent.resume(stored["interruption"], context=capture)
-            if result is None:
-                outcome = HandOver(f"could not resume: {agent.last_error}")
-            elif result.interruptions:
-                outcome = HandOver(
-                    "needs approval again", interruption=agent.checkpoint(result)
-                )
-            elif capture.action is not None:
-                outcome = await self._continue_from(
-                    task, dag, node_name, stored, capture.action
-                )
-            else:
-                resumed_text = (result.final_output or "").strip() or None
-                outcome = await self._continue_from(
-                    task, dag, node_name, stored, resumed_text
-                )
-
-        if isinstance(outcome, HandOver):
-            await self._record_pause(
-                task_id,
-                dag,
-                results=stored["results"],
-                fingerprint=stored["params_fingerprint"],
-                node=node_name,
-                hand_over=outcome,
-            )
-        # An Ask or Reply means the graph continued past `node_name` —
-        # `DAGRunner`'s own `on_checkpoint` already recorded that, interruption
-        # cleared along with it, node by node, the same as any other run.
-        return await self._route(task, outcome)
-
-    async def _continue_from(
-        self, task: Task, dag, node_name: str, stored: dict, resumed_value: Any
-    ) -> Action:
-        """The rest of the graph, picked up from exactly the node that
-        stopped — not restarted, which would spend the earlier nodes' work
-        again to reach the same call.
-
-        `resumed_value` is whatever `node_name` resolved to: an `Action`
-        (its agent called a tool while resuming, the same as any node's
-        agent can) or plain text (it did not, and the caller already fell
-        back the same way a fresh call would). Either way this only injects
-        it and lets the graph's own edges decide what happens past it —
-        `_fix_bug_ok`-style guards work the same on an injected value as on
-        one the node just returned.
-        """
-        state = (
-            DAGState.from_dict(stored["results"])
-            .with_result(dag.entry, PARAMS[task.type](**task.params))
-            .with_result(node_name, resumed_value)
-        )
-        outcome, _final, _trail = await self._walk(
-            dag,
-            task=task,
-            state=state,
-            fingerprint=stored["params_fingerprint"],
-            from_node=node_name,
-        )
-        return outcome
-
     async def _record_pause(
         self, task_id: int, dag, *, results: dict, fingerprint: str, node: str, hand_over: HandOver
     ) -> None:
@@ -651,10 +510,10 @@ class Pool:
         alongside the state so far, so `_raise_hands` can read this run's
         actual reason rather than the task's bare type and parameters.
 
-        `hand_over.interruption`, when set, is a tool call waiting on the
-        operator's yes or no (ticket 07) — stored alongside so
-        `decide_pending_action` can find it by task id later, in this
-        process or another one.
+        There was an `interruption` alongside this — a paused tool call
+        waiting on the operator's yes or no. It went with the five-node
+        `api_issue` graph: `apply_fix` was the only tool that ever produced
+        one, and nothing produces one now.
         """
         await self._db.save_dag_state(
             task_id,
@@ -663,7 +522,6 @@ class Pool:
             params_fingerprint=fingerprint,
             paused_at_node=node,
             paused_question=hand_over.reason,
-            interruption=hand_over.interruption,
         )
 
     @staticmethod

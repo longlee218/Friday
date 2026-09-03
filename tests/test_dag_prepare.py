@@ -5,14 +5,13 @@ arrives without the fields needed to trace it, and the first move is to ask.
 
 Ticket 33 moved that rule from `plan_api_issue` into the last node of the
 `api_issue` graph. These tests follow it there: they exercise
-`_compose_reply` with no agents and no tool servers, which is exactly the
-state a fresh install is in, and assert the same outcomes the planner gave.
+`prepare`, the node every graph shares, with no agents and no tool servers —
+exactly the state a fresh install is in.
 """
 
 from __future__ import annotations
 
 from friday.dag.engine import DAGDeps, DAGState
-from friday.dag.api_issue.graph import _compose_reply
 from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
 from types import SimpleNamespace
 
@@ -54,13 +53,6 @@ async def gate(**kw):
     return problem
 
 
-async def decide(**kw):
-    """What the graph replies with once it *has* run and found nothing."""
-    task = SimpleNamespace(params={"summary": "checkout is 500", **kw})
-    state = DAGState.empty().with_result("prepare", ApiIssueParams(**task.params))
-    return await _compose_reply(state, DAGDeps(task=task))
-
-
 async def test_a_report_with_nothing_to_trace_on_asks_for_details():
     action = await gate()
 
@@ -79,17 +71,6 @@ async def test_a_curl_is_enough_to_reach_the_graph():
 async def test_an_environment_alone_is_not_enough_to_trace():
     """You cannot find a request from the environment name."""
     assert isinstance(await gate(environment="production"), Ask)
-
-
-async def test_a_graph_that_found_nothing_hands_over_rather_than_asking_again():
-    """By the time a node runs, the reporter has already given something to
-    trace on — `_traceable` saw to that. So "nothing found" is the
-    investigation coming up empty, which is a person's problem, not another
-    question for the reporter."""
-    action = await decide(correlation_id=CID)
-
-    assert isinstance(action, HandOver)
-    assert "nothing was found" in action.reason
 
 
 # ---- the other task types --------------------------------------------------

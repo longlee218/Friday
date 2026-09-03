@@ -24,7 +24,7 @@ INSTRUCTIONS = build_instructions()
 class Triage:
     """Decides what a mention is. Performs no writes.
 
-    `create_task` takes the type as a closed-enum argument rather than being
+    `classify` takes the type as a closed-enum argument rather than being
     one tool per type: the type still comes from the model, but naming a
     fourth type is adding a `Params` class, not a fourth tool. Tool calling is
     used rather than a structured output type because some OpenAI-compatible

@@ -111,7 +111,7 @@ TaskType = Literal["api_issue", "access_request", "doc_question", "skip"]
 
 @dataclass(frozen=True, slots=True)
 class ApiIssueParams:
-    #: The docstring below reaches a model: triage's `create_task` tool reads
+    #: The docstring below reaches a model: triage's `classify` tool reads
     #: it as this type's description, one line each, the same place its
     #: fields are defined. `AccessRequestParams` and `DocQuestionParams`
     #: carry the same pattern.

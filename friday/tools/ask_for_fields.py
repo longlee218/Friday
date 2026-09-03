@@ -4,7 +4,7 @@ The sibling of `ask_clarification`, and deliberately not the same tool. That
 one takes a question in words, which is right when nobody knows in advance
 what might be unclear. This one takes a closed enum of one type's own askable
 fields, so the model **cannot** name a field that does not exist — the same
-property that makes `create_task` safe.
+property that makes `classify` safe.
 
 Collapsing the two into one tool would trade a constraint the code can check
 for a shorter list, which is the wrong direction: an extractor that invents a

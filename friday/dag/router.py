@@ -19,8 +19,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from friday.dag.api_issue import graph as api_issue
-from friday.dag.api_issue.graph import build_api_issue_dag
 from friday.dag.engine import DAG
 from friday.dag.prepare import plan_by_required_parameters, prepare_node
 from friday.domain.models import PARAMS, Params
@@ -100,40 +98,28 @@ def register_dags(
     that mattered (ticket 13). Starting from empty states the same intention
     and leaves the guard live for everyone else.
 
-    Every entry in `PARAMS` gets a graph: `api_issue` its own, everything else
-    the one-node graph `build_simple_dag` builds. `dag_for` never answers "no
-    graph" for a type this covers, which is every classifiable type there is.
+    Every entry in `PARAMS` gets the same one-node graph. There was a
+    five-node `api_issue` investigation — read the logs, find the code,
+    analyse, propose a patch, compose a reply — and the operator removed it:
+    it was a workflow nobody had described, built from a guess at what
+    investigating an API fault looks like, and every node of it skipped on
+    every run because no tool server was ever configured.
+
+    `dag_for` never answers "no graph" for a type this covers, which is every
+    classifiable type there is. Build a multi-node graph when there are steps
+    worth skipping and somebody has said what they are.
     """
     EDGE_ROUTER.clear()
-    register_dag("api_issue", build_api_issue_dag())
-
     for task_type, params_cls in PARAMS.items():
-        if task_type == "api_issue":
-            continue
         register_dag(task_type, build_simple_dag(task_type, params_cls))
 
-    # Each graph builds its own agents: which node gets which configuration
-    # block, tools and server is the graph's own business, and this module
-    # knowing the answer is what ticket 15 took out of it.
-    agents = api_issue.build_agents(config, skills, servers)
-    if agents:
-        log.info("api_issue graph: agents for %s", ", ".join(sorted(agents)))
-        absent = api_issue.absent_servers(agents, servers)
-        if absent:
-            log.info(
-                "api_issue graph: no %s server — the nodes needing it will skip",
-                ", ".join(absent),
-            )
-    else:
-        log.info(
-            "api_issue graph: no node agents configured — it will hand over "
-            "every report rather than investigate one"
-        )
-
-    # Stored for the runner to hand down through `DAGDeps`. Kept here rather
-    # than closed over inside the graph so the graph stays testable without
-    # either a model or a tool server.
-    DAG_DEPS_EXTRA["api_issue"] = {**agents, "context_store": context_store}
+    # No graph has a node agent any more — the one that did was `api_issue`'s
+    # investigation, and it is gone. `DAG_DEPS_EXTRA` stays empty and the
+    # dict stays, because it is what a graph's agents would be handed down
+    # through, and `Pool` reads it either way.
+    DAG_DEPS_EXTRA.clear()
+    if context_store is not None:
+        DAG_DEPS_EXTRA["context_store"] = context_store
     # Replaced, not merged. Merging means a second call — a test, a restart in
     # the same process — leaves the previous run's servers reachable, and a
     # closed connection that is still in the dict is worse than an absent one:

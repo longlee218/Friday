@@ -6,8 +6,9 @@ format; a composing node with nothing to say sent a reporter a raw diff.
 
 This is the third option, and it is a *tool* rather than a prompt instruction
 because a prompt can only ask the model to say it is confused. A tool call is
-a thing the run can stop on — the same shape `answer` and `hand_over` already
-use, and the same shape `apply_fix` uses to wait for the operator.
+a thing the run can stop on, which a sentence in a prompt is not.
+
+**No agent is given it yet.** It is here for when one is.
 
 Which of the two audiences the question reaches is not this tool's business.
 It records what was asked and why; `Pool._route` already knows that an `Ask`
@@ -112,7 +113,7 @@ def ask_clarification(
 
 #: Written out rather than left as a docstring literal, because the kinds and
 #: their meanings come from `CLARIFICATION_TYPES` — the same trick
-#: `friday/triage/__init__.py` uses on `create_task`, for the same reason.
+#: `friday/tools/classify.py` uses on `classify`, for the same reason.
 ask_clarification.__doc__ = f"""Stop and ask, before doing any of the work.
 
 Call this the moment you notice something is unclear, missing or ambiguous —

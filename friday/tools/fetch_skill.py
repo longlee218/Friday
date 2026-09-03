@@ -21,9 +21,8 @@ log = logging.getLogger(__name__)
 def fetch_skill_tool(library: SkillLibrary):
     """The tool an agent calls to read a skill it decided it needs.
 
-    Bound to one library rather than reaching for a module global, the same
-    shape `remember_tool` uses: what an agent can reach is composition, not
-    something the agent declares.
+    Bound to one library rather than reaching for a module global: what an
+    agent can reach is composition, not something the agent declares.
     """
     @tool
     def fetch_skill(name: str) -> str:

@@ -52,33 +52,6 @@ def _every_node_built():
     return build_agents(config)
 
 
-def test_the_composing_node_speaks_in_the_operators_voice():
-    """It answers a reporter under the operator's name, so it is told how that
-    person writes. Nothing else in the graph is."""
-    built = _every_node_built()
-
-    assert "How Long writes" in built["compose_reply"].instructions
-
-
-def test_every_other_step_is_told_it_is_not_a_voice():
-    """And told not to invent, which is the failure that costs somebody an
-    afternoon on the wrong request.
-
-    Every node, not one of them. The version this replaced checked
-    `analyze_stack` alone, so a node pasted with the operator's voice by
-    mistake would have shipped — which is exactly the shape of the bug the
-    whole invariant exists to stop.
-    """
-    from friday.dag.api_issue.graph import NODES
-
-    built = _every_node_built()
-
-    for node in NODES:
-        if node == "compose_reply":
-            continue
-        told = built[node].instructions
-        assert "How Long writes" not in told, f"{node} was given the operator's voice"
-        assert "do not invent" in told.lower(), f"{node} was not told it is a step"
 
 
 def test_the_responder_speaks_in_that_voice_too():

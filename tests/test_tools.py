@@ -46,10 +46,7 @@ def test_the_tools_this_system_has_are_all_in_one_place():
     do?" has one answer with one place to read it."""
     assert set(_tool_objects()) == {
         "ask_clarification",
-        "answer",
-        "hand_over",
-        "apply_fix",
-        "create_task",
+        "classify",
         "skip",
     }
 

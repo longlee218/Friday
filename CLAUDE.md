@@ -150,9 +150,9 @@ What is actually on disk.
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py` (the account), `bot.py` (approval cards) and `normalise.py`. Its `__init__.py` is empty on purpose |
 | `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages |
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
-| `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds every graph's entry node and holds the fill-and-validate mechanism (`prepare`, `plan_by_required_parameters`) it runs. `dag/api_issue/` is the one graph with an investigation past that node: `graph.py` declares each of its nodes **once** — what it runs, its config block, its prompt, its family, its server, its tools — and projects that into both the graph the engine walks and the agents behind it, `prompt.py` holds what each is told. `dag/router.py` maps a task type to a graph and nothing else; it does not know any graph's node names |
+| `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds the entry node every graph shares and holds the fill-and-validate mechanism it runs. `dag/router.py` maps a task type to a graph. **Every type now gets the same one-node graph** |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
-| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), concluding (`reply`, `classify`), acting (`patch`), reaching (`fetch_skill`). A test asserts the list and forbids declaring one anywhere else |
+| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching (`fetch_skill`). A test asserts the list and forbids declaring one anywhere else |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `friday/board/` | The read-only page on `:8086`; its JSON API is `ops/api.py` |
@@ -259,10 +259,9 @@ not an implementation detail:
   built (ticket 32): a graph checkpoints after every node, and discards its
   state when the task's parameters change, because a conclusion drawn without
   the correlationId is not a conclusion about the request that has one.
-- **Every task type is a graph** (ticket 04). `access_request` and
-  `doc_question` get one node — extract, validate, then ask for what is
-  missing or hand over, which is all most types need — and `api_issue` gets
-  an investigation past that same node. `dag_for` never answers "no graph"
+- **Every task type is a graph** (ticket 04). **Every** type gets
+  one node — extract, validate, then ask for what is missing or hand over.
+  `api_issue` had an investigation past that node and no longer does. `dag_for` never answers "no graph"
   for a type `PARAMS` knows about; there is no second way to decide what to
   do with a task any more, and `Pool._plan` asserts on the
   invariant rather than falling back to one. Build a multi-node graph when
@@ -272,20 +271,15 @@ not an implementation detail:
   message is a row; one loop delivers it. Approval is enforced as a predicate
   in the query that selects sendable rows, not as a check each caller must
   remember — see `_NEEDS_APPROVAL` in `friday/store/db.py`.
-- **A dangerous action gets a second gate, not the outbox's.** Messages wait
-  at the outbox regardless of which task produced them; applying a fix
-  (ticket 07, D15) is the one action a node can take, and it waits on the
-  SDK's own tool approval instead — the tool is marked `needs_approval`, the
-  run stops holding its state (`Pool.decide_pending_action`), and
-  that state lives in `dag_state.interruption` until the operator says yes or
-  no. A word list matched against a model's own prose was the *gate* before
-  this, and it is not a gate a persuasive message cannot argue past.
-  `_HANDS_OFF` in `friday/dag/api_issue/graph.py` is still there and still runs —
-  deliberately, as a cheap pre-filter that costs no model call when the cause
-  or the file already names a migration, a schema or a credential. It is a
-  layer, not the gate; the gate is the approval. Saying so here because the
-  sentence above read as though the list were gone, which is the shape a
-  reader trusts and nothing contradicts (ticket 13).
+- **Nothing takes a dangerous action, so there is no second gate.** There
+  was one: `apply_fix` was marked `needs_approval`, the run stopped holding
+  its own state, and `Pool.decide_pending_action` resumed or declined it. It
+  went with the five-node `api_issue` graph that produced it — the operator
+  removed that graph as a workflow nobody had described. `Harness.checkpoint`
+  and `resume` are still there and still tested; nothing calls them. The
+  outbox's approval is the only gate now, and every message waits at it.
+
+
 - **An agent's voice is part of its own prompt, and what reaches a reporter is
   pinned on the `Reply`, not on a label.** Two agents write in the operator's
   voice because a person reads what they write under that name — the responder
@@ -316,8 +310,13 @@ not an implementation detail:
   that share it hold two copies, deliberately: different jobs diverge, and
   sharing the text only postpones that.
 - **Triage classifies and nothing else.** No parameters, no summary — a type
-  and a confidence, through one `create_task(task_type, confidence)` tool with
-  a closed enum of types (`skip` stays its own tool; it creates nothing).
+  and a confidence, through one `classify(task_type, confidence)` tool with
+  a closed enum of types (`skip` stays its own tool: everything `classify`
+  names opens work, and `skip` names the absence of it). It was
+  `create_task`, and it creates nothing — it records a `Decided`; the task is
+  opened by `TriageRunner._apply` and only sometimes. A tool name is an
+  instruction to the model, so a model told to "create a task" believed it
+  was doing something it was not.
   Everything a task knows is lifted out of the message by `friday/extraction/`,
   one extractor per task type, reading every message linked to the task. The
   tool schema is the enforcement: a tool parameter is an instruction to the

@@ -213,7 +213,6 @@ def _prompt_modules():
         root / "triage" / "prompt.py",
         root / "extraction" / "prompt.py",
         root / "responder" / "prompt.py",
-        root / "dag" / "api_issue" / "prompt.py",
         root / "memory" / "channel_context.py",
     ]
 
@@ -394,8 +393,7 @@ def test_only_a_prompt_whose_input_uses_the_markers_claims_them():
     It was in five prompts and only three agents wrapped anything. The
     responder's untrusted content is escaped inside `<conversation>` and
     `<task>` — a boundary, but a different one — so it no longer claims a
-    convention it does not follow; the graph's nodes wrap their inputs now,
-    so they do.
+    convention it does not follow.
     """
     import ast
     from pathlib import Path
@@ -424,10 +422,6 @@ def test_only_a_prompt_whose_input_uses_the_markers_claims_them():
             root / "memory" / "channel_context.py",
             root / "memory" / "channel_context.py",
         ),
-        "api_issue": (
-            root / "dag" / "api_issue" / "prompt.py",
-            root / "dag" / "api_issue" / "graph.py",
-        ),
     }
 
     for agent, (prompt_module, input_module) in pairs.items():
@@ -439,40 +433,6 @@ def test_only_a_prompt_whose_input_uses_the_markers_claims_them():
         )
 
 
-def test_every_node_that_runs_an_agent_wraps_what_it_hands_it():
-    """Per function, not per module — because per module is how the guard
-    above was first written, and removing the wrap from one of five nodes
-    left it green.
-
-    Each node builds its own input by interpolation: a correlation id lifted
-    from a reporter's message, log lines from a tool server, a cause another
-    model wrote. All of it is somebody else's text arriving in a prompt.
-    """
-    import ast
-    from pathlib import Path
-
-    graph = Path(__file__).resolve().parents[1] / "friday" / "dag" / "api_issue" / "graph.py"
-    unwrapped = []
-    for node in ast.walk(ast.parse(graph.read_text())):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        names = [
-            inner.func.attr
-            for inner in ast.walk(node)
-            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)
-        ]
-        if "run" not in names:
-            continue
-        wraps = any(
-            isinstance(inner, ast.Call)
-            and isinstance(inner.func, ast.Name)
-            and inner.func.id == "user_input"
-            for inner in ast.walk(node)
-        )
-        if not wraps:
-            unwrapped.append(node.name)
-
-    assert unwrapped == [], f"a node hands a model text it did not wrap: {unwrapped}"
 
 
 def test_a_learned_note_cannot_open_a_section_in_the_instructions():
