@@ -1,6 +1,8 @@
 # Spec: skill tools for the agents
 
-Status: ready-for-agent.
+Status: done. **Five of its decisions did not survive the code — D5, D6's
+`location`, D8's fourth rank, D10, and the turn budget. Read
+`issues/04-review-fixes.md` before trusting a decision below.**
 
 ## Problem Statement
 

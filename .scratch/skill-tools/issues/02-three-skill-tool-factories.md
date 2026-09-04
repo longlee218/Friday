@@ -8,7 +8,7 @@ does not have them still has `fetch_skill` and the catalogue.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 Three tools, three files, one subject each — the rule that
 `tests/test_tools.py` enforces already, extended by three names. Each

@@ -7,7 +7,7 @@ every skill that already ships with the repo loads unchanged.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 The fields are read at startup, served from memory, and rendered by a
 later ticket. This ticket is the prerequisite: nothing downstream of it
@@ -17,7 +17,7 @@ defaults tell the truth about today's library — every shipped skill is
 operator-written (so `custom`) and lets the agent use any tool (so `()`,
 which `describe_skill` renders as `(all)`).
 
-- [ ] `Skill` has `mutability: Literal["built_in", "custom"]`, default `"custom"`
+- [x] `Skill` has `mutability: Literal["built_in", "custom"]`, default `"custom"`
 - [ ] `Skill` has `allowed_tools: tuple[str, ...]`, default `()`
 - [ ] `SkillLibrary._read` parses `mutability` and `allowed_tools` from
       frontmatter when present; uses the defaults when absent

@@ -9,7 +9,7 @@ on it is preserved.
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
 The wiring is the smallest change that lands the new tools with a real
 caller. Triage, extractors, and graph nodes are intentionally not
