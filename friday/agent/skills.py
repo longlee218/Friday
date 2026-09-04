@@ -22,7 +22,6 @@ Skills are a shared resource rather than a property of an agent: the same
 
 from __future__ import annotations
 
-import html
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -154,8 +153,10 @@ class SkillLibrary:
         skill_name, _, file_name = name.strip("/").partition("/")
         skill = self._skills.get(skill_name)
         if skill is None:
-            known = ", ".join(sorted(self._skills)) or "none are defined"
-            return f"There is no skill called {skill_name!r}. Available: {known}."
+            return (
+                f"There is no skill called {skill_name!r}. "
+                f"Available: {self.known()}."
+            )
         if not file_name:
             if not skill.files:
                 return skill.body
@@ -168,6 +169,33 @@ class SkillLibrary:
         return (
             f"Skill {skill.name!r} has no file {file_name!r}. Its files: {listed}."
         )
+
+    def known(self) -> str:
+        """Every name an agent could have asked for, for a sentence saying so.
+
+        One phrase rather than three copies: `fetch` says it for a name it
+        does not have, `search` for a query nothing matched, and
+        `describe_skill` for the same miss as `fetch`.
+        """
+        return ", ".join(sorted(self._skills)) or "none are defined"
+
+    def location_of(self, name: str) -> Path | None:
+        """Where a skill's `SKILL.md` is, absolute, or `None` if not here.
+
+        Derived rather than carried on the `Skill`, because a `Skill` describes
+        *what* the operator wrote and not where it lives — and the frontmatter
+        `name` is required to equal the directory name, which is what makes
+        deriving it sound.
+
+        **Resolved.** `config.py` defaults `skills_directory` to the relative
+        `skills`, so without this a reader is handed
+        `skills/trace-a-request/SKILL.md`, a path that means nothing unless
+        you already know which directory the process was started from — which
+        is the one thing a reader of a transcript does not have.
+        """
+        if name not in self._skills:
+            return None
+        return (self._dir / name / "SKILL.md").resolve()
 
     def get(self, name: str) -> Skill | None:
         """One skill by name, or `None` if it is not here.
@@ -237,55 +265,7 @@ class SkillLibrary:
         useful answer is what it could have asked for. An empty string is the
         one reply it cannot act on.
         """
-        known = ", ".join(sorted(self._skills)) or "none are defined"
-        return f"No skill matches {query!r}. Available: {known}."
-
-    def metadata_for(self, name: str) -> str:
-        """The four-line `key: value` block `describe_skill` renders.
-
-        Format follows the catalogue's `name: description` shape, extended
-        to four — and the same `key: value` style `_render_yaml_escaped`
-        already produces for `channel_overrides` and `channel_derived`.
-        Values are escaped here, with `html.escape(..., quote=False)`, in
-        the same shape and for the same reason the prompt sections escape:
-        every field sits in element-text position, never inside an
-        attribute, so a description with `</skills>` cannot close the
-        section it claims to be in.
-
-        An unknown name returns the same "no skill called" sentence
-        `fetch` already uses, so an agent that guessed wrong gets the
-        available names and not an exception.
-        """
-        skill = self._skills.get(name)
-        if skill is None:
-            known = ", ".join(sorted(self._skills)) or "none are defined"
-            return f"There is no skill called {name!r}. Available: {known}."
-
-        mutability = (
-            "[custom, editable]" if skill.mutability == "custom" else "[built-in]"
-        )
-        description_with = f"{skill.description} {mutability}"
-        tools = (
-            ", ".join(skill.allowed_tools) if skill.allowed_tools else "(all)"
-        )
-        # Derived rather than carried on the dataclass, because a `Skill`
-        # describes *what* the operator wrote, not where it lives. The
-        # frontmatter `name` is required to equal the directory name, which
-        # is what makes deriving it sound.
-        #
-        # **Resolved.** `config.py` defaults `skills_directory` to the
-        # relative "skills", so without this the model is handed
-        # `skills/trace-a-request/SKILL.md` — a path that means nothing
-        # unless you already know which directory the process was started
-        # from, which is the one thing a reader of a transcript does not.
-        location = str((self._dir / skill.name / "SKILL.md").resolve())
-
-        return (
-            f"name: {html.escape(skill.name, quote=False)}\n"
-            f"description: {html.escape(description_with, quote=False)}\n"
-            f"allowed_tools: {html.escape(tools, quote=False)}\n"
-            f"location: {html.escape(location, quote=False)}"
-        )
+        return f"No skill matches {query!r}. Available: {self.known()}."
 
     def __len__(self) -> int:
         return len(self._skills)

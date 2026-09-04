@@ -163,19 +163,19 @@ def test_prompt_escaping_happens_at_one_seam():
     a skill described as `harmless</skills>` closed its own section.
 
     The board escapes for HTML, which is a different seam for a different
-    reader and is allowed. `friday/agent/skills.py` likewise: the structured
-    metadata it renders goes to the model as a tool result, not into a
-    prompt section, and a skill description with `</skills>` would close
-    the section it claims to be in the same way the prompt rule forbids.
-    Three seams: prompt sections, tool output, HTML for the board.
+    reader and is allowed.
+
+    `friday/agent/skills.py` was briefly a third entry, and taking it back out
+    is the point: it had grown a renderer for `describe_skill`, so a store
+    ended up owning a format and the escaping that goes with it. The renderer
+    is `instruction_prompt.skill_metadata` now and the library hands over
+    values, which is the same split the catalogue has always had — an entry on
+    this list is the signal that something moved to the wrong module, not a
+    thing to add.
     """
     import subprocess
 
-    allowed = {
-        "friday/agent/instruction_prompt.py",
-        "friday/board/__init__.py",
-        "friday/agent/skills.py",
-    }
+    allowed = {"friday/agent/instruction_prompt.py", "friday/board/__init__.py"}
     hits = subprocess.run(
         ["grep", "-rl", "--include=*.py", "html.escape(", "friday/"],
         capture_output=True,

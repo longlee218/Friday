@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from friday.agent.skills import Skill, SkillLibrary
+from friday.tools.describe_skill import describe
 
 
 def write(directory, name: str, text: str) -> None:
@@ -689,7 +690,7 @@ def test_describe_returns_the_four_fields_in_order(tmp_path):
     write(tmp_path, "trace-a-request", SKILL)
 
     library = SkillLibrary(tmp_path).load()
-    text = library.metadata_for("trace-a-request")
+    text = describe(library, "trace-a-request")
     lines = text.split("\n")
 
     assert lines[0].startswith("name:")
@@ -706,7 +707,7 @@ def test_describe_mutability_custom_renders_as_editable(tmp_path):
 
     library = SkillLibrary(tmp_path).load()
 
-    assert "[custom, editable]" in library.metadata_for("trace-a-request")
+    assert "[custom, editable]" in describe(library, "trace-a-request")
 
 
 def test_describe_mutability_built_in_renders_without_editable(tmp_path):
@@ -718,7 +719,7 @@ def test_describe_mutability_built_in_renders_without_editable(tmp_path):
 
     library = SkillLibrary(tmp_path).load()
 
-    assert "[built-in]" in library.metadata_for("shipped")
+    assert "[built-in]" in describe(library, "shipped")
 
 
 def test_describe_allowed_tools_empty_renders_as_all(tmp_path):
@@ -727,7 +728,7 @@ def test_describe_allowed_tools_empty_renders_as_all(tmp_path):
 
     library = SkillLibrary(tmp_path).load()
 
-    assert "(all)" in library.metadata_for("trace-a-request")
+    assert "(all)" in describe(library, "trace-a-request")
 
 
 def test_describe_allowed_tools_list_renders_as_csv(tmp_path):
@@ -740,7 +741,7 @@ def test_describe_allowed_tools_list_renders_as_csv(tmp_path):
 
     library = SkillLibrary(tmp_path).load()
 
-    text = library.metadata_for("trace")
+    text = describe(library, "trace")
     assert "read_logs, query_range" in text
 
 
@@ -755,7 +756,7 @@ def test_describe_escapes_values_at_the_seam(tmp_path):
 
     library = SkillLibrary(tmp_path).load()
 
-    text = library.metadata_for("tricky")
+    text = describe(library, "tricky")
     assert "&lt;bad&gt;" in text
     assert "&amp;" in text
     assert "<bad>" not in text
@@ -766,7 +767,7 @@ def test_describe_unknown_name_says_so(tmp_path):
 
     library = SkillLibrary(tmp_path).load()
 
-    text = library.metadata_for("does-not-exist")
+    text = describe(library, "does-not-exist")
     assert "no skill called" in text.lower() or "no skill" in text.lower()
     assert "trace-a-request" in text
 
@@ -790,7 +791,7 @@ def test_describe_location_is_an_absolute_path(tmp_path):
     os.chdir(tmp_path.parent)
     try:
         library = SkillLibrary(tmp_path.name).load()
-        text = library.metadata_for("trace-a-request")
+        text = describe(library, "trace-a-request")
     finally:
         os.chdir(here)
 

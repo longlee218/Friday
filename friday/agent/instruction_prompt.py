@@ -59,6 +59,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from friday.memory.channel_context import ChannelContext
+from friday.agent.skills import Skill
 from friday.domain.models import InboundEvent, Params
 
 log = logging.getLogger(__name__)
@@ -385,6 +386,39 @@ def skill_system(catalogue: list[str] | None, *, index: bool = True) -> Section:
     for i, line in enumerate(catalogue, 1):
         lines.append(f"{i}. {_escape(line)}" if index else f"- {_escape(line)}")
     return Section("skill_system", "\n".join(lines))
+
+
+def skill_metadata(skill: Skill, location: str) -> str:
+    """One skill's four fields, for `describe_skill` to hand back.
+
+    Four `key: value` lines: the name, the description with a tag saying
+    whether the operator edits it, the tools the skill expects, and where the
+    file is. That is the catalogue's own `name: description` shape carried to
+    four fields rather than a second format the model has to learn — and the
+    same `key: value` style `_render_yaml_escaped` renders a channel's
+    overrides in.
+
+    **Not a `Section`**, for the reason `user_input` is not one: this is not
+    part of any agent's stable prefix. It is a tool's answer, and it lands in
+    the conversation rather than between a section's tags.
+
+    Here rather than on `SkillLibrary` because a store that renders is a
+    second renderer, and the last time this codebase had two, one of them did
+    not escape — a skill described as `harmless</skills>` closed the section
+    and everything after it read as instructions. Escaping lives at this seam;
+    so, therefore, does anything that needs it. The library hands over the
+    values and the path, and knows nothing about how they are shown.
+    """
+    mutability = (
+        "[custom, editable]" if skill.mutability == "custom" else "[built-in]"
+    )
+    tools = ", ".join(skill.allowed_tools) if skill.allowed_tools else "(all)"
+    return (
+        f"name: {_escape(skill.name)}\n"
+        f"description: {_escape(f'{skill.description} {mutability}')}\n"
+        f"allowed_tools: {_escape(tools)}\n"
+        f"location: {_escape(location)}"
+    )
 
 
 def search_skills_system(available: bool = True) -> Section:

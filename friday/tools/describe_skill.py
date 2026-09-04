@@ -3,9 +3,11 @@
 The same factory pattern as `fetch_skill`: what an agent can reach is
 composition, not something the agent declares.
 
-The block is four `key: value` lines, which is the catalogue's own
-`name: description` shape carried to four fields rather than a second format
-the model has to learn.
+**The format is not decided here and not in the library either.** It is
+`instruction_prompt.skill_metadata`, beside every other renderer and beside
+the escaping every one of them shares. A store that renders is a second
+renderer, and the last time this codebase had two of those, one of them did
+not escape.
 """
 
 from __future__ import annotations
@@ -13,11 +15,30 @@ from __future__ import annotations
 import logging
 
 from friday.agent.harness import tool
+from friday.agent.instruction_prompt import skill_metadata
 from friday.agent.skills import SkillLibrary
 
-__all__ = ["describe_skill_tool"]
+__all__ = ["describe", "describe_skill_tool"]
 
 log = logging.getLogger(__name__)
+
+
+def describe(library: SkillLibrary, name: str) -> str:
+    """One skill's metadata, or a sentence saying what exists instead.
+
+    The whole of what the tool does, as a plain function, so it can be tested
+    without standing up a run: composing three things nobody else composes is
+    the part worth pinning, and the tool body around it is a docstring and a
+    log line.
+
+    Never raises, for `fetch`'s reason: an agent that guessed at a name made
+    an ordinary mistake, and the useful answer is what it could have asked
+    for.
+    """
+    skill = library.get(name)
+    if skill is None:
+        return f"There is no skill called {name!r}. Available: {library.known()}."
+    return skill_metadata(skill, str(library.location_of(name)))
 
 
 def describe_skill_tool(library: SkillLibrary):
@@ -38,6 +59,6 @@ def describe_skill_tool(library: SkillLibrary):
             name: the skill's name, as the catalogue or search_skills gave it.
         """
         log.info("skill described: %s", name)
-        return library.metadata_for(name)
+        return describe(library, name)
 
     return describe_skill
