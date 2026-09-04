@@ -387,6 +387,61 @@ def skill_system(catalogue: list[str] | None, *, index: bool = True) -> Section:
     return Section("skill_system", "\n".join(lines))
 
 
+def search_skills_system(available: bool = True) -> Section:
+    """When the agent has `search_skills`, tell it what the tool does.
+
+    The catalogue is the index for skills the agent already knows about; this
+    is the way to find skills the catalogue does not surface.
+    """
+    if not available:
+        return Section("search_skills_system")
+    return Section(
+        "search_skills_system",
+        "Call search_skills(query) to find skills whose name or description "
+        "matches what you are looking for. Use it when the catalogue above "
+        "does not show a skill that sounds like what you need — a skill "
+        "named `deploy` whose description says `release a build` will be "
+        "missed by a reporter asking about `rolling out`, and search is "
+        "how you reach it. Returns up to five matches ranked by exact name, "
+        "then name prefix, then description.",
+    )
+
+
+def describe_skill_system(available: bool = True) -> Section:
+    """When the agent has `describe_skill`, tell it what the tool does.
+
+    The detail behind a catalogue line, before deciding whether to read the
+    body — name, mutability, allowed tools, location.
+    """
+    if not available:
+        return Section("describe_skill_system")
+    return Section(
+        "describe_skill_system",
+        "Call describe_skill(name) to see one skill's metadata before reading "
+        "its body. Returns the skill's name, description (with the mutability "
+        "tag `[custom, editable]` or `[built-in]`), the allowed tools list (or "
+        "`(all)`), and the absolute path to its `SKILL.md`. Use it when you "
+        "want to know what a skill is for without paying for the body.",
+    )
+
+
+def read_skill_file_system(available: bool = True) -> Section:
+    """When the agent has `read_skill_file`, tell it what the tool does.
+
+    The third step of disclosure — a file the body's text pointed at, by the
+    path the body wrote it.
+    """
+    if not available:
+        return Section("read_skill_file_system")
+    return Section(
+        "read_skill_file_system",
+        "Call read_skill_file(name, file_path) to read a supporting file "
+        "inside a skill's directory by its path — for example "
+        "`read_skill_file(\"deploy\", \"references/setup.md\")`. Use it when a "
+        "skill's body points at a file in a `references/` folder.",
+    )
+
+
 #: Named separately from the section that renders it so a caller can check
 #: what it is about to promise the model exists.
 MEMORY_TOOLS = ("memory_search", "memory_add", "memory_update", "memory_delete")

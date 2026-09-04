@@ -25,7 +25,10 @@ from dataclasses import dataclass
 from friday.config import AgentConfig
 from friday.responder.prompt import build_input, build_instructions
 from friday.agent.harness import Harness
+from friday.tools.describe_skill import describe_skill_tool
 from friday.tools.fetch_skill import fetch_skill_tool
+from friday.tools.read_skill_file import read_skill_file_tool
+from friday.tools.search_skills import search_skills_tool
 from friday.domain.models import Params, InboundEvent
 
 __all__ = ["Draft", "Responder"]
@@ -96,7 +99,16 @@ class Responder:
             instructions=build_instructions(),
             model=model,
             notes=notes,
-            tools=[fetch_skill_tool(skills)] if skills is not None else [],
+            tools=(
+                [
+                    fetch_skill_tool(skills),
+                    search_skills_tool(skills),
+                    describe_skill_tool(skills),
+                    read_skill_file_tool(skills),
+                ]
+                if skills is not None
+                else []
+            ),
         )
 
     def knows(self, channel_id: str, name: str) -> bool:
@@ -146,12 +158,12 @@ class Responder:
             tone=tone,
             context=context,
         )
-        # Two extra turns when a skill can be fetched: the call and its
-        # answer both land before the reply is started, and without the room
-        # asking for a skill would mean never writing anything.
-        result = await self._run.run(
-            said, calls=calls, extra_turns=2 if self._skills is not None else 0
-        )
+        # Two turns per tool the responder carries — the call and its answer
+        # both land before the reply is started. Counted off the agent's
+        # own tool list, not a hard-coded number, so a new skill tool
+        # never silently under-budgets the run.
+        extra = 2 * len(self._run.agent.tools) if self._skills is not None else 0
+        result = await self._run.run(said, calls=calls, extra_turns=extra)
         if result is None:
             log.warning("falling back to the template")
             return None

@@ -80,20 +80,30 @@ def test_no_tool_is_declared_outside_the_tools_package():
 
 
 def test_a_factory_tool_is_reachable_too():
-    """`fetch_skill` and `ask_for_fields` are built per-call — one is bound to
-    a skill library, the other to one type's field names — so they are not
-    module-level objects and the listing above cannot see them. They are still
-    tools, and still here; this is what says so."""
+    """`fetch_skill`, `ask_for_fields`, and the three new skill tools are
+    built per-call — bound to a library or one type's field names — so
+    they are not module-level objects and the listing above cannot see
+    them. They are still tools, and still here; this is what says so."""
     from friday.agent.skills import SkillLibrary
     from friday.domain.models import ApiIssueParams
     from friday.tools.ask_for_fields import ask_for_fields_tool
+    from friday.tools.describe_skill import describe_skill_tool
     from friday.tools.fetch_skill import fetch_skill_tool
+    from friday.tools.read_skill_file import read_skill_file_tool
+    from friday.tools.search_skills import search_skills_tool
 
-    built = fetch_skill_tool(SkillLibrary(REPO / "skills"))
+    library = SkillLibrary(REPO / "skills")
+    built = fetch_skill_tool(library)
     fields = ask_for_fields_tool(ApiIssueParams)
+    search = search_skills_tool(library)
+    describe = describe_skill_tool(library)
+    read_file = read_skill_file_tool(library)
 
     assert built.name == "fetch_skill"
     assert fields.name == "ask_for_fields"
+    assert search.name == "search_skills"
+    assert describe.name == "describe_skill"
+    assert read_file.name == "read_skill_file"
 
 
 def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():

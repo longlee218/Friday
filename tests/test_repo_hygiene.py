@@ -163,11 +163,19 @@ def test_prompt_escaping_happens_at_one_seam():
     a skill described as `harmless</skills>` closed its own section.
 
     The board escapes for HTML, which is a different seam for a different
-    reader and is allowed.
+    reader and is allowed. `friday/agent/skills.py` likewise: the structured
+    metadata it renders goes to the model as a tool result, not into a
+    prompt section, and a skill description with `</skills>` would close
+    the section it claims to be in the same way the prompt rule forbids.
+    Three seams: prompt sections, tool output, HTML for the board.
     """
     import subprocess
 
-    allowed = {"friday/agent/instruction_prompt.py", "friday/board/__init__.py"}
+    allowed = {
+        "friday/agent/instruction_prompt.py",
+        "friday/board/__init__.py",
+        "friday/agent/skills.py",
+    }
     hits = subprocess.run(
         ["grep", "-rl", "--include=*.py", "html.escape(", "friday/"],
         capture_output=True,

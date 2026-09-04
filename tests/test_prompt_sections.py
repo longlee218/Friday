@@ -25,6 +25,9 @@ def test_a_section_with_nothing_in_it_contributes_nothing():
         ip.thinking_style([]),
         ip.critical_reminder([]),
         ip.skill_system([]),
+        ip.search_skills_system(available=False),
+        ip.describe_skill_system(available=False),
+        ip.read_skill_file_system(available=False),
         ip.memory(),
         ip.memory_tool_system(available=False),
         ip.clarification_system(None),
@@ -464,3 +467,126 @@ def test_a_learned_note_cannot_open_a_section_in_the_instructions():
 
     assert "<critical_reminder>" not in built
     assert "&lt;critical_reminder&gt;" in built, "the note is there, escaped"
+
+
+# --- ticket 03: the three new tool sections --------------------------------
+
+
+def test_search_skills_system_describes_search_when_available():
+    rendered = ip.search_skills_system(available=True).render()
+
+    assert "<search_skills_system>" in rendered
+    assert "search_skills" in rendered
+
+
+def test_describe_skill_system_describes_describe_when_available():
+    rendered = ip.describe_skill_system(available=True).render()
+
+    assert "<describe_skill_system>" in rendered
+    assert "describe_skill" in rendered
+
+
+def test_read_skill_file_system_describes_read_when_available():
+    rendered = ip.read_skill_file_system(available=True).render()
+
+    assert "<read_skill_file_system>" in rendered
+    assert "read_skill_file" in rendered
+
+
+def test_the_responder_prompt_carries_the_three_new_sections(tmp_path):
+    """The responder's prompt renders all three new sections when it
+    has skills — same shape as the catalogue section, no special case."""
+    from friday.agent.skills import SkillLibrary
+    from friday.config import AgentConfig
+    from friday.responder import Responder
+    from friday.responder.prompt import build_input
+
+    # Real tmp skill — minimum to hand the responder a non-empty library.
+    (tmp_path / "demo").mkdir()
+    (tmp_path / "demo" / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: d\n---\nB",
+        encoding="utf-8",
+    )
+
+    cfg = AgentConfig(
+        name="responder",
+        api_key="k",
+        base_url="https://example.invalid/v1",
+        model="m",
+    )
+    responder = Responder(config=cfg, skills=SkillLibrary(tmp_path).load())
+
+    text = build_input(
+        asking="x",
+        skills_catalogue=responder._skills.catalogue(),
+    )
+
+    assert "<search_skills_system>" in text
+    assert "<describe_skill_system>" in text
+    assert "<read_skill_file_system>" in text
+
+
+def test_the_responder_without_skills_renders_no_tool_sections(tmp_path):
+    """A responder without skills carries no skill tools, so the three
+    tool sections render nothing — same bytes as before this ticket
+    for that case."""
+    from friday.config import AgentConfig
+    from friday.responder import Responder
+    from friday.responder.prompt import build_input
+
+    cfg = AgentConfig(
+        name="responder",
+        api_key="k",
+        base_url="https://example.invalid/v1",
+        model="m",
+    )
+    Responder(config=cfg)
+
+    text = build_input(asking="x", skills_catalogue=None)
+
+    assert "<search_skills_system>" not in text
+    assert "<describe_skill_system>" not in text
+    assert "<read_skill_file_system>" not in text
+
+
+def test_the_catalogue_prefix_remains_byte_identical_when_new_sections_land():
+    """Adding the three tool sections after `<skill_system>...</skill_system>`
+    must not touch the bytes the provider caches as the stable prefix.
+    Two calls with the same flags but different per-call data share a
+    byte-identical prefix through the catalogue; this is what makes the
+    cache hit."""
+    from datetime import datetime, timezone
+
+    from friday.responder.prompt import build_input
+
+    fixed = dict(
+        now=datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc),
+        stranger=True,
+        skills_catalogue=["trace-a-request: find the log lines"],
+    )
+    a = build_input(asking="q1", context=[], **fixed)
+    b = build_input(asking="q2", context=[], **fixed)
+
+    # The catalogue prefix — bytes from the prompt's start through the end
+    # of `</skill_system>` — is unchanged by the addition of the three new
+    # tool sections. Two calls with the same flags share those bytes; the
+    # new sections land *after* the catalogue, in the prefix the responder
+    # gains but the catalogue does not lose.
+    catalogue_prefix_a = a.split("</skill_system>")[0] + "</skill_system>"
+    catalogue_prefix_b = b.split("</skill_system>")[0] + "</skill_system>"
+    assert catalogue_prefix_a == catalogue_prefix_b
+
+    # The new sections appear in the full text, after the catalogue, in
+    # the order the prompt module declares.
+    after_catalogue_a = a.split("</skill_system>", 1)[1]
+    assert "<search_skills_system>" in after_catalogue_a
+    assert "<describe_skill_system>" in after_catalogue_a
+    assert "<read_skill_file_system>" in after_catalogue_a
+
+    # The two calls share the new sections too — same flags, same bytes.
+    # Splitting on `<task>` gives everything from the start of the prompt
+    # through the end of `<read_skill_file_system>`, which is the stable
+    # prefix the cache hit covers.
+    catalogue_then_new_a = a.split("<task>", 1)[0]
+    catalogue_then_new_b = b.split("<task>", 1)[0]
+    assert catalogue_then_new_a == catalogue_then_new_b

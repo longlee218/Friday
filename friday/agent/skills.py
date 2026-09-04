@@ -34,6 +34,13 @@ log = logging.getLogger(__name__)
 
 _FRONTMATTER = "---"
 
+#: The two strings a skill's `mutability` field accepts. `"custom"` is the
+#: default — every shipped skill is operator-written and editable, and the
+#: truth about what exists today is that there is no built-in yet. `"built_in"`
+#: marks the opposite: a skill the operator does not edit, the future home
+#: of system-shipped content.
+_MUTABILITY = ("built_in", "custom")
+
 
 @dataclass(frozen=True, slots=True)
 class Skill:
@@ -47,6 +54,15 @@ class Skill:
     #: serving only what was catalogued at startup is also what makes a
     #: fabricated path ("../../.env") unservable by construction.
     files: dict[str, str] = None  # type: ignore[assignment]
+    #: Whether the operator edits this skill. `"custom"` is the default; the
+    #: other value is `"built_in"`. Rendered by `describe_skill` as
+    #: `[custom, editable]` or `[built-in]` — the same two strings the
+    #: reference code uses, so a model trained on it recognises the signal.
+    mutability: str = "custom"
+    #: The tool names this skill expects. Empty means any tool — the agent
+    #: decides, the skill does not constrain. Rendered by `describe_skill`
+    #: as a comma-joined list, or `(all)` when empty.
+    allowed_tools: tuple[str, ...] = ()
 
     def summary(self) -> str:
         """The one line an agent is shown before deciding to read it."""
@@ -152,6 +168,94 @@ class SkillLibrary:
             f"Skill {skill.name!r} has no file {file_name!r}. Its files: {listed}."
         )
 
+    def get(self, name: str) -> Skill | None:
+        """One skill by name, or `None` if it is not here.
+
+        The body is `fetch`; the structured object is `get`. `describe_skill`
+        and the frontmatter tests need the fields the reader parsed; `fetch`
+        hides them.
+        """
+        return self._skills.get(name)
+
+    def search(self, query: str) -> str:
+        """Ranked `name: description` lines matching the query.
+
+        Ranks in order: exact name > name prefix > description substring >
+        token match (any word in name or description contains the query).
+        Case-insensitive — `CORRELATION` finds `correlation`. Capped at five
+        matches; an empty query returns `""`; a query with no matches returns
+        a sentence naming what was searched and what is available.
+
+        The body never participates — `search` exists to *find* a skill, not
+        to read it. A description that does not say the right words is the
+        operator's description, not the tool's problem.
+        """
+        q = query.strip().lower()
+        if not q:
+            return ""
+
+        # Score each skill 0..3; ties broken by name for stable order.
+        scored: list[tuple[int, str, Skill]] = []
+        for skill in self._skills.values():
+            name_lower = skill.name.lower()
+            desc_lower = skill.description.lower()
+            if name_lower == q:
+                scored.append((3, skill.name, skill))
+            elif name_lower.startswith(q):
+                scored.append((2, skill.name, skill))
+            elif q in desc_lower:
+                scored.append((1, skill.name, skill))
+            elif any(q in word for word in (name_lower + " " + desc_lower).split()):
+                scored.append((0, skill.name, skill))
+
+        scored.sort(key=lambda s: (-s[0], s[1]))
+        if not scored:
+            known = ", ".join(sorted(self._skills)) or "none are defined"
+            return f"No skill matches {query!r}. Available: {known}."
+        return "\n".join(s.summary() for _, _, s in scored[:5])
+
+    def metadata_for(self, name: str) -> str:
+        """The four-line `key: value` block `describe_skill` renders.
+
+        Format follows the catalogue's `name: description` shape, extended
+        to four — and the same `key: value` style `_render_yaml_escaped`
+        already produces for `channel_overrides` and `channel_derived`.
+        Values are escaped here, with `html.escape(..., quote=False)`, in
+        the same shape and for the same reason the prompt sections escape:
+        every field sits in element-text position, never inside an
+        attribute, so a description with `</skills>` cannot close the
+        section it claims to be in.
+
+        An unknown name returns the same "no skill called" sentence
+        `fetch` already uses, so an agent that guessed wrong gets the
+        available names and not an exception.
+        """
+        import html
+
+        skill = self._skills.get(name)
+        if skill is None:
+            known = ", ".join(sorted(self._skills)) or "none are defined"
+            return f"There is no skill called {name!r}. Available: {known}."
+
+        mutability = (
+            "[custom, editable]" if skill.mutability == "custom" else "[built-in]"
+        )
+        description_with = f"{skill.description} {mutability}"
+        tools = (
+            ", ".join(skill.allowed_tools) if skill.allowed_tools else "(all)"
+        )
+        # The library reads skills from one directory; the path is derived
+        # rather than carried on the dataclass, because a `Skill` describes
+        # *what* the operator wrote, not where it lives.
+        location = str(self._dir / skill.name / "SKILL.md")
+
+        return (
+            f"name: {html.escape(skill.name, quote=False)}\n"
+            f"description: {html.escape(description_with, quote=False)}\n"
+            f"allowed_tools: {html.escape(tools, quote=False)}\n"
+            f"location: {html.escape(location, quote=False)}"
+        )
+
     def __len__(self) -> int:
         return len(self._skills)
 
@@ -206,9 +310,34 @@ def _read(path: Path) -> Skill:
             f"{path.parent.name!r} — they must match"
         )
 
+    mutability = str(meta.get("mutability") or "custom")
+    if mutability not in _MUTABILITY:
+        raise ValueError(
+            f"frontmatter 'mutability' must be one of {', '.join(_MUTABILITY)}, "
+            f"got {mutability!r}"
+        )
+
+    if "allowed_tools" in meta:
+        raw = meta["allowed_tools"]
+        if not isinstance(raw, list):
+            raise ValueError(
+                f"frontmatter 'allowed_tools' must be a list, got "
+                f"{type(raw).__name__}"
+            )
+        allowed_tools = tuple(str(t) for t in raw)
+    else:
+        allowed_tools = ()
+
     files = {
         str(extra.relative_to(path.parent)): extra.read_text(encoding="utf-8-sig")
         for extra in sorted(path.parent.rglob("*.md"))
         if extra != path
     }
-    return Skill(name=name, description=description, body=body.strip(), files=files)
+    return Skill(
+        name=name,
+        description=description,
+        body=body.strip(),
+        files=files,
+        mutability=mutability,
+        allowed_tools=allowed_tools,
+    )

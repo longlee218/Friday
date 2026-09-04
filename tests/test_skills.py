@@ -250,7 +250,12 @@ def test_the_responder_is_given_the_catalogue_and_the_tool(tmp_path):
 
     responder = Responder(config=cfg, skills=_library(tmp_path))
 
-    assert [t.name for t in responder._run.agent.tools] == ["fetch_skill"]
+    assert [t.name for t in responder._run.agent.tools] == [
+        "fetch_skill",
+        "search_skills",
+        "describe_skill",
+        "read_skill_file",
+    ]
 
 
 def test_the_responder_without_skills_carries_no_tool():
@@ -393,3 +398,382 @@ def test_the_old_flat_layout_is_reported_not_ignored(tmp_path):
 
     assert len(library) == 0
     assert "move this to trace/SKILL.md" in library.problems[0]
+
+
+# --- ticket 01: frontmatter grows `mutability` and `allowed_tools` ----------
+
+
+def test_a_skill_without_mutability_defaults_to_custom(tmp_path):
+    """Every shipped skill is operator-written and editable; the default
+    is the truth about what exists, and a skill written before this
+    field existed parses unchanged."""
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert library.problems == []
+    assert library.get("trace-a-request").mutability == "custom"
+
+
+def test_a_skill_without_allowed_tools_defaults_to_empty(tmp_path):
+    """Empty means the agent may use any tool; `describe_skill` renders
+    it as `(all)`. An empty tuple is the safe default."""
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert library.problems == []
+    assert library.get("trace-a-request").allowed_tools == ()
+
+
+def test_a_skill_can_declare_mutability_built_in(tmp_path):
+    """The other half of the field. Without it, mutability is decorative."""
+    (tmp_path / "shipped").mkdir()
+    (tmp_path / "shipped" / "SKILL.md").write_text(
+        "---\nname: shipped\ndescription: d\nmutability: built_in\n---\nB",
+        encoding="utf-8",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert library.problems == []
+    assert library.get("shipped").mutability == "built_in"
+
+
+def test_a_bad_mutability_is_rejected_by_name(tmp_path):
+    """Same shape as every other frontmatter rejection — the file is
+    named, the value is named, the loader keeps going."""
+    (tmp_path / "bad").mkdir()
+    (tmp_path / "bad" / "SKILL.md").write_text(
+        "---\nname: bad\ndescription: d\nmutability: wrong\n---\nB",
+        encoding="utf-8",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert len(library) == 0
+    assert len(library.problems) == 1
+    assert "mutability" in library.problems[0]
+    assert "bad/SKILL.md" in library.problems[0]
+
+
+def test_allowed_tools_parses_a_list_from_frontmatter(tmp_path):
+    """A list of tool names the skill expects; the model reads it before
+    the body so a skill that wants only a log reader does not get a
+    write tool handed to it."""
+    (tmp_path / "trace").mkdir()
+    (tmp_path / "trace" / "SKILL.md").write_text(
+        "---\nname: trace\ndescription: d\n"
+        "allowed_tools: [read_logs, query_range]\n---\nB",
+        encoding="utf-8",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert library.problems == []
+    assert library.get("trace").allowed_tools == ("read_logs", "query_range")
+
+
+def test_allowed_tools_must_be_a_list(tmp_path):
+    """A scalar here is most likely a typo (`allowed_tools: read_logs`
+    should be a list, not a single string); reject it rather than
+    silently wrapping it into a one-element list."""
+    (tmp_path / "bad").mkdir()
+    (tmp_path / "bad" / "SKILL.md").write_text(
+        "---\nname: bad\ndescription: d\nallowed_tools: read_logs\n---\nB",
+        encoding="utf-8",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert len(library.problems) == 1
+    assert "allowed_tools" in library.problems[0]
+
+
+def test_get_returns_none_for_a_skill_that_does_not_exist(tmp_path):
+    """`get` does not raise — an agent asking for a name that does not
+    exist deserves a hand back, the same shape as `fetch`."""
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert library.get("trace-a-request") is not None
+    assert library.get("does-not-exist") is None
+
+
+def test_the_shipped_skills_all_parse_with_safe_defaults():
+    """The shipped library is the example an operator copies; every
+    skill loads with the new defaults applied. The library's
+    `problems` list is empty, and iterating the catalogue shows the
+    expected mutability on every entry."""
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    library = SkillLibrary(repo / "skills").load()
+
+    assert library.problems == []
+    catalogue = library.catalogue()
+    assert catalogue, "the shipped directory should have at least one skill"
+    for line in catalogue:
+        name = line.split(":", 1)[0]
+        skill = library.get(name)
+        assert skill.mutability == "custom", name
+        assert skill.allowed_tools == (), name
+
+
+# --- ticket 02: search, describe, read --------------------------------------
+
+
+def test_search_finds_an_exact_name_match(tmp_path):
+    """Exact name beats everything else."""
+    write(tmp_path, "trace-a-request", SKILL)
+    write(
+        tmp_path,
+        "deploy",
+        "---\nname: deploy\ndescription: how to deploy\n---\nB",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    lines = library.search("trace-a-request").split("\n")
+
+    # Only `trace-a-request` matches the exact-name query; `deploy` does
+    # not appear at all.
+    assert lines == ["trace-a-request: Find the log lines for one request"]
+
+
+def test_search_finds_a_name_prefix_match(tmp_path):
+    """A prefix beats description substring and token match."""
+    write(tmp_path, "trace-a-request", SKILL)
+    write(
+        tmp_path,
+        "trace-corpus",
+        "---\nname: trace-corpus\ndescription: indexing\n---\nB",
+    )
+    write(
+        tmp_path,
+        "deploy",
+        "---\nname: deploy\ndescription: trace from staging\n---\nB",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+    lines = library.search("trace").split("\n")
+
+    # Both `trace-a-request` and `trace-corpus` should rank above `deploy`
+    assert lines[0].startswith("trace-")
+    assert lines[1].startswith("trace-")
+    assert "deploy" not in lines[:2]
+
+
+def test_search_finds_a_description_substring(tmp_path):
+    """A description substring beats a token match."""
+    write(
+        tmp_path,
+        "tracing",
+        "---\nname: tracing\ndescription: find a request by id\n---\nB",
+    )
+    write(
+        tmp_path,
+        "trace-corpus",
+        "---\nname: trace-corpus\ndescription: indexing\n---\nB",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+    lines = library.search("request").split("\n")
+
+    assert lines[0].startswith("tracing:")
+
+
+def test_search_caps_at_five_matches(tmp_path):
+    """Five is enough; a longer result is the agent's signal to narrow."""
+    for i in range(8):
+        write(
+            tmp_path,
+            f"trace-{i}",
+            f"---\nname: trace-{i}\ndescription: how to trace {i}\n---\nB",
+        )
+
+    library = SkillLibrary(tmp_path).load()
+    lines = library.search("trace").split("\n")
+
+    assert len(lines) == 5
+
+
+def test_search_empty_query_returns_empty_string(tmp_path):
+    """An empty query has nothing to match against."""
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert library.search("") == ""
+    assert library.search("   ") == ""
+
+
+def test_search_no_match_returns_a_sentence(tmp_path):
+    """A query with no matches gets the same shape as `fetch`'s miss:
+    the question back, the available names."""
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+    answer = library.search("xyzzy")
+
+    assert "no skill matches" in answer.lower()
+    assert "trace-a-request" in answer
+
+
+def test_search_is_case_insensitive(tmp_path):
+    """A reporter who typed `CORRELATION` should still find
+    `correlation` — case is not a discovery aid."""
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert "trace-a-request" in library.search("TRACE")
+
+
+# --- describe ----------------------------------------------------------------
+
+
+def test_describe_returns_the_four_fields_in_order(tmp_path):
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+    text = library.metadata_for("trace-a-request")
+    lines = text.split("\n")
+
+    assert lines[0].startswith("name:")
+    assert lines[1].startswith("description:")
+    assert lines[2].startswith("allowed_tools:")
+    assert lines[3].startswith("location:")
+
+
+def test_describe_mutability_custom_renders_as_editable(tmp_path):
+    """The two strings the reference code shows: `[custom, editable]`
+    and `[built-in]`. A model trained on the reference shape recognises
+    either."""
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert "[custom, editable]" in library.metadata_for("trace-a-request")
+
+
+def test_describe_mutability_built_in_renders_without_editable(tmp_path):
+    (tmp_path / "shipped").mkdir()
+    (tmp_path / "shipped" / "SKILL.md").write_text(
+        "---\nname: shipped\ndescription: d\nmutability: built_in\n---\nB",
+        encoding="utf-8",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert "[built-in]" in library.metadata_for("shipped")
+
+
+def test_describe_allowed_tools_empty_renders_as_all(tmp_path):
+    """Empty means any tool — the agent decides."""
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert "(all)" in library.metadata_for("trace-a-request")
+
+
+def test_describe_allowed_tools_list_renders_as_csv(tmp_path):
+    (tmp_path / "trace").mkdir()
+    (tmp_path / "trace" / "SKILL.md").write_text(
+        "---\nname: trace\ndescription: d\n"
+        "allowed_tools: [read_logs, query_range]\n---\nB",
+        encoding="utf-8",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    text = library.metadata_for("trace")
+    assert "read_logs, query_range" in text
+
+
+def test_describe_escapes_values_at_the_seam(tmp_path):
+    """A description containing `<` or `&` cannot close its own block
+    or inject HTML-entity tricks — escape once, the renderer."""
+    (tmp_path / "tricky").mkdir()
+    (tmp_path / "tricky" / "SKILL.md").write_text(
+        '---\nname: tricky\ndescription: "<bad> & ampersand"\n---\nbody',
+        encoding="utf-8",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    text = library.metadata_for("tricky")
+    assert "&lt;bad&gt;" in text
+    assert "&amp;" in text
+    assert "<bad>" not in text
+
+
+def test_describe_unknown_name_says_so(tmp_path):
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    text = library.metadata_for("does-not-exist")
+    assert "no skill called" in text.lower() or "no skill" in text.lower()
+    assert "trace-a-request" in text
+
+
+def test_describe_location_is_an_absolute_path(tmp_path):
+    """The path is what an operator would click; absolute makes it
+    copy-paste-able from a transcript."""
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    text = library.metadata_for("trace-a-request")
+    location_line = next(l for l in text.split("\n") if l.startswith("location:"))
+    path_value = location_line.split(":", 1)[1].strip()
+    assert "trace-a-request" in path_value
+    assert "SKILL.md" in path_value
+
+
+# --- read_skill_file ---------------------------------------------------------
+
+
+def test_read_skill_file_returns_a_deep_path(tmp_path):
+    """The third step of disclosure: a body points at a deep file,
+    the agent can read it by path verbatim."""
+    BIG_SKILL_PATH = (
+        "---\nname: deploy\ndescription: how to deploy\n---\n\n"
+        "Steps are short. For rollback, see [rollback.md](references/rollback.md).\n"
+    )
+    write(tmp_path, "deploy", BIG_SKILL_PATH)
+    (tmp_path / "deploy" / "references").mkdir()
+    (tmp_path / "deploy" / "references" / "rollback.md").write_text(
+        "Rollback: revert the tag.", encoding="utf-8"
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert library.fetch("deploy/references/rollback.md") == "Rollback: revert the tag."
+
+
+def test_read_skill_file_rejects_uncatalogued_path(tmp_path):
+    write(tmp_path, "deploy", BIG_SKILL)
+    (tmp_path / "deploy" / "rollback.md").write_text("Rollback: revert the tag.")
+
+    library = SkillLibrary(tmp_path).load()
+
+    answer = library.fetch("deploy/no-such-file.md")
+    assert "no file" in answer.lower()
+
+
+def test_read_skill_file_does_not_leak_outside_the_skill(tmp_path):
+    """A fabricated path cannot reach a sibling skill's directory.
+    Same property `fetch_skill(name/file.md)` already has: files are
+    served from what was catalogued at startup, no filesystem lookup."""
+    write(tmp_path, "deploy", BIG_SKILL)
+    write(tmp_path, "secret", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    answer = library.fetch("deploy/../secret/SKILL.md")
+    assert "Find the log lines" not in answer
+    assert "no file" in answer.lower()

@@ -18,6 +18,9 @@ from datetime import datetime, timezone
 
 from friday.agent.instruction_prompt import (
     assemble,
+    describe_skill_system,
+    read_skill_file_system,
+    search_skills_system,
     skill_system,
     counterpart,
     job,
@@ -194,7 +197,15 @@ def build_input(
     context: Sequence[InboundEvent] = (),
     now: datetime | None = None,
 ) -> str:
-    """Everything one draft call knows, rendered stable-first."""
+    """Everything one draft call knows, rendered stable-first.
+
+    The three skill tool renderers sit between the catalogue and the
+    tone examples. They render nothing when the responder was built
+    without skills (the `available` flag is False in that case), so a
+    responder without skills produces the exact bytes it did before
+    this ticket, including no extra sections.
+    """
+    has_skills = bool(skills_catalogue)
     parts = [
         base(now or datetime.now(timezone.utc)),
         channel_base(room),
@@ -202,6 +213,9 @@ def build_input(
         channel_overrides(room),
         counterpart(COUNTERPART if stranger else ""),
         skill_system(skills_catalogue),
+        search_skills_system(has_skills),
+        describe_skill_system(has_skills),
+        read_skill_file_system(has_skills),
         tone_examples(list(tone)),
         conversation(list(context)),
         task("respond", params, asking),
