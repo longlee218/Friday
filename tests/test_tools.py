@@ -136,6 +136,25 @@ def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
     assert offenders == {}, f"tool-shaped and not in friday/tools/: {offenders}"
 
 
+def test_the_skill_tools_ask_the_model_for_what_their_names_promise():
+    """The parameter names *are* the instruction to the model, so they are
+    worth asserting rather than reading. Nothing else pinned them: the
+    factories were checked for their `.name` and their behaviour was covered
+    through the library underneath, which would keep passing if a tool asked
+    for the wrong thing or stopped asking at all."""
+    from friday.agent.skills import SkillLibrary
+    from friday.tools.describe_skill import describe_skill_tool
+    from friday.tools.read_skill_file import read_skill_file_tool
+    from friday.tools.search_skills import search_skills_tool
+
+    library = SkillLibrary(REPO / "skills")
+    schema = lambda built: set(built.params_json_schema["properties"])
+
+    assert schema(search_skills_tool(library)) == {"query"}
+    assert schema(describe_skill_tool(library)) == {"name"}
+    assert schema(read_skill_file_tool(library)) == {"name", "file_path"}
+
+
 def test_the_two_asking_tools_are_not_the_same_tool():
     """They answer different questions, and collapsing them would trade a
     constraint the code can check for a shorter list. `ask_for_fields` offers

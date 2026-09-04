@@ -22,6 +22,7 @@ Skills are a shared resource rather than a property of an agent: the same
 
 from __future__ import annotations
 
+import html
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -181,10 +182,23 @@ class SkillLibrary:
         """Ranked `name: description` lines matching the query.
 
         Ranks in order: exact name > name prefix > description substring >
-        token match (any word in name or description contains the query).
+        every query token found somewhere in the name or description.
         Case-insensitive — `CORRELATION` finds `correlation`. Capped at five
-        matches; an empty query returns `""`; a query with no matches returns
-        a sentence naming what was searched and what is available.
+        matches; an empty query and one that matches nothing both come back
+        as a sentence naming what is available.
+
+        The last rank splits the **query**, not the corpus, and that is the
+        whole of what it buys: the tool asks the agent for a phrase, and a
+        phrase is rarely a contiguous substring of anything. `"log find"`
+        reaches `"Find log lines"`; splitting the corpus instead — which
+        this did — could only ever match an infix of the name, because any
+        query inside a description's word is already inside the description
+        and caught one rank above. Rank 4 was advertised to the model as
+        token matching and was not.
+
+        **All** tokens, not any: a query of four ordinary words matches
+        almost every skill on `"the"` alone, and a rank that matches
+        everything ranks nothing.
 
         The body never participates — `search` exists to *find* a skill, not
         to read it. A description that does not say the right words is the
@@ -192,7 +206,7 @@ class SkillLibrary:
         """
         q = query.strip().lower()
         if not q:
-            return ""
+            return self._nothing_matched(query)
 
         # Score each skill 0..3; ties broken by name for stable order.
         scored: list[tuple[int, str, Skill]] = []
@@ -205,14 +219,26 @@ class SkillLibrary:
                 scored.append((2, skill.name, skill))
             elif q in desc_lower:
                 scored.append((1, skill.name, skill))
-            elif any(q in word for word in (name_lower + " " + desc_lower).split()):
+            elif all(
+                token in f"{name_lower} {desc_lower}" for token in q.split()
+            ):
                 scored.append((0, skill.name, skill))
 
         scored.sort(key=lambda s: (-s[0], s[1]))
         if not scored:
-            known = ", ".join(sorted(self._skills)) or "none are defined"
-            return f"No skill matches {query!r}. Available: {known}."
+            return self._nothing_matched(query)
         return "\n".join(s.summary() for _, _, s in scored[:5])
+
+    def _nothing_matched(self, query: str) -> str:
+        """What a search that found nothing hands back.
+
+        A sentence rather than an empty string, for the reason `fetch` gives:
+        an agent that guessed badly has made an ordinary mistake, and the
+        useful answer is what it could have asked for. An empty string is the
+        one reply it cannot act on.
+        """
+        known = ", ".join(sorted(self._skills)) or "none are defined"
+        return f"No skill matches {query!r}. Available: {known}."
 
     def metadata_for(self, name: str) -> str:
         """The four-line `key: value` block `describe_skill` renders.
@@ -230,8 +256,6 @@ class SkillLibrary:
         `fetch` already uses, so an agent that guessed wrong gets the
         available names and not an exception.
         """
-        import html
-
         skill = self._skills.get(name)
         if skill is None:
             known = ", ".join(sorted(self._skills)) or "none are defined"
@@ -244,10 +268,17 @@ class SkillLibrary:
         tools = (
             ", ".join(skill.allowed_tools) if skill.allowed_tools else "(all)"
         )
-        # The library reads skills from one directory; the path is derived
-        # rather than carried on the dataclass, because a `Skill` describes
-        # *what* the operator wrote, not where it lives.
-        location = str(self._dir / skill.name / "SKILL.md")
+        # Derived rather than carried on the dataclass, because a `Skill`
+        # describes *what* the operator wrote, not where it lives. The
+        # frontmatter `name` is required to equal the directory name, which
+        # is what makes deriving it sound.
+        #
+        # **Resolved.** `config.py` defaults `skills_directory` to the
+        # relative "skills", so without this the model is handed
+        # `skills/trace-a-request/SKILL.md` — a path that means nothing
+        # unless you already know which directory the process was started
+        # from, which is the one thing a reader of a transcript does not.
+        location = str((self._dir / skill.name / "SKILL.md").resolve())
 
         return (
             f"name: {html.escape(skill.name, quote=False)}\n"

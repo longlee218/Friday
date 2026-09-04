@@ -1,9 +1,9 @@
 """Finding a skill by what it does, when the agent does not already know its name.
 
 A factory rather than a bare tool: the library is the injection site, the same
-shape as `fetch_skill`. The catalogue in the prompt is the fast path for skills
-it already knows about; this tool is the way to find skills the catalogue does
-not surface.
+shape as `fetch_skill`. The catalogue in the prompt is the fast path for the
+skills an agent has already been shown; this is the way to reach one the
+catalogue's wording does not surface.
 """
 
 from __future__ import annotations
@@ -19,32 +19,29 @@ log = logging.getLogger(__name__)
 
 
 def search_skills_tool(library: SkillLibrary):
-    """The tool an agent calls to find a skill it cannot name by heart."""
+    """The tool an agent calls to find a skill it cannot name by heart.
 
+    Bound to one library rather than reaching for a module global: what an
+    agent can reach is composition, not something the agent declares.
+    """
+
+    @tool
     def search_skills(query: str) -> str:
-        """Find skills whose name or description matches the query.
+        """Find skills by what they are for, when you do not know the name.
 
-        Ranks exact-name match above name-prefix above description-substring
-        above token match. Caps at five results so a vague query does not
-        dump the whole library into the prompt. A description that does not
-        say the right words is the operator's description, not this tool's
-        problem — the body is too expensive to use as the index.
+        Use this when the catalogue you were shown has no line that sounds
+        like what you need. A skill named `deploy` whose description says
+        "release a build" will not catch your eye if you are looking for
+        "rolling out", and this is how you reach it anyway.
+
+        Returns up to five `name: description` lines, best match first. Never
+        the bodies — call fetch_skill once you have picked one.
 
         Args:
-            query: what the agent is looking for, in one phrase.
+            query: a phrase describing what you are trying to do, not the
+                skill's name. Word order does not matter.
         """
+        log.info("skills searched: %s", query)
         return library.search(query)
 
-    search_skills.__doc__ = (
-        "Find skills by what they are for, when you do not already know the "
-        "name.\n\n"
-        "Use this when the catalogue in the prompt does not show a skill that "
-        "sounds like what you need. Returns ranked `name: description` "
-        "lines — exact-name match first, then name prefix, then description "
-        "substring, then a token match. Capped at five results so a vague "
-        "query does not dump the library.\n\n"
-        "Args:\n"
-        "    query: a phrase — what you are trying to do, not the skill's "
-        "name.\n"
-    )
-    return tool(search_skills)
+    return search_skills

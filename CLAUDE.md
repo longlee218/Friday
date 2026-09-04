@@ -152,7 +152,7 @@ What is actually on disk.
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
 | `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds the entry node every graph shares and holds the fill-and-validate mechanism it runs. `dag/router.py` maps a task type to a graph. **Every type now gets the same one-node graph** |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
-| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching (`fetch_skill`). A test asserts the list and forbids declaring one anywhere else |
+| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`). A test asserts the list and forbids declaring one anywhere else |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `friday/board/` | The read-only page on `:8086`; its JSON API is `ops/api.py` |
@@ -193,6 +193,18 @@ Both spellings are checked by reading the syntax, since grep sees only one of
 them. A tool that needs something injected — `fetch_skill` a skill library,
 `ask_for_fields` one type's field names — stays a factory; that is a
 different thing from living somewhere else.
+
+**Four tools reach a skill, and the split is by what the agent already knows.**
+`fetch_skill` when it has the name — from the catalogue, which is still in the
+prompt and still the common case. `search_skills` when it does not: the
+catalogue is matched by eye, so a skill named `deploy` described as "release a
+build" is invisible to an agent looking for "rolling out". `describe_skill` for
+the metadata behind one line — the mutability tag and the file's path — without
+paying for the body. `read_skill_file` for the file a body linked to, by the
+path the body wrote. Its fourth search rank splits the **query**, not the
+corpus: the tool asks for a phrase, and splitting the corpus instead could only
+ever match an infix of the name, because a query inside a description's word is
+already inside the description and caught a rank above.
 
 ## Architecture constraints
 

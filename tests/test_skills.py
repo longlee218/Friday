@@ -599,14 +599,17 @@ def test_search_caps_at_five_matches(tmp_path):
     assert len(lines) == 5
 
 
-def test_search_empty_query_returns_empty_string(tmp_path):
-    """An empty query has nothing to match against."""
+def test_search_empty_query_answers_rather_than_returning_nothing(tmp_path):
+    """An empty string is the one reply a model cannot act on, and this
+    module's own rule is that a bad guess comes back as something it can —
+    which is why `fetch` answers a missing name with the list of real ones."""
     write(tmp_path, "trace-a-request", SKILL)
 
     library = SkillLibrary(tmp_path).load()
 
-    assert library.search("") == ""
-    assert library.search("   ") == ""
+    for blank in ("", "   "):
+        answer = library.search(blank)
+        assert "trace-a-request" in answer, blank
 
 
 def test_search_no_match_returns_a_sentence(tmp_path):
@@ -619,6 +622,54 @@ def test_search_no_match_returns_a_sentence(tmp_path):
 
     assert "no skill matches" in answer.lower()
     assert "trace-a-request" in answer
+
+
+def test_search_matches_a_phrase_whose_words_are_out_of_order(tmp_path):
+    """The query is split, not the corpus. The tool asks the agent for a
+    phrase and a phrase is rarely a contiguous substring of anything, so
+    without this the fourth rank could only ever match an infix of the name —
+    any query inside a description's word is already inside the description
+    and caught one rank above. It was advertised to the model as token
+    matching and was not."""
+    write(
+        tmp_path,
+        "trace-a-request",
+        "---\nname: trace-a-request\ndescription: Find log lines\n---\nB",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    # Not `name in answer`: the miss sentence lists every available skill by
+    # name, so that assertion is satisfied by the failure it is meant to catch.
+    assert library.search("log find") == "trace-a-request: Find log lines"
+
+
+def test_search_needs_every_word_of_the_query_not_just_one(tmp_path):
+    """A rank that matches everything ranks nothing: four ordinary words
+    would hit every skill on `the` alone."""
+    write(
+        tmp_path,
+        "trace-a-request",
+        "---\nname: trace-a-request\ndescription: Find log lines\n---\nB",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert "No skill matches" in library.search("find the deploy rollback")
+
+
+def test_search_still_reaches_an_infix_of_the_name(tmp_path):
+    """What the old fourth rank did do. Splitting the query rather than the
+    corpus has to keep it: a one-word query is one token."""
+    write(
+        tmp_path,
+        "trace-a-request",
+        "---\nname: trace-a-request\ndescription: Find log lines\n---\nB",
+    )
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert library.search("a-req") == "trace-a-request: Find log lines"
 
 
 def test_search_is_case_insensitive(tmp_path):
@@ -721,17 +772,32 @@ def test_describe_unknown_name_says_so(tmp_path):
 
 
 def test_describe_location_is_an_absolute_path(tmp_path):
-    """The path is what an operator would click; absolute makes it
-    copy-paste-able from a transcript."""
+    """`config.py` defaults `skills_directory` to the relative "skills", so
+    without resolving it the model is handed `skills/x/SKILL.md` — a path that
+    means nothing unless you already know where the process was started, which
+    is the one thing a reader of a transcript does not.
+
+    A **relative** directory is what production passes, so that is what this
+    builds from. Asserting on a `tmp_path`-built library would pass whether or
+    not anything resolved, which is how this went out wrong: the test was
+    named for absoluteness and only checked the filename.
+    """
+    import os
+    from pathlib import Path
+
     write(tmp_path, "trace-a-request", SKILL)
+    here = Path.cwd()
+    os.chdir(tmp_path.parent)
+    try:
+        library = SkillLibrary(tmp_path.name).load()
+        text = library.metadata_for("trace-a-request")
+    finally:
+        os.chdir(here)
 
-    library = SkillLibrary(tmp_path).load()
-
-    text = library.metadata_for("trace-a-request")
     location_line = next(l for l in text.split("\n") if l.startswith("location:"))
     path_value = location_line.split(":", 1)[1].strip()
-    assert "trace-a-request" in path_value
-    assert "SKILL.md" in path_value
+    assert Path(path_value).is_absolute(), path_value
+    assert path_value.endswith("trace-a-request/SKILL.md"), path_value
 
 
 # --- read_skill_file ---------------------------------------------------------

@@ -493,57 +493,29 @@ def test_read_skill_file_system_describes_read_when_available():
     assert "read_skill_file" in rendered
 
 
-def test_the_responder_prompt_carries_the_three_new_sections(tmp_path):
-    """The responder's prompt renders all three new sections when it
-    has skills — same shape as the catalogue section, no special case."""
-    from friday.agent.skills import SkillLibrary
-    from friday.config import AgentConfig
-    from friday.responder import Responder
+def test_the_responder_prompt_carries_the_three_new_sections():
+    """All three render when there is a catalogue to search. That the
+    responder is *handed* one is `test_skills.py`'s job — this is the
+    renderer, and building an agent here only to read a private attribute
+    off it tested neither thing."""
     from friday.responder.prompt import build_input
 
-    # Real tmp skill — minimum to hand the responder a non-empty library.
-    (tmp_path / "demo").mkdir()
-    (tmp_path / "demo" / "SKILL.md").write_text(
-        "---\nname: demo\ndescription: d\n---\nB",
-        encoding="utf-8",
-    )
-
-    cfg = AgentConfig(
-        name="responder",
-        api_key="k",
-        base_url="https://example.invalid/v1",
-        model="m",
-    )
-    responder = Responder(config=cfg, skills=SkillLibrary(tmp_path).load())
-
-    text = build_input(
-        asking="x",
-        skills_catalogue=responder._skills.catalogue(),
-    )
+    text = build_input(asking="x", skills_catalogue=["demo: d"])
 
     assert "<search_skills_system>" in text
     assert "<describe_skill_system>" in text
     assert "<read_skill_file_system>" in text
 
 
-def test_the_responder_without_skills_renders_no_tool_sections(tmp_path):
-    """A responder without skills carries no skill tools, so the three
-    tool sections render nothing — same bytes as before this ticket
-    for that case."""
-    from friday.config import AgentConfig
-    from friday.responder import Responder
+def test_no_catalogue_means_no_tool_sections_either():
+    """A section that describes a tool renders only if the tool is there —
+    the rule `clarification_system` and `memory_tool_system` already follow.
+    An agent told about a door that is not in the room goes looking for it."""
     from friday.responder.prompt import build_input
-
-    cfg = AgentConfig(
-        name="responder",
-        api_key="k",
-        base_url="https://example.invalid/v1",
-        model="m",
-    )
-    Responder(config=cfg)
 
     text = build_input(asking="x", skills_catalogue=None)
 
+    assert "<skill_system>" not in text
     assert "<search_skills_system>" not in text
     assert "<describe_skill_system>" not in text
     assert "<read_skill_file_system>" not in text

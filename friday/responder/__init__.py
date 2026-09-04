@@ -94,21 +94,30 @@ class Responder:
         #: is short enough. Triage does not: it stops on its first tool call
         #: by design, so a fetch there would end the run before it classified.
         self._skills = skills
+        #: The four ways it can reach a skill: read one it named, find one it
+        #: could not name, look at one before reading it, follow a link out of
+        #: a body. Kept as a local rather than read back off the agent, because
+        #: `harness.py` is the only module that may know the SDK's shape — the
+        #: `Harness` properties exist so nobody reaches through it, and the
+        #: turn budget below is the one caller that wanted to.
+        tools = (
+            [
+                fetch_skill_tool(skills),
+                search_skills_tool(skills),
+                describe_skill_tool(skills),
+                read_skill_file_tool(skills),
+            ]
+            if skills is not None
+            else []
+        )
+        #: Two turns each — the call and its answer — for however many it got.
+        self._tool_turns = 2 * len(tools)
         self._run = Harness(
             config=config,
             instructions=build_instructions(),
             model=model,
             notes=notes,
-            tools=(
-                [
-                    fetch_skill_tool(skills),
-                    search_skills_tool(skills),
-                    describe_skill_tool(skills),
-                    read_skill_file_tool(skills),
-                ]
-                if skills is not None
-                else []
-            ),
+            tools=tools,
         )
 
     def knows(self, channel_id: str, name: str) -> bool:
@@ -158,12 +167,13 @@ class Responder:
             tone=tone,
             context=context,
         )
-        # Two turns per tool the responder carries — the call and its answer
-        # both land before the reply is started. Counted off the agent's
-        # own tool list, not a hard-coded number, so a new skill tool
-        # never silently under-budgets the run.
-        extra = 2 * len(self._run.agent.tools) if self._skills is not None else 0
-        result = await self._run.run(said, calls=calls, extra_turns=extra)
+        # Room for every tool call it might make before the reply is
+        # written. A ceiling, not a target: it costs nothing to a run that
+        # answers in one turn, and without it an agent that reaches for a
+        # skill spends its only turn on the fetch and returns nothing.
+        result = await self._run.run(
+            said, calls=calls, extra_turns=self._tool_turns
+        )
         if result is None:
             log.warning("falling back to the template")
             return None
