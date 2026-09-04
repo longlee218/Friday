@@ -18,21 +18,21 @@ operator-written (so `custom`) and lets the agent use any tool (so `()`,
 which `describe_skill` renders as `(all)`).
 
 - [x] `Skill` has `mutability: Literal["built_in", "custom"]`, default `"custom"`
-- [ ] `Skill` has `allowed_tools: tuple[str, ...]`, default `()`
-- [ ] `SkillLibrary._read` parses `mutability` and `allowed_tools` from
+- [x] `Skill` has `allowed_tools: tuple[str, ...]`, default `()`
+- [x] `SkillLibrary._read` parses `mutability` and `allowed_tools` from
       frontmatter when present; uses the defaults when absent
-- [ ] `SkillLibrary._read` rejects `mutability` values outside the two
+- [x] `SkillLibrary._read` rejects `mutability` values outside the two
       strings, naming the file in the error — same shape as every other
       frontmatter rejection
-- [ ] `SkillLibrary._read` escapes `name`, `description`, `mutability`,
-      `allowed_tools`, and the eventual `location` at the seam with
-      `html.escape(..., quote=False)` — the same escape the catalogue
-      uses today, applied once here so the tools do not each have to
-      remember it
-- [ ] Every skill that ships in `skills/` round-trips through the new
+- [~] ~~`SkillLibrary._read` escapes the fields at the seam~~ —
+      **superseded, see `04-review-fixes.md`.** Escaping in the reader
+      would have put it in a store; it belongs with the renderer, and
+      the renderer belongs in `instruction_prompt`. The reader parses
+      and validates and escapes nothing
+- [x] Every skill that ships in `skills/` round-trips through the new
       reader with `library.problems == []`
-- [ ] `tests/test_skills.py` adds cases for: defaults applied, value
+- [x] `tests/test_skills.py` adds cases for: defaults applied, value
       rejected on bad `mutability`, escape at the seam on `<` and `&`
-- [ ] `tests/test_skills.py` adds a case asserting the shipped library
+- [x] `tests/test_skills.py` adds a case asserting the shipped library
       parses with `mutability == "custom"` and `allowed_tools == ()`
-- [ ] Suite stays green: `uv run pytest -q`
+- [x] Suite stays green: `uv run pytest -q`
