@@ -61,6 +61,16 @@ class AgentConfig:
     #: cannot be hardcoded — it decides when a conversation has grown large
     #: enough that summarising it costs less than passing it raw.
     context_window: int = 128_000
+    #: How many times to call the provider for one run before giving up, and
+    #: how long to wait after the first failure — doubling from there.
+    #:
+    #: Small numbers on purpose. Every attempt lives inside `timeout_seconds`,
+    #: which bounds the whole run rather than each try, so a long backoff
+    #: spends the budget waiting instead of asking. The outbox retries over
+    #: minutes because a send can wait; a task cannot, since the pool works
+    #: one at a time.
+    max_attempts: int = 3
+    retry_backoff_seconds: float = 1.0
     #: What this agent may spend in a day, in tokens in and out. `None` is no
     #: ceiling, which is the shipped default and deliberate: `docs/DESIGN.md`
     #: says the first weeks are data collection, so the *measurement* is
@@ -299,6 +309,8 @@ def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
             max_turns=int(spec.pop("max_turns", 1)),
             context_window=int(spec.pop("context_window", 128_000)),
             timeout_seconds=float(spec.pop("timeout_seconds", 60.0)),
+            max_attempts=int(spec.pop("max_attempts", 3)),
+            retry_backoff_seconds=float(spec.pop("retry_backoff_seconds", 1.0)),
             daily_token_budget=(
                 int(budget)
                 if (budget := spec.pop("daily_token_budget", None)) is not None

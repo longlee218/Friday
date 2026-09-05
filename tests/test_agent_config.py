@@ -111,3 +111,30 @@ def test_max_tokens_reaches_the_model_settings_without_a_knob_for_it():
     )
 
     assert built.agent.model_settings.max_tokens == 4096
+
+
+def test_the_client_retries_nothing_and_waits_no_longer_than_the_run():
+    """Both numbers chosen here rather than inherited from the SDK.
+
+    Its defaults are ten minutes and two silent retries. The first makes a run
+    unbounded from this side — the pool works one task at a time, so that is
+    every task waiting. The second is worse than slow: the provider bills three
+    calls where the record holds one, and a record that disagrees with the
+    invoice is what this board exists to stop. Retrying belongs to
+    `Harness._attempts`, where it is counted and each attempt gets its own row.
+    """
+    from friday.agent.harness import _chat_model
+    from friday.config import AgentConfig
+
+    model = _chat_model(
+        AgentConfig(
+            name="a", api_key="k", base_url="https://example.invalid/v1",
+            model="test-model", timeout_seconds=45.0, max_attempts=1,
+        )
+    )
+
+    assert model._client.max_retries == 0
+    # One attempt allowed, so one attempt gets the whole budget. What a share
+    # of it buys when there is more than one is
+    # `test_one_request_may_not_spend_the_whole_run`.
+    assert model._client.timeout == 45.0

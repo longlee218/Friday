@@ -302,6 +302,11 @@ class ModelCall:
     #: How long the provider took, wall clock. The one number here that is
     #: measured rather than passed in.
     latency_ms: int | None = None
+    #: Which attempt of its run this was, 1-based. An ordinal, not a total:
+    #: one row is one call to the provider, and the provider bills per call —
+    #: so a run rate-limited once leaves two rows, each with its own prompt
+    #: and its own cost, rather than one row claiming to be two.
+    attempt: int = 1
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

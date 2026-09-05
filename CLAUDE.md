@@ -324,6 +324,31 @@ not an implementation detail:
   a call was about, and forgetting *that* loses a correlation key rather than
   the record. `AgentHooks` cannot do this job — `on_llm_start` fires after the
   decision to spend and `on_llm_end` after the money is gone.
+- **A hiccup is retried here and nowhere else.** `Harness._attempts` calls the
+  provider up to `max_attempts` times with doubling backoff, and what counts
+  as worth another call is an explicit list — connection errors, timeouts,
+  429, any 5xx — never a guess from the message. A 400 is the provider saying
+  the request is wrong, and asking again buys the same answer at twice the
+  price. Running out is work for a person, and the reason says how many times
+  it tried, because "429 slow down" alone reads as a moment while "gave up
+  after 3 attempts" says the moment lasted.
+
+  **The client's own retry is switched off** (`max_retries=0`), and that is
+  not tidiness: `AsyncOpenAI` retries twice by default and says nothing, so
+  the provider bills three calls where the record holds one. Every attempt
+  gets its own row with its own prompt and its own cost — `attempt` is an
+  ordinal, not a total — which is the only arrangement in which the record and
+  the invoice agree.
+
+  **`timeout_seconds` bounds the whole run, retries included**, so the pool's
+  worst case stays what it was, and **one HTTP request gets a share of it** —
+  `timeout_seconds / max_attempts`. Given the whole budget, the client's timer
+  never fired first, the run-level one cancelled instead, and a cancellation
+  is a `BaseException` the retry loop never sees: a hung provider spent the
+  entire budget on one attempt while `APITimeoutError` sat on the retry list
+  unable to fire. The cost of a share each is that one slow-but-working call
+  fails where it used to be waited out, which is the right way round for
+  agents that send one short prompt and read one short answer.
 - **A ceiling refuses; it does not trim.** `daily_token_budget` is per agent,
   counted from the rows the agent actually wrote, so a restart does not
   forgive it and the number cannot drift from what the board shows. Reaching

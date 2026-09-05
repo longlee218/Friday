@@ -256,6 +256,12 @@ class ModelCall(Base):
     node: Mapped[str | None] = mapped_column(default=None)
     #: Wall clock, in milliseconds.
     latency_ms: Mapped[int | None] = mapped_column(default=None)
+    #: Which attempt of its run this call was, 1-based. Nullable for the same
+    #: reason `trail` is: SQLite cannot add a NOT NULL column to a table that
+    #: has rows, and this one has them wherever a model has ever been called.
+    #: A row written before the column existed says nothing about attempts,
+    #: which is different from saying it was the first.
+    attempt: Mapped[int | None] = mapped_column(default=1)
     agent: Mapped[str]
     model: Mapped[str]
     system_prompt: Mapped[str]

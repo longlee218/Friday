@@ -608,3 +608,197 @@ async def test_the_ceiling_is_reached_at_it_and_not_past_it():
         spent=one_short,
     )
     assert (await under.run("go")).final_output == "done"
+
+
+def _flaky(*failures):
+    """A model that raises the given things, in order, then answers."""
+    from agents.items import ModelResponse
+    from agents.usage import Usage
+    from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+
+    queue = list(failures)
+
+    class Flaky(Model):
+        calls = 0
+
+        async def get_response(self, *a, **kw):
+            Flaky.calls += 1
+            if queue:
+                raise queue.pop(0)
+            return ModelResponse(
+                output=[
+                    ResponseOutputMessage(
+                        id="1", role="assistant", status="completed", type="message",
+                        content=[ResponseOutputText(
+                            text="done", type="output_text", annotations=[]
+                        )],
+                    )
+                ],
+                usage=Usage(requests=1, input_tokens=5, output_tokens=2),
+                response_id=None,
+            )
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    return Flaky()
+
+
+class _Answered:
+    """The least a provider error needs to exist.
+
+    Built by hand rather than with the HTTP library: the SDK vendors it under
+    a private name, and a test that reaches for that is a test that breaks on
+    an upgrade for a reason having nothing to do with what it checks.
+    """
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        self.request = None
+        self.headers: dict = {}
+
+
+def _rate_limited():
+    from openai import RateLimitError
+
+    return RateLimitError("429 slow down", response=_Answered(429), body=None)
+
+
+def _rejected():
+    from openai import BadRequestError
+
+    return BadRequestError(
+        "400 that prompt is not acceptable", response=_Answered(400), body=None
+    )
+
+
+async def test_a_hiccup_is_tried_again_and_then_answers():
+    """The asymmetry this fixes: the outbox retries a *send*, and the layer
+    one call in — the expensive one — turned a 429 during a burst into a task
+    a person has to pick up and that will never retry itself.
+
+    Both attempts are recorded, because the provider billed for both. A record
+    that counts one call where the invoice counts two is not a record.
+    """
+    from dataclasses import replace as _replace
+
+    recorded: list = []
+
+    async def sink(call) -> None:
+        recorded.append(call)
+
+    model = _flaky(_rate_limited())
+    run = Harness(
+        config=_replace(CONFIG, max_attempts=3, retry_backoff_seconds=0.0),
+        instructions="i",
+        model=model,
+        record=sink,
+    )
+
+    assert (await run.run("go")).final_output == "done"
+    assert model.calls == 2
+    assert [c.attempt for c in recorded] == [1, 2]
+    assert recorded[0].output == "", "the attempt that failed has no answer"
+    assert recorded[1].output
+
+
+async def test_a_prompt_the_provider_rejects_is_not_paid_for_twice():
+    """Terminal on the first attempt. What counts as transient is a list, not
+    a guess from the message — and a 400 is the provider saying the request
+    itself is wrong, which trying again cannot change."""
+    from dataclasses import replace as _replace
+
+    recorded: list = []
+
+    async def sink(call) -> None:
+        recorded.append(call)
+
+    model = _flaky(_rejected(), _rejected(), _rejected())
+    run = Harness(
+        config=_replace(CONFIG, max_attempts=3, retry_backoff_seconds=0.0),
+        instructions="i",
+        model=model,
+        record=sink,
+    )
+
+    assert await run.run("go") is None
+    assert model.calls == 1
+    assert "not acceptable" in run.last_error
+    assert "gave up" not in run.last_error
+    assert [c.attempt for c in recorded] == [1], "one call, one row"
+
+
+async def test_giving_up_says_it_gave_up():
+    """A person reads this. "429 slow down" alone reads as a moment; "gave up
+    after 3 attempts" says the moment lasted, which is the difference between
+    something to ignore and something to look at."""
+    from dataclasses import replace as _replace
+
+    recorded: list = []
+
+    async def sink(call) -> None:
+        recorded.append(call)
+
+    run = Harness(
+        config=_replace(CONFIG, max_attempts=3, retry_backoff_seconds=0.0),
+        instructions="i",
+        model=_flaky(_rate_limited(), _rate_limited(), _rate_limited()),
+        record=sink,
+    )
+
+    assert await run.run("go") is None
+    assert run.last_error.startswith("gave up after 3 attempts:")
+    assert "429" in run.last_error
+    # Three calls, three rows. The record over-counting the invoice is the
+    # same failure as under-counting it, and the flush runs twice on every
+    # path that ends in an exception — once where the attempt failed and once
+    # in the `finally` — so the row it builds has to be consumed, not copied.
+    assert [c.attempt for c in recorded] == [1, 2, 3]
+
+
+async def test_a_408_is_a_hiccup_and_not_a_verdict():
+    """The status the SDK has no class for, and the one that matters.
+
+    Every status at or above 500 arrives as `InternalServerError`, so the
+    `>= 500` branch this replaced could never fire — while 408 Request Timeout
+    fell through the same branch as a bare `APIStatusError` and was treated as
+    the provider's final answer. It is the opposite: the request did not
+    arrive in time, which is the definition of worth asking again.
+    """
+    from dataclasses import replace as _replace
+
+    from openai import APIStatusError
+
+    model = _flaky(APIStatusError("408 too slow", response=_Answered(408), body=None))
+    run = Harness(
+        config=_replace(CONFIG, max_attempts=3, retry_backoff_seconds=0.0),
+        instructions="i",
+        model=model,
+    )
+
+    assert (await run.run("go")).final_output == "done"
+    assert model.calls == 2
+
+
+def test_one_request_may_not_spend_the_whole_run():
+    """`APITimeoutError` is on the list of what to retry, and it could not
+    fire: the client and the run were given the same number, so the run-level
+    timer always tripped first — and it cancels, which is a `BaseException`
+    the retry loop never sees. A hung provider burned the entire budget on one
+    attempt and reported "no answer within 60s", never "gave up after 3".
+
+    A share each makes the claim true. The cost is that one slow-but-working
+    call now fails where it used to be waited out, which is the right way
+    round for agents that send one short prompt and read one short answer.
+    """
+    from friday.agent.harness import _chat_model
+    from friday.config import AgentConfig
+
+    model = _chat_model(
+        AgentConfig(
+            name="a", api_key="k", base_url="https://example.invalid/v1",
+            model="test-model", timeout_seconds=60.0, max_attempts=3,
+        )
+    )
+
+    assert model._client.timeout == 20.0

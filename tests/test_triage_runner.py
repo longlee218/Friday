@@ -625,3 +625,47 @@ async def test_a_mention_is_never_lost_to_a_spent_budget(db, provider, inbox):
 
 async def _spent(n: int) -> int:
     return n
+
+
+async def test_giving_up_on_a_provider_still_reaches_a_person(db, provider, inbox):
+    """Retrying changes when a mention becomes somebody's problem, never
+    whether it does.
+
+    The point of the retry is that a 429 during a burst stops being permanent
+    human work. The point of the cap is that it does not stop being human work
+    *eventually* — a provider that is down all afternoon must surface, and the
+    reason has to say the moment lasted rather than reading like one blip.
+    """
+    from dataclasses import replace as _replace
+
+    from agents.models.interface import Model
+
+    from friday.config import AgentConfig
+    from friday.triage import Triage
+    from friday.triage.runner import NEEDS_HUMAN, TriageRunner
+    from tests.test_harness import _rate_limited
+
+    class AlwaysBusy(Model):
+        async def get_response(self, *a, **kw):
+            raise _rate_limited()
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    provider.emit(make_event(message_id="10", text="checkout is 500ing"))
+    await captured(inbox)
+
+    await TriageRunner(
+        db=db,
+        triage=Triage(
+            config=AgentConfig(
+                name="triage", api_key="k", base_url="https://example.invalid/v1",
+                model="test-model", max_attempts=3, retry_backoff_seconds=0.0,
+            ),
+            model=AlwaysBusy(),
+        ),
+        confidence_threshold=0.7,
+    ).run_once()
+
+    (task,) = await db.tasks_in_state(NEEDS_HUMAN, 10)
+    assert "gave up after 3 attempts" in task.params["reason"]

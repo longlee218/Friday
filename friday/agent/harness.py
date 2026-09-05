@@ -49,7 +49,14 @@ from agents.mcp import (
 )
 from agents.tool import default_tool_error_function
 from agents.tool_context import ToolContext as _SdkToolContext
-from openai import AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    InternalServerError,
+    RateLimitError,
+)
 
 from friday.config import AgentConfig
 from friday.ops.redact import scrub
@@ -433,19 +440,22 @@ class Harness:
         calls: list = []
         hooks = LogHooks(calls, model=self._config.model)
         self.agent.hooks = hooks
+        progress = _Progress()
         try:
+            # The timeout bounds the whole run, retries included, rather than
+            # each try. The pool works one task at a time, so what has to stay
+            # bounded is how long a task can hold it — three tries at sixty
+            # seconds would be three minutes of every task waiting. The cost
+            # is that a hiccup late in the budget leaves little room to try
+            # again, which is the right way round: the run was already slow.
             return await asyncio.wait_for(
-                Runner.run(
-                    self.agent,
-                    input_,
-                    context=context,
-                    max_turns=max_turns,
-                    run_config=RunConfig(tracing_disabled=True),
-                ),
+                self._attempts(input_, context, max_turns, hooks, calls, progress),
                 timeout=self._config.timeout_seconds,
             )
         except Exception as exc:  # noqa: BLE001 - every failure becomes work
-            self.last_error = _why(exc, self._config.timeout_seconds)
+            self.last_error = _why(
+                exc, self._config.timeout_seconds, progress.attempt
+            )
             log.warning("%s failed: %s", self._config.name, self.last_error)
             return None
         finally:
@@ -455,9 +465,56 @@ class Harness:
             # configured `max_turns: 1`, which is triage, the extractors and
             # the summariser, that would mean no record at all of the call that
             # hung. `unfinished()` is what the run managed to send.
-            if (cut_off := hooks.unfinished()) is not None:
-                calls.append(cut_off)
+            # Whatever the last attempt sent and never got an answer to. On a
+            # timeout that is the only record of the call that hung, and the
+            # attempts that failed before it were flushed as they failed.
+            progress.flush(hooks, calls)
             await self._write_down(calls, about)
+
+    async def _attempts(self, input_, context, max_turns, hooks, calls, progress):
+        """Call the provider until it answers, it refuses in a way trying
+        again cannot fix, or the attempts run out.
+
+        Ours rather than the client's, and the client's is switched off in
+        `_chat_model`. `AsyncOpenAI` retries by default and says nothing, so
+        the provider bills three calls where the record holds one — and a
+        record that disagrees with the invoice is the thing this board exists
+        to stop. The cost is a dumber retry: doubling, and no reading of a
+        `Retry-After` header.
+        """
+        last: Exception | None = None
+        for attempt in range(1, self._config.max_attempts + 1):
+            progress.attempt = attempt
+            try:
+                result = await Runner.run(
+                    self.agent,
+                    input_,
+                    context=context,
+                    max_turns=max_turns,
+                    run_config=RunConfig(tracing_disabled=True),
+                )
+            except Exception as exc:  # noqa: BLE001 - decided by _transient
+                # Whatever this attempt managed to send is a row of its own:
+                # the provider charged for it, and the next attempt's hook
+                # would otherwise overwrite the record of it.
+                progress.flush(hooks, calls)
+                last = exc
+                if not _transient(exc) or attempt == self._config.max_attempts:
+                    raise
+                log.info(
+                    "%s: attempt %d of %d failed (%s), trying again",
+                    self._config.name,
+                    attempt,
+                    self._config.max_attempts,
+                    type(exc).__name__,
+                )
+                await asyncio.sleep(
+                    self._config.retry_backoff_seconds * 2 ** (attempt - 1)
+                )
+            else:
+                progress.flush(hooks, calls)
+                return result
+        raise last  # unreachable: the loop either returns or raises
 
     async def _over_budget(self) -> str | None:
         """Why this call is not being made, or `None` to make it.
@@ -547,7 +604,56 @@ class _About:
         )
 
 
-def _why(exc: Exception, timeout: float) -> str:
+#: What is worth calling again. A list rather than a guess from the message:
+#: a 400 is the provider saying the request itself is wrong, and paying to ask
+#: it a second time buys nothing.
+_TRANSIENT = (APIConnectionError, APITimeoutError, RateLimitError, InternalServerError)
+
+
+#: Statuses the SDK gives no class of its own, and that are still worth
+#: another call. Only 408 today: the client maps every status at or above 500
+#: to `InternalServerError` and 429 to `RateLimitError`, both already above —
+#: so a `>= 500` test here, which is what this replaced, could never fire,
+#: while 408 fell through it and was treated as the provider's final answer.
+_RETRY_STATUSES = frozenset({408})
+
+
+def _transient(exc: Exception) -> bool:
+    if isinstance(exc, _TRANSIENT):
+        return True
+    return isinstance(exc, APIStatusError) and exc.status_code in _RETRY_STATUSES
+
+
+@dataclass
+class _Progress:
+    """Which attempt is in flight, and how much of the record it has claimed.
+
+    A value passed down rather than state on the `Harness`, and rather than
+    the attempt number smuggled onto the exception, which is what the first
+    version did. Both readers need it — the loop numbers rows as it goes, the
+    `finally` numbers whatever a cancelled attempt left behind — so it is
+    handed to both.
+    """
+
+    attempt: int = 1
+    #: How many rows already carry a number. Everything after this belongs to
+    #: the attempt in flight.
+    claimed: int = 0
+
+    def flush(self, hooks, calls: list) -> None:
+        """Number every row this attempt produced, and keep what it sent.
+
+        The hook builds a row when the provider answers; an attempt that
+        failed leaves only what it sent, which `unfinished` returns.
+        """
+        if (cut_off := hooks.unfinished()) is not None:
+            calls.append(cut_off)
+        for index in range(self.claimed, len(calls)):
+            calls[index] = replace(calls[index], attempt=self.attempt)
+        self.claimed = len(calls)
+
+
+def _why(exc: Exception, timeout: float, attempts: int = 0) -> str:
     """The reason, in a form somebody can act on.
 
     A timeout is the case this exists for: `asyncio.wait_for` raises a
@@ -560,6 +666,11 @@ def _why(exc: Exception, timeout: float) -> str:
     """
     if isinstance(exc, asyncio.TimeoutError):
         return f"no answer within {timeout:g}s"
+    if attempts > 1:
+        # A person reads this. "429 slow down" alone reads as a moment; saying
+        # how many times it was tried says the moment lasted, which is the
+        # difference between something to ignore and something to look at.
+        return f"gave up after {attempts} attempts: {scrub(str(exc))}"
     return scrub(str(exc))
 
 
@@ -582,5 +693,22 @@ def _chat_model(config: AgentConfig) -> OpenAIChatCompletionsModel:
     """Chat Completions rather than the Responses API, so `base_url`, `api_key`
     and `model` are the whole of what it takes to use a different
     OpenAI-compatible provider."""
-    client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key)
+    client = AsyncOpenAI(
+        base_url=config.base_url,
+        api_key=config.api_key,
+        # Both chosen rather than inherited. The client's own default is ten
+        # minutes and two silent retries: the first makes a run unbounded from
+        # this side, and the second bills the provider three times for a call
+        # the record counts once. Retrying is `_attempts`'s job, where it can
+        # be seen and counted.
+        #
+        # A share of the run's budget rather than all of it. Given the whole
+        # of it, the run-level timer always tripped first — and it cancels,
+        # which is a `BaseException` the retry loop never sees — so a hung
+        # provider spent the entire budget on one attempt and `APITimeoutError`
+        # sat on the retry list unable to fire. The cost is that one
+        # slow-but-working call now fails where it used to be waited out.
+        timeout=config.timeout_seconds / max(config.max_attempts, 1),
+        max_retries=0,
+    )
     return OpenAIChatCompletionsModel(model=config.model, openai_client=client)

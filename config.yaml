@@ -21,6 +21,18 @@ database_path: ./data/friday.db
 # differently: hitting it truncates a reply, hitting the daily budget refuses
 # the call.
 #
+# `max_attempts` (3) and `retry_backoff_seconds` (1, doubling) are what the
+# model layer does with a hiccup. A 429 during a burst or a 502 from the
+# provider is tried again; a 400 is not, because the provider is saying the
+# request itself is wrong and asking twice costs twice for the same answer.
+# Running out of attempts is work for a person, and the reason says so.
+#
+# Small numbers on purpose: every attempt lives inside `timeout_seconds`,
+# which bounds the whole run rather than each try — and one HTTP request is
+# given `timeout_seconds / max_attempts`, so a hung provider is cut off with
+# budget left to try again rather than spending all of it waiting once. The outbox retries over minutes
+# because a send can wait; a task cannot, since the pool works one at a time.
+#
 # `timeout_seconds` bounds one run of that agent and defaults to 60. It is a
 # number chosen here rather than inherited: the OpenAI client's own default is
 # ten minutes and it retries past that, and the pool works one task at a time,

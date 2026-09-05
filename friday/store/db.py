@@ -1733,6 +1733,7 @@ def _model_call(row: schema.ModelCall) -> ModelCall:
         task_id=row.task_id,
         node=row.node,
         latency_ms=row.latency_ms,
+        attempt=row.attempt or 1,
         created_at=row.created_at,
     )
 

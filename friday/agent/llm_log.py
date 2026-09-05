@@ -97,11 +97,19 @@ class LogHooks(Hooks):
 
         What `on_llm_start` knew is real and is kept. What it could not know is
         written as absent — an empty output and no usage — rather than as a
-        number that reads like a measurement. `on_llm_end` clears `_pending`,
-        so a completed call never comes back through here.
+        number that reads like a measurement.
+
+        **Consuming, not reading.** `on_llm_end` clears `_pending` for a call
+        that finished, and this clears it for one that did not — because there
+        is more than one caller now. The retry loop flushes after every failed
+        attempt and the harness flushes again in its `finally`, so a method
+        that only *looked* handed the same unanswered call to both: a run that
+        made three calls recorded four, and the record over-counting the
+        invoice is the same failure as under-counting it.
         """
         if not self._pending:
             return None
+        pending, self._pending = self._pending, {}
         return ModelCall(
             agent=self._agent,
             model=self._model,
@@ -111,7 +119,7 @@ class LogHooks(Hooks):
             # How long it hung before being cut off, which is the one number
             # a call that never answered can still supply.
             latency_ms=self._elapsed_ms(),
-            **self._pending,
+            **pending,
         )
 
     def _elapsed_ms(self) -> int:

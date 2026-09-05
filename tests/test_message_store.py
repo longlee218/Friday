@@ -204,3 +204,23 @@ async def test_what_an_agent_has_spent_today_is_read_from_what_it_wrote(db):
     assert await db.spent_today("triage") == 1600
     assert await db.spent_today("responder") == 550
     assert await db.spent_today("summary") == 0
+
+
+async def test_a_call_records_which_attempt_it_was(db):
+    """One row is one call to the provider, so the number it carries is an
+    ordinal and not a total.
+
+    The ticket called the column `attempts`, before the shape was known. What
+    a row can honestly say is *which* attempt it was — the second call in a
+    run that was rate-limited once is a first-class row with its own prompt
+    and its own cost, not a counter on somebody else's.
+
+    Which is the whole point: the provider bills per attempt, so the record
+    has to be per attempt or the two disagree.
+    """
+    common = dict(model="m", system_prompt="s", prompt="p", output="o",
+                  input_tokens=1, output_tokens=1)
+    await db.record_model_call(agent="triage", attempt=1, **common)
+    await db.record_model_call(agent="triage", attempt=2, **common)
+
+    assert [c.attempt for c in await db.model_calls(limit=10)] == [2, 1]
