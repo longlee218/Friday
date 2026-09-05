@@ -8,7 +8,14 @@ and nothing a stranger typed can close the section it was quoted into.
 
 from __future__ import annotations
 
+from conftest import make_event
+
 from friday.agent import instruction_prompt as ip
+
+
+def _events(texts: list[str]) -> list:
+    """One event per line of text, all from the same person."""
+    return [make_event(text=t) for t in texts]
 
 
 # --- shape ------------------------------------------------------------------
@@ -393,10 +400,24 @@ def test_only_a_prompt_whose_input_uses_the_markers_claims_them():
     the markers, has been told about a door that is not in the room, which is
     the failure this module's own docstring warns about.
 
-    It was in five prompts and only three agents wrapped anything. The
-    responder's untrusted content is escaped inside `<conversation>` and
-    `<task>` — a boundary, but a different one — so it no longer claims a
-    convention it does not follow.
+    It was in five prompts and only three agents wrapped anything.
+
+    **The responder now claims it and now wraps.** It used to do neither, on
+    the argument that escaping inside `<conversation>` is a boundary of its
+    own — true, but it left the one agent whose output reaches a person
+    without the sentence saying so, and without the `<critical_reminder>` that
+    every other agent here ends with. It quotes `<conversation>` and not
+    `<tone>`, because tone examples are the operator's own messages.
+
+    **Two routes put the markers in, and this counts both.** `user_input` for
+    an agent whose whole input is one quoted blob (triage, the summariser),
+    and `quoted=True` on a section for an agent whose other sections must stay
+    readable (the responder) — the difference matters because `user_input`
+    escapes, so passing it an already-escaped section body escapes it twice.
+    Checking only for `user_input`, as this did, is the same shape of proxy
+    bug as deciding a tool's prompt section from the catalogue: it names a
+    fact next to the one it means, and they come apart the moment a second
+    route exists.
     """
     import ast
     from pathlib import Path
@@ -427,9 +448,20 @@ def test_only_a_prompt_whose_input_uses_the_markers_claims_them():
         ),
     }
 
+    def quotes_a_section(path: Path) -> bool:
+        """`quoted=True` passed to any section builder — the second route."""
+        return any(
+            kw.arg == "quoted"
+            and isinstance(kw.value, ast.Constant)
+            and kw.value.value is True
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, ast.Call)
+            for kw in node.keywords
+        )
+
     for agent, (prompt_module, input_module) in pairs.items():
         claims = "trust_boundary" in calls(prompt_module)
-        wraps = "user_input" in calls(input_module)
+        wraps = "user_input" in calls(input_module) or quotes_a_section(input_module)
         assert claims == wraps, (
             f"{agent}: claims the marker convention={claims}, "
             f"actually wraps its input={wraps}"
@@ -491,6 +523,51 @@ def test_read_skill_file_system_describes_read_when_available():
 
     assert "<read_skill_file_system>" in rendered
     assert "read_skill_file" in rendered
+
+
+def test_the_responder_is_told_the_two_things_it_has_got_wrong():
+    """It wrote "ok có correlationId rồi" against null params, and promised
+    "để anh trace thử" in the same message. Both are in the job text; they are
+    repeated at the end because that is what the last section is for — a model
+    attends to the front of a long prompt and to the end of it."""
+    from friday.responder.prompt import build_instructions
+
+    said = build_instructions()
+
+    assert "<critical_reminder>" in said
+    assert "params show as null" in said
+    assert "never say what happens next" in said
+
+
+def test_the_responder_claims_the_markers_and_puts_them_in():
+    """Both halves. The convention in the instructions, the markers round the
+    conversation — and round the conversation only, since `<tone>` is the
+    operator's own writing and `soul` tells the agent to follow it."""
+    from friday.responder.prompt import build_input, build_instructions
+
+    said = build_instructions()
+    given = build_input(
+        asking="q", context=_events(["api lỗi"]), tone=_events(["ok để anh xem"])
+    )
+
+    assert "<trust_boundary>" in said
+    assert "--- BEGIN USER INPUT ---" in given
+
+    conversation = given.split("<conversation>")[1].split("</conversation>")[0]
+    tone = given.split("<tone>")[1].split("</tone>")[0]
+    assert "--- BEGIN USER INPUT ---" in conversation
+    assert "--- BEGIN USER INPUT ---" not in tone
+
+
+def test_quoting_a_section_does_not_escape_it_twice():
+    """`user_input` escapes and wraps, which is right for raw text and wrong
+    for a section body its own builder already escaped: a reporter's `<b>`
+    comes out as `&amp;lt;b&amp;gt;` and the model is shown mangled text.
+    Triage and the summariser do that today."""
+    rendered = ip.conversation(_events(["api <b>lỗi</b> & chậm"]), quoted=True).render()
+
+    assert "&lt;b&gt;" in rendered
+    assert "&amp;lt;" not in rendered, "escaped twice"
 
 
 def test_the_responder_prompt_carries_the_three_new_sections():
