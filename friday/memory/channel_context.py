@@ -24,7 +24,6 @@ import yaml
 from friday.config import AgentConfig
 from friday.store.db import Database
 from friday.agent.harness import Harness
-from friday.memory.notes import Promotion
 
 __all__ = ["ChannelContext", "ContextRebuilder", "ContextStore"]
 
@@ -229,17 +228,17 @@ class ContextStore:
 
 
 class ContextRebuilder:
-    """Rebuilds every known channel's derived section when something has been
-    learned.
+    """Rebuilds every known channel's derived section when a room has said
+    more since its last summary.
 
-    Rides `Promotion`'s existing cadence rather than owning a timer: a
-    rebuild that fires whether or not anything changed would spend a summary
-    call on channels with nothing new to say.
+    Runs on the heartbeat's own cadence rather than owning a timer, and
+    decides per channel: a rebuild that fires whether or not anything changed
+    would spend a summary call on channels with nothing new to say.
     """
 
     @classmethod
     def build(
-        cls, config, *, store, db, promotion, record=None, spent=None
+        cls, config, *, store, db, record=None, spent=None
     ) -> "ContextRebuilder":
         """Which agent summarises a channel, and when, are this module's
         business. The composition root asks for a rebuilder — and that is why
@@ -259,7 +258,6 @@ class ContextRebuilder:
         return cls(
             store=store,
             db=db,
-            promotion=promotion,
             summary_config=config.agents.get("summary"),
             summary_share=config.context.summary_share,
             record=record,
@@ -271,7 +269,6 @@ class ContextRebuilder:
         *,
         store: ContextStore,
         db: Database,
-        promotion: Promotion,
         summary_config: AgentConfig | None = None,
         summary_share: float = 0.5,
         record=None,
@@ -280,7 +277,6 @@ class ContextRebuilder:
     ) -> None:
         self._store = store
         self._db = db
-        self._promotion = promotion
         self._summary_config = summary_config
         self._summary_share = summary_share
         self._record = record
@@ -292,22 +288,17 @@ class ContextRebuilder:
     async def rebuild_all(self) -> None:
         """Rewrite the machine-written half of every known channel's file.
 
-        Runs on the heartbeat's own cadence and decides per channel, which is
-        the correction this method needed: it used to ride `Promotion` —
-        `Heartbeat.promote` called it behind `if promoted:` — and promotion
-        counts staged observations, of which there are none, because nothing
-        has written one since `remember` was removed. So the derived section
-        of every channel file was only ever written by hand, and nothing said
-        so.
-
-        The summary never had anything to do with promotion anyway. It depends
-        on the room having said more, and that is what it asks now.
+        Runs on the heartbeat's own cadence and decides per channel: it used
+        to ride a promotion pass — `Heartbeat.promote` called it behind
+        `if promoted:` — which had nothing to do with what a summary actually
+        depends on, and had never once fired, since nothing staged an
+        observation after `remember` was removed. The derived section of
+        every channel file was only ever written by hand, and nothing said so.
+        That tier is gone now (ticket 09's D9); this asks the one question
+        that was ever real — has the room said more since its last summary.
         """
-        learned = await self._promotion.render()
         for channel_id in self._store.known_channels():
             derived: dict[str, Any] = {}
-            if learned:
-                derived["learned"] = learned
             summary, newest = await self._maybe_summarize(channel_id)
             if summary:
                 derived["summary"] = summary

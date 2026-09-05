@@ -33,7 +33,6 @@ class Heartbeat:
         interval_seconds: float = 60.0,
         keep_model_calls_days: float | None = None,
         liveness: "Liveness | None" = None,
-        promotion=None,
         context_rebuilder=None,
         extra=None,
     ) -> None:
@@ -44,10 +43,8 @@ class Heartbeat:
         self._extra = extra
         self._keep_days = keep_model_calls_days
         self._liveness = liveness
-        self._promotion = promotion
-        #: Rebuilds channel context files, but only when promotion actually
-        #: promoted something — a rebuild on every idle beat would cost a
-        #: summary call for nothing new to say.
+        #: Rebuilds channel context files. Its own condition decides whether
+        #: a channel is worth another summary call — see `ContextRebuilder`.
         self._context_rebuilder = context_rebuilder
         self._started = datetime.now(timezone.utc)
         self._last_seen: int | None = None
@@ -58,22 +55,24 @@ class Heartbeat:
             await self.beat()
             if self._liveness is not None:
                 await self._liveness.check()
-            await self.promote()
+            await self.rebuild_context()
 
-    async def promote(self) -> None:
-        """Run one promotion pass, and rebuild what the channels have learned.
+    async def rebuild_context(self) -> None:
+        """Rebuild what the channels have learned.
 
-        The rebuild used to sit behind `if promoted:`, which is a condition it
-        has nothing to do with — and one that has never been true, since
-        nothing has staged an observation since `remember` was removed. So the
-        machine-written half of every channel file was only ever written by
-        hand, silently, for months.
+        Was `promote`, named for what this loop used to also do: run a
+        promotion pass over staged observations, behind `if promoted:`. Both
+        are gone (ticket 09's D9) — a tool name, or a method name, is an
+        instruction to the next reader, and this one had stopped meaning
+        anything before it went: nothing had staged an observation since
+        `remember` was removed, so the condition never fired and the derived
+        half of every channel file was only ever written by hand. The same
+        lesson this codebase already records for `create_task` renaming to
+        `classify`.
 
-        It runs every beat now and decides per channel: `rebuild_all` asks
-        whether a room has said anything since the summary it already has.
+        Runs every beat and decides per channel: `rebuild_all` asks whether a
+        room has said anything since the summary it already has.
         """
-        if self._promotion is not None:
-            await self._promotion.run_once()
         if self._context_rebuilder is not None:
             await self._context_rebuilder.rebuild_all()
 

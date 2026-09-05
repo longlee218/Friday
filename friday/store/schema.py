@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, String, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Base", "Conversation", "Cursor", "DagState", "Message", "ModelCall", "Note", "Observation", "Outbound", "Task", "Verdict"]
+__all__ = ["Base", "Conversation", "Cursor", "DagState", "Memory", "Message", "ModelCall", "Outbound", "Task", "ToolCall", "Verdict"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -272,6 +272,32 @@ class ModelCall(Base):
     created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
 
 
+class Memory(Base):
+    """Something an agent chose to remember, scoped to one channel.
+
+    `id` is a string rather than the usual autoincrementing integer: it is
+    opaque and sparse on purpose, generated in the store rather than left to
+    the database's own sequence, so a model that invents one fails instead of
+    resolving to whichever row happens to sit at that offset.
+
+    Soft-deleted: `memory_delete` sets `deleted_at`/`deleted_by` rather than
+    removing the row, so the operator can see what a line said and who took it
+    out. Every reader that serves a model treats a deleted row as absent.
+    """
+
+    __tablename__ = "memories"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    channel_id: Mapped[str] = mapped_column(index=True)
+    agent: Mapped[str]
+    text: Mapped[str]
+    task_id: Mapped[int | None] = mapped_column(index=True)
+    created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
+    updated_at: Mapped[datetime] = mapped_column(IsoDateTime)
+    deleted_at: Mapped[datetime | None] = mapped_column(IsoDateTime, default=None)
+    deleted_by: Mapped[str | None] = mapped_column(default=None)
+
+
 class ToolCall(Base):
     """One thing an agent reached for, and what came back.
 
@@ -298,32 +324,3 @@ class ToolCall(Base):
     created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
 
 
-class Observation(Base):
-    """Something a step learned. Staged, never read back into a prompt."""
-
-    __tablename__ = "observations"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    task_id: Mapped[int] = mapped_column(index=True)
-    category: Mapped[str]
-    text: Mapped[str]
-    created_at: Mapped[datetime] = mapped_column(IsoDateTime)
-    #: Set by the compaction pass when an approved outcome corroborated it.
-    #: Ticket 10; named here so the shape is complete rather than migrated later.
-    promoted_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
-
-
-class Note(Base):
-    """Something believed for longer than one task.
-
-    Keyed on (category, text) so the same thing learned twice is one note with
-    more support behind it, rather than two notes saying it.
-    """
-
-    __tablename__ = "notes"
-
-    category: Mapped[str] = mapped_column(primary_key=True)
-    text: Mapped[str] = mapped_column(primary_key=True)
-    #: How many approved tasks agree. What decides which notes survive a trim.
-    support: Mapped[int] = mapped_column(default=1)
-    created_at: Mapped[datetime] = mapped_column(IsoDateTime)

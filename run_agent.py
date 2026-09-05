@@ -21,7 +21,6 @@ from friday.ops.api import bind, build_api, check_exposure
 from friday.board import build_board
 from friday.ops.liveness import Heartbeat, Liveness
 from friday.agent.mcp import build as build_mcp
-from friday.memory.notes import Promotion
 from friday.ops.redact import Redacting, install_excepthook
 from friday.outbox import Outbox
 from friday.providers import CredentialRejected
@@ -186,16 +185,11 @@ async def _run(stack: AsyncExitStack) -> None:
         context_store=context_store,
     )
 
-    promotion = Promotion(db=db)
-    # Read once, at build time: a promotion takes effect on the next start
-    # rather than invalidating a warm prompt cache mid-run.
-    learned = await promotion.render()
-
     responder = Responder.build(
         config,
-        notes=learned,
         skills=skills,
         context_store=context_store,
+        db=db,
         record=record_call,
         spent=db.spent_today,
     )
@@ -253,12 +247,10 @@ async def _run(stack: AsyncExitStack) -> None:
     heartbeat = Heartbeat(
         db=db,
         liveness=liveness,
-        promotion=promotion,
         context_rebuilder=ContextRebuilder.build(
             config,
             store=context_store,
             db=db,
-            promotion=promotion,
             record=record_call,
             spent=db.spent_today,
         ),

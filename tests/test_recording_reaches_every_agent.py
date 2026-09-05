@@ -118,7 +118,6 @@ async def test_the_summariser_records(spy):
         _config(summary=CONFIG, summary_share=0.0),
         store=_Store(),
         db=_LoudChannel(),
-        promotion=_NothingPromoted(),
         record=SINK,
         spent=LEDGER,
     )
@@ -166,7 +165,3 @@ class _LoudChannel:
 
         return [make_event(text="anything at all")]
 
-
-class _NothingPromoted:
-    async def render(self):
-        return ""

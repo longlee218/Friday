@@ -163,3 +163,19 @@ def test_the_sink_is_built_once_and_only_here():
     } - {"friday/store/db.py"}
 
     assert offenders == set(), f"a second place decides to record: {offenders}"
+
+
+def test_the_responder_is_given_the_store_its_memory_tools_need():
+    """`Responder.build(db=...)` is what lets it reach `memory_search` and the
+    rest — the obvious-first agent for ticket 09's D9. Not part of `SEAMS`
+    above: triage and the summariser have no opinion on this yet, so it is
+    the responder's own seam, not a rule for every builder.
+    """
+    node = _calls_in_run().get("Responder.build")
+    assert node is not None, "Responder.build is not called in _run at all"
+
+    given = next((kw.value for kw in node.keywords if kw.arg == "db"), None)
+    assert isinstance(given, ast.Name), (
+        f"Responder.build is handed {ast.dump(given) if given else 'nothing'} "
+        "for db, not a name"
+    )

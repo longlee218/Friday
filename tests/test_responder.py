@@ -151,3 +151,114 @@ async def test_it_is_told_not_to_address_anyone_by_mention():
     from friday.responder import INSTRUCTIONS
 
     assert "mention" in INSTRUCTIONS.lower()
+
+
+async def test_a_responder_given_a_store_can_reach_its_own_memory():
+    """The responder is the obvious first agent to get these — it writes text
+    a person reads, and how a room actually likes to be answered is exactly
+    the kind of thing worth writing down. Driven end to end: a scripted model
+    that calls `memory_search`, and the tool actually reaching the store
+    scoped to the channel this draft is about."""
+    from agents.testing import function_call
+
+    from friday.domain.models import MemoryScope
+
+    seen = {}
+
+    class Store:
+        async def memory_search(self, scope, query, limit):
+            seen["scope"] = scope
+            return []
+
+    responder = Responder(
+        config=CONFIG,
+        model=ScriptedModel(
+            [
+                [function_call("memory_search", {"query": "tone"}, call_id="1")],
+                [assistant_message("cho anh xin correlationId nhé")],
+            ]
+        ),
+        db=Store(),
+    )
+
+    await responder.draft(
+        asking="ask", context=(), tone=TONE, channel_id="c1", task_id=42,
+    )
+
+    assert seen["scope"] == MemoryScope(channel_id="c1", task_id=42, agent="responder")
+
+
+async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
+    """Same rule as skills: an agent told about a tool it does not have goes
+    looking for a door that is not in the room — and the two halves of that
+    have to be checked on the *same* construction, not on `build_input` called
+    with a flag by hand, which cannot tell "the flag is right" from "the flag
+    and the wiring happen to agree today".
+
+    The claim is checked on the real per-call prompt `draft()` sends — the
+    section lives in `build_input`'s output, not in the static
+    `instructions` — captured through `record=`, the same sink `collecting()`
+    already uses elsewhere in this file. The wiring is checked by reaching
+    into `._run.agent.tools`, the way
+    `test_max_tokens_reaches_the_model_settings_without_a_knob_for_it`
+    already reaches into `.agent.model_settings` — one specific construction,
+    not a production caller `harness.py`'s own rule is about.
+    """
+    class Store:
+        async def memory_search(self, scope, query, limit):
+            return []
+
+    without_calls, without_sink = collecting()
+    without = Responder(
+        config=CONFIG, model=ScriptedModel([[assistant_message("ok")]]),
+        record=without_sink,
+    )
+    await without.draft(asking="ask", context=(), tone=TONE)
+
+    with_calls, with_sink = collecting()
+    with_store = Responder(
+        config=CONFIG, model=ScriptedModel([[assistant_message("ok")]]),
+        db=Store(), record=with_sink,
+    )
+    await with_store.draft(asking="ask", context=(), tone=TONE, channel_id="c1")
+
+    without_names = {t.name for t in without._run.agent.tools}
+    with_names = {t.name for t in with_store._run.agent.tools}
+
+    assert "memory_search" not in without_names
+    assert "memory_search" not in without_calls[0].prompt
+
+    assert "memory_search" in with_names
+    assert "memory_search" in with_calls[0].prompt
+
+
+def test_a_responder_with_memory_is_built_with_the_matching_context_type(monkeypatch):
+    """The SDK's context typing is cosmetic at runtime — passing `context=` at
+    call time populates a tool's `ctx.context` regardless of what `Harness`
+    was constructed with, confirmed separately. The acceptance property this
+    pins is structural: a future reader checking what an agent's tools expect
+    should find the answer on the `Harness` construction, not have to trace
+    into `friday/tools/memory.py` to work it out — and a responder given no
+    store should not claim a context type its tools do not need.
+    """
+    import friday.responder as responder_module
+
+    given: list = []
+
+    class Spy(responder_module.Harness):
+        def __init__(self, **kw):
+            given.append(kw.get("context_type"))
+            super().__init__(**kw)
+
+    monkeypatch.setattr(responder_module, "Harness", Spy)
+
+    class Store:
+        async def memory_search(self, scope, query, limit):
+            return []
+
+    from friday.domain.models import MemoryScope
+
+    Responder(config=CONFIG, model=ScriptedModel([]), db=Store())
+    Responder(config=CONFIG, model=ScriptedModel([]))
+
+    assert given == [MemoryScope, None]

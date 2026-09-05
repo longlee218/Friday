@@ -252,25 +252,78 @@ MODEL_AUTHORED = frozenset({"summary"})
 
 
 @dataclass(frozen=True, slots=True)
-class Observation:
-    """Something a step learned, staged for review."""
+class Memory:
+    """Something an agent chose to remember, scoped to one channel.
 
-    id: int
-    task_id: int
-    category: str
+    Replaced `remember`'s staging tier (ticket 09's D9): that wrote a guess
+    nothing read back, promoted only once an approved outcome corroborated it,
+    and had no producer for months. This is written and read back by the same
+    kind of call, with the floor moved from an approval count to three
+    narrower guarantees — scope, visibility, and never reaching a model except
+    as a tool result. See `friday/tools/memory.py`.
+
+    `id` is opaque and sparse rather than sequential, so a model that invents
+    one fails instead of landing on a neighbouring row.
+
+    `deleted_at`/`deleted_by` make a deletion visible rather than final: the
+    row survives, so an operator asking "what did this used to say, and who
+    took it out" has an answer. `memory_search`, `memory_update` and
+    `memory_delete` all treat a deleted row as absent — the same "no such
+    memory" a wrong-scope id gets, so a model cannot learn a row existed by
+    the shape of the refusal.
+    """
+
+    id: str
+    channel_id: str
+    agent: str
     text: str
+    task_id: int | None
     created_at: datetime
-    promoted_at: datetime | None = None
+    updated_at: datetime
+    deleted_at: datetime | None = None
+    deleted_by: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class Note:
-    """Something believed for longer than one task."""
+class MemoryScope:
+    """Where a memory belongs and who wrote it. Runtime-supplied, every field.
 
-    category: str
-    text: str
-    support: int
-    created_at: datetime
+    Here rather than beside the tools that use it (`friday/tools/memory.py`):
+    it is also part of `Database`'s own signature — five `friday/store/db.py`
+    methods take a `scope`, and a store may not import from `friday/tools/`.
+    It was a quoted forward reference there before this move
+    (`scope: "MemoryScope"  # type: ignore[name-defined]`), which is a real
+    gap and not a stylistic one: mypy checked nothing about the one parameter
+    whose entire job is "never wrong". `friday/domain/` is the vocabulary
+    both sides read, which is what a store and a tool factory are allowed to
+    share.
+
+    `channel_id` is the read *and* write boundary — a memory written in one
+    room is invisible in another. Not a nicety: this system's rooms are
+    different teams, and a fact learned in one is a leak in the next.
+
+    `task_id` and `agent` are provenance. They are never searched on; they are
+    what lets the operator's board answer "who wrote this, and while doing
+    what" about a line the agent is now acting on. **Both are required, and
+    `task_id` is nullable rather than optional** — a run that belongs to no
+    task says so by passing `None`, which is a different statement from
+    forgetting to pass it. They had defaults, under a docstring that said
+    every field was runtime-supplied; a default is how provenance goes missing
+    without anybody deciding it should.
+
+    **This is the run's context object, not a closure variable**, and the
+    distinction is the difference between working and being silently wrong. An
+    agent here is built once, at startup — `Responder.build` in the composition
+    root, reused for every task in every channel — so a scope captured when the
+    tools were made would pin every room's memory to whichever room happened to
+    be first. It arrives per call instead, as `Harness.run(context=...)`, the
+    way `ClarifyCapture` and `FieldsCapture` already do. The model still cannot
+    name it, which was the point.
+    """
+
+    channel_id: str
+    task_id: int | None
+    agent: str
 
 
 @dataclass(frozen=True, slots=True)

@@ -20,6 +20,7 @@ from friday.agent.instruction_prompt import (
     assemble,
     critical_reminder,
     describe_skill_system,
+    memory_tool_system,
     read_skill_file_system,
     search_skills_system,
     skill_system,
@@ -219,6 +220,7 @@ def build_input(
     room=None,
     stranger: bool = False,
     skills_catalogue: list[str] | None = None,
+    has_memory: bool = False,
     tone: Sequence[InboundEvent] = (),
     context: Sequence[InboundEvent] = (),
     now: datetime | None = None,
@@ -234,7 +236,7 @@ def build_input(
     # A non-empty catalogue and the four skill tools are the same fact: the
     # responder wires the tools only for a library that has something in it
     # (see its `__init__`). So this decides both, and an agent is never told
-    # about a tool it was not given — the rule `memory_tool_system` follows.
+    # about a tool it was not given.
     has_skills = bool(skills_catalogue)
     parts = [
         base(now or datetime.now(timezone.utc)),
@@ -246,6 +248,10 @@ def build_input(
         search_skills_system(has_skills),
         describe_skill_system(has_skills),
         read_skill_file_system(has_skills),
+        # `has_memory` is decided the same way, by `__init__`: whether a
+        # `db` was given to build the four memory tools from. Same rule as
+        # the skill tools above — never claim a door that is not in the room.
+        memory_tool_system(has_memory),
         tone_examples(list(tone)),
         # Quoted, because `trust_boundary()` above tells this agent what the
         # markers mean and a convention with nothing wrapped in it is an

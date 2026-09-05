@@ -143,7 +143,7 @@ What is actually on disk.
 | **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `states.py` (`TaskState`, `OutboundState`, and the legal transitions), `actions.py` (`Ask`/`Reply`/`HandOver`, what a decision about a task comes to), `validation.py` (the rule engine, one call site) |
 | **`friday/store/`** | `schema.py` holds the mapped classes, `db.py` is the only store and converts at the edge — nothing above it knows SQLAlchemy exists |
 | **`friday/agent/`** | What it takes to call a model, and nothing about what to call it for: `harness.py` (the only module that may import the SDK), `instruction_prompt.py`, `skills.py`, `mcp.py`, `llm_log.py` |
-| **`friday/memory/`** | What is kept between tasks, in tiers that never mix: `observations.py` (staged), `notes.py` (promoted, and only by an approved outcome), `channel_context.py` (per-channel YAML), `verdicts.py` (the operator marking a classification right) |
+| **`friday/memory/`** | What is kept between tasks, in tiers that never mix: `channel_context.py` (per-channel YAML), `verdicts.py` (the operator marking a classification right). There was a third — `observations.py`/`notes.py`, staged guesses promoted once an approved outcome corroborated them — dropped once it had gone months with no producer (ticket 09's D9); an agent's own memory is a tool now, `friday/tools/memory.py`, not a tier here |
 | **`friday/ops/`** | Alive and safe, deciding nothing: `liveness.py`, `redact.py`, `api.py` |
 | **`friday/text/`** | `transform.py` splits code out before cleaning the prose; `param_hygiene.py` cleans one value. Decides nothing |
 | `friday/inbox/` | Deep module: `stream()`, `sweep_once()`, `tally()`. Gateway, backfill, cursors and dedup are implementation |
@@ -152,7 +152,7 @@ What is actually on disk.
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
 | `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds the entry node every graph shares and holds the fill-and-validate mechanism it runs. `dag/router.py` maps a task type to a graph. **Every type now gets the same one-node graph** |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
-| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), remembering (`memory`, shape only: it calls four `Database` methods that do not exist yet and no agent has it — ticket 09 of `.scratch/nothing-runs-unmeasured/`). A test asserts the list — all twelve, factories built rather than skipped — and forbids declaring one anywhere else |
+| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), remembering (`memory` — `memory_search`, `memory_add`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder; ticket 09's D9). A test asserts the list — all twelve, factories built rather than skipped — and forbids declaring one anywhere else |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `friday/board/` | The read-only page on `:8086`; its JSON API is `ops/api.py` |
@@ -599,10 +599,34 @@ not an implementation detail:
 - **Silence is not approval.** Only a classification the operator marked
   *right* becomes a few-shot example, and only a classifiable type at that. An
   unmarked classification is one nobody read.
-- **Agents never write long-term memory directly.** `remember()` writes to a
-  staging tier that is never read back into a prompt; a promotion pass moves
-  only what an approved outcome corroborates. A test fails if any module but
-  the store and the promotion reads it.
+- **Agents write their own long-term memory now, and read it back** (ticket
+  09's D9, reversing what this file said until 2026-09-06: *"Agents never
+  write long-term memory directly. `remember()` writes to a staging tier that
+  is never read back into a prompt; a promotion pass moves only what an
+  approved outcome corroborates."* That tier had no drift floor problem — an
+  agent never saw its own unreviewed guesses — but no producer either:
+  nothing wrote an observation once `remember` left the tool list, so
+  promotion ran every heartbeat over an empty table for months before both
+  tables were dropped.
+
+  What replaced it trades the approval floor for three narrower guarantees,
+  all in `friday/tools/memory.py`: a memory reaches a model **only as a tool
+  result**, never appended to `instructions` — closed by construction, since a
+  tool result cannot rewrite the prompt of every later call the way a promoted
+  note once could (commit f0686f2); **scope is runtime-supplied** on
+  `MemoryScope`, read off the run's context rather than named by the model, so
+  a channel's memory is invisible to a run in another one; and **ids are
+  opaque and sparse**, so an invented one fails rather than landing on a
+  neighbouring row. Drift is possible and is bounded by the channel scope and
+  the operator's visibility into what was written, not by a corroboration
+  count.
+
+  **Wired to the responder, never to triage.** The responder is the agent
+  that writes text a person reads, and a room's habits are exactly the kind
+  of thing worth remembering; triage stops on its first tool call by design,
+  the same reason it has no skill tools. Whether an extractor or the
+  summariser should get them is undecided and left that way — nothing here
+  argues either side yet.
 
 ## Conventions
 
@@ -653,8 +677,16 @@ The five canonical roles, unchanged (`needs-triage`, `needs-info`, `ready-for-ag
 ### Domain docs
 
 Single-context: **`CONTEXT.md`** at the repo root holds the domain vocabulary —
-twenty-one terms, from Message and Conversation through Task, Triage,
-Extraction, Workflow, Graph, Tool server, Persona, Harness and Observation to
-Outbox, Approval, Provider and Sweep. Read it before naming anything, and add
-the term there when you name something new. `docs/adr/` does not exist yet.
-See `docs/agents/domain.md`.
+22 terms as of this file's own count (`grep -c "^## " CONTEXT.md`, not
+retyped by hand here for that reason), from Message and Conversation through
+Task, Triage, Extraction, Graph, Tool server, Harness and Memory to Outbox,
+Approval, Provider and Sweep. Read it before naming anything, and add the
+term there when you name something new. `docs/adr/` does not exist yet. See
+`docs/agents/domain.md`.
+
+This sentence has drifted from the file it describes before, silently, which
+is the reason to prefer a command over a number the next time this goes
+stale: "Workflow" and "Persona" were named here as terms with no matching
+heading before this edit and are left that way — pre-existing and not this
+ticket's to chase — while "Observation" is the one this ticket's own change
+made wrong, since the term is `Memory` now.

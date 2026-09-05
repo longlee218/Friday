@@ -11,6 +11,7 @@ stalls ingestion.
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
@@ -22,7 +23,6 @@ from sqlalchemy import (
     literal,
     or_,
     select,
-    tuple_,
     update,
 )
 from sqlalchemy.dialects.sqlite import insert
@@ -38,12 +38,12 @@ from friday.store import schema
 from friday.domain.conversation import ConversationId
 from friday.domain.states import OutboundState
 from friday.domain.models import (
+    Memory,
+    MemoryScope,
     InboundEvent,
     MentionType,
     ModelCall,
     ToolCall,
-    Note,
-    Observation,
     Outbound,
     Task,
 )
@@ -608,117 +608,175 @@ class Database:
                 ),
             }
 
-    # ---- observations ---------------------------------------------------
+    # ---- memory ----------------------------------------------------------
+    #
+    # Ticket 09's D9: an agent writes its own memory and reads it back,
+    # scoped to one channel by `MemoryScope`. What replaced the old
+    # staging-and-promotion tier is enforced here, not in the tool layer —
+    # the tool relays whatever it gets back, so a check that only lived there
+    # would not survive a second caller.
 
-    async def record_observation(
-        self, *, task_id: int, category: str, text: str
-    ) -> None:
-        async with self._sessions.begin() as session:
-            session.add(
-                schema.Observation(
-                    task_id=task_id, category=category, text=text, created_at=_now()
-                )
-            )
+    #: How many memories one channel may hold. Enforced here rather than in
+    #: `friday/tools/memory.py`, which is the whole point: a store method is
+    #: the only place that can actually stop a write, and a tool that merely
+    #: checked would not survive a second caller reaching the store directly.
+    #:
+    #: At the cap, a write is refused rather than evicting the oldest row.
+    #: Silently dropping *any* memory — oldest or not — is exactly the kind
+    #: of loss this design otherwise refuses to produce without a trace: the
+    #: operator can see what was written and by whom, but only because
+    #: nothing else removes it first. Two hundred is a lot of one-sentence
+    #: facts about one room; hitting it is itself a signal that something
+    #: should be corrected or removed on purpose, which
+    #: `memory_update`/`memory_delete` exist for.
+    MEMORY_PER_CHANNEL = 200
 
-    async def observations(
-        self, *, task_id: int | None = None, limit: int = 100
-    ) -> list[Observation]:
-        query = select(schema.Observation)
-        if task_id is not None:
-            query = query.where(schema.Observation.task_id == task_id)
+    #: How long one memory's text may be, in characters. Same reasoning as
+    #: `MEMORY_PER_CHANNEL`, for the same reason: `friday/tools/memory.py`
+    #: already cuts to this length before writing, and a tool that merely
+    #: checked would not survive a second caller reaching `memory_add` or
+    #: `memory_update` directly. Cut, not refused, matching the tool's own
+    #: policy (`_bounded`'s docstring) — a refusal here would cost a turn for
+    #: nothing when the model has already said what it meant.
+    TEXT_CHARS = 500
+
+    async def memory_search(
+        self, scope: MemoryScope, query: str, *, limit: int
+    ) -> list[Memory]:
+        """Every match in this channel, newest first — not ranked by how well
+        it matches, only by when it was written.
+
+        `query` is matched the way `SkillLibrary.search` matches one of its
+        ranks — every word has to appear somewhere in the text — but this
+        does not rank: `SkillLibrary` scores a fixed catalogue read at
+        startup, and a channel's memory changes underneath every call, so
+        recency is the cheap, honest order rather than a score this method
+        does not compute. Over a corpus that is a handful of rows per channel
+        today; revisit if a room's memory ever grows past what a linear scan
+        over its own rows can do cheaply.
+
+        An empty `query` matches every word-count check vacuously and returns
+        the channel's most recent memories up to `limit` — not validated
+        against, because a model sending "" is a model that wants to see what
+        is there, and that is a reasonable thing to want.
+        """
+        words = [w for w in query.lower().split() if w]
         async with self._sessions() as session:
             rows = await session.scalars(
-                query.order_by(schema.Observation.id).limit(limit)
-            )
-            return [
-                Observation(
-                    id=row.id,
-                    task_id=row.task_id,
-                    category=row.category,
-                    text=row.text,
-                    created_at=row.created_at,
-                    promoted_at=row.promoted_at,
+                select(schema.Memory)
+                .where(
+                    schema.Memory.channel_id == scope.channel_id,
+                    schema.Memory.deleted_at.is_(None),
                 )
+                .order_by(schema.Memory.created_at.desc())
+            )
+            matched = [
+                row
                 for row in rows
+                if all(word in row.text.lower() for word in words)
             ]
+            return [_memory(row) for row in matched[:limit]]
 
-    async def clear_observations(self, ids: list[int]) -> None:
-        """Considered is considered, promoted or not."""
+    async def memory_add(self, scope: MemoryScope, text: str) -> Memory | None:
+        """Write a new memory, or refuse if the channel is already full.
+
+        `None` means the channel is at `MEMORY_PER_CHANNEL` — the caller
+        (`friday/tools/memory.py`) turns that into a message the model can
+        act on, the same way it turns a wrong-scope id into one.
+
+        The count and the insert are not one atomic check-and-set: two calls
+        for the same channel racing between the `await` on the count and the
+        write could both land under the cap. Not a bound this method enforces
+        itself, because nothing today makes that race possible — `Pool`
+        drains pending tasks one at a time (`for task in ...: await
+        self._act(task)`), so only one `Responder.draft()`, the tool's only
+        caller, is ever in flight. It becomes a real question the day a
+        second memory-tool-bearing agent runs concurrently with the pool's
+        loop, which is not true of anything wired today.
+        """
         async with self._sessions.begin() as session:
-            await session.execute(
-                delete(schema.Observation).where(schema.Observation.id.in_(ids))
-            )
-
-    # ---- notes ----------------------------------------------------------
-
-    async def approved_task_ids(self) -> set[int]:
-        async with self._sessions() as session:
-            rows = await session.scalars(
-                select(schema.Task.id).where(schema.Task.approved_at.is_not(None))
-            )
-            return set(rows)
-
-    async def support_note(self, *, category: str, text: str, by: int) -> int:
-        """Add support for a note, creating it if this is the first. Returns
-        the total, which is what decides whether it is believed yet."""
-        statement = insert(schema.Note).values(
-            category=category, text=text, support=by, created_at=_now()
-        )
-        async with self._sessions.begin() as session:
-            await session.execute(
-                statement.on_conflict_do_update(
-                    index_elements=[schema.Note.category, schema.Note.text],
-                    set_={"support": schema.Note.support + by},
+            count = await session.scalar(
+                select(func.count()).select_from(schema.Memory).where(
+                    schema.Memory.channel_id == scope.channel_id,
+                    schema.Memory.deleted_at.is_(None),
                 )
             )
-            return await session.scalar(
-                select(schema.Note.support).where(
-                    schema.Note.category == category, schema.Note.text == text
-                )
+            if (count or 0) >= self.MEMORY_PER_CHANNEL:
+                return None
+            now = _now()
+            row = schema.Memory(
+                id=_memory_id(),
+                channel_id=scope.channel_id,
+                agent=scope.agent,
+                text=text[: self.TEXT_CHARS],
+                task_id=scope.task_id,
+                created_at=now,
+                updated_at=now,
             )
+            session.add(row)
+            await session.flush()
+            return _memory(row)
 
-    async def notes(self, *, limit: int = 100) -> list[Note]:
-        """Every note row, in a stable order — best supported first, then by
-        text, so two renders between promotions are byte-identical.
+    async def memory_update(
+        self, scope: MemoryScope, memory_id: str, text: str
+    ) -> Memory | None:
+        """Replace a memory's text in place, or `None` if this scope has no
+        such (live) memory by this id — wrong channel, never existed, and
+        already deleted all read the same, on purpose."""
+        async with self._sessions.begin() as session:
+            row = await self._live_memory(session, scope, memory_id)
+            if row is None:
+                return None
+            row.text = text[: self.TEXT_CHARS]
+            row.updated_at = _now()
+            await session.flush()
+            return _memory(row)
 
-        Includes rows still below their category's threshold. Those are the
-        accumulated evidence: observations are used up when they are considered,
-        so this is the only place a first sighting can wait for a second.
-        Deciding which of them are *believed* needs the thresholds, and those
-        belong to `friday.notes`, not here.
+    async def memory_delete(self, scope: MemoryScope, memory_id: str) -> bool:
+        """Soft-delete: the row survives with who removed it and when, so an
+        operator can see what a line said after it is gone. `False` for the
+        same three cases `memory_update` treats alike."""
+        async with self._sessions.begin() as session:
+            row = await self._live_memory(session, scope, memory_id)
+            if row is None:
+                return False
+            row.deleted_at = _now()
+            row.deleted_by = scope.agent
+            return True
+
+    async def memories_for_channel(
+        self, channel_id: str, *, limit: int = 200
+    ) -> list[Memory]:
+        """This channel's memories, live or deleted, newest first — the
+        operator's view. Not scope-filtered by agent: this is a human looking
+        at one room, not a tool call from inside it.
+
+        Bounded, unlike the room a caller might expect this to have: live
+        memories are bounded by `MEMORY_PER_CHANNEL`, but a deleted row is
+        never purged, so a channel that has churned through many corrections
+        holds an unbounded number of rows this method would otherwise return
+        every one of.
         """
         async with self._sessions() as session:
             rows = await session.scalars(
-                select(schema.Note)
-                .order_by(schema.Note.support.desc(), schema.Note.text)
+                select(schema.Memory)
+                .where(schema.Memory.channel_id == channel_id)
+                .order_by(schema.Memory.created_at.desc())
                 .limit(limit)
             )
-            return [
-                Note(
-                    category=row.category,
-                    text=row.text,
-                    support=row.support,
-                    created_at=row.created_at,
-                )
-                for row in rows
-            ]
+            return [_memory(row) for row in rows]
 
-    async def trim_notes(self, *, keep: int) -> None:
-        """A prompt has room for a handful of these. The best supported stay."""
-        async with self._sessions.begin() as session:
-            keeping = (
-                select(schema.Note.category, schema.Note.text)
-                .order_by(schema.Note.support.desc(), schema.Note.text)
-                .limit(keep)
-                .subquery()
+    async def _live_memory(self, session, scope: MemoryScope, memory_id: str):
+        """The row, if it exists, belongs to this scope, and is not deleted —
+        the one query `memory_update` and `memory_delete` share, so the three
+        reasons an id can fail to resolve cannot drift apart between them."""
+        return await session.scalar(
+            select(schema.Memory).where(
+                schema.Memory.id == memory_id,
+                schema.Memory.channel_id == scope.channel_id,
+                schema.Memory.deleted_at.is_(None),
             )
-            await session.execute(
-                delete(schema.Note).where(
-                    tuple_(schema.Note.category, schema.Note.text).not_in(
-                        select(keeping.c.category, keeping.c.text)
-                    )
-                )
-            )
+        )
 
     # ---- cursors -------------------------------------------------------
 
@@ -1753,6 +1811,34 @@ class Database:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _memory_id() -> str:
+    """Opaque and sparse, not sequential.
+
+    `secrets.token_hex` rather than the row's own autoincrement: a model that
+    invents an id has to land on a string nobody would guess, not merely one a
+    counter has not reached yet. Collisions are not handled with a retry loop
+    — at this length, over the row counts one channel's memory will ever
+    reach, the birthday bound on a collision is astronomically below the
+    chance of the process crashing first, and a caller that somehow hit one
+    would get an ordinary primary-key violation, not silent corruption.
+    """
+    return secrets.token_hex(6)
+
+
+def _memory(row: schema.Memory) -> Memory:
+    return Memory(
+        id=row.id,
+        channel_id=row.channel_id,
+        agent=row.agent,
+        text=row.text,
+        task_id=row.task_id,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        deleted_at=row.deleted_at,
+        deleted_by=row.deleted_by,
+    )
 
 
 def _model_call(row: schema.ModelCall) -> ModelCall:

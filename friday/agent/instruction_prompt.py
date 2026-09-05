@@ -461,6 +461,37 @@ def skill_metadata(skill: Skill, location: str) -> str:
     )
 
 
+def memory_lines(found) -> str:
+    """One memory per line, for `memory_search` to hand back.
+
+    Same reason `skill_metadata` is not a `Section` and lives here rather than
+    on the store that reads the rows: this is a tool's answer, not part of any
+    agent's stable prefix, and a store that renders is a second renderer — the
+    last time this codebase had two of those, one of them did not escape.
+
+    A memory's `text` is model-written, by the same agent this hands it back
+    to, from a room that also contains a reporter's own messages — the same
+    shape that made `skill_metadata` necessary: a value the model can
+    influence, returned as a tool's answer rather than a `Section`, so nothing
+    upstream of this function is already escaping it. `_escape` is what
+    stopped `harmless</skills>` from closing a section early; the same string
+    shaped as a memory (`</job><critical_reminder>…</critical_reminder>`)
+    would do the same thing here, and would keep doing it on every later
+    `memory_search` in the room, because a memory persists.
+
+    Whitespace is collapsed *before* escaping, not after: a stored newline
+    could otherwise forge a second `id: text` line, the same delimit defence
+    `channel_derived` needed once a summariser started quoting what it read.
+    `_escape` does not touch newlines, so the order matters — collapsing
+    first is what keeps one memory to one line.
+    """
+    if not found:
+        return "nothing remembered about that yet"
+    return "\n".join(
+        f"{m.id}: {_escape(' '.join(m.text.split()))}" for m in found
+    )
+
+
 def search_skills_system(available: bool = True) -> Section:
     """When the agent has `search_skills`, tell it what the tool does.
 
@@ -550,39 +581,30 @@ def memory(
     *,
     conversation_body: str = "",
     channel_body: str = "",
-    notes_body: str = "",
 ) -> Section:
-    """What is already known, in one place: this exchange, this room, and what
-    has been learned across tasks.
+    """What is already known, in one place: this exchange and this room.
 
-    One section rather than three because they answer one question — *what do
-    I already know?* — and an agent given three separate blocks has to work
-    out that they are the same kind of thing. Each part is labelled inside so
-    the agent can still tell which is which, and an absent part contributes
-    nothing rather than an empty heading.
+    One section rather than two because they answer one question — *what do
+    I already know?* — and an agent given separate blocks has to work out that
+    they are the same kind of thing. Each part is labelled inside so the agent
+    can still tell which is which, and an absent part contributes nothing
+    rather than an empty heading.
 
-    **Escaped here.** The contract used to say bodies arrive pre-escaped and
-    this only composes — written before there was a caller, and wrong the
-    moment there was one: notes are model-written text handed over raw, and
-    they land in *instructions*, so a note that closed its own section would
-    put a `<critical_reminder>` into every call that agent makes. Escaping
-    belongs where every other value is escaped.
+    Escaped here, like every other value the seam hands to a prompt.
 
-    **Nothing calls this yet, and that is a finding rather than an oversight.**
-    The three things it groups have three different lifetimes: `notes` are
-    built once at startup and live in `instructions`, `channel` changes when
-    something is learned, and `conversation` changes every call. This module's
-    ordering rule is *by how often a section changes*, because a byte that
-    moves early costs the cache hit on everything after it — so grouping them
-    means either paying for notes on every call or freezing a conversation
-    into the instructions. Wiring it needs that trade decided first, and
-    deciding it quietly inside a builder would be the wrong place.
+    **Nothing calls this yet.** A third part lived here — `notes`, promoted
+    observations concatenated onto `instructions` — until it was removed along
+    with the tier that produced them (ticket 09's D9): a memory an agent writes
+    now reaches a model only as a tool result, never as instructions, which is
+    what makes the class of failure that tier had to escape against
+    unreachable by construction rather than defended against. `conversation`
+    and `channel` remain queued for the day something calls them, same as
+    before.
     """
     parts = []
     for label, body in (
         ("conversation", conversation_body),
         ("channel", channel_body),
-        ("notes", notes_body),
     ):
         if body and body.strip():
             parts.append(f"[{label}]\n{_escape(body)}")

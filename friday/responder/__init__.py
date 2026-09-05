@@ -27,6 +27,8 @@ from friday.responder.prompt import build_input, build_instructions
 from friday.agent.harness import Harness
 from friday.tools.describe_skill import describe_skill_tool
 from friday.tools.fetch_skill import fetch_skill_tool
+from friday.domain.models import MemoryScope
+from friday.tools.memory import memory_tools
 from friday.tools.read_skill_file import read_skill_file_tool
 from friday.tools.search_skills import search_skills_tool
 from friday.domain.models import Params, InboundEvent
@@ -50,7 +52,7 @@ class Draft:
 class Responder:
     @classmethod
     def build(
-        cls, config, *, notes: str = "", skills=None, context_store=None,
+        cls, config, *, skills=None, context_store=None, db=None,
         record=None, spent=None,
     ) -> "Responder | None":
         """The responder, or None when it is off or unconfigured.
@@ -63,9 +65,9 @@ class Responder:
             return None
         built = cls(
             config=settings,
-            notes=notes,
             skills=skills,
             context_store=context_store,
+            db=db,
             record=record,
             spent=spent,
         )
@@ -80,9 +82,15 @@ class Responder:
         *,
         config: AgentConfig,
         model=None,
-        notes: str = "",
         skills=None,
         context_store=None,
+        #: The store, for the four memory tools — the responder's own, scoped
+        #: to one channel per call. `None` means what it means for `skills`:
+        #: the tools are not wired and the prompt does not claim them.
+        #: Ticket 09's D9: the responder is the obvious first agent to get
+        #: these, since it is the one that writes text a person reads and
+        #: what a room likes is exactly the kind of thing worth remembering.
+        db=None,
         record=None,
         spent=None,
     ) -> None:
@@ -122,14 +130,20 @@ class Responder:
             if skills is not None and len(skills) > 0
             else []
         )
+        #: Same rule as the skill tools: given only when there is a store to
+        #: back them, and `build_input`'s `has_memory` reads this same fact
+        #: rather than a second flag that could drift from it.
+        self._has_memory = db is not None
+        if self._has_memory:
+            tools = tools + memory_tools(db)
         #: Two turns each — the call and its answer — for however many it got.
         self._tool_turns = 2 * len(tools)
         self._run = Harness(
             config=config,
             instructions=build_instructions(),
             model=model,
-            notes=notes,
             tools=tools,
+            context_type=MemoryScope if self._has_memory else None,
             record=record,
             spent=spent,
         )
@@ -178,15 +192,25 @@ class Responder:
             skills_catalogue=(
                 self._skills.catalogue() if self._skills is not None else None
             ),
+            has_memory=self._has_memory,
             tone=tone,
             context=context,
+        )
+        # `None` when there is no channel to scope a memory to, or no memory
+        # tools to scope it for — a memory tool called with no scope reports
+        # "unavailable" rather than crashing, but the ordinary case is that
+        # a real task always has a channel.
+        scope = (
+            MemoryScope(channel_id=channel_id, task_id=task_id, agent="responder")
+            if self._has_memory and channel_id is not None
+            else None
         )
         # Room for every tool call it might make before the reply is
         # written. A ceiling, not a target: it costs nothing to a run that
         # answers in one turn, and without it an agent that reaches for a
         # skill spends its only turn on the fetch and returns nothing.
         result = await self._run.run(
-            said, extra_turns=self._tool_turns, task_id=task_id
+            said, context=scope, extra_turns=self._tool_turns, task_id=task_id
         )
         if result is None:
             log.warning("falling back to the template")

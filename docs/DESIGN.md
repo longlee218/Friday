@@ -4,9 +4,12 @@ Status: **built, and this file has drifted from it.**
 
 Read `CLAUDE.md` first — it describes what exists. This file records the
 reasoning behind decisions, and several of those decisions were later reversed
-in ways it does not reflect. Two are marked inline below and are the ones most
-likely to mislead: the "agentic nodes" vocabulary was removed, and triage's
-tool schemas no longer take any parameter but `confidence`.
+in ways it does not reflect. Three are marked inline below and are the ones
+most likely to mislead: the "agentic nodes" vocabulary was removed, triage's
+tool schemas no longer take any parameter but `confidence`, and the memory
+design below — a staging tier promoted by an approval-gated compaction pass —
+was replaced by an agent writing and reading its own memory directly (ticket
+09's D9, 2026-09-06).
 
 Kept rather than rewritten because the argument is still worth reading even
 where the conclusion moved. **Where it disagrees with the code, the code is
@@ -119,7 +122,7 @@ many humans.
 | `tasks` | → conversation | work items, their state, and their approval |
 | `outbox` | → task | outbound intents: conversation, text, sender, reply_to, kind, attempts, last_error |
 | `llm_calls` | → agent run | prompt, output, tool calls and tokens per model call, for the debug view. Trimmed on a retention bound |
-| `memory_staging` | → task | agent-written entries awaiting promotion |
+| ~~`memory_staging`~~ | → task | **removed** — see the Memory section below |
 
 `events` and `messages` were separate tables and are now one. Every in-scope
 mention was written to both, so a column added to one silently went missing from
@@ -316,28 +319,60 @@ thing.
 
 ## Memory
 
+**Superseded 2026-09-06 (D9). What is below was built roughly as described —
+staging plus an approval-gated promotion pass, `fact`/`person`/`lesson` in
+place of the four kinds — and then removed, because it had stopped doing the
+job it was built for. Read for the argument it made, not for what exists.**
+
 Two tiers, because agents write memory *and* a compaction pass does.
 
 - **Staging** — `remember(kind, text)` appends an observation scoped to the
   current task. The agent supplies only `kind` and `text`; the runner attaches
   `task_id` and `created_at`, because provenance the model writes is provenance
   the model can get wrong.
-- **Long-term** — a capped JSON file. A compaction pass reads staging plus
-  completed tasks and promotes only what is corroborated by an outcome approved
-  in `review`. Staging is cleared on promotion. Entries carry `support_count`;
-  low-support entries expire.
+- **Long-term** — a capped, rewritten table, not a JSON file as first
+  planned. A compaction pass reads staging plus completed tasks and promotes
+  only what is corroborated by an outcome approved in `review`. Staging is
+  cleared on promotion. Entries carry a support count; low-support entries
+  expire.
 
-`kind` is a closed enum — `recurring_problem`, `tone_preference`, `system_fact`,
-`person_fact` — so promotion can apply different rules per kind (a
-`tone_preference` needs no corroboration; a `recurring_problem` should need
-several approved tasks).
-
-The long-term file is **capped and rewritten, not appended**: it sits in every
-prompt's stable prefix, so appending per task would invalidate the cache every
-task and eventually eat the context window. Rewrite on promotion, not per task.
-
-The property being protected: the long-term file only contains things that
+The property being protected: the long-term set only contains things that
 turned out to be true. A wrong entry there is invisible and self-reinforcing.
+
+**Why it was removed anyway.** The protection held, and nothing ever tested
+it: `remember` was cut from the tool list before any agent's job called for
+noticing something worth keeping, so staging never received an entry and
+promotion ran every heartbeat over an empty table — for months, silently,
+which is exactly the failure mode this whole design exists to catch elsewhere.
+A floor nothing ever stood on is not evidence the floor works.
+
+**D9 — the decision.** An agent writes long-term memory directly, and reads
+back what it wrote, because CRUD without retrieval is three tools nobody can
+use: `memory_update` and `memory_delete` have nothing to name if the agent
+never sees what it stored. The floor moves from "a human approved the task
+this came from" to three narrower, structural guarantees instead of one
+procedural one:
+
+- **a memory reaches a model only as a tool result**, never appended to
+  `instructions` — the class of failure a promoted note produced once
+  (commit f0686f2: a note that closed its own section rewrote the instructions
+  of every later call) is unreachable now by construction, because a tool
+  result cannot do what a string concatenated onto `instructions` could;
+- **scope is runtime-supplied**, carried on a context object and never named
+  by the model, so a channel's memory cannot be read or written from another;
+- **ids are opaque and sparse**, so a hallucinated one fails rather than
+  landing on a neighbouring row.
+
+Drift is possible under this design and is accepted: nothing corroborates a
+memory before it is written. It is bounded by the channel scope, by the
+operator being able to **see** what was written and by whom — including a
+deleted line, and who deleted it — and by the fact that none of it reaches a
+prompt except through a tool call the run chose to make — not by a count of
+approved tasks agreeing. Removal is the agent's own, through `memory_delete`;
+the board is read-only by design (`allow_methods=["GET"]`), so there is no
+route for the operator to remove one directly. An earlier draft of this
+sentence said "see and remove", which overstated the second half. See
+`friday/tools/memory.py` for the shape and `CLAUDE.md` for what is wired.
 
 ## Orchestration
 
@@ -453,8 +488,10 @@ local host), and the per-node cap values.
    failure for the whole system. Decided deliberately after being raised.
 2. **`discord-self` tracks a private API.** It can break on any Discord client
    change, with no SLA. Isolating the user-side in one module is the mitigation.
-3. **Agents can write memory.** Mitigated by the staging tier and
-   approval-gated promotion, not eliminated.
+3. **Agents can write memory.** The staging tier and approval-gated
+   promotion this line originally pointed at is gone (D9, see Memory above);
+   the mitigation now is scope, visibility and the tool-result boundary
+   instead of an approval gate. Not eliminated either way.
 4. **Every node is an LLM call.** Cost and latency scale with mention volume,
    and a `skip` still costs a call. The threshold and node caps are the levers.
 5. **The threshold and caps are unset by design.** The first weeks are data

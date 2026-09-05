@@ -236,3 +236,39 @@ async def test_calls_that_name_no_message_are_still_reachable(client, db):
 
     assert [c["agent"] for c in got] == ["triage", "summary"], "newest first"
     assert client.get("/api/model-calls?uncorrelated=true").json()[0]["agent"] == "summary"
+
+
+async def test_a_channels_memories_are_reachable_live_and_deleted(client, db):
+    """`memory_delete` hides a line from every tool but keeps the row, and
+    this is the one route that reads it back — the operator's own view, not
+    scoped by agent the way the tool is."""
+    from friday.domain.models import MemoryScope
+
+    scope = MemoryScope(channel_id="100", task_id=None, agent="responder")
+    kept = await db.memory_add(scope, "checkout runs on cluster b")
+    gone = await db.memory_add(scope, "they deploy on fridays")
+    await db.memory_delete(scope, gone.id)
+
+    got = client.get("/api/channels/100/memories").json()
+
+    by_id = {m["id"]: m for m in got}
+    assert by_id[kept.id]["deleted_at"] is None
+    assert by_id[gone.id]["deleted_by"] == "responder"
+    assert by_id[gone.id]["deleted_at"] is not None
+
+
+async def test_a_channels_memories_are_bounded_like_every_other_list_route(client, db):
+    """Live memories stop at `MEMORY_PER_CHANNEL`, but a deleted row is never
+    purged — a channel that has churned many corrections holds an unbounded
+    number of rows, and every other list route on this board is bounded."""
+    from friday.store.db import Database
+    from friday.domain.models import MemoryScope
+
+    scope = MemoryScope(channel_id="100", task_id=None, agent="responder")
+    for n in range(5):
+        written = await db.memory_add(scope, f"fact {n}")
+        await db.memory_delete(scope, written.id)
+
+    got = client.get("/api/channels/100/memories?limit=2").json()
+
+    assert len(got) == 2

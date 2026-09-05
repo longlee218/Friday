@@ -138,6 +138,34 @@ def build_api(
         calls = await db.model_calls(uncorrelated=uncorrelated, limit=limit)
         return _clean([asdict(c) | {"created_at": c.created_at} for c in calls])
 
+    @api.get("/api/channels/{channel_id}/memories")
+    async def channel_memories(
+        channel_id: str = Path(...),
+        limit: int = Query(200, ge=1, le=MAX_PAGE),
+    ) -> list[dict]:
+        """This channel's memories, live or deleted, newest first — the
+        operator's own view.
+
+        Not scoped by agent the way `memory_search` is: a tool asks "what do
+        I know", a person here asks "what does this room's memory say, and
+        who wrote or removed each line" — `memory_delete` soft-deletes for
+        exactly this route.
+
+        Bounded like every other list route here, and for the same reason a
+        channel's memory needed a cap at all: live rows stop at
+        `Database.MEMORY_PER_CHANNEL`, but a deleted one is never purged, so
+        an unbounded read here would grow with every correction a channel has
+        ever had rather than with what it currently holds.
+        """
+        return _clean([
+            asdict(m) | {
+                "created_at": m.created_at,
+                "updated_at": m.updated_at,
+                "deleted_at": m.deleted_at,
+            }
+            for m in await db.memories_for_channel(channel_id, limit=limit)
+        ])
+
     @api.get("/api/tasks")
     async def tasks(
         state: TaskState | None = None,

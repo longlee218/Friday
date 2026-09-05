@@ -1,9 +1,10 @@
 """What an agent chooses to remember, and can go back and correct.
 
-**Shape only. No agent is given these yet**, and the four `db` methods they
-call do not exist — see `.scratch/nothing-runs-unmeasured/issues/09`. The same
-state `ask_clarification` has been in since ticket 36: declared, reviewable,
-and wired to nothing.
+Wired to the responder (ticket 09's D9) — the obvious first, since it is the
+agent that writes text a person reads and so the one whose room-specific
+habits are worth remembering. Triage is the obvious never: it stops on its
+first tool call by design, so a memory tool there would end the run before it
+classified, the same reason it has no skill tools either.
 
 This replaces `remember` rather than restoring it. `remember` wrote to a
 staging tier that nothing read back, and a promotion pass moved only what two
@@ -17,12 +18,14 @@ implied by this module existing.
 What the staging tier was protecting is kept, by three properties instead:
 
 **A memory reaches a model only as a tool result, never as instructions.**
-`remember`'s successor tier did the opposite — `Harness._with_notes` appends
-the promoted block to `instructions`, and commit f0686f2 is the day a promoted
-note closed its own section and could rewrite the instructions of every call
-that agent made afterwards. Text that only ever arrives as tool output cannot
-do that, whatever it says. It also means memory costs nothing on a run that
-does not search: a prompt-cache argument and a safety argument pointing the
+`remember`'s successor tier did the opposite — `Harness` used to append the
+promoted block to `instructions` (that mechanism, `_with_notes`, is deleted
+along with the tier itself, ticket 09's D9), and commit f0686f2 is the day a
+promoted note closed its own section and could rewrite the instructions of
+every call that agent made afterwards. Text that only ever arrives as tool
+output cannot do that, whatever it says. It also means memory costs nothing
+on a run that does not search: a prompt-cache argument and a safety argument
+pointing the
 same way.
 
 **Scope is attached by the runtime, never named by the model.** The same rule
@@ -48,45 +51,14 @@ the whole of what makes an opaque id safe.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 
 from friday.agent.harness import ToolContext, tool
+from friday.agent.instruction_prompt import memory_lines
+from friday.domain.models import MemoryScope
 
 __all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "MemoryScope", "memory_tools"]
 
 log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class MemoryScope:
-    """Where a memory belongs and who wrote it. Runtime-supplied, every field.
-
-    `channel_id` is the read *and* write boundary — a memory written in one
-    room is invisible in another. Not a nicety: this system's rooms are
-    different teams, and a fact learned in one is a leak in the next.
-
-    `task_id` and `agent` are provenance. They are never searched on; they are
-    what lets the operator's board answer "who wrote this, and while doing
-    what" about a line the agent is now acting on. **Both are required, and
-    `task_id` is nullable rather than optional** — a run that belongs to no
-    task says so by passing `None`, which is a different statement from
-    forgetting to pass it. They had defaults, under a docstring that said
-    every field was runtime-supplied; a default is how provenance goes missing
-    without anybody deciding it should.
-
-    **This is the run's context object, not a closure variable**, and the
-    distinction is the difference between working and being silently wrong. An
-    agent here is built once, at startup — `Responder.build` in the composition
-    root, reused for every task in every channel — so a scope captured when the
-    tools were made would pin every room's memory to whichever room happened to
-    be first. It arrives per call instead, as `Harness.run(context=...)`, the
-    way `ClarifyCapture` and `FieldsCapture` already do. The model still cannot
-    name it, which was the point.
-    """
-
-    channel_id: str
-    task_id: int | None
-    agent: str
 
 
 #: A memory is a sentence, not a document. Longer than this is a summary that
@@ -133,16 +105,22 @@ def memory_tools(db):
     "try again" after a write that may have landed is how a room ends up with
     the same memory twice.
 
-    `db` must answer four methods, none of which exist yet:
+    `db` is `friday/store/db.py`'s `Database`, answering four methods:
 
-        memory_search(scope, query, limit)   -> list[Memory]
-        memory_add(scope, text)              -> Memory
+        memory_search(scope, query, *, limit) -> list[Memory]
+        memory_add(scope, text)               -> Memory | None
         memory_update(scope, memory_id, text) -> Memory | None
-        memory_delete(scope, memory_id)      -> bool
+        memory_delete(scope, memory_id)       -> bool
 
-    A `None` or `False` back means "no memory with that id **in this scope**",
-    which is the same answer as "it does not exist" and deliberately so: an
-    agent must not be able to learn that a row exists in a room it cannot read.
+    `None`/`False` means two different things depending on which method gives
+    it, and both are deliberate rather than an overloaded shorthand. From
+    `memory_update`/`memory_delete`, it means "no memory with that id **in
+    this scope**" — the same answer whether the id never existed, belongs to
+    another channel, or was already deleted, so an agent cannot learn a row
+    exists in a scope it cannot read. From `memory_add`, it means the channel
+    is at `Database.MEMORY_PER_CHANNEL` — nothing is evicted to make room, so
+    the tool tells the model to correct or remove something on purpose
+    instead.
     """
 
     async def memory_search(ctx: ToolContext[MemoryScope], query: str) -> str:
@@ -151,7 +129,10 @@ def memory_tools(db):
         Search first. What you are about to work out may have been worked out
         already, by an earlier run that wrote it down for exactly this moment.
 
-        Returns up to {RESULTS} lines, best match first, each one
+        Returns up to {RESULTS} lines, newest first — not scored or ranked,
+        only ordered by when each one was written, so a precise memory older
+        than {RESULTS} vaguer ones on the same words will not be in the list.
+        Narrow the query rather than trust the order. Each line is
         `id: text` — the id is what memory_update and memory_delete take, so
         keep it if you intend to correct or remove that line. Nothing found
         comes back as a plain sentence saying so, which is an answer, not an
@@ -166,7 +147,7 @@ def memory_tools(db):
         """
         found = await db.memory_search(_scope(ctx), query, limit=RESULTS)
         log.info("memory searched: %r -> %d", query, len(found))
-        return _as_lines(found)
+        return memory_lines(found)
 
     async def memory_add(ctx: ToolContext[MemoryScope], text: str) -> str:
         """Write down something a later run would otherwise have to work out again.
@@ -190,6 +171,16 @@ def memory_tools(db):
         scope = _scope(ctx)
         kept = _bounded(text)
         written = await db.memory_add(scope, kept)
+        if written is None:
+            # The store's own cap, not a failure — see `Database.MEMORY_PER_CHANNEL`.
+            # Nothing is evicted to make room, so the model has to make room
+            # itself: correct something with memory_update, or remove
+            # something wrong with memory_delete.
+            return (
+                "this channel's memory is full — use memory_update to correct "
+                "something already here, or memory_delete to remove something "
+                "that turned out to be wrong, then try again"
+            )
         log.info("memory added by %s: %r", scope.agent, kept)
         return f"remembered as {written.id}"
 
@@ -253,19 +244,6 @@ def memory_tools(db):
         memory_update,
         memory_delete,
     ]
-
-
-def _as_lines(found) -> str:
-    """One memory per line, and each memory kept to one line.
-
-    A stored text carrying a newline could otherwise forge a second `id: text`
-    entry and be read back as a memory nobody wrote — the same delimiter
-    defence `channel_derived` needed once the summariser started quoting what
-    it read.
-    """
-    if not found:
-        return "nothing remembered about that yet"
-    return "\n".join(f"{m.id}: {' '.join(m.text.split())}" for m in found)
 
 
 class NotWired(RuntimeError):

@@ -7,7 +7,7 @@ decide what happens to the observation tier that has no producer.
 
 **Decisions:** none yet — the second half is an open question, see below
 
-**Status:** in progress — the rebuild is fixed; the dead tier is the operator's call
+**Status:** done
 
 ## Why
 
@@ -58,7 +58,7 @@ goes stale silently.
 - [x] An `agents.summary` block exists in `config.yaml`, or its absence is
       logged loudly at startup the way an empty `sensitive_words` already is
 - [x] A test fails if `rebuild_all` becomes unreachable again
-- [ ] The observation tier is either given a producer or removed, and
+- [x] The observation tier is either given a producer or removed, and
       `CLAUDE.md` matches whichever happened
 - [x] Each guard is deleted once and watched go red
 
@@ -83,13 +83,45 @@ pass — so the test read "no second summary" as the behaviour it was checking
 for, when the real answer was "no summary at all, twice". A counting model
 written out rather than wrapped around one.
 
-## Still open, and not mine to decide
+## The dead tier, resolved
 
-Whether the observation tier is **given a producer or removed**. The operator
-has already chosen its replacement — the four memory tools of ticket 09 —
-which makes removal the consistent answer, and removal means dropping two
-tables that no code writes to. That is destructive and irreversible in a way
-the rest of this ticket is not, so it waits for a yes.
+The operator's call on 2026-09-06: remove it. `friday/memory/observations.py`
+and `friday/memory/notes.py` are deleted, along with the `Observation`/`Note`
+domain models and schema classes, the seven `Database` methods that served
+only them, and every wire between `Promotion` and the composition root —
+`Harness`'s `notes` parameter, `Responder`'s, `Heartbeat`'s, and
+`ContextRebuilder`'s. A migration drops both tables; it is destructive by
+nature and says so in its own docstring.
 
-Until then `Promotion` still runs on every beat over a table nothing writes,
-which costs one query a minute and is honest about achieving nothing.
+`CLAUDE.md`, `CONTEXT.md`, `friday/memory/__init__.py` and `docs/DESIGN.md`
+all described the tier as live. All four now say what replaced it and why —
+`docs/DESIGN.md`'s Memory section is marked superseded rather than rewritten,
+following the convention the file already uses for its other two reversals.
+
+The test that pinned the old escape-based defense against a promoted note
+rewriting an agent's instructions is deleted rather than left passing against
+a mechanism that no longer exists — the attack it guarded is unreachable now
+by construction, since there is no `notes=` parameter left to inject through.
+
+727 tests passed right after this removal and before ticket 09's build began
+in the same working tree (739 before the removal, −12 net: the notes tests
+and the now-obsolete instruction-injection test gone, four adjusted tests
+remain). Nothing added by the removal itself needed a mutation check — it is
+pure deletion plus doc rewrites.
+
+That count is stale the moment this sentence is read next to ticket 09's own
+file: the two landed in one working tree without a commit between them, so
+the number a reader can actually verify today is ticket 09's, not this one.
+Recorded here anyway because it was true of what this specific pass did, in
+isolation, and a number that was correct once is worth more than one erased
+to avoid looking stale.
+
+## One more naming fix, from the same review
+
+`Heartbeat.promote` kept its name after this ticket removed everything it was
+named for. Its own docstring admitted as much — "named for what it used to
+also do" — which is a confession, not a justification, and this codebase
+already records the lesson for exactly this shape of mistake: `create_task`
+was renamed to `classify` because a tool's name is an instruction to whoever
+reads it next, model or person. Renamed to `rebuild_context`, which is the
+whole of what it does now.
