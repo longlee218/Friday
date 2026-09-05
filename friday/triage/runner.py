@@ -50,7 +50,7 @@ def _record(outcome: TriageOutcome) -> dict:
 class TriageRunner:
     @classmethod
     async def build(
-        cls, config, *, db: Database, still_typing=None
+        cls, config, *, db: Database, still_typing=None, record=None
     ) -> "TriageRunner":
         """Everything triage needs, read from configuration here.
 
@@ -98,7 +98,10 @@ class TriageRunner:
         return cls(
             db=db,
             triage=Triage(
-                config=settings, examples=examples, sensitive=sensitive
+                config=settings,
+                examples=examples,
+                sensitive=sensitive,
+                record=record,
             ),
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)
@@ -205,27 +208,16 @@ class TriageRunner:
         return self._still_typing(last.conversation, last.author_id)
 
     async def _decide(self, event: InboundEvent) -> TriageOutcome:
-        """Decide, and keep the call that decided it.
+        """Decide.
 
-        Triage writes nothing, so this is where a call becomes a row — right
-        beside the decision it produced, keyed on the same message.
+        This used to drain a `calls` list and write each one to the store,
+        which is why triage was the only agent whose prompts were ever kept:
+        every other caller of `Harness.run` forgot the list. The harness holds
+        the sink now (D1) and writes them itself, correlated by the
+        `message_id` `Triage.decide` passes it.
         """
         context = await self._db.relevant_messages(event.conversation)
-        calls: list = []
-        outcome = await self._triage.decide(event, context=context, calls=calls)
-        for call in calls:
-            await self._db.record_model_call(
-                message_id=event.provider_message_id,
-                agent=call.agent,
-                model=call.model,
-                system_prompt=call.system_prompt,
-                prompt=call.prompt,
-                output=call.output,
-                input_tokens=call.input_tokens,
-                output_tokens=call.output_tokens,
-                created_at=call.created_at,
-            )
-        return outcome
+        return await self._triage.decide(event, context=context)
 
     async def _apply(
         self, event: InboundEvent, outcome: TriageOutcome

@@ -366,6 +366,43 @@ class Database:
         async with self._sessions.begin() as session:
             session.add(schema.ModelCall(**values))
 
+    async def calls_by_message(self, message_ids) -> dict[str, ModelCall]:
+        """The most recent call about each of these messages.
+
+        Asked for *by message* rather than by taking a page of recent calls and
+        keying it: a page is shared by every agent, and only triage's rows
+        carry a message id at all. Once the extractors, the responder and the
+        summariser started recording, a page of the newest calls could be
+        entirely rows that can never match a message while the call that
+        classified it sat just outside the window.
+
+        Newest wins where a message has more than one — a reclassification is
+        what the board should show.
+        """
+        wanted = list(message_ids)
+        if not wanted:
+            return {}
+        query = (
+            select(schema.ModelCall)
+            .where(schema.ModelCall.message_id.in_(wanted))
+            .order_by(schema.ModelCall.created_at.asc(), schema.ModelCall.id.asc())
+        )
+        async with self._sessions() as session:
+            return {
+                row.message_id: ModelCall(
+                    agent=row.agent,
+                    model=row.model,
+                    system_prompt=row.system_prompt,
+                    prompt=row.prompt,
+                    output=row.output,
+                    input_tokens=row.input_tokens,
+                    output_tokens=row.output_tokens,
+                    message_id=row.message_id,
+                    created_at=row.created_at,
+                )
+                for row in await session.scalars(query)
+            }
+
     async def model_calls(
         self, *, message_id: str | None = None, limit: int = 50
     ) -> list[ModelCall]:

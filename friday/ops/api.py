@@ -69,7 +69,9 @@ def build_api(
         together and always read the same instant of the database.
         """
         messages = await db.page_messages(limit=BOARD_MESSAGES)
-        calls = {c.message_id: c for c in await db.model_calls(limit=MAX_PAGE)}
+        calls = await db.calls_by_message(
+            m.provider_message_id for m in messages
+        )
         tasks = await db.tasks(limit=MAX_PAGE)
         return _clean(
             {

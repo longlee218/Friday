@@ -38,6 +38,7 @@ class Triage:
         model=None,
         examples: Sequence[tuple[str, str]] = (),
         sensitive: Sensitive | None = None,
+        record=None,
     ) -> None:
         #: Empty by default, which means nothing is held. An install that has
         #: not thought about this yet gets the behaviour it would have had
@@ -53,6 +54,7 @@ class Triage:
             instructions=build_instructions(examples),
             tools=TOOLS,
             model=model,
+            record=record,
             context_type=ClassifyCapture,
             model_settings={
                 # Without a forced tool call the vaguest message — "the api is
@@ -76,12 +78,14 @@ class Triage:
         event: InboundEvent,
         *,
         context: Sequence[InboundEvent] = (),
-        calls: list | None = None,
     ) -> TriageOutcome:
         """Decide what a message is. Writes nothing, here or anywhere.
 
-        `calls` collects both sides of every model call, for a caller that
-        wants to keep them — which is the runner, because storing is a write.
+        Not even the call that decided it: the harness hands that to whatever
+        sink it was built with, which is the composition root's business. This
+        used to take a `calls` list and the runner used to drain it, and that
+        arrangement is what left the extractors, the summariser and the
+        responder unrecorded — see D1.
         """
         held = self._sensitive.found(event.text)
         if held is not None:
@@ -104,7 +108,10 @@ class Triage:
 
         said = build_input(list(context) + [event])
         result = await self._run.run(
-            said, context=capture, calls=calls, extra_turns=1
+            said,
+            context=capture,
+            extra_turns=1,
+            message_id=event.provider_message_id,
         )
         if result is None:
             return NeedsHuman(f"triage failed: {self._run.last_error}")

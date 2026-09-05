@@ -313,6 +313,17 @@ not an implementation detail:
   and `model` are the whole of what it takes to move an agent to a different
   OpenAI-compatible provider. Not the Responses API: some providers reject
   parts of it, and one of them is the one in `config.yaml`.
+- **Every model call is bounded and written down at one seam.** `_settle` is
+  where `Runner.run` is called, so it is where a run gets its clock
+  (`timeout_seconds` per agent, 60s by default — not the provider client's ten
+  minutes) and where the call is handed to the recording sink. The sink is
+  given to a `Harness` **at construction**, by the composition root, and never
+  passed to `run()`: it was a `calls=` list on the call, three of the four
+  callers forgot it, and `model_calls` held triage alone while the board
+  described it as holding every prompt. A caller still names the `message_id`
+  a call was about, and forgetting *that* loses a correlation key rather than
+  the record. `AgentHooks` cannot do this job — `on_llm_start` fires after the
+  decision to spend and `on_llm_end` after the money is gone.
 - **`friday/agent/harness.py` is the only module that may import `agents`.** The SDK
   is here for speed, not for keeps, and that is only true while replacing it
   means rewriting one file. What other modules need — `tool`, `ToolContext`,

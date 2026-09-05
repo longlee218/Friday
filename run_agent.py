@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import AsyncExitStack
+from dataclasses import asdict
 import os
 from pathlib import Path
 
@@ -86,6 +87,18 @@ async def _run(stack: AsyncExitStack) -> None:
             "or export it before running."
         )
     db = await Database.connect(config.database_path)
+
+    async def record_call(call) -> None:
+        """Where every model call in this process is written down.
+
+        The one sink, built once, handed to every agent that is built below.
+        It is here and not in `friday/store/` because which store a call goes
+        to is composition, and because the point of the seam is that no agent
+        chooses whether to use it — see D1 in
+        `.scratch/nothing-runs-unmeasured/SPEC.md`.
+        """
+        await db.record_model_call(**asdict(call))
+
     context_store = ContextStore.build(config)
     skills = SkillLibrary.build(config)
 
@@ -127,7 +140,9 @@ async def _run(stack: AsyncExitStack) -> None:
 
     provider.on_verdict = marked
 
-    runner = await TriageRunner.build(config, db=db, still_typing=inbox.still_typing)
+    runner = await TriageRunner.build(
+        config, db=db, still_typing=inbox.still_typing, record=record_call
+    )
 
     # Connected here rather than by whoever uses them: a connection has a
     # lifetime, and something has to close it. The stack unwinds with the run.
@@ -144,7 +159,7 @@ async def _run(stack: AsyncExitStack) -> None:
     # `friday/extraction/`, not here.
     from friday.extraction import register_extractors
 
-    register_extractors(config)
+    register_extractors(config, record=record_call)
 
     # Register the workflow graphs. Same shape as the extractors above and for
     # the same reason: which task types have a graph is the graph module's
@@ -165,7 +180,11 @@ async def _run(stack: AsyncExitStack) -> None:
     learned = await promotion.render()
 
     responder = Responder.build(
-        config, notes=learned, skills=skills, context_store=context_store
+        config,
+        notes=learned,
+        skills=skills,
+        context_store=context_store,
+        record=record_call,
     )
     pool = Pool.build(config, db=db, responder=responder)
     async def decided(*, task_id: int, approved: bool, by: str) -> None:
@@ -223,7 +242,11 @@ async def _run(stack: AsyncExitStack) -> None:
         liveness=liveness,
         promotion=promotion,
         context_rebuilder=ContextRebuilder.build(
-            config, store=context_store, db=db, promotion=promotion
+            config,
+            store=context_store,
+            db=db,
+            promotion=promotion,
+            record=record_call,
         ),
         interval_seconds=config.heartbeat_seconds,
         keep_model_calls_days=config.keep_model_calls_days,

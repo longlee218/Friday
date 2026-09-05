@@ -149,7 +149,13 @@ async def extract(task_type: str, text: str) -> tuple[Params | None, Clarify | N
 
 
 
-def register(task_type: str, params_cls: type[Params], config: "AgentConfig") -> None:  # type: ignore[name-defined]  # noqa: F821
+def register(
+    task_type: str,
+    params_cls: type[Params],
+    config: "AgentConfig",  # type: ignore[name-defined]  # noqa: F821
+    *,
+    record=None,
+) -> None:
     """Register one task type's extractor from configuration.
 
     One function for every task type rather than one per type: they differ
@@ -176,6 +182,7 @@ def register(task_type: str, params_cls: type[Params], config: "AgentConfig") ->
             instructions=build_instructions(),
             tools=[ask_for_fields_tool(params_cls)],
             context_type=FieldsCapture,
+            record=record,
         ),
         name=f"{task_type}_extractor",
     )
@@ -288,7 +295,7 @@ EXTRACTS = {
 }
 
 
-def register_extractors(config: "Config") -> None:  # type: ignore[name-defined]  # noqa: F821
+def register_extractors(config: "Config", *, record=None) -> None:  # type: ignore[name-defined]  # noqa: F821
     """Wire every extractor the configuration declares.
 
     Composition root calls this once at startup and learns nothing about any
@@ -312,4 +319,4 @@ def register_extractors(config: "Config") -> None:  # type: ignore[name-defined]
                 task_type,
             )
             continue
-        register(task_type, getattr(models, params_name), agent_config)
+        register(task_type, getattr(models, params_name), agent_config, record=record)

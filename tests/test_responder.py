@@ -26,8 +26,23 @@ TONE = [
 ]
 
 
-def responder_with(*steps) -> Responder:
-    return Responder(config=CONFIG, model=ScriptedModel(list(steps)))
+def responder_with(*steps, record=None) -> Responder:
+    return Responder(config=CONFIG, model=ScriptedModel(list(steps)), record=record)
+
+
+def collecting() -> tuple[list, object]:
+    """A recording sink and the list it fills.
+
+    The sink is handed over when the responder is built, not when it is asked
+    for a draft — see D1. A test that wants to read the prompt therefore has
+    to say so before the run, which is the same order production works in.
+    """
+    calls: list = []
+
+    async def sink(call) -> None:
+        calls.append(call)
+
+    return calls, sink
 
 
 async def test_it_writes_a_reply():
@@ -44,24 +59,23 @@ async def test_it_writes_a_reply():
 async def test_the_operators_own_messages_are_in_the_prompt():
     """Real examples carry a voice that a description of one does not — which
     is the whole reason to read them instead of writing a style guide."""
-    calls: list = []
-    responder = responder_with([assistant_message("ok")])
+    calls, sink = collecting()
+    responder = responder_with([assistant_message("ok")], record=sink)
 
-    await responder.draft(asking="ask", context=(), tone=TONE, calls=calls)
+    await responder.draft(asking="ask", context=(), tone=TONE)
 
     (call,) = calls
     assert "cho anh xin cái correlationId nhé" in call.prompt
 
 
 async def test_the_conversation_is_in_the_prompt():
-    calls: list = []
-    responder = responder_with([assistant_message("ok")])
+    calls, sink = collecting()
+    responder = responder_with([assistant_message("ok")], record=sink)
 
     await responder.draft(
         asking="ask",
         context=[make_event(text="api trả 500", author_name="mobile dev")],
         tone=TONE,
-        calls=calls,
     )
 
     assert "api trả 500" in calls[0].prompt

@@ -92,7 +92,10 @@ async def test_a_credential_never_appears_in_the_reason():
 async def test_both_sides_of_the_call_are_collected():
     calls: list = []
 
-    await harness([assistant_message("done")]).run("classify this", calls=calls)
+    async def sink(call) -> None:
+        calls.append(call)
+
+    await harness([assistant_message("done")], record=sink).run("classify this")
 
     (call,) = calls
     assert call.agent == "an-agent"
@@ -340,3 +343,119 @@ def test_the_tool_context_alias_keeps_ctx_out_of_the_model_s_schema():
         return x
 
     assert set(probe.params_json_schema["properties"]) == {"x"}
+
+
+async def test_every_call_reaches_the_sink_it_was_built_with():
+    """D1: the recording seam is handed over once, at construction.
+
+    It was a `calls=` list on `run()`, and three of the four callers forgot
+    it — the extractors, the summariser, and the responder through the pool —
+    so `model_calls` held triage and nothing else while the board said it held
+    every prompt. A seam a caller can forget is one that will be forgotten.
+    """
+    recorded: list = []
+
+    async def sink(call) -> None:
+        recorded.append(call)
+
+    await harness([assistant_message("done")], record=sink).run("classify this")
+
+    (call,) = recorded
+    assert call.agent == "an-agent"
+    assert call.model == "test-model"
+    assert "classify this" in call.prompt
+
+
+async def test_a_model_that_never_answers_becomes_work_for_a_person():
+    """A run is bounded here, and nowhere else.
+
+    The OpenAI client defaults to ten minutes and retries past that, and the
+    pool works one task at a time — so an unbounded run does not stall one
+    task, it stalls every task, while the heartbeat goes on reporting the
+    process alive. The bound is per agent and configured, because a
+    classification and a drafted reply are not the same wait.
+
+    A timeout is a failure like any other: `None` back, a reason in
+    `last_error`, no exception for a caller to catch. `asyncio.TimeoutError`
+    has an empty `str()`, so the reason is written rather than repeated —
+    without that the operator reads "triage failed: " and nothing else.
+    """
+    import asyncio
+    from dataclasses import replace as _replace
+
+    class NeverAnswers(Model):
+        async def get_response(self, *a, **kw):
+            await asyncio.sleep(30)
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    run = Harness(
+        config=_replace(CONFIG, timeout_seconds=0.05),
+        instructions="i",
+        model=NeverAnswers(),
+    )
+
+    assert await run.run("go") is None
+    assert run.last_error == "no answer within 0.05s"
+
+
+async def test_a_sink_that_fails_costs_a_row_and_not_the_answer():
+    """Recording runs after the expensive part is already done.
+
+    A failed write loses a row; a raised write would lose an answer the
+    provider has already been paid for — and would do it inside a `finally`,
+    which is where the run's own result is waiting.
+    """
+    async def sink(call) -> None:
+        raise RuntimeError("the database is locked")
+
+    result = await harness([assistant_message("done")], record=sink).run("go")
+
+    assert result.final_output == "done"
+
+
+async def test_a_call_that_never_came_back_is_still_written_down():
+    """The run that times out is the one whose prompt somebody needs.
+
+    `LogHooks` builds its `ModelCall` in `on_llm_end`, and a timeout cancels
+    the run before that fires — so the middleware's `finally` had nothing to
+    hand the sink, and the agents this matters most for are the ones it fails
+    for. `max_turns: 1` is triage, all three extractors and the summariser:
+    for every one of them a timeout meant *zero* rows, and the prompt of the
+    call that hung is exactly what was missing.
+
+    What is known at `on_llm_start` — the system prompt and the input — is
+    enough to answer "what did we ask it?", which is the question. What is not
+    known is written as absent rather than as zero: no output, no usage.
+    """
+    import asyncio
+    from dataclasses import replace as _replace
+
+    recorded: list = []
+
+    async def sink(call) -> None:
+        recorded.append(call)
+
+    class NeverAnswers(Model):
+        async def get_response(self, *a, **kw):
+            await asyncio.sleep(30)
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    run = Harness(
+        config=_replace(CONFIG, timeout_seconds=0.05),
+        instructions="you decide what a message is",
+        model=NeverAnswers(),
+        record=sink,
+    )
+
+    assert await run.run("classify this", message_id="m1") is None
+
+    (call,) = recorded
+    assert call.message_id == "m1"
+    assert "classify this" in call.prompt
+    assert "you decide what a message is" in call.system_prompt
+    assert call.output == ""
+    assert call.input_tokens == 0

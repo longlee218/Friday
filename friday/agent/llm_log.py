@@ -35,9 +35,13 @@ class LogHooks(Hooks):
         # matters later is which model we asked for.
         self._model = model
         self._pending: dict = {}
+        #: Which agent asked. Known from `on_llm_start`, and needed by
+        #: `unfinished()` because there is no `agent` argument there.
+        self._agent = ""
 
     async def on_llm_start(self, context, agent, system_prompt, input_items) -> None:
         log.debug("→ %s system:\n%s", agent.name, system_prompt)
+        self._agent = agent.name
         prompt = []
         for item in input_items:
             line = _short(item)
@@ -72,6 +76,32 @@ class LogHooks(Hooks):
                 output_tokens=usage.output_tokens,
                 **self._pending,
             )
+        )
+        self._pending = {}
+
+
+    def unfinished(self) -> ModelCall | None:
+        """The call that was sent and never answered, if there is one.
+
+        A timeout cancels the run inside the provider request, so `on_llm_end`
+        never fires and the ordinary path records nothing. That is the run
+        whose prompt is worth the most: it is the one nobody can reconstruct
+        from the outcome, because there is no outcome.
+
+        What `on_llm_start` knew is real and is kept. What it could not know is
+        written as absent — an empty output and no usage — rather than as a
+        number that reads like a measurement. `on_llm_end` clears `_pending`,
+        so a completed call never comes back through here.
+        """
+        if not self._pending:
+            return None
+        return ModelCall(
+            agent=self._agent,
+            model=self._model,
+            output="",
+            input_tokens=0,
+            output_tokens=0,
+            **self._pending,
         )
 
 

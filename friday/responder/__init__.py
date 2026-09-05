@@ -50,7 +50,8 @@ class Draft:
 class Responder:
     @classmethod
     def build(
-        cls, config, *, notes: str = "", skills=None, context_store=None
+        cls, config, *, notes: str = "", skills=None, context_store=None,
+        record=None,
     ) -> "Responder | None":
         """The responder, or None when it is off or unconfigured.
 
@@ -65,6 +66,7 @@ class Responder:
             notes=notes,
             skills=skills,
             context_store=context_store,
+            record=record,
         )
         log.info(
             "responder on %s — its drafts need approval before they go out",
@@ -80,6 +82,7 @@ class Responder:
         notes: str = "",
         skills=None,
         context_store=None,
+        record=None,
     ) -> None:
         #: Where the room's register lives. None means every channel writes
         #: the way the voice alone says, which is what shipped before.
@@ -125,6 +128,7 @@ class Responder:
             model=model,
             notes=notes,
             tools=tools,
+            record=record,
         )
 
     def knows(self, channel_id: str, name: str) -> bool:
@@ -142,7 +146,6 @@ class Responder:
         stranger: bool = False,
         context: Sequence[InboundEvent] = (),
         tone: Sequence[InboundEvent] = (),
-        calls: list | None = None,
     ) -> Draft | None:
         """Write what `asking` says, in the operator's voice.
 
@@ -178,9 +181,7 @@ class Responder:
         # written. A ceiling, not a target: it costs nothing to a run that
         # answers in one turn, and without it an agent that reaches for a
         # skill spends its only turn on the fetch and returns nothing.
-        result = await self._run.run(
-            said, calls=calls, extra_turns=self._tool_turns
-        )
+        result = await self._run.run(said, extra_turns=self._tool_turns)
         if result is None:
             log.warning("falling back to the template")
             return None

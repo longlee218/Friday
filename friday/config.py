@@ -61,6 +61,16 @@ class AgentConfig:
     #: cannot be hardcoded — it decides when a conversation has grown large
     #: enough that summarising it costs less than passing it raw.
     context_window: int = 128_000
+    #: How long one run of this agent may take before it becomes work for a
+    #: person, in seconds.
+    #:
+    #: A number chosen here rather than inherited. The OpenAI client defaults
+    #: to ten minutes and retries, so an unbounded run could hold the pool for
+    #: half an hour while the heartbeat went on saying "alive" — the pool works
+    #: one task at a time, so that is every task, not one. Sixty seconds is
+    #: long for a classification and short enough that a stall surfaces the
+    #: same day.
+    timeout_seconds: float = 60.0
     #: Step-specific knobs the model layer does not care about, e.g. the
     #: confidence threshold for triage or the tone-example count for the
     #: responder.
@@ -280,6 +290,7 @@ def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
             settings=spec.pop("settings", None) or {},
             max_turns=int(spec.pop("max_turns", 1)),
             context_window=int(spec.pop("context_window", 128_000)),
+            timeout_seconds=float(spec.pop("timeout_seconds", 60.0)),
             options=spec,  # whatever is left is step-specific
         )
     return agents

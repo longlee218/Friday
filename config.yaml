@@ -8,6 +8,13 @@ database_path: ./data/friday.db
 #
 # ${VAR} reads from .env. An unset variable is an error, not an empty string.
 #
+# `timeout_seconds` bounds one run of that agent and defaults to 60. It is a
+# number chosen here rather than inherited: the OpenAI client's own default is
+# ten minutes and it retries past that, and the pool works one task at a time,
+# so an unbounded run does not stall one task — it stalls every task, while the
+# heartbeat goes on saying the process is alive. Raise it for an agent that
+# reads logs; leave it for one that classifies a sentence.
+#
 # Everything goes through the Chat Completions API, which is why swapping
 # provider is three lines rather than a rewrite. Known endpoints:
 #   OpenAI    https://api.openai.com/v1

@@ -8,7 +8,7 @@ none of the four call sites has to remember any of it.
 
 **Decisions:** D1, D2
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -45,19 +45,107 @@ per-tool decision, so it belongs on the tool, not in this middleware.
 
 ## Acceptance criteria
 
-- [ ] `_settle` wraps `Runner.run` in a timeout, configured per agent, with a
+- [x] `_settle` wraps `Runner.run` in a timeout, configured per agent, with a
       default that is not the provider SDK's ten minutes
-- [ ] Every tool that reaches outside this process carries its own `timeout`,
-      and the `timeout_behavior` for each is chosen rather than defaulted —
-      note that this requires an **async** handler (ticket 10.7), so the sync
-      skill tools have to be converted before they can have one
-- [ ] A timeout is a `last_error` like any other failure — no exception escapes
+- [~] Every tool that reaches outside this process carries its own `timeout`
+      — **not applicable yet, and deliberately not forced.** No tool reaches
+      outside this process today: `SkillLibrary.build()` calls `.load()` once
+      at startup and reads every skill and its extra files into memory, so the
+      four skill tools are dictionary lookups, and `mcp_servers` is empty.
+      Adding a timeout to a dict lookup — and converting four sync handlers to
+      async to be allowed to — is speculative work for a failure that cannot
+      happen. The requirement moves to where it will bite: ticket 07 already
+      says an MCP tool has to be wrapped in a function tool of ours to be
+      bounded at all, and that wrapper is where the clock goes
+- [x] A timeout is a `last_error` like any other failure — no exception escapes
       the harness, the rule this module already states
-- [ ] The harness takes a recording sink at construction; `run(calls=...)`
+- [x] The harness takes a recording sink at construction; `run(calls=...)`
       either goes away or becomes a second sink, and no production call site
       passes one
-- [ ] Every agent's calls reach the sink — triage, all three extractors, the
+- [x] Every agent's calls reach the sink — triage, all three extractors, the
       responder, the summariser — asserted by a test that enumerates them
       rather than deriving the list
-- [ ] The composition root is the only place the sink is built
-- [ ] Each guard is deleted once and watched go red
+- [x] The composition root is the only place the sink is built
+- [x] Each guard is deleted once and watched go red
+
+## What it came to
+
+**The sink is a constructor argument.** `Harness(record=...)` takes an async
+callable of one `ModelCall`, and `_settle` hands it every call the run made,
+in a `finally` — a call that failed still cost what it cost, and a run that
+timed out has usually already had one whole exchange with the provider, which
+is exactly the run somebody will want the prompt of. A sink that raises is
+caught and logged: a failed write loses a row, a raised write would lose an
+answer already paid for.
+
+`run(calls=...)` is gone. What a caller still names is `message_id`, and the
+difference is the point: forgetting it loses a correlation key, not the
+record. `TriageRunner._decide` no longer drains a list and writes it — that
+loop is why triage was the only agent whose prompts were ever kept.
+
+**The clock is `asyncio.wait_for` around `Runner.run`,** at
+`timeout_seconds` per agent, 60s by default. `AsyncOpenAI` is constructed with
+no timeout and the client's own default is ten minutes with retries; the pool
+works one task at a time, so an unbounded run stalls every task while the
+heartbeat reports the process alive. A timeout is a `last_error` like any
+other failure, and `_why` writes the reason out because
+`asyncio.TimeoutError` has an empty `str()` — without it the operator reads
+"triage failed: " and nothing else.
+
+**The composition root builds the sink and nothing else may.**
+`record_call` closes over the database in `run_agent._run`, and a test fails
+if any module under `friday/` other than the store reaches for
+`record_model_call`. A second test names the four builders — extractors,
+triage, responder, summariser — and fails if any is constructed without a
+sink. Written out, not derived, for the reason CLAUDE.md gives: a list that
+computes itself agrees with whatever the code happens to be.
+
+Six guards, each deleted once and watched go red. The timeout one is worth a
+line: with `wait_for` removed the test takes 31 seconds and then fails, which
+is the failure it exists to prevent, demonstrated.
+
+693 tests pass (682 before, +11). `uv run mypy friday run_agent.py` reports 32
+errors before this change and 32 after — none in what it touched. mypy is in
+the dev group but is not configured, wired to anything, or recorded in
+CLAUDE.md, and this work did not add it.
+
+## What the review changed
+
+Four defects, all introduced by this ticket, none caught by a green suite.
+
+**A single-turn timeout recorded nothing** — the exact case the `finally` was
+written for, and the comment above it said the opposite. `LogHooks` builds its
+`ModelCall` in `on_llm_end`, and a timeout cancels the run inside the provider
+request, so that hook never fires. The claim that "a run that times out has
+usually already had one whole exchange" is true only of multi-turn agents, and
+`max_turns: 1` is triage, all three extractors and the summariser — every
+agent this matters most for. `LogHooks.unfinished()` now returns what
+`on_llm_start` knew, with an empty output and no usage rather than a zero that
+reads like a measurement.
+
+**All four builders could drop their forwarding line with a green suite.**
+D1's own failure mode, one layer down: the `calls=` list was forgettable at
+the call site, and `record=record` is forgettable in the builder. The
+criterion asked for a test that enumerates the agents and no such test
+existed — the one written here checked the composition root's *call sites*,
+which is a different thing. `tests/test_recording_reaches_every_agent.py`
+drives each builder through its public entry with a sentinel and asserts the
+`Harness` it constructs was handed that object. All five forwarding lines go
+red when deleted; the summariser has two, and the first version of that test
+covered only the second, which is why it is worth saying that a mutation that
+does not turn a test red is the test's problem and not the mutation's.
+
+**`test_every_agent_is_built_with_somewhere_to_record` passed when nothing
+recorded.** It asked whether the keyword was spelled, never what it was
+handed, so `record=None` at all four sites — the whole system recording
+nothing, which is the bug this board exists to fix — went straight through it.
+It now requires a `Name`, and requires all four to name the same sink.
+
+**The board lost calls it used to show.** Not a defect in the middleware but a
+consequence of it: `friday/board/__init__.py` and `friday/ops/api.py` both
+built `{c.message_id: c for c in await db.model_calls(limit=200)}`, and until
+today every row in that window was triage's and carried a message id. With
+four agents writing, a page of the most recent calls can be entirely rows that
+can never match a message while the call that classified it sits just outside
+the window. `Database.calls_by_message` asks for the calls belonging to the
+messages being rendered, which is what the board meant in the first place.

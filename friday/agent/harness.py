@@ -22,7 +22,9 @@ not mention the library.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from dataclasses import replace
 from typing import Any
 
 from agents import (
@@ -221,11 +223,26 @@ class Harness:
         #: section could put a `<critical_reminder>` into the instructions of
         #: every call that agent makes.
         notes: str = "",
+        #: Where every call this agent makes is written down. An async callable
+        #: taking one `ModelCall`.
+        #:
+        #: **Handed over once, here, rather than passed to `run()`** (D1). It
+        #: was a `calls=` list on the call, and three of the four callers
+        #: forgot it — the extractors, the summariser, and the responder
+        #: through the pool — so `model_calls` held triage alone while the
+        #: board described it as holding every prompt. A seam a caller can
+        #: forget is one that will be forgotten; this one cannot be, because
+        #: there is nowhere to forget it from.
+        #:
+        #: `None` records nothing, which is for tests and for an agent built
+        #: before a sink exists. The composition root always passes one.
+        record=None,
         model=None,
         context_type: type | None = None,
         **agent_options: Any,
     ) -> None:
         self._config = config
+        self._record = record
         self.last_error: str | None = None
         agent_class = Agent[context_type] if context_type else Agent
         self.agent = agent_class(
@@ -261,8 +278,8 @@ class Harness:
         prompt: str,
         *,
         context: Any = None,
-        calls: list | None = None,
         extra_turns: int = 0,
+        message_id: str | None = None,
     ) -> Any | None:
         """Run it. `None` means it did not answer.
 
@@ -280,12 +297,18 @@ class Harness:
 
         `extra_turns` is for an agent whose answer arrives as a tool call: the
         call and its result are two turns where a written answer is one.
+
+        `message_id` is the message this call was made about, where there is
+        one, and it is the *only* thing about recording a caller still says.
+        Forgetting it loses a correlation key; it does not lose the record —
+        which is the whole difference between this and the `calls=` list it
+        replaced.
         """
         return await self._settle(
             prompt,
             context=context,
-            calls=calls,
             max_turns=self._config.max_turns + extra_turns,
+            message_id=message_id,
         )
 
     def checkpoint(self, result: Any) -> dict[str, Any]:
@@ -300,7 +323,6 @@ class Harness:
         interruption: dict[str, Any],
         *,
         context: Any = None,
-        calls: list | None = None,
     ) -> Any | None:
         """Continue a run that was approved to go ahead — `checkpoint`'s
         output, from this process or an earlier one.
@@ -344,33 +366,91 @@ class Harness:
             return None
         state.approve(pending[0])
         return await self._settle(
-            state, context=None, calls=calls, max_turns=self._config.max_turns
+            state, context=None, max_turns=self._config.max_turns
         )
 
     async def _settle(
-        self, input_: Any, *, context: Any, calls: list | None, max_turns: int
+        self,
+        input_: Any,
+        *,
+        context: Any,
+        max_turns: int,
+        message_id: str | None = None,
     ) -> Any | None:
         """Run to completion or to the first thing that stops it, and turn a
         failure into `last_error` rather than an exception every caller would
-        otherwise have to catch identically."""
+        otherwise have to catch identically.
+
+        The one place a model call happens, so the one place it can be bounded
+        and written down (D2). `AgentHooks` cannot do either: `on_llm_start`
+        fires after the decision to spend has been made and `on_llm_end` after
+        the money is gone, and neither can refuse a call or cut one short.
+        """
         # Deferred: `llm_log` reaches `Hooks` through this module, so importing
         # it at module load time would be a cycle.
         from friday.agent.llm_log import LogHooks
 
         self.last_error = None
-        self.agent.hooks = LogHooks(calls, model=self._config.model)
+        calls: list = []
+        hooks = LogHooks(calls, model=self._config.model)
+        self.agent.hooks = hooks
         try:
-            return await Runner.run(
-                self.agent,
-                input_,
-                context=context,
-                max_turns=max_turns,
-                run_config=RunConfig(tracing_disabled=True),
+            return await asyncio.wait_for(
+                Runner.run(
+                    self.agent,
+                    input_,
+                    context=context,
+                    max_turns=max_turns,
+                    run_config=RunConfig(tracing_disabled=True),
+                ),
+                timeout=self._config.timeout_seconds,
             )
         except Exception as exc:  # noqa: BLE001 - every failure becomes work
-            self.last_error = scrub(str(exc))
+            self.last_error = _why(exc, self._config.timeout_seconds)
             log.warning("%s failed: %s", self._config.name, self.last_error)
             return None
+        finally:
+            # In `finally` because a call that failed still cost what it cost.
+            # A timeout cancels the run *inside* the provider request, so the
+            # hook that builds a `ModelCall` never fires — and for every agent
+            # configured `max_turns: 1`, which is triage, the extractors and
+            # the summariser, that would mean no record at all of the call that
+            # hung. `unfinished()` is what the run managed to send.
+            if (cut_off := hooks.unfinished()) is not None:
+                calls.append(cut_off)
+            await self._write_down(calls, message_id)
+
+    async def _write_down(self, calls: list, message_id: str | None) -> None:
+        """Hand each call to the sink, and never let the sink break the run.
+
+        A failed write is a lost row; a raised write would be a lost answer.
+        The agent has already done the expensive part by the time this runs.
+        """
+        if self._record is None:
+            return
+        for call in calls:
+            try:
+                await self._record(
+                    replace(call, message_id=message_id) if message_id else call
+                )
+            except Exception:  # noqa: BLE001 - recording must not cost the run
+                log.exception("could not record a call by %s", self._config.name)
+
+
+def _why(exc: Exception, timeout: float) -> str:
+    """The reason, in a form somebody can act on.
+
+    A timeout is the case this exists for: `asyncio.wait_for` raises a
+    `TimeoutError` whose `str()` is the empty string, so the module's own rule
+    — a failure is a `last_error` a person reads — would have produced
+    "triage failed: " and nothing else.
+
+    Everything else is scrubbed, because it is stored against a task and a
+    provider exception can quote an Authorization header.
+    """
+    if isinstance(exc, asyncio.TimeoutError):
+        return f"no answer within {timeout:g}s"
+    return scrub(str(exc))
 
 
 def _with_notes(instructions: str, notes: str) -> str:

@@ -7,6 +7,8 @@ fact. A log line answers it while the process is alive and never again.
 from __future__ import annotations
 
 from agents.models.interface import Model
+from dataclasses import asdict
+
 from agents.testing import ScriptedModel, function_call
 
 from conftest import captured, make_event
@@ -26,10 +28,16 @@ def api_issue_call():
 
 
 async def test_a_run_reports_both_sides_of_the_call():
-    triage = Triage(config=CONFIG, model=ScriptedModel([[api_issue_call()]]))
     calls: list = []
 
-    await triage.decide(make_event(text="checkout is 500ing"), calls=calls)
+    async def sink(call) -> None:
+        calls.append(call)
+
+    triage = Triage(
+        config=CONFIG, model=ScriptedModel([[api_issue_call()]]), record=sink
+    )
+
+    await triage.decide(make_event(text="checkout is 500ing"))
 
     (call,) = calls
     assert call.agent == "triage"
@@ -43,10 +51,11 @@ async def test_a_run_reports_both_sides_of_the_call():
 
 
 async def test_triage_still_writes_nothing_itself():
-    """It reports the call; the caller decides whether to keep it."""
+    """It reaches no store. Built without a sink, it records nowhere and still
+    decides — which is what makes it testable without a database."""
     triage = Triage(config=CONFIG, model=ScriptedModel([[api_issue_call()]]))
 
-    outcome = await triage.decide(make_event(), calls=[])
+    outcome = await triage.decide(make_event())
 
     assert outcome.type == "api_issue"
 
@@ -60,7 +69,11 @@ async def test_a_decision_can_be_traced_back_to_the_call_that_made_it(
 
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
-    triage = Triage(config=CONFIG, model=ScriptedModel([[api_issue_call()]]))
+    triage = Triage(
+        config=CONFIG,
+        model=ScriptedModel([[api_issue_call()]]),
+        record=lambda call: db.record_model_call(**asdict(call)),
+    )
 
     await TriageRunner(db=db, triage=triage, confidence_threshold=0.7).run_once()
 

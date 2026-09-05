@@ -1,0 +1,158 @@
+"""Every agent records, and the chain that makes it so is checked.
+
+D1 says the recording sink is handed over at construction so that no caller
+can forget it. That moved the forgetting one layer down: each builder now
+takes `record=` and passes it on by hand, and a review found that deleting any
+one of those four forwarding lines left the whole suite green. The `calls=`
+list's own failure mode, reproduced inside its fix.
+
+So this file drives each builder through its public entry point with a
+sentinel sink, and asserts the `Harness` it ends up constructing was given
+that exact object. Identity, not presence: `record=None` everywhere is the
+bug this board exists to fix, and a test that only checks a keyword is
+spelled would pass through it.
+
+The list of builders is written out. Deriving it — from the config, from the
+module names — is how the prompt-families test stopped checking anything when
+a module moved.
+"""
+
+from __future__ import annotations
+
+import pytest
+from friday.agent import harness as harness_module
+from friday.config import AgentConfig
+
+CONFIG = AgentConfig(
+    name="an-agent", api_key="k", base_url="https://example.invalid/v1",
+    model="test-model", max_turns=1, settings={}, options={},
+)
+
+
+@pytest.fixture
+def spy(monkeypatch):
+    """Every `Harness` built during a test, and the sink each was given.
+
+    A subclass rather than a stub: it runs the real constructor, so a builder
+    that assembles its agent wrongly still fails here rather than being
+    quietly accommodated.
+
+    Patched per module, because each imports the name directly — and the list
+    of modules patched *is* the enumeration this file is about. The source
+    module is patched too: `friday.extraction.register` imports `Harness`
+    *inside* the function, so it resolves at call time and a per-module patch
+    never reaches it. `Spy`'s base is bound before any of this, so patching
+    the name it inherits from does not make it its own parent.
+    """
+    given: list = []
+
+    class Spy(harness_module.Harness):
+        def __init__(self, **kw):
+            given.append(kw.get("record"))
+            super().__init__(**kw)
+
+        async def run(self, *a, **kw):
+            """Inert. Every construction here is real; no execution is — the
+            summariser builds its harness inside the call that uses it, so
+            reaching that construction means letting the call happen."""
+            return None
+
+    for module in (
+        "friday.agent.harness",
+        "friday.triage",
+        "friday.extraction",
+        "friday.responder",
+        "friday.memory.channel_context",
+    ):
+        monkeypatch.setattr(f"{module}.Harness", Spy)
+    return given
+
+
+SINK = object()
+
+
+async def test_triage_records(spy, db):
+    from friday.triage.runner import TriageRunner
+
+    await TriageRunner.build(_config(triage=CONFIG), db=db, record=SINK)
+
+    assert spy == [SINK]
+
+
+async def test_every_extractor_records(spy):
+    from friday.extraction import EXTRACTS, register_extractors
+
+    register_extractors(
+        _config(**{f"extractor_{t}": CONFIG for t in EXTRACTS}), record=SINK
+    )
+
+    assert spy == [SINK] * len(EXTRACTS), "one per configured extractor"
+
+
+async def test_the_responder_records(spy):
+    from friday.responder import Responder
+
+    assert Responder.build(_config(responder=CONFIG), record=SINK) is not None
+    assert spy == [SINK]
+
+
+async def test_the_summariser_records(spy):
+    """Two forwarding lines rather than one — `build` to the constructor, and
+    the constructor's field to the `Harness` built later — so this goes in at
+    `build`, which is the door the composition root uses. Reaching the second
+    line means letting the summary actually run; `Spy.run` is what makes that
+    cost nothing.
+
+    An earlier version of this test constructed `ContextRebuilder` directly
+    and so covered only the second line: deleting `build`'s forwarding left it
+    green. Both are covered now.
+    """
+    from friday.memory.channel_context import ContextRebuilder
+
+    rebuilder = ContextRebuilder.build(
+        _config(summary=CONFIG, summary_share=0.0),
+        store=_Store(),
+        db=_LoudChannel(),
+        promotion=_NothingPromoted(),
+        record=SINK,
+    )
+
+    await rebuilder.rebuild_all()
+
+    assert spy == [SINK]
+
+
+# --- the least that lets each builder run ------------------------------------
+
+
+def _config(*, summary_share: float = 0.5, **agents):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        agents=agents,
+        triage_examples=[],
+        sensitive_words=(),
+        ingest=SimpleNamespace(turn_seconds=0),
+        workflows=SimpleNamespace(use_responder=True),
+        context=SimpleNamespace(summary_share=summary_share),
+    )
+
+
+class _Store:
+    def known_channels(self):
+        return ["c1"]
+
+    def rebuild_derived(self, channel_id, derived):
+        self.derived = derived
+
+
+class _LoudChannel:
+    async def relevant_messages_in_channel(self, provider, channel_id):
+        from tests.conftest import make_event
+
+        return [make_event(text="anything at all")]
+
+
+class _NothingPromoted:
+    async def render(self):
+        return ""

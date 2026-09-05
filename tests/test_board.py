@@ -93,3 +93,38 @@ def test_the_page_offers_no_way_to_change_anything(client):
     assert "<form" not in page
     assert "<button" not in page
     assert client.post("/").status_code == 405
+
+
+async def test_a_messages_call_survives_a_crowd_of_unlinked_ones(
+    client, db, provider, inbox
+):
+    """The board's window is shared, and it did not used to be.
+
+    It maps calls to messages from one page of `model_calls`, and until every
+    agent started recording, every row in that page was triage's and carried a
+    message id. Now the extractors, the responder and the summariser write
+    there too, and none of them is about a single message — so a page of the
+    most recent calls can be entirely rows that can never match anything,
+    while the call that actually classified the message sits just outside it.
+
+    Asking for the calls that belong to these messages is the fix, and it is
+    also what the board meant all along.
+    """
+    provider.emit(make_event(message_id="10", text="checkout is 500ing"))
+    await captured(inbox)
+
+    await db.record_model_call(
+        message_id="10", agent="triage", model="m",
+        system_prompt="s", prompt="why it was classified", output="classify(...)",
+        input_tokens=1, output_tokens=1,
+    )
+    for _ in range(250):
+        await db.record_model_call(
+            agent="api_issue_extractor", model="m",
+            system_prompt="s", prompt="lift the fields out", output="{}",
+            input_tokens=1, output_tokens=1,
+        )
+
+    page = client.get("/").text
+
+    assert "why it was classified" in page

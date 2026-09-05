@@ -47,7 +47,7 @@ async def _body(db: Database, status: str) -> str:
     messages = await db.page_messages(limit=25)
     tasks = await db.tasks(limit=200)
     failed = await db.outbound(FAILED, limit=50)
-    calls = {c.message_id: c for c in await db.model_calls(limit=200)}
+    calls = await db.calls_by_message(m.provider_message_id for m in messages)
 
     sections = [
         _header(status, counts),
