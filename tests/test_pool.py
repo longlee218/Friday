@@ -102,7 +102,8 @@ class StubResponder:
         self.given_params: list = []
         self.strangers: list[bool] = []
 
-    async def draft(self, *, asking, params=None, channel_id=None, stranger=False, context=(), tone=(), calls=None):
+    async def draft(self, *, asking, params=None, channel_id=None,
+                    stranger=False, context=(), tone=(), task_id=None):
         self.strangers.append(stranger)
         from friday.responder import Draft
 
@@ -290,7 +291,8 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     prompts_seen: list[str] = []
 
     class StubHarness:
-        async def run(self, prompt, *, context=None, calls=None, extra_turns=0):
+        async def run(self, prompt, *, context=None, extra_turns=0,
+                      task_id=None, node=None):
             prompts_seen.append(prompt)
             return StubResult()
 
@@ -849,3 +851,81 @@ async def _paused_on_a_patch(db):
 
 
 
+
+
+async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
+    """The reason `task_id` exists, driven where it actually happens.
+
+    An extractor runs inside a task's graph, on every pass, against every
+    message the reporter has sent — so the message a call was "about" is not a
+    question with one answer, and until now those rows landed under no key at
+    all. This is the only test that would notice the chain from `Pool` through
+    `prepare_node` to the extractor's `Harness` coming apart in the middle,
+    which is exactly how the `record=` chain broke one ticket ago.
+    """
+    from datetime import datetime, timezone
+
+    from agents.testing import ScriptedModel, assistant_message
+    from sqlalchemy import update as sa_update
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
+    from friday.extraction import _EXTRACTORS, build_extractor
+    from friday.store import schema
+
+    recorded: list = []
+
+    async def sink(call) -> None:
+        recorded.append(call)
+
+    filled = (
+        '{"summary": "checkout 500", "environment": "production", '
+        '"correlation_id": "abcdef01-2345-6789-abcd-ef0123456789", "curl": null}'
+    )
+    ext = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=Harness(
+            config=AgentConfig(
+                name="api_issue_extractor", api_key="k",
+                base_url="https://example.invalid/v1", model="test-model",
+            ),
+            instructions="lift the fields out",
+            model=ScriptedModel([[assistant_message(filled)]]),
+            record=sink,
+        ),
+        name="api_issue_extractor",
+    )
+    kept = _EXTRACTORS.get("api_issue")
+    _EXTRACTORS["api_issue"] = ext
+
+    try:
+        await db.record_message(
+            InboundEvent(
+                provider="fake", provider_message_id="m-1", channel_id="watched",
+                thread_id=None, author_id="u", author_name="reporter",
+                text="production broke at noon",
+                created_at=datetime.now(timezone.utc),
+                mention_type=MentionType.DIRECT,
+            )
+        )
+        task = await make_task(db)
+        async with db._sessions.begin() as session:
+            await session.execute(
+                sa_update(schema.Message)
+                .where(schema.Message.provider_message_id == "m-1")
+                .values(task_id=task.id)
+            )
+
+        await Pool(db=db, auto_ask=True).run_once()
+    finally:
+        if kept is None:
+            _EXTRACTORS.pop("api_issue", None)
+        else:
+            _EXTRACTORS["api_issue"] = kept
+
+    (call,) = recorded
+    assert call.task_id == task.id
+    assert call.node == "prepare"
+    assert call.message_id is None, "an extractor reads a task, not one message"
+    assert [c.agent for c in await db.calls_for_task(task.id)] == []

@@ -110,6 +110,34 @@ def build_api(
         calls = await db.model_calls(message_id=message_id, limit=20)
         return _clean([asdict(c) | {"created_at": c.created_at} for c in calls])
 
+    @api.get("/api/tasks/{task_id}/model-calls")
+    async def task_model_calls(task_id: int = Path(...)) -> list[dict]:
+        """Everything the model was asked while working on one task, in order.
+
+        The question `message_id` cannot answer: an extractor runs on every
+        pass of a task's graph against every message the reporter has sent,
+        and a responder answers the task rather than any one message.
+        """
+        return _clean([
+            asdict(c) | {"created_at": c.created_at}
+            for c in await db.calls_for_task(task_id)
+        ])
+
+    @api.get("/api/model-calls")
+    async def recent_model_calls(
+        uncorrelated: bool = False,
+        limit: int = Query(20, ge=1, le=MAX_PAGE),
+    ) -> list[dict]:
+        """The newest calls, whatever they were about.
+
+        `uncorrelated=true` narrows to the rows that name no message — the
+        summariser's, and any agent working outside a task. They were stored
+        and unreachable: the per-message route filters by message, and asking
+        the store for `message_id=None` means "do not filter".
+        """
+        calls = await db.model_calls(uncorrelated=uncorrelated, limit=limit)
+        return _clean([asdict(c) | {"created_at": c.created_at} for c in calls])
+
     @api.get("/api/tasks")
     async def tasks(
         state: TaskState | None = None,

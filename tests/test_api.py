@@ -190,3 +190,49 @@ def test_a_host_still_may_not(tmp_path, monkeypatch):
 
     with pytest.raises(SystemExit, match="loopback"):
         api.check_exposure("0.0.0.0", token=None)
+
+
+async def test_a_tasks_own_calls_are_reachable(client, db):
+    """`message_id` answered "why was this classified that way". It cannot
+    answer "what did this task cost, and what was the model asked while
+    working on it" — an extractor runs on every pass against every message the
+    reporter sent, and a responder answers a task."""
+    task = await db.create_task(
+        conversation=ConversationId("fake", "watched"), type="api_issue",
+        state=TaskState.PENDING, confidence=0.9, params={},
+    )
+    common = dict(model="m", system_prompt="s", output="o",
+                  input_tokens=3, output_tokens=4)
+    await db.record_model_call(
+        task_id=task.id, node="prepare", agent="api_issue_extractor",
+        prompt="lift the fields out", latency_ms=120, **common,
+    )
+    await db.record_model_call(agent="summary", prompt="somebody else's", **common)
+
+    got = client.get(f"/api/tasks/{task.id}/model-calls").json()
+
+    assert [c["agent"] for c in got] == ["api_issue_extractor"]
+    assert got[0]["node"] == "prepare"
+    assert got[0]["latency_ms"] == 120
+
+
+async def test_calls_that_name_no_message_are_still_reachable(client, db):
+    """Ticket 01 made the extractors, the responder and the summariser record,
+    and every one of their rows has a NULL `message_id`. The only per-call
+    route filtered by message, and `model_calls(message_id=None)` means "no
+    filter" rather than "the uncorrelated ones" — so those prompts were stored
+    and readable nowhere but the SQLite file. The complaint this board opened
+    with was that the steps producing text a person reads had no record of
+    what they were sent; storing it and not being able to look at it is the
+    same complaint one step later."""
+    common = dict(model="m", system_prompt="s", output="o",
+                  input_tokens=1, output_tokens=1)
+    await db.record_model_call(agent="summary", prompt="what this room is like", **common)
+    await db.record_model_call(
+        message_id="10", agent="triage", prompt="classify this", **common
+    )
+
+    got = client.get("/api/model-calls").json()
+
+    assert [c["agent"] for c in got] == ["triage", "summary"], "newest first"
+    assert client.get("/api/model-calls?uncorrelated=true").json()[0]["agent"] == "summary"

@@ -48,11 +48,12 @@ async def _body(db: Database, status: str) -> str:
     tasks = await db.tasks(limit=200)
     failed = await db.outbound(FAILED, limit=50)
     calls = await db.calls_by_message(m.provider_message_id for m in messages)
+    by_task = await db.calls_for_tasks(t.id for t in tasks)
 
     sections = [
         _header(status, counts),
         _failed(failed),
-        _tasks(tasks),
+        _tasks(tasks, by_task),
         _messages(messages, calls),
     ]
     return "\n".join(section for section in sections if section)
@@ -82,13 +83,14 @@ def _failed(rows) -> str:
     return f'<section class="failed"><h2>Could not be sent</h2><ul>{items}</ul></section>'
 
 
-def _tasks(tasks) -> str:
+def _tasks(tasks, calls_by_task) -> str:
     columns = []
     for state in TaskState:
         here = [t for t in tasks if t.state == state]
         cards = "".join(
             f'<li><b>{_e(t.type)}</b> #{t.id}'
-            f'<span class="why">{_e(_summarise(t))}</span></li>'
+            f'<span class="why">{_e(_summarise(t))}</span>'
+            f"{_calls(calls_by_task.get(t.id, ()))}</li>"
             for t in here
         )
         columns.append(
@@ -96,6 +98,26 @@ def _tasks(tasks) -> str:
             f"<ul>{cards}</ul></div>"
         )
     return f'<section><h2>Tasks</h2><div class="cols">{"".join(columns)}</div></section>'
+
+
+def _calls(calls) -> str:
+    """What the model was asked while working on one task.
+
+    Folded away by default: a prompt carries whatever was in the conversation
+    it was assembled from, and a board that unrolls all of them at once is a
+    page nobody reads. `_e` is what keeps a reporter's text from becoming
+    markup on the way through.
+    """
+    if not calls:
+        return ""
+    rows = "".join(
+        f"<pre>{_e(c.agent)}"
+        + (f" · {_e(c.node)}" if c.node else "")
+        + (f" · {c.latency_ms}ms" if c.latency_ms is not None else "")
+        + f"\n{_e(c.prompt)}\n\n→ {_e(c.output)}</pre>"
+        for c in calls
+    )
+    return f"<details><summary>{len(calls)} model call(s)</summary>{rows}</details>"
 
 
 def _messages(messages, calls) -> str:

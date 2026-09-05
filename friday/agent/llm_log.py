@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 from friday.agent.harness import Hooks
 from friday.domain.models import ModelCall
@@ -38,10 +39,15 @@ class LogHooks(Hooks):
         #: Which agent asked. Known from `on_llm_start`, and needed by
         #: `unfinished()` because there is no `agent` argument there.
         self._agent = ""
+        #: When the request went out, monotonic. Per *call* rather than per
+        #: run: a run may make several, and the number worth having is how
+        #: long the provider took on each, not how long the loop took.
+        self._sent_at = 0.0
 
     async def on_llm_start(self, context, agent, system_prompt, input_items) -> None:
         log.debug("→ %s system:\n%s", agent.name, system_prompt)
         self._agent = agent.name
+        self._sent_at = time.monotonic()
         prompt = []
         for item in input_items:
             line = _short(item)
@@ -74,6 +80,7 @@ class LogHooks(Hooks):
                 output=scrub("\n".join(output)),
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
+                latency_ms=self._elapsed_ms(),
                 **self._pending,
             )
         )
@@ -101,8 +108,14 @@ class LogHooks(Hooks):
             output="",
             input_tokens=0,
             output_tokens=0,
+            # How long it hung before being cut off, which is the one number
+            # a call that never answered can still supply.
+            latency_ms=self._elapsed_ms(),
             **self._pending,
         )
+
+    def _elapsed_ms(self) -> int:
+        return int((time.monotonic() - self._sent_at) * 1000)
 
 
 def _short(item) -> str:

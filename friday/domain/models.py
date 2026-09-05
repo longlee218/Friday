@@ -289,7 +289,19 @@ class ModelCall:
     output: str
     input_tokens: int
     output_tokens: int
+    #: What the call was about, and none of these is the same question.
+    #:
+    #: `message_id` suits triage — one call, one message — and nothing
+    #: downstream: an extractor runs on every pass of a task's graph against
+    #: many messages, and a responder answers a task. `node` says which step of
+    #: a graph asked, where a graph asked at all. All three are absent for the
+    #: summariser, which belongs to a channel rather than to any of them.
     message_id: str | None = None
+    task_id: int | None = None
+    node: str | None = None
+    #: How long the provider took, wall clock. The one number here that is
+    #: measured rather than passed in.
+    latency_ms: int | None = None
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

@@ -308,6 +308,7 @@ class Pool:
         if self._responder is None:
             return template
         draft = await self._responder.draft(
+            task_id=task.id,
             asking=template,
             params=_as_params(task),
             channel_id=task.conversation.channel_id,
@@ -403,14 +404,14 @@ class Pool:
             return prepared
 
         fingerprint = _fingerprint(_prepare_material(prepared))
-        state = DAGState.from_dict(
-            await self._db.load_dag_state(
-                task.id, dag_name=dag.name, params_fingerprint=fingerprint
-            )
-        ).with_result(dag.entry, prepared)
+        stored = await self._db.load_dag_progress(
+            task.id, dag_name=dag.name, params_fingerprint=fingerprint
+        )
+        results, walked = stored if stored is not None else ({}, [])
+        state = DAGState.from_dict(results).with_result(dag.entry, prepared)
 
         outcome, final, trail = await self._walk(
-            dag, task=task, state=state, fingerprint=fingerprint
+            dag, task=task, state=state, fingerprint=fingerprint, walked=walked
         )
         if final is None:
             return outcome  # the run itself failed; there is no state to record
@@ -454,6 +455,7 @@ class Pool:
         task: Task,
         state: DAGState,
         fingerprint: str,
+        walked: list[str] | None = None,
         from_node: str | None = None,
     ) -> tuple[Action, DAGState | None, list[str]]:
         """Run the graph from `state`, recording each node before the next.
@@ -467,16 +469,21 @@ class Pool:
         `from_node` only changes what the log line says.
         """
 
-        async def checkpoint(current: DAGState) -> None:
+        async def checkpoint(current: DAGState, path: list[str]) -> None:
             await self._db.save_dag_state(
                 task.id,
                 dag_name=dag.name,
                 results=_checkpointable(current, dag),
+                trail=path,
                 params_fingerprint=fingerprint,
             )
 
         runner = DAGRunner(
-            dag, deps=self._deps_for(task), state=state, on_checkpoint=checkpoint
+            dag,
+            deps=self._deps_for(task),
+            state=state,
+            trail=walked,
+            on_checkpoint=checkpoint,
         )
         try:
             final = await runner.run()

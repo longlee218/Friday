@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from agents import (
@@ -280,6 +280,8 @@ class Harness:
         context: Any = None,
         extra_turns: int = 0,
         message_id: str | None = None,
+        task_id: int | None = None,
+        node: str | None = None,
     ) -> Any | None:
         """Run it. `None` means it did not answer.
 
@@ -298,17 +300,18 @@ class Harness:
         `extra_turns` is for an agent whose answer arrives as a tool call: the
         call and its result are two turns where a written answer is one.
 
-        `message_id` is the message this call was made about, where there is
-        one, and it is the *only* thing about recording a caller still says.
-        Forgetting it loses a correlation key; it does not lose the record —
-        which is the whole difference between this and the `calls=` list it
-        replaced.
+        `message_id`, `task_id` and `node` are what this call was *about*, and
+        they are three questions rather than one: a message suits triage, a
+        task suits everything that works on one, and a node names the step of
+        a graph that asked. A caller supplies whichever it knows. Forgetting
+        one loses a correlation key; it does not lose the record — which is the
+        whole difference between these and the `calls=` list they replaced.
         """
         return await self._settle(
             prompt,
             context=context,
             max_turns=self._config.max_turns + extra_turns,
-            message_id=message_id,
+            about=_About(message_id=message_id, task_id=task_id, node=node),
         )
 
     def checkpoint(self, result: Any) -> dict[str, Any]:
@@ -375,7 +378,7 @@ class Harness:
         *,
         context: Any,
         max_turns: int,
-        message_id: str | None = None,
+        about: "_About | None" = None,
     ) -> Any | None:
         """Run to completion or to the first thing that stops it, and turn a
         failure into `last_error` rather than an exception every caller would
@@ -418,9 +421,9 @@ class Harness:
             # hung. `unfinished()` is what the run managed to send.
             if (cut_off := hooks.unfinished()) is not None:
                 calls.append(cut_off)
-            await self._write_down(calls, message_id)
+            await self._write_down(calls, about)
 
-    async def _write_down(self, calls: list, message_id: str | None) -> None:
+    async def _write_down(self, calls: list, about: "_About | None") -> None:
         """Hand each call to the sink. A sink that fails costs a row, not a run.
 
         A failed write is a lost row; a raised write would be a lost answer,
@@ -442,11 +445,35 @@ class Harness:
             return
         for call in calls:
             try:
-                await self._record(
-                    replace(call, message_id=message_id) if message_id else call
-                )
+                await self._record(about.stamp(call) if about else call)
             except Exception:  # noqa: BLE001 - recording must not cost the run
                 log.exception("could not record a call by %s", self._config.name)
+
+
+@dataclass(frozen=True, slots=True)
+class _About:
+    """What a run was about, for the rows it produces.
+
+    A value rather than three parameters threaded through `_settle`, because
+    they travel together and are read together, and because the next one —
+    ticket 04's `attempts` — is measured here rather than passed in.
+    """
+
+    message_id: str | None = None
+    task_id: int | None = None
+    node: str | None = None
+
+    def stamp(self, call):
+        """The call with what the caller knew about it, and nothing else
+        overwritten: `latency_ms` was measured by the hook and is not ours."""
+        if not (self.message_id or self.task_id or self.node):
+            return call
+        return replace(
+            call,
+            message_id=self.message_id,
+            task_id=self.task_id,
+            node=self.node,
+        )
 
 
 def _why(exc: Exception, timeout: float) -> str:

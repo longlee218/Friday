@@ -65,7 +65,9 @@ class Extractor:
         self._params_cls = params_cls
         self.name = name
 
-    async def run(self, text: str) -> tuple[Params | None, Clarify | None]:
+    async def run(
+        self, text: str, *, task_id: int | None = None, node: str | None = None
+    ) -> tuple[Params | None, Clarify | None]:
         """Ask the model to fill the fields. `(None, None)` if the call failed.
 
         The harness already swallows exceptions into `last_error`, so a
@@ -77,7 +79,11 @@ class Extractor:
         """
         capture = FieldsCapture()
         result = await self._harness.run(
-            build_input(text, self._params_cls), context=capture, extra_turns=1
+            build_input(text, self._params_cls),
+            context=capture,
+            extra_turns=1,
+            task_id=task_id,
+            node=node,
         )
         if result is None:
             log.warning("extractor %s returned no result", self.name)
@@ -130,7 +136,13 @@ def registered() -> dict[str, Extractor]:
     return dict(_EXTRACTORS)
 
 
-async def extract(task_type: str, text: str) -> tuple[Params | None, Clarify | None]:
+async def extract(
+    task_type: str,
+    text: str,
+    *,
+    task_id: int | None = None,
+    node: str | None = None,
+) -> tuple[Params | None, Clarify | None]:
     """Run the extractor registered for `task_type` over `text`.
 
     Returns the filled Params, or None if no extractor is registered or the
@@ -143,7 +155,7 @@ async def extract(task_type: str, text: str) -> tuple[Params | None, Clarify | N
     ext = _EXTRACTORS.get(task_type)
     if ext is None:
         return None, None
-    return await ext.run(text)
+    return await ext.run(text, task_id=task_id, node=node)
 
 
 

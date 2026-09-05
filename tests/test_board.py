@@ -128,3 +128,20 @@ async def test_a_messages_call_survives_a_crowd_of_unlinked_ones(
     page = client.get("/").text
 
     assert "why it was classified" in page
+
+
+async def test_a_tasks_calls_are_shown_under_it(client, db):
+    """The board shows what a task cost and what the model was asked while
+    working on it. Until every agent recorded there was nothing to show; now
+    the rows exist and the page is where an operator would look for them."""
+    task = await seed(db)
+    await db.record_model_call(
+        task_id=task.id, node="prepare", agent="api_issue_extractor", model="m",
+        system_prompt="s", prompt="lift the fields out", output="{}",
+        input_tokens=7, output_tokens=2, latency_ms=120,
+    )
+
+    page = client.get("/").text
+
+    assert "lift the fields out" in page
+    assert "api_issue_extractor" in page

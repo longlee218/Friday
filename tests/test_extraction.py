@@ -122,7 +122,8 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
     class StubHarness:
         last_error = None
 
-        async def run(self, prompt, *, context=None, calls=None, extra_turns=0):
+        async def run(self, prompt, *, context=None, extra_turns=0,
+                      task_id=None, node=None):
             return StubResult()
 
     ext = build_extractor(
@@ -143,7 +144,8 @@ def test_an_extractor_returns_none_when_harness_fails():
     class FailingHarness:
         last_error = "boom"
 
-        async def run(self, prompt, *, context=None, calls=None, extra_turns=0):
+        async def run(self, prompt, *, context=None, extra_turns=0,
+                      task_id=None, node=None):
             return None
 
     @dataclass
@@ -168,7 +170,8 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
         final_output = "not even close to JSON"
 
     class StubHarness:
-        async def run(self, prompt, *, context=None, calls=None, extra_turns=0):
+        async def run(self, prompt, *, context=None, extra_turns=0,
+                      task_id=None, node=None):
             return StubResult()
 
     @dataclass

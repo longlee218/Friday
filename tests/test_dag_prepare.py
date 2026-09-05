@@ -160,7 +160,7 @@ async def _prepare_with_clarify(params_obj, clarify, *, extracted=None, monkeypa
     extractor or model."""
     import friday.dag.prepare as wf
 
-    async def stub_extract(task_type, text):
+    async def stub_extract(task_type, text, *, task_id=None, node=None):
         return extracted, clarify
 
     monkeypatch.setattr(wf, "_extract", stub_extract)

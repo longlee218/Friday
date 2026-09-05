@@ -155,6 +155,17 @@ class DagState(Base):
     params_fingerprint: Mapped[str] = mapped_column(default="")
     #: Node name -> that node's result.
     results: Mapped[dict] = mapped_column(JSON, default=dict)
+    #: The nodes this graph has walked, in the order it walked them. Beside
+    #: the results rather than derived from them: declaration order is not
+    #: execution order, and `Pool._outcome` reads the path backwards to find
+    #: which node decided. A resumed run that started from an empty path
+    #: could only answer that from the part it happened to walk itself.
+    #: Nullable, and that is not laziness: SQLite cannot add a NOT NULL
+    #: column to a table that has rows, and this one has them on every
+    #: deployment that has ever run a graph. A row written before this column
+    #: existed has no recorded path, which is a different thing from an empty
+    #: one, and both read as "nothing to resume from".
+    trail: Mapped[list | None] = mapped_column(JSON, default=list)
     #: Set when a run ends on an `Ask` or `HandOver` a node returned to stop
     #: things there rather than decide the graph's own answer. Cleared on
     #: resume — the next node to run checkpoints without them.
@@ -235,8 +246,16 @@ class ModelCall(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     #: The message the call was made about — what links a decision to the
-    #: prompt behind it.
+    #: prompt behind it. Right for triage and for nothing downstream, which is
+    #: why the next two exist.
     message_id: Mapped[str | None] = mapped_column(index=True)
+    #: The task whose work this call was part of, and the graph node that made
+    #: it. Indexed because "what did this task cost, and what was it asked?"
+    #: is the question the board is for.
+    task_id: Mapped[int | None] = mapped_column(index=True)
+    node: Mapped[str | None] = mapped_column(default=None)
+    #: Wall clock, in milliseconds.
+    latency_ms: Mapped[int | None] = mapped_column(default=None)
     agent: Mapped[str]
     model: Mapped[str]
     system_prompt: Mapped[str]

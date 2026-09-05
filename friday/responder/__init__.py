@@ -146,6 +146,7 @@ class Responder:
         stranger: bool = False,
         context: Sequence[InboundEvent] = (),
         tone: Sequence[InboundEvent] = (),
+        task_id: int | None = None,
     ) -> Draft | None:
         """Write what `asking` says, in the operator's voice.
 
@@ -181,7 +182,9 @@ class Responder:
         # written. A ceiling, not a target: it costs nothing to a run that
         # answers in one turn, and without it an agent that reaches for a
         # skill spends its only turn on the fetch and returns nothing.
-        result = await self._run.run(said, extra_turns=self._tool_turns)
+        result = await self._run.run(
+            said, extra_turns=self._tool_turns, task_id=task_id
+        )
         if result is None:
             log.warning("falling back to the template")
             return None

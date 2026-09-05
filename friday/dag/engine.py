@@ -179,7 +179,11 @@ class DAGRunner:
         *,
         deps: DAGDeps | None = None,
         state: DAGState | None = None,
-        on_checkpoint: Callable[[DAGState], Awaitable[None]] | None = None,
+        #: The path an earlier run walked, from the checkpoint that saved it.
+        #: A resumed run appends to it rather than starting empty — see
+        #: `trail`.
+        trail: list[str] | None = None,
+        on_checkpoint: Callable[[DAGState, list[str]], Awaitable[None]] | None = None,
         max_steps: int = 50,
     ) -> None:
         self._dag = dag
@@ -189,7 +193,7 @@ class DAGRunner:
         #: A cycle in the edges would otherwise spin forever. The graph is
         #: meant to be acyclic; this is the guard that says so out loud.
         self._max_steps = max_steps
-        self._trail: list[str] = []
+        self._trail: list[str] = list(trail or [])
 
     @property
     def state(self) -> DAGState:
@@ -203,6 +207,11 @@ class DAGRunner:
         did the graph end up deciding?" needs the second. Reading it off the
         node tuple instead means a bookkeeping node declared last — an audit
         line, a cleanup — silently answers for the node that actually decided.
+
+        It is checkpointed alongside the state, because a run that resumes
+        after a restart would otherwise answer that question from the part of
+        the path it happened to walk itself. A node already recorded is walked
+        past rather than re-run, and walking past it still counts.
         """
         return list(self._trail)
 
@@ -228,12 +237,13 @@ class DAGRunner:
                 # resumed run can answer "what did this graph decide?" the
                 # same way a fresh one does.
                 #
-                # `_resume_point` normally walks past these before the loop
-                # starts, so this branch is reached only when the state was
-                # written by a differently-shaped graph — a node that used to
-                # be skipped now sitting on the path. Which is exactly when
-                # counting it matters.
-                self._trail.append(current)
+                # Unless the trail already says so. The path is now restored
+                # from the checkpoint alongside the state, and `_resume_point`
+                # leaves the loop pointing at the last recorded node when
+                # everything has run — so appending unconditionally counted
+                # that node twice on every resumed pass.
+                if current not in self._trail:
+                    self._trail.append(current)
                 current = self._dag.next_after(current, self._state)
                 continue
 
@@ -272,7 +282,7 @@ class DAGRunner:
         if self._on_checkpoint is None:
             return
         try:
-            await self._on_checkpoint(self._state)
+            await self._on_checkpoint(self._state, list(self._trail))
         except Exception:  # noqa: BLE001 - a failed save must not lose the run
             log.exception(
                 "dag %s: could not checkpoint; the run continues but a "

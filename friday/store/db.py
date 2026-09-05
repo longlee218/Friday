@@ -366,6 +366,45 @@ class Database:
         async with self._sessions.begin() as session:
             session.add(schema.ModelCall(**values))
 
+    async def calls_for_tasks(self, task_ids) -> dict[int, list[ModelCall]]:
+        """Every call for each of these tasks, oldest first within a task.
+
+        One query rather than one per task: the board renders up to two hundred
+        of them, and asking per task made a page render cost two hundred round
+        trips to answer a question about a table that is indexed on exactly
+        this column.
+        """
+        wanted = list(task_ids)
+        if not wanted:
+            return {}
+        query = (
+            select(schema.ModelCall)
+            .where(schema.ModelCall.task_id.in_(wanted))
+            .order_by(schema.ModelCall.created_at.asc(), schema.ModelCall.id.asc())
+        )
+        grouped: dict[int, list[ModelCall]] = {}
+        async with self._sessions() as session:
+            for row in await session.scalars(query):
+                if row.task_id is None:  # excluded by the filter; narrows the type
+                    continue
+                grouped.setdefault(row.task_id, []).append(_model_call(row))
+        return grouped
+
+    async def calls_for_task(self, task_id: int) -> list[ModelCall]:
+        """Every call made while working on one task, oldest first.
+
+        Oldest first because they read as a sequence — what was extracted,
+        then what was drafted — and a reader following a task's history is
+        going forwards.
+        """
+        query = (
+            select(schema.ModelCall)
+            .where(schema.ModelCall.task_id == task_id)
+            .order_by(schema.ModelCall.created_at.asc(), schema.ModelCall.id.asc())
+        )
+        async with self._sessions() as session:
+            return [_model_call(row) for row in await session.scalars(query)]
+
     async def calls_by_message(self, message_ids) -> dict[str, ModelCall]:
         """The most recent call about each of these messages.
 
@@ -389,43 +428,35 @@ class Database:
         )
         async with self._sessions() as session:
             return {
-                row.message_id: ModelCall(
-                    agent=row.agent,
-                    model=row.model,
-                    system_prompt=row.system_prompt,
-                    prompt=row.prompt,
-                    output=row.output,
-                    input_tokens=row.input_tokens,
-                    output_tokens=row.output_tokens,
-                    message_id=row.message_id,
-                    created_at=row.created_at,
-                )
+                row.message_id: _model_call(row)
                 for row in await session.scalars(query)
+                # Excluded by the filter above; stated so the type says it too.
+                if row.message_id is not None
             }
 
     async def model_calls(
-        self, *, message_id: str | None = None, limit: int = 50
+        self,
+        *,
+        message_id: str | None = None,
+        #: Only the rows that name no message. Distinct from `message_id=None`,
+        #: which means "do not filter" — and the difference is the whole reason
+        #: this exists: after every agent started recording, most rows name no
+        #: message and there was no way to ask for them.
+        uncorrelated: bool = False,
+        limit: int = 50,
     ) -> list[ModelCall]:
         query = select(schema.ModelCall)
         if message_id is not None:
             query = query.where(schema.ModelCall.message_id == message_id)
+        elif uncorrelated:
+            query = query.where(schema.ModelCall.message_id.is_(None))
         async with self._sessions() as session:
             rows = await session.scalars(
                 query.order_by(schema.ModelCall.created_at.desc(),
                                schema.ModelCall.id.desc()).limit(limit)
             )
             return [
-                ModelCall(
-                    agent=row.agent,
-                    model=row.model,
-                    system_prompt=row.system_prompt,
-                    prompt=row.prompt,
-                    output=row.output,
-                    input_tokens=row.input_tokens,
-                    output_tokens=row.output_tokens,
-                    message_id=row.message_id,
-                    created_at=row.created_at,
-                )
+                _model_call(row)
                 for row in rows
             ]
 
@@ -1462,6 +1493,9 @@ class Database:
         *,
         dag_name: str,
         results: dict,
+        #: The path that produced those results. Saved with them because they
+        #: are read together and are only meaningful together.
+        trail: list[str] | None = None,
         #: Required, not defaulted. `_fingerprint` never returns "" — even for
         #: no parameters at all — so an empty one is only what a caller who
         #: forgot this argument writes, and writing it guarantees the next
@@ -1487,6 +1521,7 @@ class Database:
             dag_name=dag_name,
             params_fingerprint=params_fingerprint,
             results=results,
+            trail=list(trail or []),
             paused_at_node=paused_at_node,
             paused_question=paused_question,
             interruption=interruption,
@@ -1502,6 +1537,7 @@ class Database:
                             statement.excluded.params_fingerprint
                         ),
                         "results": statement.excluded.results,
+                    "trail": statement.excluded.trail,
                         "paused_at_node": statement.excluded.paused_at_node,
                         "paused_question": statement.excluded.paused_question,
                         "interruption": statement.excluded.interruption,
@@ -1537,8 +1573,37 @@ class Database:
 
         Returns the raw results mapping; rebuilding it into a `DAGState` is
         the caller's business, so this module keeps knowing nothing about the
-        graph.
+        graph. `load_dag_progress` returns the path alongside it, for the
+        caller that resumes rather than only reads.
         """
+        row = await self._dag_row(task_id, dag_name, params_fingerprint)
+        return None if row is None else dict(row.results or {})
+
+    async def load_dag_progress(
+        self,
+        task_id: int,
+        *,
+        dag_name: str | None = None,
+        params_fingerprint: str | None = None,
+    ) -> tuple[dict, list[str]] | None:
+        """What the graph recorded, and the path that recorded it.
+
+        One read for both, because they are only meaningful together and a
+        resumed run needs both to answer "what did this graph decide?" — the
+        results say which nodes have run, the path says in what order, and
+        `Pool._outcome` reads the second backwards.
+        """
+        row = await self._dag_row(task_id, dag_name, params_fingerprint)
+        if row is None:
+            return None
+        return dict(row.results or {}), list(row.trail or [])
+
+    async def _dag_row(
+        self, task_id: int, dag_name: str | None, params_fingerprint: str | None
+    ):
+        """The row, once it has passed both tests of whether it is still
+        anybody's to read. One place, so the two readers cannot disagree about
+        when state is stale."""
         async with self._sessions() as session:
             row = await session.get(schema.DagState, task_id)
             if row is None:
@@ -1563,7 +1628,7 @@ class Database:
                     row.params_fingerprint or "(none recorded)",
                 )
                 return None
-            return dict(row.results or {})
+            return row
 
     async def dag_pause(self, task_id: int) -> tuple[str, str] | None:
         """The node that paused and the question it asked, if any."""
@@ -1590,6 +1655,7 @@ class Database:
             return {
                 "dag_name": row.dag_name,
                 "results": dict(row.results or {}),
+                "trail": list(row.trail or []),
                 "params_fingerprint": row.params_fingerprint or "",
                 "paused_at_node": row.paused_at_node,
                 "interruption": row.interruption,
@@ -1622,6 +1688,29 @@ class Database:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _model_call(row: schema.ModelCall) -> ModelCall:
+    """One row, as the domain sees it.
+
+    Written out once rather than three times: the three readers of this table
+    each built the dataclass by hand, so a column added to `schema` reached
+    whichever of them somebody remembered.
+    """
+    return ModelCall(
+        agent=row.agent,
+        model=row.model,
+        system_prompt=row.system_prompt,
+        prompt=row.prompt,
+        output=row.output,
+        input_tokens=row.input_tokens,
+        output_tokens=row.output_tokens,
+        message_id=row.message_id,
+        task_id=row.task_id,
+        node=row.node,
+        latency_ms=row.latency_ms,
+        created_at=row.created_at,
+    )
 
 
 def _event(row: schema.Message) -> InboundEvent:

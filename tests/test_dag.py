@@ -231,7 +231,7 @@ async def test_the_state_is_checkpointed_after_every_node_not_at_the_end():
     exact failure the table exists to prevent."""
     saved: list[dict] = []
 
-    async def on_checkpoint(state: DAGState) -> None:
+    async def on_checkpoint(state: DAGState, trail: list[str]) -> None:
         saved.append(state.to_dict())
 
     dag = DAG(
@@ -1149,7 +1149,7 @@ async def test_a_node_0_hand_over_still_reaches_the_operator(db, monkeypatch):
 
     traced = "abcdef01-2345-6789-abcd-ef0123456789"
 
-    async def fills_something_in(task_type, text):
+    async def fills_something_in(task_type, text, *, task_id=None, node=None):
         """An extractor that finds a field — the ordinary case, and what moves
         the parameters out from under the pause."""
         return (
@@ -1181,3 +1181,45 @@ async def test_a_node_0_hand_over_still_reaches_the_operator(db, monkeypatch):
         "the pause was stored under a fingerprint nothing reads it back by"
     )
     assert "no investigation past this point" in told.text
+
+
+async def test_the_path_a_graph_took_survives_a_restart(db):
+    """`_outcome` reads the trail to decide what the graph concluded, and the
+    trail lived only in memory.
+
+    Declaration order is not execution order — a graph that ends with
+    bookkeeping declared after the node that decides would have that
+    bookkeeping answer for it — which is why the trail exists at all. After a
+    restart there was none, so a resumed run could only answer the question
+    from the part of the path it happened to walk itself.
+    """
+    from friday.dag.engine import DAG, DAGRunner, DAGState, Node
+
+    async def first(state, deps):
+        return "one"
+
+    async def second(state, deps):
+        return "two"
+
+    dag = DAG(
+        name="two-steps",
+        nodes=(Node("first", first), Node("second", second)),
+        edges=(Edge("first", "second"),),
+    )
+
+    saved: dict = {}
+
+    async def checkpoint(state, trail) -> None:
+        saved["state"], saved["trail"] = state, list(trail)
+
+    first_run = DAGRunner(dag, on_checkpoint=checkpoint)
+    await first_run.run()
+
+    assert first_run.trail == ["first", "second"]
+    assert saved["trail"] == ["first", "second"]
+
+    # A restart: the state comes back, and so does the path that produced it.
+    resumed = DAGRunner(dag, state=saved["state"], trail=saved["trail"])
+    await resumed.run()
+
+    assert resumed.trail == ["first", "second"], "not re-walked, and not lost"

@@ -64,7 +64,9 @@ def prepare_node(
     async def _prepare(state: DAGState, deps: DAGDeps) -> Params | Action:
         known = params_cls(**deps.task.params)
         text = await deps.db.original_text_for(deps.task.id)
-        filled, problem = await prepare(task_type, known, text=text)
+        filled, problem = await prepare(
+            task_type, known, text=text, task_id=deps.task.id, node="prepare"
+        )
 
         merged = {**deps.task.params, **asdict(filled)}
         if merged != deps.task.params:
@@ -87,6 +89,11 @@ async def prepare(
     params: Params,
     *,
     text: str | None = None,
+    #: Whose work this is, for the row the extractor's call becomes. Node 0
+    #: is the only step that knows both, and the extractor is the only agent
+    #: it runs — so this is where the two meet.
+    task_id: int | None = None,
+    node: str | None = None,
 ) -> tuple[Params, Action | None]:
     """Fill the parameters in, then check them. Node 0 of every graph.
 
@@ -108,7 +115,9 @@ async def prepare(
     """
     clarify: Clarify | None = None
     if text is not None:
-        extracted, clarify = await _extract(task_type, text)
+        extracted, clarify = await _extract(
+            task_type, text, task_id=task_id, node=node
+        )
         if extracted is not None:
             params = _fill(params, extracted)
 

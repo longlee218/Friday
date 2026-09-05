@@ -11,6 +11,7 @@ from friday.domain.conversation import ConversationId
 from friday.config import IngestConfig
 from friday.inbox import Inbox
 from friday.domain.models import MentionType
+from friday.domain.states import TaskState
 
 
 def context(**kw):
@@ -135,3 +136,37 @@ async def test_two_providers_sharing_a_channel_number_do_not_share_a_history(
     assert [m.text for m in await db.messages(here)] == ["from discord"]
     assert [m.text for m in await db.messages(there)] == ["from elsewhere"]
     assert len(await db.conversations()) == 2
+
+
+async def test_a_call_made_for_a_task_is_read_back_by_that_task(db):
+    """`message_id` is the right key for triage and the wrong one for
+    everything downstream.
+
+    An extractor runs on every pass of a task's graph, against many messages;
+    a responder answers a task, not a message. So "what did task 42 cost, and
+    which prompts produced this reply" was a question the table could not
+    answer — and after ticket 01 made those agents record, their rows were
+    stored under no key at all.
+    """
+    task = await db.create_task(
+        conversation=ConversationId("fake", "watched"), type="api_issue",
+        state=TaskState.PENDING, confidence=0.9, params={},
+    )
+    common = dict(model="m", system_prompt="s", output="o",
+                  input_tokens=1, output_tokens=1)
+    await db.record_model_call(
+        task_id=task.id, node="prepare", agent="api_issue_extractor",
+        prompt="lift the fields out", latency_ms=120, **common,
+    )
+    await db.record_model_call(
+        task_id=task.id, agent="responder", prompt="write it in their voice",
+        latency_ms=340, **common,
+    )
+    await db.record_model_call(agent="summary", prompt="unrelated", **common)
+
+    mine = await db.calls_for_task(task.id)
+
+    assert [c.agent for c in mine] == ["api_issue_extractor", "responder"]
+    assert mine[0].node == "prepare"
+    assert mine[0].latency_ms == 120
+    assert mine[1].node is None
