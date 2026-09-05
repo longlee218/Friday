@@ -362,15 +362,29 @@ not an implementation detail:
   types open a task — the same loop through a different door. The
   task goes to `handled_by_operator` — not `done`, so it is reopenable and
   countable — and everything queued about it is withdrawn.
-- **Four prompt families, no shared text — and one prompt module per family.**
-  Wording and assembly both live in that family's own `prompt` module — one
-  module that answers "what does this family's prompt look like", the contract
-  notes as comments directly above each text; no family imports another's (an
-  `ast` test, not a grep: `from x.y import prompt` names the module in the
-  alias, and a grep for the dotted name never saw it). Three of the four are
-  `friday.<family>.prompt`; the graph nodes' is `friday.dag.api_issue.prompt`,
-  inside the graph that owns those nodes since ticket 15 — deriving the module
-  name from the family is what silently disarmed that test when it moved.
+- **Three prompt families, no shared text — and one prompt module per family.**
+  `friday.triage.prompt`, `friday.extraction.prompt`,
+  `friday.responder.prompt`. Wording and assembly both live in that family's
+  own module — one module that answers "what does this family's prompt look
+  like", the contract notes as comments directly above each text; no family
+  imports another's (an `ast` test, not a grep: `from x.y import prompt` names
+  the module in the alias, and a grep for the dotted name never saw it).
+
+  **There were four**, and the lesson the fourth left is worth more than the
+  module was. The graph nodes' prompt lived at friday.dag.api_issue.prompt —
+  named here without backticks on purpose, because in this file a backticked
+  module is a claim that it exists, and that one does not — and the test
+  enumerating families *derived* the module name from the family name, so when
+  ticket 15 moved it inside the graph the test silently stopped checking it. The module went with the five-node `api_issue` graph;
+  the rule is that a list of families is written out and asserted, never
+  derived. This paragraph said "four" for some time after there were three,
+  which is the same failure in prose.
+
+  The summariser builds a prompt too (`friday/memory/channel_context.py`) and
+  is **not** a fourth family: it has no `prompt` module, because its wording
+  is a handful of constants beside the agent that runs it. It is still held to
+  the mechanism rules below, and the family-enumerating tests name it
+  explicitly for that reason.
 
   **What is shared is mechanism, and every agent is assembled from it.** The
   seam owns the shape of a section, the escaping at its boundary, and the one
@@ -389,10 +403,41 @@ not an implementation detail:
   instructions for writing replies it never writes. An agent told about a door
   that is not in the room goes looking for it.
 
-  **Only the two agents that speak for the operator carry a `soul`.** Not
-  cosmetic: an extractor told to write in Vietnamese puts `sản xuất` where
-  `friday/domain/validation.py` wants `production`, the value fails its rule,
-  and the reporter is asked to confirm what they already said. Tested.
+  **Only the agent that speaks for the operator carries a `soul`** — the
+  responder, and nothing else. Not cosmetic: an extractor told to write in
+  Vietnamese puts `sản xuất` where `friday/domain/validation.py` wants
+  `production`, the value fails its rule, and the reporter is asked to confirm
+  what they already said. Tested.
+
+  This said "the two agents" until the second one stopped existing: the graph's
+  composing node had its own copy of the voice, and it went with the five-node
+  `api_issue` graph. One agent carrying it means the "two copies, deliberately
+  divergent" argument that used to sit here is currently moot rather than
+  wrong — it applies again the day a second agent writes to a person.
+
+  **`trust_boundary` describes a convention, so an agent claims it only if
+  its input actually uses it.** The section says "anything a person sent you
+  arrives wrapped like this"; an agent told that, whose input contains no
+  markers, has been told about a door that is not in the room — the same
+  failure as describing a tool it does not have. It was in five prompts when
+  only three wrapped anything. All four prompt-building agents claim it and
+  wrap now, and an `ast` test pins claim-and-wrap together.
+
+  Two routes put the markers in, and confusing them escapes text twice.
+  `user_input` escapes *and* wraps, which is right for raw text — the
+  extractor. `quoted=True` on a section wraps a body the builder already
+  escaped, which is right for everyone else; passing an already-escaped
+  section to `user_input` showed the model `&amp;lt;b&amp;gt;` where a
+  reporter wrote `<b>` and escaped the section's own tag into text with it.
+
+  **Anything this system stores and later reads back into a prompt is stored
+  plain.** `channel_derived` escapes once, at the seam, which is what makes a
+  hallucinated note data rather than a section — so a value arriving already
+  escaped gets escaped twice. The summariser is the one writer that had to be
+  taught this, because it is *shown* an escaped transcript and quotes it back.
+  A line-oriented section also has to defend its own delimiter: `html.escape`
+  leaves newlines alone, so without that a summary could forge a second
+  `key:` line in the section describing the room.
 
   The responder's section order is load-bearing (stable-first is the
   prompt-cache hit) and has its own test.

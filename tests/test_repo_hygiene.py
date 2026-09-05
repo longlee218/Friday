@@ -115,6 +115,38 @@ def test_every_path_the_docs_name_exists():
     assert missing == {}, f"documented paths that do not exist: {missing}"
 
 
+def test_every_module_the_docs_name_can_be_imported():
+    """The same rule as above for the *dotted* spelling, which the test above
+    cannot see: it matches `friday/...` with slashes, so CLAUDE.md named
+    `friday.dag.api_issue.prompt` for some time after that module was deleted
+    with the five-node graph, and nothing said so. The sentence around it —
+    "four prompt families" — was wrong for as long.
+
+    Two spellings for one thing is two chances to go stale and one test, which
+    is the shape of every rule in this file that was learned the hard way.
+    """
+    import importlib.util
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    missing = {}
+    for doc in ("CLAUDE.md", "CONTEXT.md"):
+        named = re.findall(r"`(friday\.[\w.]+)`", (root / doc).read_text())
+        for module in named:
+            # `find_spec` rather than an import: it answers the question
+            # without running module-level code, and several of these reach a
+            # provider or the SDK on import.
+            try:
+                found = importlib.util.find_spec(module) is not None
+            except (ImportError, ModuleNotFoundError, ValueError):
+                found = False
+            if not found:
+                missing.setdefault(doc, []).append(module)
+
+    assert missing == {}, f"documented modules that do not exist: {missing}"
+
+
 def test_an_outbound_state_is_defined_once():
     """`queued` was spelled out in `friday/outbox/` for its readers and again
     in `friday/store/db.py` for its `WHERE` clauses — four strings, written
