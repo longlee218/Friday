@@ -88,3 +88,67 @@ def test_a_crash_in_a_thread_is_scrubbed_too(tmp_path):
     )
 
     assert SECRET not in done.stderr
+
+
+def _rendered(emit) -> str:
+    """One log record through `Redacting` and a real formatter.
+
+    Through the formatter on purpose: the filter runs first and the message,
+    the arguments and the traceback are rendered afterwards, so a test that
+    inspects the record instead of the output cannot see what actually reaches
+    the file.
+    """
+    import io
+    import logging
+
+    from friday.ops.redact import Redacting
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    log = logging.getLogger("redact-probe")
+    log.handlers = [handler]
+    log.filters = [Redacting()]
+    log.setLevel(logging.DEBUG)
+    log.propagate = False
+
+    emit(log)
+    return stream.getvalue()
+
+
+def test_an_exception_passed_as_an_argument_is_scrubbed():
+    """The shape this module was written for, and the one it used to miss.
+
+    `logger.error("%s failed: %s", name, exc)` — an exception is an object, so
+    it was returned untouched and `str()` was called on it by the formatter,
+    after every filter had run. The SDK's tool error path logs exactly this,
+    at ERROR, with the raw tool arguments beside it.
+    """
+    TOKEN = "Bearer abcdefghijklmnop0123456789ABCDEF"
+
+    def emit(log):
+        try:
+            raise RuntimeError(f"provider rejected: {TOKEN}")
+        except RuntimeError as exc:
+            log.error("%s failed: %s", "classify", exc)
+
+    said = _rendered(emit)
+    assert TOKEN not in said, said
+    assert "[REDACTED]" in said
+
+
+def test_a_traceback_is_scrubbed():
+    """`exc_info` is rendered by the formatter and never passes through a
+    filter's hands, so the filter has to render it itself. `exc_text` is the
+    slot a formatter checks first, which is what makes that possible."""
+    TOKEN = "Bearer abcdefghijklmnop0123456789ABCDEF"
+
+    def emit(log):
+        try:
+            raise RuntimeError(f"provider rejected: {TOKEN}")
+        except RuntimeError as exc:
+            log.error("classify failed", exc_info=exc)
+
+    said = _rendered(emit)
+    assert TOKEN not in said, said
+    assert "RuntimeError" in said, "the traceback is still readable"

@@ -39,10 +39,25 @@ def scrub(text: str) -> str:
 
 
 class Redacting(logging.Filter):
-    """Scrubs a record's message and its arguments.
+    """Scrubs a record's message, its arguments, and its traceback.
 
     Attached to the root logger, so it covers libraries too — which is where
     the leak would come from, not from our own code.
+
+    **The exception is the point, not an afterthought.** This module exists
+    for "a provider error quoting the Authorization line, landing in a log
+    file", and for a while it did not cover that: it scrubbed `record.msg` and
+    string arguments, and a library logging `logger.error("%s failed: %s",
+    name, exc, exc_info=exc)` slipped past both — `exc` is an object, so
+    `_scrub_one` returned it untouched and the formatter called `str()` on it
+    afterwards, and `exc_info` was never looked at at all. The SDK's own tool
+    error path is exactly that shape (`agents/tool.py`), logged at ERROR with
+    the raw arguments beside it.
+
+    `exc_text` is where a formatter caches the rendered traceback, and it uses
+    it if it is already set — so filling it in with a scrubbed rendering is
+    how a filter reaches something otherwise formatted after every filter has
+    run.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -50,6 +65,8 @@ class Redacting(logging.Filter):
             record.msg = scrub(record.msg)
         if record.args:
             record.args = _scrub_args(record.args)
+        if record.exc_info and record.exc_text is None:
+            record.exc_text = scrubbed_traceback(*record.exc_info)
         return True
 
 
@@ -60,7 +77,19 @@ def _scrub_args(args):
 
 
 def _scrub_one(value):
-    return scrub(value) if isinstance(value, str) else value
+    """A string, or an exception rendered as one.
+
+    An exception is not a string and is formatted like one: `%s` calls `str()`
+    on it long after this filter has run, so leaving the object in place left
+    whatever it quotes unscrubbed. Rendering it here is what puts it inside
+    the only scrub there is. Every other type is left alone — a `%d` handed a
+    string is a formatting error, and this must not invent one.
+    """
+    if isinstance(value, str):
+        return scrub(value)
+    if isinstance(value, BaseException):
+        return scrub(str(value))
+    return value
 
 
 def scrubbed_traceback(exc_type, exc, tb) -> str:
