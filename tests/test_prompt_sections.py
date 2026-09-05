@@ -409,15 +409,21 @@ def test_only_a_prompt_whose_input_uses_the_markers_claims_them():
     every other agent here ends with. It quotes `<conversation>` and not
     `<tone>`, because tone examples are the operator's own messages.
 
-    **Two routes put the markers in, and this counts both.** `user_input` for
-    an agent whose whole input is one quoted blob (triage, the summariser),
-    and `quoted=True` on a section for an agent whose other sections must stay
-    readable (the responder) — the difference matters because `user_input`
-    escapes, so passing it an already-escaped section body escapes it twice.
+    **Two routes put the markers in, and this counts both.** `user_input`
+    escapes and wraps, which is right when the input is raw text — the
+    extractor, and nothing else now. `quoted=True` wraps a body its builder
+    already escaped, which is every agent that quotes a rendered section:
+    triage, the summariser and the responder, all three since ticket 06.
+
     Checking only for `user_input`, as this did, is the same shape of proxy
     bug as deciding a tool's prompt section from the catalogue: it names a
     fact next to the one it means, and they come apart the moment a second
-    route exists.
+    route exists — which is what happened one commit later.
+
+    The `quoted=True` half is still coarse: it asks whether the module passes
+    it anywhere, not whether it passes it to the section this agent's input
+    actually carries. `conversation` is the only builder that takes it, and
+    each of these modules builds one input, so the two coincide today.
     """
     import ast
     from pathlib import Path
@@ -563,11 +569,119 @@ def test_quoting_a_section_does_not_escape_it_twice():
     """`user_input` escapes and wraps, which is right for raw text and wrong
     for a section body its own builder already escaped: a reporter's `<b>`
     comes out as `&amp;lt;b&amp;gt;` and the model is shown mangled text.
-    Triage and the summariser do that today."""
+    Triage and the summariser both did, until ticket 06."""
     rendered = ip.conversation(_events(["api <b>lỗi</b> & chậm"]), quoted=True).render()
 
     assert "&lt;b&gt;" in rendered
     assert "&amp;lt;" not in rendered, "escaped twice"
+
+
+# --- ticket 06: nothing is escaped twice --------------------------------------
+
+
+HAS_MARKUP = "api <b>lỗi</b> & chậm"
+
+
+def test_triage_sees_what_the_reporter_typed_escaped_once():
+    """It rendered the section and then passed the whole thing through
+    `user_input`, and both escape — so the model was shown
+    `&amp;lt;b&amp;gt;` where somebody wrote `<b>`."""
+    from friday.triage.prompt import build_input
+
+    given = build_input(_events([HAS_MARKUP]))
+
+    assert "&lt;b&gt;" in given
+    assert "&amp;lt;" not in given, "escaped twice"
+
+
+def test_the_summariser_sees_what_the_reporter_typed_escaped_once():
+    """The expensive half: its output is stored as the channel's derived
+    summary, so every later prompt for that room reads it. A mangled
+    transcript does not end with this call — it becomes the room's memory of
+    what was said."""
+    from friday.memory.channel_context import _transcript
+
+    given = _transcript(_events([HAS_MARKUP]))
+
+    assert "&lt;b&gt;" in given
+    assert "&amp;lt;" not in given, "escaped twice"
+
+
+def test_the_conversation_is_a_real_section_for_both_of_them():
+    """The second half of the same bug, and the one a reader notices first:
+    the tag was escaped into text too, so the one label these two agents were
+    given had stopped being a section. Every other agent here reads labelled
+    sections; these read a description of one."""
+    from friday.memory.channel_context import _transcript
+    from friday.triage.prompt import build_input
+
+    for given in (build_input(_events([HAS_MARKUP])), _transcript(_events([HAS_MARKUP]))):
+        assert "<conversation>" in given
+        assert "&lt;conversation&gt;" not in given
+
+
+def test_extraction_was_never_wrong_and_stays_that_way():
+    """It wraps raw text, which is what `user_input` is for. It is also the
+    agent that can least afford this: it copies `correlation_id` and `curl`
+    verbatim because one is matched by machine and the other is pasted into a
+    terminal, and a value that went through two escapes no longer refers to
+    anything."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+
+    given = build_input("id la <abc> & 7", ApiIssueParams)
+
+    assert "&lt;abc&gt;" in given
+    assert "&amp;lt;" not in given
+
+
+def test_no_family_escapes_anything_twice():
+    """The check that would have caught ticket 06's bug: every existing one
+    asked "is the hostile tag gone", and `&amp;lt;critical_reminder&amp;gt;`
+    answers yes. Asking instead whether an entity was escaped into another
+    entity catches it whatever the payload was.
+
+    **Scope, stated because the first version of this docstring overclaimed.**
+    It covers the *per-call input* each family builds from a message it was
+    just handed. It does not cover a prompt assembled from something a model
+    wrote earlier and this system stored — the summary that becomes a
+    channel's `derived`, which `channel_derived` escapes on the way back out.
+    That round trip can stack an escape too; it is a different mechanism with
+    its own decision to make, so it has its own ticket rather than a quiet
+    assertion here.
+
+    Each family needs different arguments, so the map is written out; what is
+    not written out is *which* families exist. The assertion below fails when
+    a fourth prompt module appears, which is the part that would otherwise go
+    stale silently.
+    """
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input as extraction_input
+    from friday.memory.channel_context import _transcript
+    from friday.responder.prompt import build_input as responder_input
+    from friday.triage.prompt import build_input as triage_input
+
+    built = {
+        "triage": triage_input(_events([HAS_MARKUP])),
+        "extraction": extraction_input(HAS_MARKUP, ApiIssueParams),
+        "responder": responder_input(asking="q", context=_events([HAS_MARKUP])),
+        "summariser": _transcript(_events([HAS_MARKUP])),
+    }
+
+    from pathlib import Path
+
+    families = {
+        d.parent.name
+        for d in (Path(__file__).resolve().parents[1] / "friday").glob("*/prompt.py")
+    }
+    assert families <= set(built), (
+        f"a prompt family nothing here builds: {families - set(built)} — add it"
+    )
+
+    for family, text in built.items():
+        assert "&amp;lt;" not in text, f"{family} escaped an entity into an entity"
+        assert "&amp;gt;" not in text, family
+        assert "&amp;amp;" not in text, family
 
 
 def test_the_responder_prompt_carries_the_three_new_sections():

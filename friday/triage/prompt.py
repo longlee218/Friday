@@ -32,7 +32,6 @@ from friday.agent.instruction_prompt import (
     role,
     thinking_style,
     trust_boundary,
-    user_input,
 )
 from friday.domain.models import InboundEvent
 
@@ -95,5 +94,10 @@ def build_instructions(examples: Sequence[tuple[str, str]] = ()) -> str:
 def build_input(events: Sequence[InboundEvent]) -> str:
     """The turn, and nothing else: no identity, no date, no task section. The
     whole output is which tool was called and a number, and none of those
-    would change it."""
-    return user_input(conversation(list(events)).render())
+    would change it.
+
+    Quoted through the section rather than wrapped round it; `_quoted` in the
+    seam says why, and this prompt is one of the two that got it wrong until
+    ticket 06.
+    """
+    return assemble(conversation(list(events), quoted=True))

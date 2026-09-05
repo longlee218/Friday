@@ -71,11 +71,17 @@ _QUOTE_CLOSE = "--- END USER INPUT ---"
 def _quoted(body: str) -> str:
     """Put the markers round a body that is **already escaped**.
 
-    `user_input` escapes and wraps, which is right for raw text. A section's
-    body has been escaped line by line by its own builder, so escaping it
-    again turns a reporter's `<b>` into `&amp;lt;b&amp;gt;` — the model is then
-    shown mangled text rather than quoted text. Two callers do exactly that
-    today and are not fixed here; see the note on `conversation`.
+    The counterpart to `user_input`, which escapes *and* wraps: that is right
+    for raw text and wrong for a section body, because its builder escaped it
+    line by line already. Wrapping one that way escapes it twice and the model
+    is shown `&amp;lt;b&amp;gt;` where a reporter wrote `<b>` — mangled text
+    rather than quoted text.
+
+    Both of this repo's section-then-wrap callers did exactly that until
+    ticket 06 (triage, and the summariser whose output becomes a room's
+    derived memory). Which function to reach for is the whole of what there is
+    to get wrong here, so the two live side by side: raw text takes
+    `user_input`, an already-escaped body takes this.
     """
     return f"{_QUOTE_OPEN}\n{body}\n{_QUOTE_CLOSE}"
 
@@ -153,18 +159,22 @@ def channel_overrides(ctx: ChannelContext | None) -> Section:
 def conversation(events: list[InboundEvent], *, quoted: bool = False) -> Section:
     """What people said, escaped, and optionally inside the markers.
 
-    `quoted` is for an agent whose *other* sections are trusted and must stay
-    readable — the responder, whose `<tone>` is the operator's own messages
-    and whose `<task>` is what this system worked out. Triage and the
-    summariser instead render this section and pass the whole thing through
-    `user_input`, which escapes it a second time: their model sees
-    `&amp;lt;b&amp;gt;` where a reporter typed `<b>`. That is a real bug and a
-    separate one — this parameter exists so the responder does not join them,
-    not to fix them.
+    `quoted=True` puts the markers inside the section, round a body this
+    builder has already escaped — see `_quoted` for why that is not
+    `user_input`. Every agent that quotes a conversation wants this; the
+    parameter is not the responder's special case, it is the only correct
+    route, and `user_input` remains for the one caller that has raw text
+    (the extractor).
 
-    A section that says `quoted=True` is only half a boundary on its own. The
-    other half is `trust_boundary()` in the same agent's instructions, saying
-    what the markers mean; neither is worth having alone.
+    Markers inside the section rather than round it, so the `<conversation>`
+    tag survives as a tag. Escaping the whole rendered section instead — which
+    is what the two section-then-wrap callers used to do — escaped the label
+    into text as well, leaving those agents reading a description of a section
+    where every other agent here reads one.
+
+    `quoted=True` is only half a boundary on its own. The other half is
+    `trust_boundary()` in the same agent's instructions, saying what the
+    markers mean; neither is worth having alone.
     """
     if not events:
         return Section("conversation")

@@ -283,6 +283,11 @@ def _transcript(messages) -> str:
     # Deferred: `instruction_prompt` imports `ChannelContext` from this
     # module, so importing it at load time is a cycle. Same reason
     # `harness.py` defers `llm_log`.
-    from friday.agent.instruction_prompt import conversation, user_input
+    from friday.agent.instruction_prompt import assemble, conversation
 
-    return user_input(conversation(list(messages)).render())
+    # Quoted through the section rather than wrapped round it; `_quoted` in
+    # the seam says why. This was the worse of the two places to get it wrong,
+    # because the output is stored as the channel's derived summary and every
+    # later prompt for the room reads it — so a mangled transcript became the
+    # room's memory of what was said rather than one bad call (ticket 06).
+    return assemble(conversation(list(messages), quoted=True))
