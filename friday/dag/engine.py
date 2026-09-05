@@ -242,14 +242,13 @@ class DAGRunner:
                 # leaves the loop pointing at the last recorded node when
                 # everything has run — so appending unconditionally counted
                 # that node twice on every resumed pass.
-                if current not in self._trail:
-                    self._trail.append(current)
+                self._record_step(current)
                 current = self._dag.next_after(current, self._state)
                 continue
 
             node = self._dag.node(current)
             log.info("dag %s: running %s", self._dag.name, node.name)
-            self._trail.append(node.name)
+            self._record_step(node.name)
             result = await node.run(self._state, self._deps)
 
             self._state = self._state.with_result(node.name, result)
@@ -258,6 +257,23 @@ class DAGRunner:
             current = self._dag.next_after(node.name, self._state)
 
         return self._state
+
+    def _record_step(self, name: str) -> None:
+        """Put a node on the path, once.
+
+        Once because the path is restored from the checkpoint and a resumed
+        run walks it again — and because a node can genuinely *re-run* on that
+        pass: a result that does not survive JSON is dropped on load, so the
+        node is not recorded and runs a second time. Appending unconditionally
+        counted such a node twice and grew the row by one entry per pass.
+
+        The graph is acyclic, so a name appearing once is the whole of what
+        callers need: `Pool._outcome` reads the path backwards for the node
+        that produced the run's `Action`, and multiplicity says nothing it
+        asks about.
+        """
+        if name not in self._trail:
+            self._trail.append(name)
 
     def _resume_point(self) -> str:
         """Where to start: the entry, unless earlier nodes already ran.

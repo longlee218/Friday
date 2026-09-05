@@ -879,10 +879,10 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
     async def sink(call) -> None:
         recorded.append(call)
 
-    filled = (
-        '{"summary": "checkout 500", "environment": "production", '
-        '"correlation_id": "abcdef01-2345-6789-abcd-ef0123456789", "curl": null}'
-    )
+    # Deliberately incomplete: a complete report ends the graph without ever
+    # asking, and the ask is what reaches the responder — the *other* agent
+    # that stamps a task id, and the one that writes text a person reads.
+    filled = '{"summary": "checkout 500", "environment": "production", "curl": null}'
     ext = build_extractor(
         params_cls=ApiIssueParams,
         harness=Harness(
@@ -917,15 +917,149 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
                 .values(task_id=task.id)
             )
 
-        await Pool(db=db, auto_ask=True).run_once()
+        await Pool(db=db, auto_ask=True, responder=_responder(sink)).run_once()
     finally:
         if kept is None:
             _EXTRACTORS.pop("api_issue", None)
         else:
             _EXTRACTORS["api_issue"] = kept
 
-    (call,) = recorded
-    assert call.task_id == task.id
-    assert call.node == "prepare"
-    assert call.message_id is None, "an extractor reads a task, not one message"
-    assert [c.agent for c in await db.calls_for_task(task.id)] == []
+    by_agent = {c.agent: c for c in recorded}
+    assert set(by_agent) == {"api_issue_extractor", "responder"}, (
+        "both legs of the chain, because either can come apart on its own"
+    )
+    assert by_agent["api_issue_extractor"].task_id == task.id
+    assert by_agent["api_issue_extractor"].node == "prepare"
+    assert by_agent["api_issue_extractor"].message_id is None, (
+        "an extractor reads a task, not one message"
+    )
+    assert by_agent["responder"].task_id == task.id
+    assert by_agent["responder"].node is None, "a responder is not a graph node"
+
+
+def _responder(sink):
+    """A real `Responder` over a scripted model, so the whole path from
+    `Pool` to `Harness` is exercised rather than stubbed at the first joint."""
+    from agents.testing import ScriptedModel, assistant_message
+
+    from friday.config import AgentConfig
+    from friday.responder import Responder
+
+    return Responder(
+        config=AgentConfig(
+            name="responder", api_key="k",
+            base_url="https://example.invalid/v1", model="test-model",
+        ),
+        model=ScriptedModel([[assistant_message("cho anh xin correlationId nhé")]]),
+        record=sink,
+    )
+
+
+async def test_the_path_a_task_walked_survives_the_pause_that_ended_it(db):
+    """The trail is checkpointed, and then a hand-over used to blank it.
+
+    `_walk`'s checkpoint saves the path; the `HandOver` branch immediately
+    calls `_record_pause` on the same row, and that call passed `results` but
+    not `trail` — so the upsert overwrote the path with the empty default it
+    had just been given. `results` survived because somebody remembered to
+    pass them.
+
+    Driven through `Pool.run_once` over a two-node graph, because a one-node
+    graph never reaches `_walk` at all: node 0 runs outside the runner and
+    every graph registered today ends there, which is why nothing noticed.
+    """
+    from friday.dag.engine import DAG, Edge, Node
+    from friday.dag.router import EDGE_ROUTER, register_dag
+    from friday.domain.actions import HandOver
+
+    async def looks(state, deps):
+        return "nothing in the logs"
+
+    async def gives_up(state, deps):
+        return HandOver("no idea, over to you")
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag(
+        "api_issue",
+        DAG(
+            name="two-steps",
+            nodes=(Node("prepare", _ready), Node("look", looks), Node("give_up", gives_up)),
+            edges=(Edge("prepare", "look"), Edge("look", "give_up")),
+        ),
+    )
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+
+    try:
+        await Pool(db=db, auto_ask=True).run_once()
+        stored = await db.load_dag_progress(task.id, dag_name="two-steps")
+
+        # And again, the way a restart or a second pass reaches it: every node
+        # is already recorded, so the runner walks past all of them and adds
+        # nothing. Whatever the path is now, it came out of the database.
+        await db.move_task(task.id, TaskState.PENDING)
+        await Pool(db=db, auto_ask=True).run_once()
+        resumed = await db.load_dag_progress(task.id, dag_name="two-steps")
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+
+    assert stored is not None
+    _, walked = stored
+    assert walked == ["look", "give_up"], (
+        "the path the run took, still there after the pause that ended it"
+    )
+
+    assert resumed is not None
+    _, walked_again = resumed
+    assert walked_again == ["look", "give_up"], (
+        "a resumed pass reads the path back rather than rebuilding it from "
+        "the part it happened to walk itself"
+    )
+
+
+async def test_the_checkpoint_is_what_saves_the_path_when_nothing_pauses(db):
+    """A graph that answers never calls `_record_pause`, so the checkpoint is
+    the only thing that can have written the path.
+
+    Worth its own test rather than an assertion on the one above: with the
+    pause carrying the trail too, deleting `trail=path` from the checkpoint
+    left that test green. Two writers, one of which masked the other — which
+    is the same shape as the bug it was written for.
+    """
+    from friday.dag.engine import DAG, Edge, Node
+    from friday.dag.router import EDGE_ROUTER, register_dag
+    from friday.domain.actions import Reply
+
+    async def looks(state, deps):
+        return "found it"
+
+    async def answers(state, deps):
+        return Reply("cache đầy thôi, anh clear rồi nhé")
+
+    EDGE_ROUTER.pop("api_issue", None)
+    register_dag(
+        "api_issue",
+        DAG(
+            name="answering",
+            nodes=(Node("prepare", _ready), Node("look", looks), Node("answer", answers)),
+            edges=(Edge("prepare", "look"), Edge("look", "answer")),
+        ),
+    )
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+
+    try:
+        await Pool(db=db, auto_ask=True).run_once()
+        stored = await db.load_dag_progress(task.id, dag_name="answering")
+    finally:
+        EDGE_ROUTER.pop("api_issue", None)
+
+    assert stored is not None
+    _, walked = stored
+    assert walked == ["look", "answer"]
+
+
+async def _ready(state, deps):
+    """A node 0 that hands its parameters on without a model, so a graph test
+    is about the graph."""
+    from friday.domain.models import ApiIssueParams
+
+    return ApiIssueParams(**deps.task.params)

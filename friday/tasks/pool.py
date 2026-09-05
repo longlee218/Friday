@@ -397,6 +397,10 @@ class Pool:
                     task.id,
                     dag,
                     results={},
+                    # Node 0 is the whole path a one-node graph walks, and it
+                    # runs outside the runner — so there is no trail to carry
+                    # here, only the one node that produced this.
+                    trail=[dag.entry],
                     fingerprint=_fingerprint(await self._params_now(task)),
                     node=dag.entry,
                     hand_over=prepared,
@@ -427,6 +431,7 @@ class Pool:
                 task.id,
                 dag,
                 results=_checkpointable(final, dag),
+                trail=trail,
                 fingerprint=fingerprint,
                 node=_last_action_node(final, trail) or dag.name,
                 hand_over=outcome,
@@ -512,7 +517,20 @@ class Pool:
         return dict(current.params) if current is not None else dict(task.params)
 
     async def _record_pause(
-        self, task_id: int, dag, *, results: dict, fingerprint: str, node: str, hand_over: HandOver
+        self,
+        task_id: int,
+        dag,
+        *,
+        results: dict,
+        #: The path that produced those results. Passed for the same reason
+        #: `results` is: this is a second write to the row the checkpoint just
+        #: wrote, and the upsert overwrites every column it is given — so a
+        #: column left out is a column blanked. It was, and the trail this
+        #: ticket added went with it on every hand-over.
+        trail: list[str],
+        fingerprint: str,
+        node: str,
+        hand_over: HandOver,
     ) -> None:
         """A run ended on a `HandOver`: save which node said so and what it said,
         alongside the state so far, so `_raise_hands` can read this run's
@@ -527,6 +545,7 @@ class Pool:
             task_id,
             dag_name=dag.name,
             results=results,
+            trail=trail,
             params_fingerprint=fingerprint,
             paused_at_node=node,
             paused_question=hand_over.reason,

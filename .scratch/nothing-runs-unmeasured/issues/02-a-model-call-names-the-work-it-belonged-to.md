@@ -108,3 +108,43 @@ the same with `task_id`. Both now say in code what the query already
 guaranteed. The other 32 are pre-existing and untouched; mypy is in the dev
 group, is not configured, and is not recorded in CLAUDE.md, so this is a
 measurement rather than a gate.
+
+## What the review changed
+
+Three findings, all mine, none caught by a green suite.
+
+**A hand-over erased the path the checkpoint had just saved.** `_record_pause`
+is a *second* write to the row `_walk`'s checkpoint wrote, and the upsert
+overwrites every column it is given — so `trail`, left out, was blanked with
+the empty default. `results` survived only because somebody had remembered to
+pass them. Measured: `({'b': 'x'}, ['a', 'b'])` before the pause, `({'b': 'x'},
+[])` after.
+
+**The persistence half of the trail had no test at all.** Three separate
+mutations — the checkpoint dropping `trail=`, `Pool` not seeding the runner,
+`load_dag_progress` returning `[]` — each left the whole suite green. The one
+test that existed drove `DAGRunner` directly and hand-carried the path through
+a local dict, so every seam between the runner and the database could be cut
+without a red test. Which is exactly how the bug above shipped.
+
+Fixing it needed two tests rather than one, and the reason is worth keeping:
+with the pause carrying the trail too, deleting `trail=path` from the
+checkpoint *still* left the first test green — two writers, one masking the
+other, the same shape as the bug. The second test runs a graph that answers
+instead of pausing, so the checkpoint is the only thing that can have written
+the path.
+
+**The responder leg of the threading was unguarded**, and this ticket's own
+notes claimed otherwise: the end-to-end test built a `Pool` with no responder,
+so it exercised the extractor and nothing else. Dropping `task_id` from either
+`Responder.draft` or `Pool` left the suite green. The test now makes the
+extractor return incomplete parameters, which is what produces the ask that
+reaches the responder, and asserts both legs.
+
+And one thing the resumed pass taught, which no reading would have: a node
+whose result does not survive JSON is dropped on load and **runs again**, so
+appending to a restored path counted it twice and the row grew by one entry
+per pass. `_record_step` puts a node on the path once.
+
+702 tests pass (700 before). Six more guards, each deleted once and watched go
+red — including the one that did not go red on the first attempt.
