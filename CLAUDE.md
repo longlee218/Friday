@@ -390,6 +390,28 @@ not an implementation detail:
   invariant rather than falling back to one. Build a multi-node graph when
   there are steps worth skipping, not before — a one-node graph is that
   principle under one name, not an exception to it.
+- **The one message that goes out unread has a floor under it.**
+  `auto_ask_for_details` sends a request for missing details with no approval
+  step, on the grounds that what is asked is decided by code and only the
+  wording is the model's. That was true of the *intent* and enforced nowhere:
+  the responder's input carries other people's channel messages, so the single
+  path with no human in it was also the one whose wording a model wrote from
+  untrusted text and signed with the operator's name. It has already produced
+  a promise nobody would keep, recorded in `Responder.draft`'s docstring.
+  `friday/responder/check.py` is the floor — no link, no code block, near the
+  template's length, and no promise — and a draft that fails it is replaced by
+  the template and the reason logged.
+
+  **One of the five rules binds only some questions, and saying so is part of
+  the rule.** A draft must still name what the template named *where the
+  template names something untranslatable* — `correlationId`, `curl`. Four of
+  the seven questions this system asks name nothing of the kind ("what access
+  you need", "which document you mean"), and for those there is no way to tell
+  a faithful Vietnamese rewording from a different question. The other four
+  rules carry those. A test says this out loud, so the paragraph cannot
+  quietly become a stronger promise than the code makes. Blunt on purpose: a false refusal sends a plainer
+  question, a false acceptance sends the operator's colleagues something the
+  operator did not say.
 - **Nothing is sent by the caller that decided to send it.** An outbound
   message is a row; one loop delivers it. Approval is enforced as a predicate
   in the query that selects sendable rows, not as a check each caller must

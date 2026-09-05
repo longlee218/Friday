@@ -245,6 +245,16 @@ workflows:
   # is decided by fixed logic, not by the model, so a wrong classification
   # costs the reporter one unnecessary question at worst. Everything else
   # parks for a human.
+  #
+  # "Only the wording changes" is enforced, not assumed. It was assumed for
+  # months, while the responder's input carried other people's channel
+  # messages — so the one path with no human in it was also the one whose
+  # wording a model wrote from untrusted text under your name. Every draft now
+  # passes `friday/responder/check.py` first: no link, no code block, near the
+  # template's length, no promise, and — where the template named something
+  # that cannot be translated, like correlationId — it still names it. Failing
+  # sends the plain template and logs why. False refusals are expected and
+  # cost a plainer question, which is the right way round.
   auto_ask_for_details: true
 
 ingest:

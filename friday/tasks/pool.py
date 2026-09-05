@@ -29,6 +29,7 @@ from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.states import TaskState
 from friday.domain.models import PARAMS, Task
 from friday.outbox import Kind
+from friday.responder.check import rejected
 
 __all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "REVIEW", "Pool"]
 
@@ -304,6 +305,15 @@ class Pool:
         A responder that cannot write it falls back to the template rather than
         producing nothing: a wrong message in someone's name is worse than a
         plain one, and silence is worse than both.
+
+        **And so does a responder that wrote the wrong thing.** This is the
+        only message the system sends without a person reading it first, and
+        the sentence that justified that — what is being asked never changes,
+        only the wording does — was enforced by nothing at all. It is enforced
+        by `friday.responder.check` now: the draft has to still name what the
+        template named, carry no link or code, stay near its length, and
+        promise nothing. Code is the floor, the same rule `prepare` states for
+        validation.
         """
         if self._responder is None:
             return template
@@ -316,7 +326,17 @@ class Pool:
             context=await self._db.relevant_messages(task.conversation),
             tone=await self._db.tone_examples(limit=self._tone_examples),
         )
-        return template if draft is None else draft.text
+        if draft is None:
+            return template
+        if (reason := rejected(draft.text, asking=template)) is not None:
+            # Logged, because a fallback nobody sees hides a prompt
+            # regression — and somebody thought the wording was worth a model
+            # call, so it is worth a line when it is thrown away.
+            log.info(
+                "task %d: the drafted question was not sent — %s", task.id, reason
+            )
+            return template
+        return draft.text
 
     async def _stranger(self, task: Task) -> bool:
         """Nobody the operator has written to before, and nobody they have

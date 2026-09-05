@@ -7,7 +7,7 @@ goes out; it fails, the template goes out.
 
 **Decisions:** D8
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -39,11 +39,86 @@ where code has nothing to object to.
 
 ## Acceptance criteria
 
-- [ ] A predicate the ask must pass: still names every field the template asks
+- [x] A predicate the ask must pass: still names every field the template asks
       for, no URLs, no code blocks, under a length bound, no commitment verbs
-- [ ] A draft that fails it is discarded and the template is sent — logged at
+- [x] A draft that fails it is discarded and the template is sent — logged at
       info with the reason, since a silent fallback hides a prompt regression
-- [ ] Driven at `Pool.run_once` with a responder stub returning hostile text,
+- [x] Driven at `Pool.run_once` with a responder stub returning hostile text,
       asserting the queued row holds the template
-- [ ] The sentence in `config.yaml` is rewritten to say what enforces it
-- [ ] Each guard is deleted once and watched go red
+- [x] The sentence in `config.yaml` is rewritten to say what enforces it
+- [x] Each guard is deleted once and watched go red
+
+## What it came to
+
+`friday/responder/check.py`, beside the prompt it holds to rather than in the
+pool that calls it, on the operator's call: what it enforces is exactly what
+`friday/responder/prompt.py` promises, and a rule that lives next to that
+prompt is one somebody editing the prompt will see.
+
+Five rules, and the blunt one is the one the incident called for: a list of
+promising phrases in Vietnamese and English. "ok có correlationId rồi, để anh
+trace thử" is short, has no link, and names the field — every other rule here
+would have passed it. False positives are expected: "để anh hỏi lại team nhé"
+is an ordinary sentence and will be refused. That is the trade, and it is the
+right way round, because failing sends a plainer question and passing wrongly
+sends the operator's colleagues something the operator did not say.
+
+**Two rules the existing tests corrected before the review could.** The
+technical-word rule demanded *every* kept word from the template, which
+refused a draft answering half of an either-or — "the correlationId, or the
+curl you used" is an offer of a choice, and taking one of them is the point of
+offering it. And it read those words out of the whole template including the
+parenthetical `_question_from_clarify` appends to say *why* the question is
+worth asking, so a draft was refused for not repeating the reasoning. One of
+them, not all, and not from the reason clause.
+
+Both were caught by tests that already existed and had nothing to do with this
+ticket, which is the argument for driving the new rule through `Pool.run_once`
+rather than only through the predicate: the check in isolation would have
+agreed with itself.
+
+730 tests pass (720 before, +10). Six guards, each deleted once and watched go
+red — five rules and the call site, because a floor nobody stands on is not a
+floor.
+
+## What the review changed
+
+Four of five findings needed code. All were in rules I had already corrected
+once, which is the pattern worth naming: each fix was aimed at the case in
+front of me and none of them at the shape of the input.
+
+**The reason clause was still read on the other path.** The strip was anchored
+to the end of the string because `_question_from_clarify` ends with `)`.
+`_question` puts a validation rule's message *inline* and ends with `?`, so it
+was never stripped there — and the plainest correct rewording of "which
+environment you're on (must be one of: dev, production, staging)" was refused
+for not reciting the enum. Reachable exactly when the reporter wrote `sản
+xuất`, which CLAUDE.md names as the expected case. Everything from the first
+bracket on is reason now, because both builders put the reason last and
+nothing else there.
+
+**And a bracket inside the model's own `because` re-armed it.** `because` is
+free text an extractor wrote; a strip that stops at the first `)` leaves half
+the clause behind. Same bug, different input, which is why the fix is
+positional rather than a balanced pair.
+
+**`HTTPS://` was not a link.** The test was case-sensitive and ran against the
+raw draft rather than the folded text — a one-character evasion producing a
+real, clickable link in a message sent under the operator's name.
+
+**And `để` written decomposed was not a promise.** Vietnamese has two Unicode
+spellings of every accented letter and they compare unequal, so the word list
+could be walked around by a spelling no editor shows and no reader would see.
+Everything is NFC-folded before matching now, which is what makes a word list
+a list of words rather than of bytes.
+
+**The fifth is a limit, not a bug, and is now written down.** The
+name-what-it-named rule is a no-op when the template names nothing
+untranslatable, which is four of the seven questions this system asks. There
+is no way to tell a faithful Vietnamese rewording of "what access you need"
+from a different question, so the other four rules carry those. CLAUDE.md and
+`config.yaml` said it unconditionally; both now say which questions it binds,
+and a test pins the limit so the docs cannot quietly outgrow the code.
+
+735 tests pass (730 before, +5). Nine guards, each deleted once and watched go
+red.

@@ -1063,3 +1063,42 @@ async def _ready(state, deps):
     from friday.domain.models import ApiIssueParams
 
     return ApiIssueParams(**deps.task.params)
+
+
+async def test_a_draft_that_would_promise_something_never_reaches_the_reporter(db):
+    """The only message this system sends without a person reading it first.
+
+    `config.yaml` justified that with a sentence — what is being asked never
+    changes, only the wording does — and nothing enforced it. The responder's
+    input carries other people's channel messages, so this was both the path
+    with no human in it and the path whose wording a model writes from
+    untrusted text under the operator's name.
+
+    Driven here rather than at the check, because what matters is not that a
+    predicate returns something: it is which bytes are in the row that goes
+    out.
+    """
+    await make_task(db)
+    responder = StubResponder("ok có correlationId rồi, để anh trace thử")
+
+    await Pool(db=db, auto_ask=True, responder=responder).run_once()
+
+    (queued,) = await db.outbound()
+    assert "để anh trace" not in queued.text
+    assert queued.text == responder.asked[0], "the template, unchanged"
+    assert "correlationId" in queued.text
+
+
+async def test_a_draft_that_only_reworded_the_question_does_reach_them(db):
+    """The wording is allowed to change — that is the whole reason the
+    responder is asked. A floor that only accepted the template would make the
+    step pointless."""
+    await make_task(db)
+    responder = StubResponder(
+        "anh ơi cho em xin cái correlationId với, hoặc cái curl anh gọi nhé"
+    )
+
+    await Pool(db=db, auto_ask=True, responder=responder).run_once()
+
+    (queued,) = await db.outbound()
+    assert queued.text.startswith("anh ơi cho em xin")
