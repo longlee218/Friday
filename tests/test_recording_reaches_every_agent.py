@@ -148,6 +148,14 @@ class _Store:
     def known_channels(self):
         return ["c1"]
 
+    def summary_of(self, channel_id):
+        """Never summarised before, so the room is worth summarising — which
+        is what makes the harness get built at all."""
+        return None
+
+    def remember_summary_of(self, channel_id, message_id):
+        self.summarised = message_id
+
     def rebuild_derived(self, channel_id, derived):
         self.derived = derived
 

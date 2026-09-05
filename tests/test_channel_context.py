@@ -93,7 +93,18 @@ def test_a_file_that_cannot_be_parsed_is_reported_by_name_and_is_not_fatal(tmp_p
     assert loaded.overrides == {}
 
 
-async def test_a_rebuild_happens_only_when_something_was_learned(db):
+async def test_the_rebuild_no_longer_waits_on_a_promotion(db):
+    """This test used to assert the opposite, and the opposite was the bug.
+
+    The rebuild sat behind `if promoted:`, and `promoted` counts staged
+    observations — of which there are none, because nothing has written one
+    since `remember` was removed. So the machine-written half of every channel
+    file was only ever written by hand, for months, with a green test saying
+    the arrangement was deliberate.
+
+    The two have nothing to do with each other: a summary depends on the room
+    having said more, which is a question `rebuild_all` now asks per channel.
+    """
     calls = []
 
     class RecordingRebuilder:
@@ -109,11 +120,8 @@ async def test_a_rebuild_happens_only_when_something_was_learned(db):
 
     heartbeat = Heartbeat(db=db, promotion=Stub(0), context_rebuilder=RecordingRebuilder())
     await heartbeat.promote()
-    assert calls == []
 
-    heartbeat = Heartbeat(db=db, promotion=Stub(1), context_rebuilder=RecordingRebuilder())
-    await heartbeat.promote()
-    assert calls == [True]
+    assert calls == [True], "nothing promoted, and the rooms are still rebuilt"
 
 
 async def test_rebuild_all_writes_what_promotion_currently_believes(db, tmp_path):
@@ -450,3 +458,96 @@ async def test_a_named_person_reaches_the_prompt_beside_the_rooms_register(tmp_p
 
     assert "trang trọng" in prompts[0]
     assert "dana" in prompts[0] and "gọi em" in prompts[0]
+
+
+async def test_a_room_is_summarised_again_only_when_it_has_said_more(tmp_path):
+    """The rebuild rode a pass that could never fire.
+
+    `Heartbeat.promote` called it behind `if promoted:`, and `promoted` counts
+    staged observations — of which there are none, because nothing has written
+    one since `remember` was removed. So the machine-written half of every
+    channel file was only ever written by hand. And the summary has nothing to
+    do with promotion: it depends on the room having said more.
+
+    Which is the condition it runs on now. Re-summarising every beat would
+    spend a model call a minute on a room that has not spoken.
+    """
+    from friday.config import AgentConfig
+    from friday.memory.channel_context import ContextRebuilder, ContextStore
+
+    class Room:
+        def __init__(self) -> None:
+            self.messages = [_said("m1", "api trả 500")]
+
+        async def relevant_messages_in_channel(self, provider, channel_id):
+            return list(self.messages)
+
+    room = Room()
+    store = ContextStore(tmp_path)
+    store.rebuild_derived("c1", {})
+    summaries: list[str] = []
+
+    rebuilder = ContextRebuilder(
+        store=store,
+        db=room,
+        promotion=_NothingPromoted(),
+        summary_config=AgentConfig(
+            name="summary", api_key="k", base_url="https://example.invalid/v1",
+            model="test-model",
+        ),
+        summary_share=0.0,
+        model=_scripted(summaries),
+    )
+
+    await rebuilder.rebuild_all()
+    await rebuilder.rebuild_all()
+    assert len(summaries) == 1, "the room said nothing new"
+
+    room.messages.append(_said("m2", "vẫn còn lỗi anh ơi"))
+    await rebuilder.rebuild_all()
+    assert len(summaries) == 2
+
+
+def _said(message_id: str, text: str):
+    from conftest import make_event
+
+    return make_event(message_id=message_id, text=text)
+
+
+def _scripted(seen: list):
+    """A model that answers the same thing every time, and says how often it
+    was asked. Written out rather than wrapped around `ScriptedModel`, whose
+    internals the first version of this reached into and broke — the summary
+    then failed on every pass, and the test read that as the behaviour it was
+    checking for."""
+    from agents.items import ModelResponse
+    from agents.models.interface import Model
+    from agents.usage import Usage
+    from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+
+    class Answers(Model):
+        async def get_response(self, *a, **kw):
+            seen.append("asked")
+            return ModelResponse(
+                output=[
+                    ResponseOutputMessage(
+                        id="1", role="assistant", status="completed", type="message",
+                        content=[ResponseOutputText(
+                            text="họ hay deploy vào thứ sáu",
+                            type="output_text", annotations=[],
+                        )],
+                    )
+                ],
+                usage=Usage(requests=1, input_tokens=5, output_tokens=2),
+                response_id=None,
+            )
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    return Answers()
+
+
+class _NothingPromoted:
+    async def render(self):
+        return ""

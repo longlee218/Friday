@@ -7,7 +7,7 @@ decide what happens to the observation tier that has no producer.
 
 **Decisions:** none yet — the second half is an open question, see below
 
-**Status:** todo
+**Status:** in progress — the rebuild is fixed; the dead tier is the operator's call
 
 ## Why
 
@@ -53,11 +53,43 @@ goes stale silently.
 
 ## Acceptance criteria
 
-- [ ] The channel summary rebuild runs on its own condition, not on
+- [x] The channel summary rebuild runs on its own condition, not on
       `promoted`, and that condition is about the channel
-- [ ] An `agents.summary` block exists in `config.yaml`, or its absence is
+- [x] An `agents.summary` block exists in `config.yaml`, or its absence is
       logged loudly at startup the way an empty `sensitive_words` already is
-- [ ] A test fails if `rebuild_all` becomes unreachable again
+- [x] A test fails if `rebuild_all` becomes unreachable again
 - [ ] The observation tier is either given a producer or removed, and
       `CLAUDE.md` matches whichever happened
-- [ ] Each guard is deleted once and watched go red
+- [x] Each guard is deleted once and watched go red
+
+## What it came to, so far
+
+**The rebuild runs every beat and decides per channel.** It asks whether the
+room has said anything since the summary it already has — `summary_of`, kept
+in a `state` section *outside* `derived`, because everything in `derived` is
+rendered into that room's prompts and a message id is not context. Read back
+from the file rather than held in memory, so a process that restarted between
+beats gets the same answer as one that did not.
+
+**A test asserted the bug.** `test_a_rebuild_happens_only_when_something_was_learned`
+pinned "nothing promoted, nothing rebuilt" as deliberate, and it was green for
+months while the machine-written half of every channel file was only ever
+written by hand. It says the opposite now, and its docstring says why it
+changed.
+
+**And my own new test lied to me first.** Its scripted model reached into
+`ScriptedModel`'s internals to count calls, which broke the summary on every
+pass — so the test read "no second summary" as the behaviour it was checking
+for, when the real answer was "no summary at all, twice". A counting model
+written out rather than wrapped around one.
+
+## Still open, and not mine to decide
+
+Whether the observation tier is **given a producer or removed**. The operator
+has already chosen its replacement — the four memory tools of ticket 09 —
+which makes removal the consistent answer, and removal means dropping two
+tables that no code writes to. That is destructive and irreversible in a way
+the rest of this ticket is not, so it waits for a yes.
+
+Until then `Promotion` still runs on every beat over a table nothing writes,
+which costs one query a minute and is honest about achieving nothing.

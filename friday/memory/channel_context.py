@@ -162,6 +162,25 @@ class ContextStore:
         # the operator does not write, so it must not wait for a restart.
         self._held[channel_id] = self.load(channel_id)
 
+    def summary_of(self, channel_id: str) -> str | None:
+        """The last message the summary on disk was made from.
+
+        Its own section rather than a key in `derived`, because everything in
+        `derived` is rendered into this room's prompts and a message id is not
+        context. Read back from the file rather than held in memory: a process
+        that restarted between beats has to get the same answer as one that
+        did not.
+        """
+        state = (self._read(self.path_for(channel_id)) or {}).get("state") or {}
+        return state.get("summary_of")
+
+    def remember_summary_of(self, channel_id: str, message_id: str) -> None:
+        existing = self._read(self.path_for(channel_id)) or {}
+        existing.setdefault("derived", {})
+        existing.setdefault("overrides", {})
+        existing["state"] = {"summary_of": message_id}
+        self._write(self.path_for(channel_id), existing)
+
     def known_channels(self) -> list[str]:
         """Channels with a file already — the set a rebuild considers."""
         if not self._dir.exists():
@@ -223,7 +242,20 @@ class ContextRebuilder:
         cls, config, *, store, db, promotion, record=None, spent=None
     ) -> "ContextRebuilder":
         """Which agent summarises a channel, and when, are this module's
-        business. The composition root asks for a rebuilder."""
+        business. The composition root asks for a rebuilder — and that is why
+        the warning below lives here rather than there: `run_agent` reads no
+        agent's knobs, and a test says so.
+
+        Loud for the same reason an empty `sensitive_words` is loud: nothing
+        else says so. Without the block, every channel's derived context stays
+        whatever was last written in it, and a room that has outgrown a prompt
+        goes on handing the whole transcript to every agent that reads it.
+        """
+        if config.agents.get("summary") is None:
+            log.warning(
+                "no 'summary' agent in config.yaml — channels are never "
+                "summarised, and their context files keep what is in them now"
+            )
         return cls(
             store=store,
             db=db,
@@ -258,28 +290,52 @@ class ContextRebuilder:
         self._model = model
 
     async def rebuild_all(self) -> None:
+        """Rewrite the machine-written half of every known channel's file.
+
+        Runs on the heartbeat's own cadence and decides per channel, which is
+        the correction this method needed: it used to ride `Promotion` —
+        `Heartbeat.promote` called it behind `if promoted:` — and promotion
+        counts staged observations, of which there are none, because nothing
+        has written one since `remember` was removed. So the derived section
+        of every channel file was only ever written by hand, and nothing said
+        so.
+
+        The summary never had anything to do with promotion anyway. It depends
+        on the room having said more, and that is what it asks now.
+        """
         learned = await self._promotion.render()
         for channel_id in self._store.known_channels():
             derived: dict[str, Any] = {}
             if learned:
                 derived["learned"] = learned
-            summary = await self._maybe_summarize(channel_id)
+            summary, newest = await self._maybe_summarize(channel_id)
             if summary:
                 derived["summary"] = summary
             self._store.rebuild_derived(channel_id, derived)
+            if summary:
+                # What the summary was made from. Bookkeeping, so it is kept
+                # *outside* `derived` — everything in there is rendered into
+                # the prompts for this room, and a message id is not context.
+                # The next pass compares against it rather than asking the
+                # model again for a room that has not spoken; a rebuild every
+                # beat would be a model call a minute per channel, for nothing.
+                self._store.remember_summary_of(channel_id, newest)
 
-    async def _maybe_summarize(self, channel_id: str) -> str | None:
+    async def _maybe_summarize(self, channel_id: str) -> tuple[str | None, str]:
         if self._summary_config is None:
-            return None
+            return None, ""
         messages = await self._db.relevant_messages_in_channel("discord", channel_id)
         if not messages:
-            return None
+            return None, ""
+        newest = messages[-1].provider_message_id
+        if self._store.summary_of(channel_id) == newest:
+            return None, ""
         # A rough count, not an exact one: the threshold it is compared
         # against is itself a configured share, so precision here buys
         # nothing a cheaper estimate would not.
         tokens = sum(len(m.text) for m in messages) // 4
         if tokens < self._summary_config.context_window * self._summary_share:
-            return None
+            return None, ""
         harness = Harness(
             config=self._summary_config,
             instructions=_summary_instructions(),
@@ -289,13 +345,13 @@ class ContextRebuilder:
         )
         result = await harness.run(_transcript(messages))
         if not result or not result.final_output:
-            return None
+            return None, ""
         # `derived` holds plain text — see `ChannelContext`. This agent is
         # *shown* an escaped transcript, so one that quotes what it read hands
         # back `&lt;b&gt;`; one unescape undoes the one escape the transcript
         # applied. The escape at the seam still runs, and runs last, which is
         # what keeps a hostile summary inert (ticket 07).
-        return html.unescape(result.final_output)
+        return html.unescape(result.final_output), newest
 
 
 def _transcript(messages) -> str:

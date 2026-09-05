@@ -77,6 +77,21 @@ agents:
     # How many of your past replies to show it as tone examples.
     tone_examples: 8
 
+  # Summarises a channel once it has said more than a prompt can hold, so
+  # later prompts for that room read the summary instead of the transcript.
+  # Without this block the summary never happens and the derived section of
+  # every context file stays whatever was last written there — startup says so.
+  #
+  # It runs on the heartbeat and asks each room whether it has said anything
+  # since the summary it already has, so a quiet channel costs nothing.
+  # summary:
+  #   api_key: ${TRIAGE_API_KEY}
+  #   base_url: "https://api.minimax.io/v1"
+  #   model: "MiniMax-M3"
+  #   settings:
+  #     temperature: 0
+  #   max_turns: 1
+
   # ── Extractors, one per task type ─────────────────────────────────────────
   # Triage says what a message is and stops. Everything a task knows is lifted
   # out of the message here, by the extractor for its type, reading every

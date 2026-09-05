@@ -61,13 +61,20 @@ class Heartbeat:
             await self.promote()
 
     async def promote(self) -> None:
-        """Run one promotion pass, and rebuild channel context if it changed
-        anything. A tick that promoted nothing rebuilds nothing — a summary
-        call on every idle beat would cost real money for no new context."""
-        if self._promotion is None:
-            return
-        promoted = await self._promotion.run_once()
-        if promoted and self._context_rebuilder is not None:
+        """Run one promotion pass, and rebuild what the channels have learned.
+
+        The rebuild used to sit behind `if promoted:`, which is a condition it
+        has nothing to do with — and one that has never been true, since
+        nothing has staged an observation since `remember` was removed. So the
+        machine-written half of every channel file was only ever written by
+        hand, silently, for months.
+
+        It runs every beat now and decides per channel: `rebuild_all` asks
+        whether a room has said anything since the summary it already has.
+        """
+        if self._promotion is not None:
+            await self._promotion.run_once()
+        if self._context_rebuilder is not None:
             await self._context_rebuilder.rebuild_all()
 
     async def beat(self) -> str:

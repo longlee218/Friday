@@ -586,6 +586,16 @@ not an implementation detail:
 
   The responder's section order is load-bearing (stable-first is the
   prompt-cache hit) and has its own test.
+- **A channel is summarised when the room has said more, and on no other
+  condition.** The rebuild used to sit behind `if promoted:` in the heartbeat —
+  promotion counts staged observations, nothing has written one since
+  `remember` was removed, so the machine-written half of every channel file
+  was only ever written by hand, for months, with a green test asserting the
+  arrangement was deliberate. It runs every beat now and asks each room
+  whether it has said anything since the summary it already has; that mark
+  lives in a `state` section *outside* `derived`, because everything in
+  `derived` is rendered into that room's prompts and a message id is not
+  context.
 - **Silence is not approval.** Only a classification the operator marked
   *right* becomes a few-shot example, and only a classifiable type at that. An
   unmarked classification is one nobody read.
