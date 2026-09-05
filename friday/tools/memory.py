@@ -1,0 +1,319 @@
+"""What an agent chooses to remember, and can go back and correct.
+
+**Shape only. No agent is given these yet**, and the four `db` methods they
+call do not exist — see `.scratch/nothing-runs-unmeasured/issues/09`. The same
+state `ask_clarification` has been in since ticket 36: declared, reviewable,
+and wired to nothing.
+
+This replaces `remember` rather than restoring it. `remember` wrote to a
+staging tier that nothing read back, and a promotion pass moved only what two
+approved tasks corroborated. That restraint bought a real thing — an agent
+reading its own unreviewed notes drifts with no floor — but it cost the two
+operations that make memory usable: an agent that cannot see what it wrote
+cannot correct it, and `memory_update`/`memory_delete` have nothing to name.
+**Reversing it is a design change**, recorded in `docs/DESIGN.md` rather than
+implied by this module existing.
+
+What the staging tier was protecting is kept, by three properties instead:
+
+**A memory reaches a model only as a tool result, never as instructions.**
+`remember`'s successor tier did the opposite — `Harness._with_notes` appends
+the promoted block to `instructions`, and commit f0686f2 is the day a promoted
+note closed its own section and could rewrite the instructions of every call
+that agent made afterwards. Text that only ever arrives as tool output cannot
+do that, whatever it says. It also means memory costs nothing on a run that
+does not search: a prompt-cache argument and a safety argument pointing the
+same way.
+
+**Scope is attached by the runtime, never named by the model.** The same rule
+`remember` had for `task_id`: the parameters a model supplies are the
+parameters it can get wrong, and "which room is this" is not a question worth
+letting it answer. An agent working in one channel cannot read or write
+another's.
+
+**An id it did not read back is an id that does not resolve.** Ids are opaque
+and sparse rather than sequential, so a hallucinated one fails instead of
+landing on somebody else's row. With `1, 2, 3…` a model that invents `m12`
+deletes whatever `m12` happens to be.
+
+The docstrings below *are* the schema: `harness.tool` leaves
+`use_docstring_info` at the SDK's default of True — the knob LangChain calls
+`parse_docstring`, where it defaults to False — so an
+`Args:` line reaches the model as that parameter's description. The one for
+`memory_id` is load-bearing: without it the model is handed a bare
+`memory_id: string` and nothing saying it must be one it read back, which is
+the whole of what makes an opaque id safe.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+from friday.agent.harness import ToolContext, tool
+
+__all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "MemoryScope", "memory_tools"]
+
+log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryScope:
+    """Where a memory belongs and who wrote it. Runtime-supplied, every field.
+
+    `channel_id` is the read *and* write boundary — a memory written in one
+    room is invisible in another. Not a nicety: this system's rooms are
+    different teams, and a fact learned in one is a leak in the next.
+
+    `task_id` and `agent` are provenance. They are never searched on; they are
+    what lets the operator's board answer "who wrote this, and while doing
+    what" about a line the agent is now acting on. **Both are required, and
+    `task_id` is nullable rather than optional** — a run that belongs to no
+    task says so by passing `None`, which is a different statement from
+    forgetting to pass it. They had defaults, under a docstring that said
+    every field was runtime-supplied; a default is how provenance goes missing
+    without anybody deciding it should.
+
+    **This is the run's context object, not a closure variable**, and the
+    distinction is the difference between working and being silently wrong. An
+    agent here is built once, at startup — `Responder.build` in the composition
+    root, reused for every task in every channel — so a scope captured when the
+    tools were made would pin every room's memory to whichever room happened to
+    be first. It arrives per call instead, as `Harness.run(context=...)`, the
+    way `ClarifyCapture` and `FieldsCapture` already do. The model still cannot
+    name it, which was the point.
+    """
+
+    channel_id: str
+    task_id: int | None
+    agent: str
+
+
+#: A memory is a sentence, not a document. Longer than this is a summary that
+#: belongs in the channel's context file.
+TEXT_CHARS = 500
+
+#: What one search returns. Enough to choose from, few enough that the agent
+#: still has to have written something worth finding.
+RESULTS = 8
+
+# These were a `Limits` dataclass with a third field, `per_scope`, and a
+# `limits=` parameter on the factory — a docstring claiming the numbers could
+# not drift, over an arrangement in which they could only drift:
+#
+#   * the tool docstrings *are* the schema and cannot be f-strings, so they
+#     said "eight" and "500" while the parameter existed precisely so a caller
+#     could pass three and two hundred;
+#   * `per_scope` had no reader in this module and no place in the store
+#     contract below, so a store enforcing it would have had to keep its own
+#     copy of the number — exactly the drift the class said it prevented.
+#
+# Two constants and no parameter, with the prose built from them below. The cap
+# on how many memories one scope may hold is the store's, stated in ticket 09,
+# because the store is the only thing that can enforce it.
+
+
+def memory_tools(db):
+    """The four tools, bound to one store. The scope arrives per run.
+
+    A factory for the same reason `search_skills_tool` is one: what an agent
+    can reach is composition, not something the agent declares. Returns them
+    in a list to be handed to `Harness(tools=...)`; an agent gets all four or
+    none, because three of them are unusable without the fourth.
+
+    The split is by lifetime. `db` lives as long as the process, so it is
+    closed over; the scope lives as long as one run, so it is
+    `Harness.run(context=MemoryScope(...))` and each tool reads it off
+    `ctx.context` through `_scope`. An agent given these must therefore be
+    built with `context_type=MemoryScope`.
+
+    A store that raises is not this module's problem to phrase. `harness.tool`
+    replaces the SDK's failure message for every tool here, because the
+    default leaks `str(error)` to the model and tells it to try again — and
+    "try again" after a write that may have landed is how a room ends up with
+    the same memory twice.
+
+    `db` must answer four methods, none of which exist yet:
+
+        memory_search(scope, query, limit)   -> list[Memory]
+        memory_add(scope, text)              -> Memory
+        memory_update(scope, memory_id, text) -> Memory | None
+        memory_delete(scope, memory_id)      -> bool
+
+    A `None` or `False` back means "no memory with that id **in this scope**",
+    which is the same answer as "it does not exist" and deliberately so: an
+    agent must not be able to learn that a row exists in a room it cannot read.
+    """
+
+    async def memory_search(ctx: ToolContext[MemoryScope], query: str) -> str:
+        """Find what is already known about something, before assuming nothing is.
+
+        Search first. What you are about to work out may have been worked out
+        already, by an earlier run that wrote it down for exactly this moment.
+
+        Returns up to {RESULTS} lines, best match first, each one
+        `id: text` — the id is what memory_update and memory_delete take, so
+        keep it if you intend to correct or remove that line. Nothing found
+        comes back as a plain sentence saying so, which is an answer, not an
+        error.
+
+        Only this channel's memory is searched. There is no way to reach
+        another room's, and nothing you write here will be visible there.
+
+        Args:
+            query: a phrase describing what you want to know, in the words you
+                would use to describe it — not an id, and not a question.
+        """
+        found = await db.memory_search(_scope(ctx), query, limit=RESULTS)
+        log.info("memory searched: %r -> %d", query, len(found))
+        return _as_lines(found)
+
+    async def memory_add(ctx: ToolContext[MemoryScope], text: str) -> str:
+        """Write down something a later run would otherwise have to work out again.
+
+        Worth writing: how a system actually behaves once you have established
+        it, a person's standing preference, a step that turned out to be
+        necessary. Not worth writing: anything readable off the task you are
+        working on, anything you have not confirmed, and anything you would not
+        stand behind in a month — this is read back as fact, not as a guess.
+
+        Search before you write. A second copy of something already known is
+        worse than nothing: it takes a slot, and the two will disagree the day
+        one of them is corrected.
+
+        Returns the new id, so you can correct it later in this same run.
+
+        Args:
+            text: one sentence, at most {TEXT_CHARS} characters, that will
+                make sense to a run that has none of your current context.
+        """
+        scope = _scope(ctx)
+        kept = _bounded(text)
+        written = await db.memory_add(scope, kept)
+        log.info("memory added by %s: %r", scope.agent, kept)
+        return f"remembered as {written.id}"
+
+    @tool
+    async def memory_update(
+        ctx: ToolContext[MemoryScope], memory_id: str, text: str
+    ) -> str:
+        """Correct something already written down, in place.
+
+        Use this rather than adding a second line when what is stored is now
+        wrong or incomplete — two lines that contradict each other are worse
+        than either alone, and nothing later can tell which one won.
+
+        The previous text is replaced, not kept. Correct what is wrong; do not
+        rewrite a line that is merely phrased differently from how you would
+        phrase it.
+
+        Args:
+            memory_id: the id exactly as memory_search returned it.
+            text: what it should say instead, in full — this replaces the line
+                rather than being appended to it.
+        """
+        scope = _scope(ctx)
+        updated = await db.memory_update(scope, memory_id, _bounded(text))
+        if updated is None:
+            return _no_such(memory_id)
+        log.info("memory %s updated by %s", memory_id, scope.agent)
+        return f"{memory_id} updated"
+
+    @tool
+    async def memory_delete(ctx: ToolContext[MemoryScope], memory_id: str) -> str:
+        """Remove something that turned out to be wrong.
+
+        For a line that is *false*, not one that is old — a fact you have just
+        disproved, a preference the person has told you they no longer have.
+        Something merely inaccurate is a memory_update.
+
+        Deleting is visible to the operator afterwards, along with what the
+        line said. Delete what is wrong; you do not have to tidy.
+
+        Args:
+            memory_id: the id exactly as memory_search returned it.
+        """
+        scope = _scope(ctx)
+        if not await db.memory_delete(scope, memory_id):
+            return _no_such(memory_id)
+        log.info("memory %s deleted by %s", memory_id, scope.agent)
+        return f"{memory_id} forgotten"
+
+    # The numbers the prose quotes are the numbers the code enforces, because
+    # they are the same object. A docstring cannot be an f-string and these two
+    # are the schema the model reads, so they are written in here — the shape
+    # `classify` and `ask_for_fields` already use, for the same reason.
+    # `replace` rather than `format`: a docstring is prose and may hold a brace.
+    memory_search.__doc__ = memory_search.__doc__.replace("{RESULTS}", str(RESULTS))
+    memory_add.__doc__ = memory_add.__doc__.replace("{TEXT_CHARS}", str(TEXT_CHARS))
+
+    return [
+        tool(memory_search),
+        tool(memory_add),
+        memory_update,
+        memory_delete,
+    ]
+
+
+def _as_lines(found) -> str:
+    """One memory per line, and each memory kept to one line.
+
+    A stored text carrying a newline could otherwise forge a second `id: text`
+    entry and be read back as a memory nobody wrote — the same delimiter
+    defence `channel_derived` needed once the summariser started quoting what
+    it read.
+    """
+    if not found:
+        return "nothing remembered about that yet"
+    return "\n".join(f"{m.id}: {' '.join(m.text.split())}" for m in found)
+
+
+class NotWired(RuntimeError):
+    """The agent holding these tools was run without a `MemoryScope`.
+
+    Its own class so the log line names the mistake. Without it the scope was
+    dereferenced straight off `ctx.context`, an `AttributeError` on `None`
+    reached `harness._tool_failed`, and the operator was told a tool was
+    unavailable — which reads as the store being down, and is instead an agent
+    that was built without `context_type=MemoryScope` or run without a
+    `context=`. That is the failure mode of wiring a *new* agent to these,
+    which is the next thing that happens to this file.
+    """
+
+
+def _scope(ctx) -> MemoryScope:
+    """The run's scope, or a failure that says what is actually wrong.
+
+    Every tool here reads it through this. The model still gets "unavailable"
+    either way, which is true — without a scope there is no memory to reach —
+    but the operator gets a sentence they can act on.
+    """
+    scope = getattr(ctx, "context", None)
+    if not isinstance(scope, MemoryScope):
+        raise NotWired(
+            "memory tools were run without a MemoryScope: build the agent with "
+            f"context_type=MemoryScope and pass context= to run() (got {scope!r})"
+        )
+    return scope
+
+
+def _bounded(text: str, chars: int = TEXT_CHARS) -> str:
+    """Cut to the cap rather than refusing.
+
+    A refusal here would be a turn spent on nothing: the agent would have to
+    be told what the cap is and asked to write the line again, and it has
+    already said what it meant. A truncated memory is a worse memory, not a
+    failed step.
+    """
+    text = text.strip()
+    return text if len(text) <= chars else text[:chars].rstrip()
+
+
+def _no_such(memory_id: str) -> str:
+    """The one answer for an id that is gone, that never existed, and that
+    belongs to another room. Distinguishing them would tell an agent something
+    about a scope it cannot read."""
+    return (
+        f"no memory {memory_id!r} here — search again, ids are exactly as "
+        f"memory_search returns them"
+    )

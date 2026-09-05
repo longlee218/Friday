@@ -1,7 +1,13 @@
 """Every tool an agent may call.
 
-One module per subject: asking (`clarify`, `ask_for_fields`), classifying
-(`classify`), reaching (`fetch_skill`).
+One module per subject. **The list is not written here**, because a list in
+prose is a list that drifts: this sentence named four of the twelve tools that
+exist, having quietly stopped tracking three skill tools and then the whole
+memory subject. `tests/test_tools.py` asserts the names, builds the factories
+as well as scanning the modules, and fails if a new one is missing — so the
+answer to "what can the agents do?" lives in the one place that cannot be
+wrong about it. Read it there; the subjects are the module names beside this
+file.
 
 CLAUDE.md said for months there was deliberately no `tools/` package, and the
 argument was that a tool belongs beside the state it touches because that is

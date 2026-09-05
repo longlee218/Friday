@@ -270,3 +270,38 @@ async def test_an_empty_list_holds_nothing():
     )
 
     assert (await decide(triage, "lương tháng này về chưa")).type == "api_issue"
+
+
+async def test_a_malformed_classify_call_ends_the_run():
+    """`stop_on_first_tool` cannot tell a failed tool from a successful one.
+
+    The first tool call's output is the run's final output, and a tool's
+    failure message is its output — so a `classify` call the schema rejects
+    ends the run with nothing recorded, and the model is never asked again.
+    The corrected call scripted below is never requested.
+
+    Pinned because the tool layer now goes out of its way to let a model fix
+    its own malformed call (`harness._tool_failed` hands a `ModelBehaviorError`
+    back in the SDK's "try again" wording), and it is worth one test saying out
+    loud that the wording never reaches this agent. Nothing is lost — the
+    mention goes to a person — but it goes there for something the model could
+    have fixed, and if that is ever to change it changes here.
+    """
+    from agents.testing import ScriptedModel, function_call
+
+    triage = Triage(
+        config=CONFIG,
+        model=ScriptedModel(
+            [
+                [function_call("classify", {"task_type": "api_issue",
+                                            "confidence": "high"}, call_id="1")],
+                [function_call("classify", {"task_type": "api_issue",
+                                            "confidence": 0.9}, call_id="2")],
+            ]
+        ),
+    )
+
+    outcome = await triage.decide(make_event(text="the api is 500ing"))
+
+    assert isinstance(outcome, NeedsHuman)
+    assert outcome.reason == "triage produced no classification"

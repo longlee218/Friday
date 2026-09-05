@@ -99,13 +99,13 @@ def ask_clarification(
     ctx: ToolContext[ClarifyCapture],
     question: str,
     clarification_type: ClarificationType,
-    context: str = "",
+    context: str | None = None,
     options: list[str] | None = None,
 ) -> str:
     ctx.context.clarification = Clarification(
         question=question,
         kind=clarification_type,
-        context=context,
+        context=context or "",
         options=tuple(options or ()),
     )
     return "asked"
@@ -114,6 +114,13 @@ def ask_clarification(
 #: Written out rather than left as a docstring literal, because the kinds and
 #: their meanings come from `CLARIFICATION_TYPES` — the same trick
 #: `friday/tools/classify.py` uses on `classify`, for the same reason.
+#:
+#: **Both trailing parameters say `null` out loud.** A Python default does not
+#: make a parameter optional to the model: `strict_mode` is on, and a strict
+#: schema lists every property as required — `context: str = ""` was in
+#: `required` with no way to express having nothing to add, so an agent told
+#: "if that is not obvious" had to invent something to satisfy a schema it
+#: could not opt out of. `str | None` is what puts the null branch in.
 ask_clarification.__doc__ = f"""Stop and ask, before doing any of the work.
 
 Call this the moment you notice something is unclear, missing or ambiguous —
@@ -124,8 +131,11 @@ Args:
     question: what you need to know, in one sentence.
     clarification_type: why you are stopping —
 {_TYPE_DOC}
-    context: why you need it, if that is not obvious from the question.
-    options: the choices, when you are asking somebody to pick one.
+    context: why you need it, if that is not obvious from the question —
+        null when the question speaks for itself. Do not write a sentence
+        here to fill the field.
+    options: the choices, when you are asking somebody to pick one, and null
+        when you are not.
 """
 
 ask_clarification = tool(ask_clarification)

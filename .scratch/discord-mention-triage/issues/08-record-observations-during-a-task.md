@@ -22,7 +22,7 @@ supplies are the parameters it can get wrong, which is also why the task and the
 timestamp are attached by the runtime: a model asked for a time invents one.
 
 An unknown category comes back as **a result the model can act on**, not an
-exception. A raising tool ends the run, and the step calling it had more to do
+exception. A raising tool ends the run, and the step calling it had more to do [^sdk]
 than write a note.
 
 The categories are closed — `fact`, `person`, `lesson` — because an open
@@ -40,3 +40,14 @@ unreviewed notes drifts, and nothing about the output says so.
 `promoted_at` exists and nothing sets it. Ticket 10 does, and only for work an
 approval corroborated — naming the column now means the shape is complete rather
 than migrated in later.
+
+
+[^sdk]: **Not true of this SDK**, established 2026-09-05 and recorded in
+`.scratch/nothing-runs-unmeasured/issues/10`. `function_tool` defaults to a
+`failure_error_function`, so a tool that raises hands the model an error
+string and the run continues; only passing `failure_error_function=None`
+re-raises. The conclusion here — return something the model can act on —
+stayed right for a different reason: the SDK's own message is generic,
+unscrubbed, and tells the model to try again. Left in place rather than
+rewritten, because a closed ticket records what was believed when it was
+written.

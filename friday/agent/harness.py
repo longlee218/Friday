@@ -37,12 +37,15 @@ from agents import (
     function_tool,
     set_tracing_disabled,
 )
+from agents.exceptions import ModelBehaviorError
 from agents.mcp import (
     MCPServer,
     MCPServerSse,
     MCPServerStdio,
     create_static_tool_filter,
 )
+from agents.tool import default_tool_error_function
+from agents.tool_context import ToolContext as _SdkToolContext
 from openai import AsyncOpenAI
 
 from friday.config import AgentConfig
@@ -64,9 +67,94 @@ log = logging.getLogger(__name__)
 #: What a tool implementation needs from the SDK, under a name that does not
 #: name it. `tool` decorates a function; `ToolContext` types its first
 #: argument; `Hooks` is the base a logging or tracing hook subclasses.
-tool = function_tool
-ToolContext = RunContextWrapper
+#:
+#: `ToolContext` was `RunContextWrapper` — the SDK's *parent* class, under the
+#: SDK's name for the child. Harmless to the schema, because the check that
+#: decides whether the first parameter is the context accepts either
+#: (`function_schema.py`), but it hid what the runtime actually passes: a
+#: `ToolContext` carrying `tool_name`, `tool_call_id`, `tool_arguments`,
+#: `tool_call`, `tool_namespace`, `agent` and `run_config`. A tool that wants
+#: to say which call it was could not, and nothing said why.
+#:
+#: **That check is on identity, not `issubclass`.** So this may be aliased to
+#: `RunContextWrapper` or to `ToolContext` and to nothing else: point it at a
+#: subclass of either — the natural move the day somebody wants one more field
+#: — and the context parameter silently becomes one the model sees and has to
+#: fill.
+ToolContext = _SdkToolContext
 Hooks = AgentHooks
+
+
+def _tool_failed(ctx: RunContextWrapper, error: Exception) -> str:
+    """What the model is told when a tool call fails.
+
+    **A `ModelBehaviorError` is the model's to fix, so it keeps the SDK's own
+    words.** The invoker catches every exception, and two of them are raised
+    before the tool body runs at all: arguments that are not valid JSON, and
+    arguments that fail the schema. The model can recover from both by
+    emitting the call again correctly — so telling it the tool is unavailable
+    would throw away the one recovery that works, and neither reason below
+    applies anyway: nothing was written, and the message is the SDK's own
+    string plus the model's own arguments.
+
+    Everything else is the tool itself failing, and there the SDK's default
+    formats `str(error)` into "An error occurred while running the tool.
+    Please try again. Error: …" and hands that to the model. Two things are
+    wrong with it, and neither is cosmetic:
+
+    **It is a route out for text nobody chose to publish.** `_settle` keeps a
+    provider exception out of a task's stored parameters for the same reason;
+    this is the same class of exposure by a path that never reaches it. A
+    store error carries the database path, an `OSError` from a skill file
+    carries the filesystem — and `scrub` does not touch either, because it
+    matches credential shapes and nothing else. What keeps them from the model
+    is this function's return value, not the scrub.
+
+    **"Please try again" is the wrong instruction for a tool that writes.**
+    Retrying a write that may already have landed is how a row gets recorded
+    twice. So the message says the opposite, for every tool, rather than
+    leaving each one to remember.
+
+    The exception is not swallowed: it is logged here, and the SDK logs it
+    too, at ERROR with the tool's raw arguments and a traceback
+    (`agents/tool.py`'s `_on_handled_error`). Both lines go through
+    `friday/ops/redact.py`, so a credential in either is redacted — that
+    filter had to learn to reach an exception argument and an `exc_info`
+    before it was true, which is ticket 11's subject and was found by writing
+    this sentence carelessly first. Only the model is told less.
+    """
+    if isinstance(error, ModelBehaviorError):
+        return default_tool_error_function(ctx, error)
+    log.warning("tool failed: %s", scrub(str(error)))
+    return "that tool is unavailable right now — carry on without it"
+
+
+def tool(func=None, **options):
+    """`function_tool`, with this codebase's one default already applied.
+
+    `failure_error_function` — see `_tool_failed`. Here rather than on each
+    tool because seven call sites remembering a keyword is six chances to
+    forget; a tool may still pass its own, since this only fills the gap.
+
+    **`docstring_style` is deliberately not set**, and the reason is worth
+    keeping because the opposite looks obviously right. The SDK picks between
+    google, sphinx and numpy with a regex scorer of its own — griffe parses
+    the docstring only once a style has been chosen, and its own auto-detection
+    is an Insiders feature the SDK says it is approximating
+    (`agents/function_schema.py`) — and pinning it seemed like insurance
+    against a wrong guess dropping every `Args:` description silently.
+    Measured, the insurance was the risk: detection returns `google` for every
+    docstring here and falls back to `google` when it scores nothing, so the
+    pin changed no schema — while a docstring written `:param x:` under a
+    google pin loses its descriptions, which auto-detection reads correctly.
+    The pin could only ever break the case it was there to protect.
+
+    What actually guards this is `tests/test_tools.py`: every field of every
+    tool must carry a description, whatever produced it.
+    """
+    options.setdefault("failure_error_function", _tool_failed)
+    return function_tool(func, **options)
+
 
 # Tracing is on by default and exports to OpenAI using the same key as model
 # requests. With a third-party provider that leaks both the traffic and the

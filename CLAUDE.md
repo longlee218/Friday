@@ -152,7 +152,7 @@ What is actually on disk.
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt, schema and model |
 | `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds the entry node every graph shares and holds the fill-and-validate mechanism it runs. `dag/router.py` maps a task type to a graph. **Every type now gets the same one-node graph** |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
-| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`). A test asserts the list and forbids declaring one anywhere else |
+| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), remembering (`memory`, shape only: it calls four `Database` methods that do not exist yet and no agent has it — ticket 09 of `.scratch/nothing-runs-unmeasured/`). A test asserts the list — all twelve, factories built rather than skipped — and forbids declaring one anywhere else |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `friday/board/` | The read-only page on `:8086`; its JSON API is `ops/api.py` |
@@ -193,6 +193,55 @@ Both spellings are checked by reading the syntax, since grep sees only one of
 them. A tool that needs something injected — `fetch_skill` a skill library,
 `ask_for_fields` one type's field names — stays a factory; that is a
 different thing from living somewhere else.
+
+**The listing builds the factories rather than skipping them**, and that is
+the second time this test has had to learn the same lesson. It scanned
+`vars(module)`, which a tool living in a closure never reaches, so its
+asserted list held three of twelve while a *second* test named five more by
+hand — the answer to "what can the agents do?" existing, but split across two
+lists that could not see each other. One list now, and
+`test_every_factory_is_registered_here` fails if a new factory is not built
+into it.
+
+**`harness.tool` is not `function_tool`.** It wraps it and sets one default
+for every tool here, because seven call sites remembering a keyword is six
+chances to forget: `failure_error_function`. A tool whose *body* fails tells
+the model "unavailable, carry on" rather than the SDK's default, which formats
+the raw exception — a route out for a path or a credential that `_settle`'s
+`scrub` never sees — and then asks the model to try again, which after a write
+that may have landed is how a row is recorded twice.
+
+**A `ModelBehaviorError` is exempt and keeps the SDK's own words**, because it
+is the one failure the model can fix: bad JSON and schema violations are
+raised before the body runs, so nothing was written and the only recovery is
+to emit the call again correctly.
+
+**That recovery does not reach triage**, and this file claimed it did for one
+afternoon. `classify` runs under `tool_use_behavior="stop_on_first_tool"`,
+where the first tool's output is the run's final output — and a
+`failure_error_function` return value *is* the tool output, which the SDK
+cannot distinguish from a success. So a malformed `classify` call ends the run
+with `capture.decided` unset, `Triage.decide` returns `NeedsHuman("triage
+produced no classification")`, and the mention goes to a person. Nothing is
+dropped and nothing retries. The exemption helps every agent that is *not*
+stop-on-first-tool; whether triage should recover instead is open, and named
+in ticket 10 of `.scratch/nothing-runs-unmeasured/`.
+
+**`docstring_style` is deliberately not pinned**, which is the opposite of
+what this file said for one afternoon. Detection returns google for every
+docstring here and falls back to google when it scores nothing, so the pin
+changed no schema — while a `:param x:` docstring under a google pin loses its
+descriptions that auto-detection reads correctly. The pin could only break the
+case it existed to protect. What guards it is a test: every field of every
+tool carries a description, whatever produced it.
+
+**`ToolContext` is the SDK's own `ToolContext`**, not `RunContextWrapper`,
+which it aliased for months. The runtime passes the former, carrying
+`tool_name`, `tool_call_id` and `tool_arguments`; the alias hid all three.
+It may point at either of those two classes and **at nothing else, not even a
+subclass of them**: `function_schema` decides whether the first parameter is
+the run context by identity, so a subclass silently becomes a parameter the
+model must fill. Tested, because nothing else would say so.
 
 **Four tools reach a skill, and the split is by what the agent already knows.**
 `fetch_skill` when it has the name — from the catalogue, which is still in the

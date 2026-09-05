@@ -16,7 +16,7 @@ from agents.models.interface import Model
 from agents.testing import ScriptedModel, assistant_message
 
 from friday.config import AgentConfig
-from friday.agent.harness import Harness
+from friday.agent.harness import Harness, ToolContext, tool
 
 CONFIG = AgentConfig(
     name="an-agent", api_key="sk-secret", base_url="https://example.invalid/v1",
@@ -303,3 +303,40 @@ async def test_a_run_paused_on_two_approvals_becomes_work_rather_than_an_excepti
     assert outcome is None, "a failure is None, not a raise"
     assert resumed.last_error, "and it says why, for the task it becomes"
     assert ran == [], "nothing was approved, so nothing ran"
+
+
+def test_the_tool_context_alias_keeps_ctx_out_of_the_model_s_schema():
+    """A tool's first parameter must be the run context and not a field the
+    model has to fill, and `harness.ToolContext` is what says so.
+
+    Asserted as the outcome rather than as the alias's identity. The first
+    version of this test checked `harness.ToolContext in (RunContextWrapper,
+    SdkToolContext)` and argued, in its own docstring, that the SDK decides
+    this by identity rather than `issubclass`. That premise is true —
+    `function_schema.py` uses `is`, twice — but the assertion never went near
+    `function_schema`: it compared two names the test imported itself, so it
+    would have stayed green if the SDK changed, and gone red on a subclass a
+    changed SDK handled perfectly well. It argued for a property it did not
+    run.
+
+    What breaks this: aliasing to a subclass (`ctx` becomes a required string
+    the model must supply), deleting the alias, or an SDK that stops
+    recognising whatever it points at. The reason the identity check makes a
+    subclass unsafe belongs in `harness.py`, next to the alias, and is there.
+    """
+    # `ToolContext` and `tool` are imported at module scope on purpose:
+    # `from __future__ import annotations` stringifies the signature below, and
+    # the SDK resolves it with `get_type_hints` against *this module's*
+    # globals. A function-local import leaves it a name nothing can resolve —
+    # the same trap `ask_for_fields` documents for its own `Literal`.
+
+    @tool
+    def probe(ctx: ToolContext[object], x: str) -> str:
+        """Doc.
+
+        Args:
+            x: a thing.
+        """
+        return x
+
+    assert set(probe.params_json_schema["properties"]) == {"x"}
