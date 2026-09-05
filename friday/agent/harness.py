@@ -421,10 +421,22 @@ class Harness:
             await self._write_down(calls, message_id)
 
     async def _write_down(self, calls: list, message_id: str | None) -> None:
-        """Hand each call to the sink, and never let the sink break the run.
+        """Hand each call to the sink. A sink that fails costs a row, not a run.
 
-        A failed write is a lost row; a raised write would be a lost answer.
-        The agent has already done the expensive part by the time this runs.
+        A failed write is a lost row; a raised write would be a lost answer,
+        and the agent has already done the expensive part by the time this
+        runs.
+
+        **Cancellation is the exception, and deliberately so.** This awaits
+        inside a `finally`, so cancelling the run while a write is in flight
+        delivers `CancelledError` at that await — and `except Exception` does
+        not catch it, so the loop stops and the remaining calls are dropped.
+        Widening the catch would swallow the cancellation and keep a shutting-
+        down process writing rows, which is worse than losing them: the caller
+        has already stopped waiting for the answer these rows describe. So the
+        rule is that the record survives every failure except the one that
+        means "stop", and `test_a_cancelled_run_stops_rather_than_finishing_its_writes`
+        is what says so out loud.
         """
         if self._record is None:
             return

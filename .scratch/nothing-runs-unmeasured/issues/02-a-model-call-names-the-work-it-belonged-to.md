@@ -36,4 +36,12 @@ reads the trail to decide what the graph actually decided.
 - [ ] `save_dag_state` stores the trail; a resumed run reads it back and
       appends rather than starting an empty one
 - [ ] The board and `ops/api.py` can list the calls for one task
+- [ ] **An operator can reach a call that names no message.** Ticket 01 made
+      the extractors, the responder and the summariser record, and every one
+      of their rows has a NULL `message_id`. `db.model_calls(message_id=None)`
+      means "no filter", not "the uncorrelated ones", and the only per-call
+      endpoint filters by message — so those prompts are stored and readable
+      nowhere but the SQLite file. The spec's complaint was that the two steps
+      producing text a person reads had no record of what they were sent; it
+      is half-answered until this is
 - [ ] Each guard is deleted once and watched go red

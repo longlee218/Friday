@@ -149,3 +149,31 @@ four agents writing, a page of the most recent calls can be entirely rows that
 can never match a message while the call that classified it sits just outside
 the window. `Database.calls_by_message` asks for the calls belonging to the
 messages being rendered, which is what the board meant in the first place.
+
+## A second review round
+
+**The board eviction was real and is fixed** — the finding above. Two more
+came back after it, and only one needed code.
+
+**Cancellation drops the rows it has not written yet, and that is the
+intended trade.** `_write_down` awaits inside the `finally`, so a cancel
+delivered mid-write raises `CancelledError` at that await, which
+`except Exception` does not catch: the loop stops and the rest are lost.
+Measured — a cancel during an in-flight write writes nothing. Widening the
+catch would swallow the cancellation and keep a shutting-down process writing
+rows, which is the worse failure: the caller has already stopped waiting for
+the answer those rows describe. Left as it is, said out loud in the docstring,
+and pinned by a test that turns red the moment somebody "improves" the catch
+to `BaseException` — because that change looks like a fix and quietly turns
+Ctrl-C into a process that will not stop.
+
+**Every row the three new agents write has a NULL `message_id`, and nothing
+can read them back.** `db.model_calls(message_id=None)` means "no filter",
+not "the uncorrelated ones", and the only per-call endpoint filters by
+message — so the extractor, responder and summariser prompts are stored and
+reachable nowhere but the SQLite file. Not fixed here: correlation keys are
+ticket 02's subject, and it has gained the criterion. Worth stating plainly
+though, because this ticket's own claim is weaker than it reads: every agent's
+calls now reach the *store*; three of the four do not yet reach the *operator*.
+
+694 tests pass.

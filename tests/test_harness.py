@@ -11,6 +11,7 @@ varies.
 
 from __future__ import annotations
 
+import pytest
 from agents import Agent
 from agents.models.interface import Model
 from agents.testing import ScriptedModel, assistant_message
@@ -459,3 +460,37 @@ async def test_a_call_that_never_came_back_is_still_written_down():
     assert "you decide what a message is" in call.system_prompt
     assert call.output == ""
     assert call.input_tokens == 0
+
+
+async def test_a_cancelled_run_stops_rather_than_finishing_its_writes():
+    """Recording must not outlive the cancellation that stopped it.
+
+    `_write_down` awaits inside a `finally`, so a cancel delivered while a
+    write is in flight raises `CancelledError` there. It is not caught —
+    `except Exception` does not reach it — the loop stops, and the remaining
+    rows are lost. That is the intended trade: the caller has already stopped
+    waiting for the answer those rows describe, and a process that keeps
+    writing through its own shutdown is the worse failure.
+
+    Pinned because widening that catch to `BaseException` looks like an
+    improvement — "record even on cancellation" — and quietly turns Ctrl-C
+    into a process that will not stop.
+    """
+    import asyncio
+
+    written: list = []
+    started = asyncio.Event()
+
+    async def slow_sink(call) -> None:
+        started.set()
+        await asyncio.sleep(5)
+        written.append(call)
+
+    run = harness([assistant_message("done")], record=slow_sink)
+    task = asyncio.create_task(run.run("go"))
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert written == []
