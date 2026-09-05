@@ -802,3 +802,93 @@ def test_one_request_may_not_spend_the_whole_run():
     )
 
     assert model._client.timeout == 20.0
+
+
+async def test_what_an_agent_reached_for_is_written_down_too():
+    """A prompt says what an agent was asked; it does not say what it did.
+
+    Four of this system's twelve tools reach a skill, and which one an agent
+    reaches for — the catalogue by name, or the search when the catalogue's
+    wording did not surface it — is an empirical question nothing could answer.
+    It becomes an expensive one the day `mcp_servers` is not empty: a tool that
+    leaves this process, with arguments a model chose, and no record of what it
+    was asked for.
+
+    Through the same sink as the model calls, because a second seam is a
+    second thing to forget — which is the whole of D1.
+    """
+    from friday.agent.harness import ToolContext, tool
+
+    written: list = []
+
+    async def sink(entry) -> None:
+        written.append(entry)
+
+    @tool
+    def look_up(name: str) -> str:
+        """Find a thing.
+
+        Args:
+            name: which thing.
+        """
+        return "found it"
+
+    from agents.testing import function_call
+
+    run = harness(
+        [function_call("look_up", {"name": "deploy"}, call_id="1")],
+        [assistant_message("done")],
+        tools=[look_up],
+        record=sink,
+    )
+    await run.run("go", extra_turns=2, task_id=7)
+
+    (reached,) = [e for e in written if getattr(e, "tool", None)]
+    assert reached.tool == "look_up"
+    assert "deploy" in reached.arguments
+    assert reached.result == "found it"
+    assert reached.failed is False
+    assert reached.task_id == 7
+    assert reached.latency_ms is not None
+
+
+async def test_a_tool_that_failed_is_recorded_as_having_failed():
+    """A tool that raises does not reach the hooks as a failure.
+
+    `harness._tool_failed` turns it into a message for the model, which is a
+    perfectly ordinary *result* as far as the SDK is concerned — so a hook
+    watching for raises sees nothing, and every failure would be filed as an
+    answer that happens to read like one. The harness tells the hooks, using
+    the `agent` and `tool_call_id` the SDK has been passing every tool all
+    along.
+    """
+    from agents.testing import function_call
+
+    from friday.agent.harness import tool
+
+    written: list = []
+
+    async def sink(entry) -> None:
+        written.append(entry)
+
+    @tool
+    def explodes(name: str) -> str:
+        """Raises.
+
+        Args:
+            name: anything.
+        """
+        raise RuntimeError("the skill file is not there")
+
+    run = harness(
+        [function_call("explodes", {"name": "deploy"}, call_id="1")],
+        [assistant_message("done")],
+        tools=[explodes],
+        record=sink,
+    )
+    await run.run("go", extra_turns=2)
+
+    (reached,) = [e for e in written if getattr(e, "tool", None)]
+    assert reached.failed is True
+    assert "unavailable" in reached.result
+    assert "skill file" not in reached.result, "the model was told less"

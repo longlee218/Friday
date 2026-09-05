@@ -324,6 +324,18 @@ not an implementation detail:
   a call was about, and forgetting *that* loses a correlation key rather than
   the record. `AgentHooks` cannot do this job — `on_llm_start` fires after the
   decision to spend and `on_llm_end` after the money is gone.
+- **What an agent reached for is written down beside what it was asked.** A
+  prompt says what an agent was *told* and nothing about what it did — so
+  which of the four skill tools it actually reaches for was a question nothing
+  could answer, and it becomes an expensive one the day `mcp_servers` is not
+  empty and a tool leaves this process with arguments a model chose. Tool
+  calls travel the same sink as model calls, because a second seam is a second
+  thing to forget, and part at the store, which is the only place that knows
+  there are two tables. **A failure has to be told, not observed:**
+  `_tool_failed` turns a raising tool into a message for the model, so
+  `on_tool_end` sees an ordinary result and would file every failure as an
+  answer — the harness marks it using the `agent` and `tool_call_id` the SDK
+  passes every tool.
 - **A hiccup is retried here and nowhere else.** `Harness._attempts` calls the
   provider up to `max_attempts` times with doubling backoff, and what counts
   as worth another call is an explicit list — connection errors, timeouts,

@@ -151,6 +151,12 @@ def _tool_failed(ctx: RunContextWrapper, error: Exception) -> str:
     before it was true, which is ticket 11's subject and was found by writing
     this sentence carelessly first. Only the model is told less.
     """
+    # Tell the hooks, because the SDK will not: this returns a string, so
+    # `on_tool_end` sees an ordinary result and would record a failure as an
+    # answer.
+    hooks = getattr(getattr(ctx, "agent", None), "hooks", None)
+    if hooks is not None and hasattr(hooks, "tool_failed"):
+        hooks.tool_failed(getattr(ctx, "tool_call_id", ""))
     if isinstance(error, ModelBehaviorError):
         return default_tool_error_function(ctx, error)
     log.warning("tool failed: %s", scrub(str(error)))
@@ -438,7 +444,8 @@ class Harness:
             return None
 
         calls: list = []
-        hooks = LogHooks(calls, model=self._config.model)
+        reached: list = []
+        hooks = LogHooks(calls, model=self._config.model, tools=reached)
         self.agent.hooks = hooks
         progress = _Progress()
         try:
@@ -469,7 +476,7 @@ class Harness:
             # timeout that is the only record of the call that hung, and the
             # attempts that failed before it were flushed as they failed.
             progress.flush(hooks, calls)
-            await self._write_down(calls, about)
+            await self._write_down(calls + reached, about)
 
     async def _attempts(self, input_, context, max_turns, hooks, calls, progress):
         """Call the provider until it answers, it refuses in a way trying

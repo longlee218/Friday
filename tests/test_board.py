@@ -145,3 +145,25 @@ async def test_a_tasks_calls_are_shown_under_it(client, db):
 
     assert "lift the fields out" in page
     assert "api_issue_extractor" in page
+
+
+async def test_what_a_task_reached_for_is_shown_beside_what_it_was_asked(client, db):
+    """A prompt and the tools it led to are read together or not at all: the
+    question an operator has is "why did it do that", and half the answer is
+    what the model was told and half is what it then went and looked up."""
+    task = await seed(db)
+    await db.record_model_call(
+        task_id=task.id, agent="responder", model="m", system_prompt="s",
+        prompt="write it in their voice", output="ok", input_tokens=1,
+        output_tokens=1,
+    )
+    await db.record_tool_call(
+        task_id=task.id, agent="responder", tool="search_skills",
+        arguments='{"query": "rolling out"}', result="deploy: release a build",
+        failed=False, latency_ms=3,
+    )
+
+    page = client.get("/").text
+
+    assert "search_skills" in page
+    assert "rolling out" in page

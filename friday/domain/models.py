@@ -274,6 +274,37 @@ class Note:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolCall:
+    """One thing an agent reached for, and what came back.
+
+    Beside `ModelCall` rather than inside it: a prompt says what an agent was
+    *asked*, and says nothing about what it did. Which of the four skill tools
+    an agent actually reaches for — the catalogue by name, or the search when
+    the catalogue's wording did not surface it — was a question nothing could
+    answer, and it becomes an expensive one the day a tool leaves this process
+    with arguments a model chose.
+
+    `failed` rather than an error string, because a tool that fails here does
+    not raise: `harness._tool_failed` turns it into a message for the model,
+    which is a *result* as far as the SDK is concerned. Without this flag a
+    failure is indistinguishable from an answer that happens to read like one.
+    """
+
+    agent: str
+    tool: str
+    arguments: str
+    result: str
+    failed: bool = False
+    latency_ms: int | None = None
+    message_id: str | None = None
+    task_id: int | None = None
+    node: str | None = None
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class ModelCall:
     """Both sides of one model call.
 

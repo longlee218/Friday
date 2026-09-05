@@ -29,6 +29,7 @@ from friday.providers.discord.user import DiscordUserProvider
 from friday.providers.discord.bot import DiscordBot
 from friday.responder import Responder
 from friday.agent.skills import SkillLibrary
+from friday.domain.models import ModelCall
 from friday.domain.states import TaskState
 from friday.triage.runner import TriageRunner
 from friday.tasks.pool import Pool
@@ -88,16 +89,23 @@ async def _run(stack: AsyncExitStack) -> None:
         )
     db = await Database.connect(config.database_path)
 
-    async def record_call(call) -> None:
-        """Where every model call in this process is written down.
+    async def record_call(entry) -> None:
+        """Where everything this process asks of a model is written down.
 
         The one sink, built once, handed to every agent that is built below.
-        It is here and not in `friday/store/` because which store a call goes
-        to is composition, and because the point of the seam is that no agent
-        chooses whether to use it — see D1 in
+        It is here and not in `friday/store/` because which store an entry
+        goes to is composition, and because the point of the seam is that no
+        agent chooses whether to use it — see D1 in
         `.scratch/nothing-runs-unmeasured/SPEC.md`.
+
+        Two kinds travel it: what the model was asked, and what the agent
+        reached for. One seam because a second is a second thing to forget;
+        they part here, at the only place that knows there are two tables.
         """
-        await db.record_model_call(**asdict(call))
+        if isinstance(entry, ModelCall):
+            await db.record_model_call(**asdict(entry))
+        else:
+            await db.record_tool_call(**asdict(entry))
 
     context_store = ContextStore.build(config)
     skills = SkillLibrary.build(config)

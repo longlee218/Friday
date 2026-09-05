@@ -39,7 +39,9 @@ async def test_a_run_reports_both_sides_of_the_call():
 
     await triage.decide(make_event(text="checkout is 500ing"))
 
-    (call,) = calls
+    # Two entries now: the prompt, and the `classify` call the answer arrives
+    # as. This test is about the first.
+    (call,) = [c for c in calls if getattr(c, "prompt", None) is not None]
     assert call.agent == "triage"
     assert call.model == "test-model"
     assert "You decide what a chat message is" in call.system_prompt
@@ -60,6 +62,24 @@ async def test_triage_still_writes_nothing_itself():
     assert outcome.type == "api_issue"
 
 
+def _recording(db):
+    """The composition root's sink, in miniature: one seam, two kinds of row.
+
+    A tool call and a model call travel the same way for the reason D1 gives —
+    a second seam is a second thing to forget — and part paths at the store,
+    which is the only place that knows there are two tables.
+    """
+    from friday.domain.models import ModelCall
+
+    async def record(entry) -> None:
+        if isinstance(entry, ModelCall):
+            await db.record_model_call(**asdict(entry))
+        else:
+            await db.record_tool_call(**asdict(entry))
+
+    return record
+
+
 async def test_a_decision_can_be_traced_back_to_the_call_that_made_it(
     inbox, provider, db
 ):
@@ -72,7 +92,7 @@ async def test_a_decision_can_be_traced_back_to_the_call_that_made_it(
     triage = Triage(
         config=CONFIG,
         model=ScriptedModel([[api_issue_call()]]),
-        record=lambda call: db.record_model_call(**asdict(call)),
+        record=_recording(db),
     )
 
     await TriageRunner(db=db, triage=triage, confidence_threshold=0.7).run_once()

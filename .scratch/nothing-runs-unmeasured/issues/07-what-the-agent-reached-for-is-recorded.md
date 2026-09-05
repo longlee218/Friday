@@ -7,7 +7,7 @@ outcome, duration — alongside the model calls that made them.
 
 **Decisions:** D1, D3
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -58,16 +58,45 @@ list, which only filters names.
 
 ## Acceptance criteria
 
-- [ ] `LogHooks` records tool starts and ends through the same sink as model
+- [x] `LogHooks` records tool starts and ends through the same sink as model
       calls, keyed to the call and the task
-- [ ] The call's identity comes off the context object the SDK already
+- [x] The call's identity comes off the context object the SDK already
       passes, not from a mechanism built here
-- [ ] Arguments are scrubbed on the way in — `friday/ops/redact.py`, same as
+- [x] Arguments are scrubbed on the way in — `friday/ops/redact.py`, same as
       every other stored string
-- [ ] A tool that raises is recorded as such, not lost — including the ones
+- [x] A tool that raises is recorded as such, not lost — including the ones
       the SDK turns into a message for the model rather than an exception
       (ticket 10.1), which are invisible to a hook that only watches for
       raises
-- [ ] The board shows an agent's tool calls next to the prompt that produced
+- [x] The board shows an agent's tool calls next to the prompt that produced
       them
-- [ ] Each guard is deleted once and watched go red
+- [x] Each guard is deleted once and watched go red
+
+## What it came to
+
+`ToolCall` beside `ModelCall`, and `tool_calls` beside `model_calls`: a tool
+call has no prompt and no tokens, a model call has no arguments and no result,
+and one table would be half nulls and a discriminator nobody reads. One sink
+still, for D1's reason — a second seam is a second thing to forget — parting
+at the composition root, which is the only place that knows there are two
+tables.
+
+**The identity came off the context object, as this ticket said it would.**
+`ToolContext` carries `tool_call_id` and `tool_arguments`, which is how a
+start is correlated with its end (the hooks are given no other way), and it
+carries `agent`, which is how the harness reaches the hooks to mark a failure.
+That is the field ticket 10 found the alias had been hiding.
+
+**A failure has to be told rather than observed.** `_tool_failed` turns a
+raising tool into a message for the model, so `on_tool_end` sees a perfectly
+ordinary result — a hook watching for raises sees nothing, and every failure
+would be filed as an answer that happens to read like one. `failed` is a
+column because the alternative is reading the result text and guessing.
+
+One thing the work turned up: triage now writes two entries per decision, the
+prompt and the `classify` call its answer arrives as, and a test that unpacked
+the sink with `(call,) = calls` broke. That is the correct shape — the tool
+call is real — and the test now says which of the two it is about.
+
+738 tests pass (735 before, +3). Four guards, each deleted once and watched go
+red.

@@ -41,6 +41,7 @@ from friday.domain.models import (
     InboundEvent,
     MentionType,
     ModelCall,
+    ToolCall,
     Note,
     Observation,
     Outbound,
@@ -365,6 +366,46 @@ class Database:
         values.setdefault("created_at", _now())
         async with self._sessions.begin() as session:
             session.add(schema.ModelCall(**values))
+
+    async def record_tool_call(self, **values) -> None:
+        values.setdefault("created_at", _now())
+        async with self._sessions.begin() as session:
+            session.add(schema.ToolCall(**values))
+
+    async def tools_for_tasks(self, task_ids) -> dict[int, list[ToolCall]]:
+        """What each of these tasks reached for, oldest first within a task.
+
+        One query rather than one per task, for the reason `calls_for_tasks`
+        gives: the board renders up to two hundred of them.
+        """
+        wanted = list(task_ids)
+        if not wanted:
+            return {}
+        query = (
+            select(schema.ToolCall)
+            .where(schema.ToolCall.task_id.in_(wanted))
+            .order_by(schema.ToolCall.created_at.asc(), schema.ToolCall.id.asc())
+        )
+        grouped: dict[int, list[ToolCall]] = {}
+        async with self._sessions() as session:
+            for row in await session.scalars(query):
+                if row.task_id is None:  # excluded by the filter; narrows the type
+                    continue
+                grouped.setdefault(row.task_id, []).append(
+                    ToolCall(
+                        agent=row.agent,
+                        tool=row.tool,
+                        arguments=row.arguments,
+                        result=row.result,
+                        failed=bool(row.failed),
+                        latency_ms=row.latency_ms,
+                        message_id=row.message_id,
+                        task_id=row.task_id,
+                        node=row.node,
+                        created_at=row.created_at,
+                    )
+                )
+        return grouped
 
     async def spent_today(self, agent: str | None = None) -> int:
         """Tokens spent since midnight UTC, in and out — by one agent, or by

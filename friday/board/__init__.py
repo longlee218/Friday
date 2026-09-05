@@ -49,11 +49,12 @@ async def _body(db: Database, status: str) -> str:
     failed = await db.outbound(FAILED, limit=50)
     calls = await db.calls_by_message(m.provider_message_id for m in messages)
     by_task = await db.calls_for_tasks(t.id for t in tasks)
+    reached = await db.tools_for_tasks(t.id for t in tasks)
 
     sections = [
         _header(status, counts),
         _failed(failed),
-        _tasks(tasks, by_task),
+        _tasks(tasks, by_task, reached),
         _messages(messages, calls),
     ]
     return "\n".join(section for section in sections if section)
@@ -83,14 +84,14 @@ def _failed(rows) -> str:
     return f'<section class="failed"><h2>Could not be sent</h2><ul>{items}</ul></section>'
 
 
-def _tasks(tasks, calls_by_task) -> str:
+def _tasks(tasks, calls_by_task, tools_by_task) -> str:
     columns = []
     for state in TaskState:
         here = [t for t in tasks if t.state == state]
         cards = "".join(
             f'<li><b>{_e(t.type)}</b> #{t.id}'
             f'<span class="why">{_e(_summarise(t))}</span>'
-            f"{_calls(calls_by_task.get(t.id, ()))}</li>"
+            f"{_calls(calls_by_task.get(t.id, ()), tools_by_task.get(t.id, ()))}</li>"
             for t in here
         )
         columns.append(
@@ -100,7 +101,7 @@ def _tasks(tasks, calls_by_task) -> str:
     return f'<section><h2>Tasks</h2><div class="cols">{"".join(columns)}</div></section>'
 
 
-def _calls(calls) -> str:
+def _calls(calls, tools=()) -> str:
     """What the model was asked while working on one task.
 
     Folded away by default: a prompt carries whatever was in the conversation
@@ -108,7 +109,7 @@ def _calls(calls) -> str:
     page nobody reads. `_e` is what keeps a reporter's text from becoming
     markup on the way through.
     """
-    if not calls:
+    if not calls and not tools:
         return ""
     rows = "".join(
         f"<pre>{_e(c.agent)}"
@@ -117,7 +118,20 @@ def _calls(calls) -> str:
         + f"\n{_e(c.prompt)}\n\n→ {_e(c.output)}</pre>"
         for c in calls
     )
-    return f"<details><summary>{len(calls)} model call(s)</summary>{rows}</details>"
+    # Beside the prompts rather than under their own heading: the question is
+    # "why did it do that", and half the answer is what the model was told
+    # while the other half is what it then went and looked up.
+    rows += "".join(
+        f"<pre>{_e(t.tool)}"
+        + (" · failed" if t.failed else "")
+        + (f" · {t.latency_ms}ms" if t.latency_ms is not None else "")
+        + f"\n{_e(t.arguments)}\n\n→ {_e(t.result)}</pre>"
+        for t in tools
+    )
+    what = f"{len(calls)} model call(s)"
+    if tools:
+        what += f", {len(tools)} tool call(s)"
+    return f"<details><summary>{what}</summary>{rows}</details>"
 
 
 def _messages(messages, calls) -> str:

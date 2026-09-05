@@ -15,7 +15,7 @@ import logging
 import time
 
 from friday.agent.harness import Hooks
-from friday.domain.models import ModelCall
+from friday.domain.models import ModelCall, ToolCall
 from friday.ops.redact import scrub
 
 __all__ = ["LogHooks"]
@@ -30,8 +30,18 @@ class LogHooks(Hooks):
     decides whether a call is worth keeping.
     """
 
-    def __init__(self, calls: list | None = None, *, model: str = "") -> None:
+    def __init__(
+        self, calls: list | None = None, *, model: str = "", tools: list | None = None
+    ) -> None:
         self._calls = calls
+        #: What the agent reached for, collected the same way and handed to
+        #: the same sink. A second seam would be a second thing to forget.
+        self._tools = tools
+        #: When each tool call started, by call id — the SDK gives the hooks
+        #: no way to correlate a start with its end except this.
+        self._reached: dict[str, float] = {}
+        #: Call ids whose tool failed. See `tool_failed`.
+        self._failed: set[str] = set()
         # The configured name, not whatever object the SDK wrapped it in: what
         # matters later is which model we asked for.
         self._model = model
@@ -86,6 +96,45 @@ class LogHooks(Hooks):
         )
         self._pending = {}
 
+
+    async def on_tool_start(self, context, agent, tool) -> None:
+        log.debug("→ %s tool %s", agent.name, getattr(tool, "name", tool))
+        self._reached[getattr(context, "tool_call_id", "")] = time.monotonic()
+
+    async def on_tool_end(self, context, agent, tool, result) -> None:
+        name = getattr(tool, "name", str(tool))
+        log.debug("← %s tool %s -> %s", agent.name, name, str(result)[:120])
+        if self._tools is None:
+            return
+        call_id = getattr(context, "tool_call_id", "")
+        started = self._reached.pop(call_id, None)
+        self._tools.append(
+            ToolCall(
+                agent=agent.name,
+                tool=name,
+                # Scrubbed on the way in, like every other stored string: a
+                # model chose these, out of text somebody else wrote.
+                arguments=scrub(str(getattr(context, "tool_arguments", "") or "")),
+                result=scrub(str(result)),
+                failed=call_id in self._failed,
+                latency_ms=(
+                    int((time.monotonic() - started) * 1000)
+                    if started is not None
+                    else None
+                ),
+            )
+        )
+        self._failed.discard(call_id)
+
+    def tool_failed(self, call_id: str) -> None:
+        """Told by `harness._tool_failed`, because the SDK is not.
+
+        A tool that raises does not reach the hooks as a failure: the harness
+        turns it into a message for the model, and `on_tool_end` sees a
+        perfectly ordinary result. Without being told, every failure would be
+        recorded as an answer.
+        """
+        self._failed.add(call_id)
 
     def unfinished(self) -> ModelCall | None:
         """The call that was sent and never answered, if there is one.

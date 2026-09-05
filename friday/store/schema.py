@@ -272,6 +272,32 @@ class ModelCall(Base):
     created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
 
 
+class ToolCall(Base):
+    """One thing an agent reached for, and what came back.
+
+    Its own table rather than a shape squeezed into `model_calls`: a tool call
+    has no prompt and no tokens, and a model call has no arguments and no
+    result. Sharing a table would mean half the columns null on every row and
+    a discriminator nobody reads.
+    """
+
+    __tablename__ = "tool_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    agent: Mapped[str]
+    tool: Mapped[str] = mapped_column(index=True)
+    arguments: Mapped[str]
+    result: Mapped[str]
+    #: A tool that fails here does not raise — the harness turns it into a
+    #: message for the model — so without this a failure reads as an answer.
+    failed: Mapped[bool] = mapped_column(default=False)
+    latency_ms: Mapped[int | None] = mapped_column(default=None)
+    message_id: Mapped[str | None] = mapped_column(index=True)
+    task_id: Mapped[int | None] = mapped_column(index=True)
+    node: Mapped[str | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
+
+
 class Observation(Base):
     """Something a step learned. Staged, never read back into a prompt."""
 
