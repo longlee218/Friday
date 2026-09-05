@@ -34,6 +34,7 @@ from agents import (
     RunContextWrapper,
     Runner,
     RunState,
+    ToolsToFinalOutputResult,
     function_tool,
     set_tracing_disabled,
 )
@@ -59,6 +60,7 @@ __all__ = [
     "MCPServerStdio",
     "ToolContext",
     "create_static_tool_filter",
+    "stop_when",
     "tool",
 ]
 
@@ -127,6 +129,40 @@ def _tool_failed(ctx: RunContextWrapper, error: Exception) -> str:
         return default_tool_error_function(ctx, error)
     log.warning("tool failed: %s", scrub(str(error)))
     return "that tool is unavailable right now — carry on without it"
+
+
+def stop_when(recorded):
+    """Stop the run when the agent has actually recorded something.
+
+    For an agent whose answer arrives as a tool call. The obvious setting is
+    `tool_use_behavior="stop_on_first_tool"`, and it is subtly wrong: it ends
+    the run at the first tool call's **output**, and the SDK cannot tell a
+    tool's success string from its failure string — a `failure_error_function`
+    return value is the tool output. So a call the schema rejects, which the
+    model could fix by emitting it again, instead becomes the run's final
+    answer and nobody reads it.
+
+    `recorded` is a predicate over the run's context — the capture object the
+    tool writes into — and it says what "answered" actually means. Falsely, the
+    model runs again and is handed the tool's output, which is the error
+    message telling it what to correct.
+
+    The retry budget is `max_turns` and nothing else: a bad call spends a turn,
+    so an agent configured for one turn plus the one `run(extra_turns=1)` adds
+    gets exactly one correction before the run is over and the failure becomes
+    a person's. That is deliberate — a model that cannot get its own schema
+    right twice is not going to on the third go, and this is the highest-volume
+    path in the system.
+    """
+
+    def decide(ctx, results) -> ToolsToFinalOutputResult:
+        if results and recorded(ctx.context):
+            return ToolsToFinalOutputResult(
+                is_final_output=True, final_output=results[-1].output
+            )
+        return ToolsToFinalOutputResult(is_final_output=False)
+
+    return decide
 
 
 def tool(func=None, **options):

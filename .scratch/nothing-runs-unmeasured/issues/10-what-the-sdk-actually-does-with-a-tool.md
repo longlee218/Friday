@@ -254,7 +254,7 @@ suggested, and the review read what it *does*. The guard that was supposed to
 protect the second one passed throughout, because it was aimed at the wrong
 thing.
 
-## Open, and not decided here: should triage recover from its own bad call?
+## Decided: triage recovers from its own bad call
 
 Found by the review after the `ModelBehaviorError` exemption went in, and
 verified through the real `Triage` with the SDK's `ScriptedModel`: the
@@ -275,7 +275,8 @@ wording becomes the run's final output and no model reads it. Nothing is
 dropped — the mention goes to a person — but it goes there for something the
 model could have fixed in one more turn.
 
-Three ways out, and choosing is the operator's, not a review finding:
+Three ways out. **The operator chose the second, on 2026-09-05: "cho thêm
+lượt vì tôi không muốn xử lý bằng tay."**
 
 1. **Leave it.** A malformed call becomes `HITL`, which is what every other
    triage failure does, and the never-drop rule holds. Costs one operator
@@ -288,9 +289,30 @@ Three ways out, and choosing is the operator's, not a review finding:
    machinery is there. Changes the turn budget, and `max_turns: 1` in
    `config.yaml` would have to move with it.
 
-Whichever is chosen, `tests/test_triage.py::test_a_malformed_classify_call_ends_the_run`
-is what turns red when it happens; it exists to make the current behaviour a
-decision rather than an accident.
+### What it came to
+
+`harness.stop_when(recorded)` — a `tool_use_behavior` callable that ends the
+run when the predicate over the run's capture says something was recorded, and
+otherwise lets the model run again holding the tool's output. Triage passes
+`lambda capture: capture.decided is not None`, which is what "answered" has
+always meant here; it was just never the thing being asked.
+
+Option 2 rather than 3 because `run_llm_again` would have kept going after a
+*successful* classification too, and the reason `stop_on_first_tool` was there
+in the first place — one call, then stop, no second opinion — is still right.
+This changes only what counts as that call having happened.
+
+No config change. The retry budget is `max_turns: 1` plus the one
+`run(extra_turns=1)` already adds, so a bad call spends the first turn and the
+correction spends the second; a second bad call overruns and becomes a
+person's, which is where it was going anyway. That the bound falls out of the
+existing numbers rather than needing a new knob is luck worth noticing, not a
+design to lean on — the day `max_turns` moves, the retry budget moves with it.
+
+Two tests, both mutation-checked: the model corrects itself and the
+classification lands; two bad calls become `NeedsHuman`. Reverting to
+`stop_on_first_tool` turns the first red, and so does removing the predicate
+from `stop_when`.
 
 ## A second review pass, and what it cost to argue with it
 

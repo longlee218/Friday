@@ -216,16 +216,22 @@ is the one failure the model can fix: bad JSON and schema violations are
 raised before the body runs, so nothing was written and the only recovery is
 to emit the call again correctly.
 
-**That recovery does not reach triage**, and this file claimed it did for one
-afternoon. `classify` runs under `tool_use_behavior="stop_on_first_tool"`,
-where the first tool's output is the run's final output — and a
-`failure_error_function` return value *is* the tool output, which the SDK
-cannot distinguish from a success. So a malformed `classify` call ends the run
-with `capture.decided` unset, `Triage.decide` returns `NeedsHuman("triage
-produced no classification")`, and the mention goes to a person. Nothing is
-dropped and nothing retries. The exemption helps every agent that is *not*
-stop-on-first-tool; whether triage should recover instead is open, and named
-in ticket 10 of `.scratch/nothing-runs-unmeasured/`.
+**Triage stops on what it recorded, not on the first tool output.**
+`stop_on_first_tool` looks right for an agent whose answer is a tool call and
+is not: it ends the run at the first tool's *output*, and a
+`failure_error_function` return value is a tool output the SDK cannot tell
+from a success. So the "try again with valid JSON" the exemption above exists
+to deliver became the run's final answer, and the one party who could act on
+it never saw it — a mention the model had all but classified became work for a
+person. `harness.stop_when(predicate)` moves the terminator to what actually
+means answered: `capture.decided is not None`.
+
+**The correction budget is one turn, and it is `max_turns`.** A bad call
+spends a turn, so `max_turns: 1` plus the one `run(extra_turns=1)` adds gives
+exactly one retry; a second bad call overruns, the harness turns that into a
+`last_error`, and the mention lands where every other triage failure lands. A
+model that cannot get its own schema right twice will not on the third go, and
+this is the highest-volume path in the system.
 
 **`docstring_style` is deliberately not pinned**, which is the opposite of
 what this file said for one afternoon. Detection returns google for every

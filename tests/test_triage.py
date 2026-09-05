@@ -272,20 +272,20 @@ async def test_an_empty_list_holds_nothing():
     assert (await decide(triage, "lương tháng này về chưa")).type == "api_issue"
 
 
-async def test_a_malformed_classify_call_ends_the_run():
-    """`stop_on_first_tool` cannot tell a failed tool from a successful one.
+async def test_a_malformed_classify_call_is_corrected_by_the_model():
+    """The model gets one turn to fix its own call, and takes it.
 
-    The first tool call's output is the run's final output, and a tool's
-    failure message is its output — so a `classify` call the schema rejects
-    ends the run with nothing recorded, and the model is never asked again.
-    The corrected call scripted below is never requested.
+    `classify` asks for a number; a model that sends `"high"` fails the schema
+    before the tool body runs, and the SDK hands it back the string saying so.
+    That only helps if the run continues — and under
+    `tool_use_behavior="stop_on_first_tool"` it did not: the first tool call's
+    *output* ends the run, and the SDK cannot tell a failure string from a
+    success one, so the correction was the run's final answer and no model
+    read it. A mention the model had all but classified became work for a
+    person.
 
-    Pinned because the tool layer now goes out of its way to let a model fix
-    its own malformed call (`harness._tool_failed` hands a `ModelBehaviorError`
-    back in the SDK's "try again" wording), and it is worth one test saying out
-    loud that the wording never reaches this agent. Nothing is lost — the
-    mention goes to a person — but it goes there for something the model could
-    have fixed, and if that is ever to change it changes here.
+    `stop_when` moves the terminator to the thing that actually means
+    answered: a classification recorded in the capture.
     """
     from agents.testing import ScriptedModel, function_call
 
@@ -303,5 +303,26 @@ async def test_a_malformed_classify_call_ends_the_run():
 
     outcome = await triage.decide(make_event(text="the api is 500ing"))
 
+    assert outcome == Decided(type="api_issue", confidence=0.9)
+
+
+async def test_a_model_that_cannot_fix_its_own_call_becomes_a_persons_problem():
+    """One correction, not an argument.
+
+    The budget is `max_turns` and nothing else, which is what keeps a model
+    that has misunderstood its own schema from spending the highest-volume
+    path in the system finding out. Two bad calls exhaust it, the harness
+    turns the overrun into a `last_error`, and the mention lands where every
+    other triage failure lands. Never dropped, which is the rule this system
+    is built on.
+    """
+    from agents.testing import ScriptedModel, function_call
+
+    bad = [function_call("classify", {"task_type": "api_issue",
+                                      "confidence": "high"}, call_id="1")]
+    triage = Triage(config=CONFIG, model=ScriptedModel([bad, bad, bad]))
+
+    outcome = await triage.decide(make_event(text="the api is 500ing"))
+
     assert isinstance(outcome, NeedsHuman)
-    assert outcome.reason == "triage produced no classification"
+    assert "triage failed" in outcome.reason

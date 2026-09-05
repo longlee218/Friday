@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from friday.triage.prompt import build_input, build_instructions
 from friday.config import AgentConfig
-from friday.agent.harness import Harness
+from friday.agent.harness import Harness, stop_when
 from friday.domain.actions import Decided, NeedsHuman, TriageOutcome
 from friday.domain.models import InboundEvent
 from friday.tools.classify import TOOLS, ClassifyCapture
@@ -60,7 +60,15 @@ class Triage:
                 # all and the mention silently yields nothing.
                 "tool_choice": "required",
             },
-            tool_use_behavior="stop_on_first_tool",
+            # Stop when a classification has actually been *recorded*, not
+            # when the first tool call produces an output. The difference is
+            # a call the schema rejects: `stop_on_first_tool` made the SDK's
+            # "try again with valid JSON" the run's final answer, so the one
+            # party who could fix it never saw it, and a mention the model
+            # very nearly classified became work for a person. The budget for
+            # that correction is one turn — `max_turns` and the one
+            # `run(extra_turns=1)` adds — after which it is a person's anyway.
+            tool_use_behavior=stop_when(lambda capture: capture.decided is not None),
         )
 
     async def decide(
