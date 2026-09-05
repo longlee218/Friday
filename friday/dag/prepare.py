@@ -19,6 +19,7 @@ from dataclasses import asdict, fields
 from typing import get_args, get_type_hints
 
 from friday.dag.engine import DAGDeps, DAGState, Node
+from friday.agent.harness import Refused
 from friday.domain.actions import Action, Ask, HandOver
 from friday.domain.models import MODEL_AUTHORED, Params
 from friday.domain.validation import Problem, validate
@@ -115,9 +116,16 @@ async def prepare(
     """
     clarify: Clarify | None = None
     if text is not None:
-        extracted, clarify = await _extract(
-            task_type, text, task_id=task_id, node=node
-        )
+        try:
+            extracted, clarify = await _extract(
+                task_type, text, task_id=task_id, node=node
+            )
+        except Refused as refusal:
+            # A ceiling, not a failure. Falling through would leave the fields
+            # unfilled, and the code floor below would then ask the reporter
+            # for what they already wrote — the exact failure CLAUDE.md names
+            # for a task type with no extractor at all.
+            return params, HandOver(str(refusal))
         if extracted is not None:
             params = _fill(params, extracted)
 

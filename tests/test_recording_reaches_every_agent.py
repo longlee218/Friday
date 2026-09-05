@@ -1,4 +1,4 @@
-"""Every agent records, and the chain that makes it so is checked.
+"""Every agent records and is bounded, and the chain that makes it so is checked.
 
 D1 says the recording sink is handed over at construction so that no caller
 can forget it. That moved the forgetting one layer down: each builder now
@@ -48,7 +48,7 @@ def spy(monkeypatch):
 
     class Spy(harness_module.Harness):
         def __init__(self, **kw):
-            given.append(kw.get("record"))
+            given.append((kw.get("record"), kw.get("spent")))
             super().__init__(**kw)
 
         async def run(self, *a, **kw):
@@ -69,31 +69,36 @@ def spy(monkeypatch):
 
 
 SINK = object()
+#: The other half. A ceiling that reaches three agents out of four is not a
+#: ceiling — it is a ceiling and a hole, and the hole is silent.
+LEDGER = object()
 
 
 async def test_triage_records(spy, db):
     from friday.triage.runner import TriageRunner
 
-    await TriageRunner.build(_config(triage=CONFIG), db=db, record=SINK)
+    await TriageRunner.build(_config(triage=CONFIG), db=db, record=SINK, spent=LEDGER)
 
-    assert spy == [SINK]
+    assert spy == [(SINK, LEDGER)]
 
 
 async def test_every_extractor_records(spy):
     from friday.extraction import EXTRACTS, register_extractors
 
     register_extractors(
-        _config(**{f"extractor_{t}": CONFIG for t in EXTRACTS}), record=SINK
+        _config(**{f"extractor_{t}": CONFIG for t in EXTRACTS}),
+        record=SINK,
+        spent=LEDGER,
     )
 
-    assert spy == [SINK] * len(EXTRACTS), "one per configured extractor"
+    assert spy == [(SINK, LEDGER)] * len(EXTRACTS), "one per configured extractor"
 
 
 async def test_the_responder_records(spy):
     from friday.responder import Responder
 
-    assert Responder.build(_config(responder=CONFIG), record=SINK) is not None
-    assert spy == [SINK]
+    assert Responder.build(_config(responder=CONFIG), record=SINK, spent=LEDGER) is not None
+    assert spy == [(SINK, LEDGER)]
 
 
 async def test_the_summariser_records(spy):
@@ -115,11 +120,12 @@ async def test_the_summariser_records(spy):
         db=_LoudChannel(),
         promotion=_NothingPromoted(),
         record=SINK,
+        spent=LEDGER,
     )
 
     await rebuilder.rebuild_all()
 
-    assert spy == [SINK]
+    assert spy == [(SINK, LEDGER)]
 
 
 # --- the least that lets each builder run ------------------------------------

@@ -96,3 +96,19 @@ async def test_a_new_day_is_summarised_again(db):
     await liveness._summary(today_noon + timedelta(days=1))
 
     assert len([r for r in await db.outbound() if r.kind == Kind.SUMMARY]) == 2
+
+
+async def test_the_beat_says_what_the_day_has_cost(db):
+    """A budget nobody can see is a number nobody sets.
+
+    The ceiling is opt-in and off by default — `docs/DESIGN.md` says the first
+    weeks are data collection — so the measurement has to be on regardless,
+    or an operator has nothing to decide the ceiling *from*.
+    """
+    common = dict(model="m", system_prompt="s", prompt="p", output="o")
+    await db.record_model_call(agent="triage", input_tokens=1000, output_tokens=200, **common)
+    await db.record_model_call(agent="responder", input_tokens=300, output_tokens=100, **common)
+
+    line = await Heartbeat(db=db).summary()
+
+    assert "1600 tokens today" in line

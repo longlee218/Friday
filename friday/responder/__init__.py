@@ -51,7 +51,7 @@ class Responder:
     @classmethod
     def build(
         cls, config, *, notes: str = "", skills=None, context_store=None,
-        record=None,
+        record=None, spent=None,
     ) -> "Responder | None":
         """The responder, or None when it is off or unconfigured.
 
@@ -67,6 +67,7 @@ class Responder:
             skills=skills,
             context_store=context_store,
             record=record,
+            spent=spent,
         )
         log.info(
             "responder on %s — its drafts need approval before they go out",
@@ -83,6 +84,7 @@ class Responder:
         skills=None,
         context_store=None,
         record=None,
+        spent=None,
     ) -> None:
         #: Where the room's register lives. None means every channel writes
         #: the way the voice alone says, which is what shipped before.
@@ -129,6 +131,7 @@ class Responder:
             notes=notes,
             tools=tools,
             record=record,
+            spent=spent,
         )
 
     def knows(self, channel_id: str, name: str) -> bool:

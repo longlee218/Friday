@@ -84,3 +84,30 @@ def test_an_agent_missing_its_model_is_rejected_by_name(tmp_path):
 
     with pytest.raises(ConfigError, match="triage"):
         load_config(write(tmp_path, text))
+
+
+def test_max_tokens_reaches_the_model_settings_without_a_knob_for_it():
+    """`max_tokens` needs no code here, and the point is to say so once.
+
+    `settings:` is splatted into `ModelSettings`, so anything that class
+    accepts is already configurable per agent — a fact worth a test rather
+    than a comment, because the alternative is somebody adding a
+    `max_tokens:` field beside it and two ways to say the same thing.
+
+    It bounds one answer; `daily_token_budget` bounds a day. Both exist
+    because they fail differently: a run that hits `max_tokens` comes back
+    *truncated*, which `_UNCLOSED` in the responder exists to survive, while a
+    day that hits its budget is a refusal that reaches a person.
+    """
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+
+    built = Harness(
+        config=AgentConfig(
+            name="a", api_key="k", base_url="https://example.invalid/v1",
+            model="test-model", settings={"temperature": 0, "max_tokens": 4096},
+        ),
+        instructions="i",
+    )
+
+    assert built.agent.model_settings.max_tokens == 4096

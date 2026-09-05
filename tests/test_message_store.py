@@ -170,3 +170,37 @@ async def test_a_call_made_for_a_task_is_read_back_by_that_task(db):
     assert mine[0].node == "prepare"
     assert mine[0].latency_ms == 120
     assert mine[1].node is None
+
+
+async def test_what_an_agent_has_spent_today_is_read_from_what_it_wrote(db):
+    """A budget held in memory is a budget a restart forgives.
+
+    Summed from the rows themselves, so the answer survives a deploy and
+    cannot drift from what the board shows. Scoped to one agent because they
+    are different jobs against different models — the classifier running on
+    every mention and the responder running on a few are not one pool.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    common = dict(model="m", system_prompt="s", prompt="p", output="o")
+    now = datetime.now(timezone.utc)
+    await db.record_model_call(
+        agent="triage", input_tokens=1000, output_tokens=200,
+        created_at=now, **common,
+    )
+    await db.record_model_call(
+        agent="triage", input_tokens=300, output_tokens=100,
+        created_at=now, **common,
+    )
+    await db.record_model_call(  # yesterday's, and yesterday is paid for
+        agent="triage", input_tokens=9999, output_tokens=9999,
+        created_at=now - timedelta(days=1), **common,
+    )
+    await db.record_model_call(  # a different job entirely
+        agent="responder", input_tokens=500, output_tokens=50,
+        created_at=now, **common,
+    )
+
+    assert await db.spent_today("triage") == 1600
+    assert await db.spent_today("responder") == 550
+    assert await db.spent_today("summary") == 0

@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+
+from friday.agent.harness import Refused
 from dataclasses import dataclass
 from typing import Optional
 
@@ -143,6 +145,9 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
 def test_an_extractor_returns_none_when_harness_fails():
     class FailingHarness:
         last_error = "boom"
+        #: The model was asked and could not answer, which is not the same as
+        #: not asking it — see `Refused`. This is the first of the two.
+        refusal = None
 
         async def run(self, prompt, *, context=None, extra_turns=0,
                       task_id=None, node=None):
@@ -367,3 +372,30 @@ def test_the_doc_reaches_the_extractors_prompt():
 
     assert "copied exactly" in prompt
     assert "- summary: summary" not in prompt
+
+
+async def test_a_model_that_could_not_answer_is_not_a_refusal():
+    """The two look identical from here — no result either way — and they are
+    told apart by which of them we caused. A model that failed is worth asking
+    the reporter about; a call we declined to make is not."""
+    from dataclasses import dataclass as _dataclass
+    from typing import Optional as _Optional
+
+    from friday.extraction import build_extractor
+
+    class Refuses:
+        last_error = "over budget"
+        refusal = "an-agent has spent 999 of its 10 tokens today"
+
+        async def run(self, prompt, *, context=None, extra_turns=0,
+                      task_id=None, node=None):
+            return None
+
+    @_dataclass
+    class Params:
+        environment: _Optional[str] = None
+
+    ext = build_extractor(params_cls=Params, harness=Refuses(), name="refuses")
+
+    with pytest.raises(Refused, match="tokens today"):
+        await ext.run("anything")

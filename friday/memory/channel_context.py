@@ -219,7 +219,9 @@ class ContextRebuilder:
     """
 
     @classmethod
-    def build(cls, config, *, store, db, promotion, record=None) -> "ContextRebuilder":
+    def build(
+        cls, config, *, store, db, promotion, record=None, spent=None
+    ) -> "ContextRebuilder":
         """Which agent summarises a channel, and when, are this module's
         business. The composition root asks for a rebuilder."""
         return cls(
@@ -229,6 +231,7 @@ class ContextRebuilder:
             summary_config=config.agents.get("summary"),
             summary_share=config.context.summary_share,
             record=record,
+            spent=spent,
         )
 
     def __init__(
@@ -240,6 +243,7 @@ class ContextRebuilder:
         summary_config: AgentConfig | None = None,
         summary_share: float = 0.5,
         record=None,
+        spent=None,
         model=None,
     ) -> None:
         self._store = store
@@ -248,6 +252,7 @@ class ContextRebuilder:
         self._summary_config = summary_config
         self._summary_share = summary_share
         self._record = record
+        self._spent = spent
         #: Test seam, same convention as `Triage`/`Responder`: a real run
         #: never passes this, and a scripted one never touches the network.
         self._model = model
@@ -280,6 +285,7 @@ class ContextRebuilder:
             instructions=_summary_instructions(),
             model=self._model,
             record=self._record,
+            spent=self._spent,
         )
         result = await harness.run(_transcript(messages))
         if not result or not result.final_output:

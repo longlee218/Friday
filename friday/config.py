@@ -61,6 +61,14 @@ class AgentConfig:
     #: cannot be hardcoded — it decides when a conversation has grown large
     #: enough that summarising it costs less than passing it raw.
     context_window: int = 128_000
+    #: What this agent may spend in a day, in tokens in and out. `None` is no
+    #: ceiling, which is the shipped default and deliberate: `docs/DESIGN.md`
+    #: says the first weeks are data collection, so the *measurement* is
+    #: always on — the heartbeat reports it either way — and the ceiling is
+    #: something an operator turns on once they know what a normal day costs.
+    #: Guessing a number for them would make the first busy day look like a
+    #: fault.
+    daily_token_budget: int | None = None
     #: How long one run of this agent may take before it becomes work for a
     #: person, in seconds.
     #:
@@ -291,6 +299,11 @@ def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
             max_turns=int(spec.pop("max_turns", 1)),
             context_window=int(spec.pop("context_window", 128_000)),
             timeout_seconds=float(spec.pop("timeout_seconds", 60.0)),
+            daily_token_budget=(
+                int(budget)
+                if (budget := spec.pop("daily_token_budget", None)) is not None
+                else None
+            ),
             options=spec,  # whatever is left is step-specific
         )
     return agents

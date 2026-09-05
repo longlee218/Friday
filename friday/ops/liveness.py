@@ -98,6 +98,9 @@ class Heartbeat:
             f"untriaged {counts['untriaged']}",
             f"tasks {states or 'none'}",
             f"outbox {outbound.get(QUEUED, 0)} queued",
+            # On whether or not any agent has a ceiling: the ceiling is opt-in
+            # and this is what an operator would set it from.
+            f"{await self._db.spent_today()} tokens today",
         ]
         failed = outbound.get(FAILED, 0)
         if self._extra is not None:

@@ -141,7 +141,11 @@ async def _run(stack: AsyncExitStack) -> None:
     provider.on_verdict = marked
 
     runner = await TriageRunner.build(
-        config, db=db, still_typing=inbox.still_typing, record=record_call
+        config,
+        db=db,
+        still_typing=inbox.still_typing,
+        record=record_call,
+        spent=db.spent_today,
     )
 
     # Connected here rather than by whoever uses them: a connection has a
@@ -159,7 +163,7 @@ async def _run(stack: AsyncExitStack) -> None:
     # `friday/extraction/`, not here.
     from friday.extraction import register_extractors
 
-    register_extractors(config, record=record_call)
+    register_extractors(config, record=record_call, spent=db.spent_today)
 
     # Register the workflow graphs. Same shape as the extractors above and for
     # the same reason: which task types have a graph is the graph module's
@@ -185,6 +189,7 @@ async def _run(stack: AsyncExitStack) -> None:
         skills=skills,
         context_store=context_store,
         record=record_call,
+        spent=db.spent_today,
     )
     pool = Pool.build(config, db=db, responder=responder)
     async def decided(*, task_id: int, approved: bool, by: str) -> None:
@@ -247,6 +252,7 @@ async def _run(stack: AsyncExitStack) -> None:
             db=db,
             promotion=promotion,
             record=record_call,
+            spent=db.spent_today,
         ),
         interval_seconds=config.heartbeat_seconds,
         keep_model_calls_days=config.keep_model_calls_days,

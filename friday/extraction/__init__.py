@@ -27,7 +27,7 @@ import re
 from dataclasses import dataclass, fields
 from typing import Any, Literal
 
-from friday.agent.harness import Harness
+from friday.agent.harness import Harness, Refused
 from friday.extraction.clarify import Clarify, FieldsCapture
 from friday.tools.ask_for_fields import ask_for_fields_tool
 from friday.domain.models import MODEL_AUTHORED, PARAMS, Params
@@ -86,6 +86,14 @@ class Extractor:
             node=node,
         )
         if result is None:
+            if self._harness.refusal is not None:
+                # Not "the model could not answer" — we did not ask it. The
+                # difference decides what happens next: with no fields, the
+                # structural check finds them missing and the reporter is
+                # asked for the correlationId they wrote in their first
+                # message. Nothing they say will change a ceiling, so this
+                # goes to the operator instead.
+                raise Refused(self._harness.refusal)
             log.warning("extractor %s returned no result", self.name)
             return None, None
         read = _parse(result.final_output or "")
@@ -167,6 +175,7 @@ def register(
     config: "AgentConfig",  # type: ignore[name-defined]  # noqa: F821
     *,
     record=None,
+    spent=None,
 ) -> None:
     """Register one task type's extractor from configuration.
 
@@ -179,7 +188,7 @@ def register(
     at runtime, in the middle of a task, where the only symptom is fields that
     never fill in. Refusing at startup costs a restart.
     """
-    from friday.agent.harness import Harness
+    from friday.agent.harness import Harness, Refused
 
     if PARAMS.get(task_type) is not params_cls:
         raise ValueError(
@@ -195,6 +204,7 @@ def register(
             tools=[ask_for_fields_tool(params_cls)],
             context_type=FieldsCapture,
             record=record,
+            spent=spent,
         ),
         name=f"{task_type}_extractor",
     )
@@ -307,7 +317,7 @@ EXTRACTS = {
 }
 
 
-def register_extractors(config: "Config", *, record=None) -> None:  # type: ignore[name-defined]  # noqa: F821
+def register_extractors(config: "Config", *, record=None, spent=None) -> None:  # type: ignore[name-defined]  # noqa: F821
     """Wire every extractor the configuration declares.
 
     Composition root calls this once at startup and learns nothing about any
@@ -331,4 +341,10 @@ def register_extractors(config: "Config", *, record=None) -> None:  # type: igno
                 task_type,
             )
             continue
-        register(task_type, getattr(models, params_name), agent_config, record=record)
+        register(
+            task_type,
+            getattr(models, params_name),
+            agent_config,
+            record=record,
+            spent=spent,
+        )

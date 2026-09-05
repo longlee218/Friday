@@ -8,6 +8,19 @@ database_path: ./data/friday.db
 #
 # ${VAR} reads from .env. An unset variable is an error, not an empty string.
 #
+# `daily_token_budget` is what an agent may spend in a day, in tokens in and
+# out, counted from the calls it actually made — so a restart does not forgive
+# it. Unset means no ceiling, which is the shipped default: the heartbeat
+# reports the day's spend either way, and a number guessed before anyone knows
+# what a normal day costs would make the first busy day look like a fault.
+# Reaching it is a refusal that becomes work for a person, never a shorter
+# answer.
+#
+# `max_tokens` goes under `settings:` and needs nothing here — that block is
+# passed to the model settings whole. It bounds one *answer*, and the two fail
+# differently: hitting it truncates a reply, hitting the daily budget refuses
+# the call.
+#
 # `timeout_seconds` bounds one run of that agent and defaults to 60. It is a
 # number chosen here rather than inherited: the OpenAI client's own default is
 # ten minutes and it retries past that, and the pool works one task at a time,

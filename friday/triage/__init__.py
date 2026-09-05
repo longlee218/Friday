@@ -39,6 +39,7 @@ class Triage:
         examples: Sequence[tuple[str, str]] = (),
         sensitive: Sensitive | None = None,
         record=None,
+        spent=None,
     ) -> None:
         #: Empty by default, which means nothing is held. An install that has
         #: not thought about this yet gets the behaviour it would have had
@@ -55,6 +56,7 @@ class Triage:
             tools=TOOLS,
             model=model,
             record=record,
+            spent=spent,
             context_type=ClassifyCapture,
             model_settings={
                 # Without a forced tool call the vaguest message — "the api is

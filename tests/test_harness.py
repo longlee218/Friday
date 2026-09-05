@@ -25,9 +25,9 @@ CONFIG = AgentConfig(
 )
 
 
-def harness(*steps, **kw) -> Harness:
+def harness(*steps, config=None, **kw) -> Harness:
     return Harness(
-        config=CONFIG,
+        config=config or CONFIG,
         instructions="do the thing",
         model=ScriptedModel(list(steps)),
         **kw,
@@ -494,3 +494,117 @@ async def test_a_cancelled_run_stops_rather_than_finishing_its_writes():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert written == []
+
+
+async def test_an_agent_that_has_spent_its_day_is_not_called_again():
+    """The ceiling is checked before the money is gone, which is the one thing
+    a hook cannot do — `on_llm_start` fires after the decision to spend.
+
+    A breach is a refusal, not a truncation. Every other refusal in this
+    system routes to a person, and a silently shortened answer under the
+    operator's name is exactly what those rules exist to prevent — so this
+    returns nothing and says why, and the caller's own machinery turns that
+    into work the way it turns any other non-answer.
+    """
+    from dataclasses import replace as _replace
+
+    class NeverReached(Model):
+        async def get_response(self, *a, **kw):
+            raise AssertionError("the provider was called anyway")
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    async def spent(agent: str) -> int:
+        return 12_000
+
+    run = Harness(
+        config=_replace(CONFIG, daily_token_budget=10_000),
+        instructions="i",
+        model=NeverReached(),
+        spent=spent,
+    )
+
+    assert await run.run("go") is None
+    assert run.last_error == "an-agent has spent 12000 of its 10000 tokens today"
+
+
+async def test_an_agent_under_its_ceiling_is_left_alone():
+    """The ceiling is opt-in and the measurement is not: an agent with no
+    budget configured is never asked what it has spent, which is what keeps
+    this from being a query on the hot path of every call for installs that
+    have not set one."""
+    from dataclasses import replace as _replace
+
+    asked: list = []
+
+    async def spent(agent: str) -> int:
+        asked.append(agent)
+        return 1
+
+    with_budget = harness(
+        [assistant_message("done")],
+        config=_replace(CONFIG, daily_token_budget=10_000),
+        spent=spent,
+    )
+    assert (await with_budget.run("go")).final_output == "done"
+    assert asked == ["an-agent"]
+
+    without = harness([assistant_message("done")], spent=spent)
+    assert (await without.run("go")).final_output == "done"
+    assert asked == ["an-agent"], "no budget, no question"
+
+
+async def test_a_ledger_that_cannot_be_read_does_not_stop_the_work():
+    """No exception escapes the harness — including from the budget check.
+
+    The check runs before the run and so outside the clause that catches
+    everything else, which is how it came to be the one path that could raise
+    past every caller. It fails *open*: a store that cannot answer "what has
+    this spent" is a store that cannot answer anything, so refusing on it
+    would turn a transient read error into every agent refusing at once, and
+    the money the ceiling protects is not at risk from a read that failed.
+    """
+    from dataclasses import replace as _replace
+
+    async def unreadable(agent: str) -> int:
+        raise RuntimeError("database is locked")
+
+    run = harness(
+        [assistant_message("done")],
+        config=_replace(CONFIG, daily_token_budget=10),
+        spent=unreadable,
+    )
+
+    assert (await run.run("go")).final_output == "done"
+
+
+async def test_the_ceiling_is_reached_at_it_and_not_past_it():
+    """On the boundary, because that is where a limit is decided.
+
+    Neither of the tests above sits on it — one is well over and one is well
+    under — so `spent < budget` could have been `spent <= budget`, a whole
+    budget's worth of overspend, and stayed green. A ceiling that lets you
+    reach it and then spend it again is not the number anybody configured.
+    """
+    from dataclasses import replace as _replace
+
+    async def spent_exactly(agent: str) -> int:
+        return 10_000
+
+    at_it = harness(
+        [assistant_message("done")],
+        config=_replace(CONFIG, daily_token_budget=10_000),
+        spent=spent_exactly,
+    )
+    assert await at_it.run("go") is None
+
+    async def one_short(agent: str) -> int:
+        return 9_999
+
+    under = harness(
+        [assistant_message("done")],
+        config=_replace(CONFIG, daily_token_budget=10_000),
+        spent=one_short,
+    )
+    assert (await under.run("go")).final_output == "done"

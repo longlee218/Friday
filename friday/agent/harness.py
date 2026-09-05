@@ -56,6 +56,7 @@ from friday.ops.redact import scrub
 
 __all__ = [
     "Harness",
+    "Refused",
     "Hooks",
     "MCPServer",
     "MCPServerSse",
@@ -87,6 +88,22 @@ log = logging.getLogger(__name__)
 #: fill.
 ToolContext = _SdkToolContext
 Hooks = AgentHooks
+
+
+class Refused(Exception):
+    """We declined to make a call, rather than making one that failed.
+
+    Two outcomes that both leave a caller with no answer, and they are worth
+    telling apart. "The model could not answer" is worth asking the reporter
+    for more; "we did not ask it" is worth telling the operator why, because
+    nothing the reporter does will change it.
+
+    `Harness` never raises this — the rule that no exception escapes it is
+    older and more load-bearing than this distinction. It reports a refusal on
+    `refusal` and a caller that has somewhere better to send it raises this
+    itself; `friday/extraction` is the one that does, because the alternative
+    there is asking a reporter for what they already wrote.
+    """
 
 
 def _tool_failed(ctx: RunContextWrapper, error: Exception) -> str:
@@ -237,13 +254,26 @@ class Harness:
         #: `None` records nothing, which is for tests and for an agent built
         #: before a sink exists. The composition root always passes one.
         record=None,
+        #: What this agent has already spent today, as an async callable of
+        #: the agent's name. Separate from `record` because they are different
+        #: capabilities over the same table — one writes, one reads — and a
+        #: test that cares about one should not have to supply the other.
+        #:
+        #: Only asked when a budget is configured, so an install that has not
+        #: set one pays nothing for the ceiling it does not have.
+        spent=None,
         model=None,
         context_type: type | None = None,
         **agent_options: Any,
     ) -> None:
         self._config = config
         self._record = record
+        self._spent = spent
         self.last_error: str | None = None
+        #: Set when this run did not happen at all, rather than happening and
+        #: failing. `last_error` carries the same words; this is what lets a
+        #: caller branch on it without reading them.
+        self.refusal: str | None = None
         agent_class = Agent[context_type] if context_type else Agent
         self.agent = agent_class(
             name=config.name,
@@ -394,6 +424,12 @@ class Harness:
         from friday.agent.llm_log import LogHooks
 
         self.last_error = None
+        self.refusal = None
+        if (refusal := await self._over_budget()) is not None:
+            self.last_error = self.refusal = refusal
+            log.warning("%s not called: %s", self._config.name, refusal)
+            return None
+
         calls: list = []
         hooks = LogHooks(calls, model=self._config.model)
         self.agent.hooks = hooks
@@ -422,6 +458,41 @@ class Harness:
             if (cut_off := hooks.unfinished()) is not None:
                 calls.append(cut_off)
             await self._write_down(calls, about)
+
+    async def _over_budget(self) -> str | None:
+        """Why this call is not being made, or `None` to make it.
+
+        Before `Runner.run` rather than inside a hook, which is the whole of
+        D2: `on_llm_start` fires once the decision to spend has been made and
+        `on_llm_end` once the money is gone, and neither can refuse.
+
+        A breach is a refusal and not a truncation. `max_tokens` bounds one
+        answer; this bounds a day, and the difference matters because a
+        shortened reply goes out under the operator's name while a refusal
+        goes to the operator. Every other limit in this system routes to a
+        person — low confidence, the turn cap, the sensitive-word prefilter —
+        and this is that rule applied to money.
+        """
+        budget = self._config.daily_token_budget
+        if budget is None or self._spent is None:
+            return None
+        try:
+            spent = await self._spent(self._config.name)
+        except Exception:  # noqa: BLE001 - this runs outside the clause below
+            # Fails open, and the direction is a decision. This check sits
+            # before `Runner.run` and so outside the `except` that turns every
+            # other failure into a `last_error` — left bare it would be the one
+            # path that raises past every caller, breaking the rule this module
+            # is built on. Refusing instead would turn a store that cannot
+            # answer one question into every agent refusing at once, and a
+            # store in that state has already stopped the work by other means.
+            log.exception("could not read %s's budget; going ahead", self._config.name)
+            return None
+        if spent < budget:
+            return None
+        return (
+            f"{self._config.name} has spent {spent} of its {budget} tokens today"
+        )
 
     async def _write_down(self, calls: list, about: "_About | None") -> None:
         """Hand each call to the sink. A sink that fails costs a row, not a run.

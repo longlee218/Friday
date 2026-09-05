@@ -50,7 +50,7 @@ def _record(outcome: TriageOutcome) -> dict:
 class TriageRunner:
     @classmethod
     async def build(
-        cls, config, *, db: Database, still_typing=None, record=None
+        cls, config, *, db: Database, still_typing=None, record=None, spent=None
     ) -> "TriageRunner":
         """Everything triage needs, read from configuration here.
 
@@ -102,6 +102,7 @@ class TriageRunner:
                 examples=examples,
                 sensitive=sensitive,
                 record=record,
+                spent=spent,
             ),
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)

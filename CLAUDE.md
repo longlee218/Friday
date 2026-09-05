@@ -324,6 +324,26 @@ not an implementation detail:
   a call was about, and forgetting *that* loses a correlation key rather than
   the record. `AgentHooks` cannot do this job — `on_llm_start` fires after the
   decision to spend and `on_llm_end` after the money is gone.
+- **A ceiling refuses; it does not trim.** `daily_token_budget` is per agent,
+  counted from the rows the agent actually wrote, so a restart does not
+  forgive it and the number cannot drift from what the board shows. Reaching
+  it means the call does not happen, and **what that becomes is the caller's,
+  and they do not all answer alike.** Triage hands the mention to a person
+  carrying the reason. An extractor raises `Refused` and its graph hands over,
+  because the alternative is the failure this file already names for a type
+  with no extractor: unfilled fields, then the reporter asked for the
+  correlationId they wrote in their first message. The responder falls back to
+  the plain template, which still goes out — a worse-worded message, not a
+  lost one. The summariser skips a rebuild. Only the first two are hand-overs,
+  and the paragraph that said all four were is what this sentence replaced. `max_tokens` is the other kind of limit and
+  lives in `settings:`: it bounds one answer and comes back *truncated*, which
+  is why a reply that hits it is a worse outcome than a call that never ran.
+  Unset means no ceiling, deliberately: the heartbeat reports the day's spend
+  either way, so the measurement is on from the first day and the ceiling is
+  something an operator sets once they know what normal costs. The check reads
+  the store before the call and **fails open** — a store that cannot answer
+  this has already stopped the work by other means, and refusing on it would
+  turn one bad read into every agent refusing at once.
 - **`friday/agent/harness.py` is the only module that may import `agents`.** The SDK
   is here for speed, not for keeps, and that is only true while replacing it
   means rewriting one file. What other modules need — `tool`, `ToolContext`,

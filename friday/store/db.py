@@ -366,6 +366,30 @@ class Database:
         async with self._sessions.begin() as session:
             session.add(schema.ModelCall(**values))
 
+    async def spent_today(self, agent: str | None = None) -> int:
+        """Tokens spent since midnight UTC, in and out — by one agent, or by
+        all of them when no name is given.
+
+        Summed from the rows rather than counted in memory, so a restart does
+        not forgive a budget and the number cannot drift from what the board
+        shows. Per agent because they are different jobs against different
+        models: the classifier running on every mention and the responder
+        running on a few are not one pool, and a shared ceiling would let the
+        cheap high-volume one exhaust the careful one.
+
+        Midnight UTC rather than the operator's midnight. A budget needs a
+        boundary that does not move, and the process has no opinion about
+        where they are.
+        """
+        start = _now().replace(hour=0, minute=0, second=0, microsecond=0)
+        query = select(
+            func.sum(schema.ModelCall.input_tokens + schema.ModelCall.output_tokens)
+        ).where(schema.ModelCall.created_at >= start)
+        if agent is not None:
+            query = query.where(schema.ModelCall.agent == agent)
+        async with self._sessions() as session:
+            return int(await session.scalar(query) or 0)
+
     async def calls_for_tasks(self, task_ids) -> dict[int, list[ModelCall]]:
         """Every call for each of these tasks, oldest first within a task.
 

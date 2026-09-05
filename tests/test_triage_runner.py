@@ -578,3 +578,50 @@ async def test_one_unreadable_message_does_not_stop_the_others(db):
     assert [t.type for t in acted] == ["api_issue"], (
         "the good message was triaged despite the bad one ahead of it"
     )
+
+
+async def test_a_mention_is_never_lost_to_a_spent_budget(db, provider, inbox):
+    """A refusal is not a discard.
+
+    The ceiling stops a call from happening; it must not stop the mention from
+    being anybody's problem. `docs/DESIGN.md`'s never-drop rule has no
+    exception for running out of money — an unclassified mention that nobody
+    is told about is indistinguishable from correct operation, which is the
+    failure this whole system is shaped against.
+    """
+    from dataclasses import replace as _replace
+
+    from agents.models.interface import Model
+
+    from friday.config import AgentConfig
+    from friday.triage import Triage
+    from friday.triage.runner import NEEDS_HUMAN, TriageRunner
+
+    class NeverReached(Model):
+        async def get_response(self, *a, **kw):
+            raise AssertionError("the provider was called despite the ceiling")
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    config = AgentConfig(
+        name="triage", api_key="k", base_url="https://example.invalid/v1",
+        model="test-model", daily_token_budget=10,
+    )
+    provider.emit(make_event(message_id="10", text="checkout is 500ing"))
+    await captured(inbox)
+
+    await TriageRunner(
+        db=db,
+        triage=Triage(
+            config=config, model=NeverReached(), spent=lambda agent: _spent(999)
+        ),
+        confidence_threshold=0.7,
+    ).run_once()
+
+    (task,) = await db.tasks_in_state(NEEDS_HUMAN, 10)
+    assert "tokens today" in task.params["reason"]
+
+
+async def _spent(n: int) -> int:
+    return n

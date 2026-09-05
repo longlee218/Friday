@@ -69,6 +69,12 @@ def test_nothing_in_the_composition_root_is_read_before_it_is_built():
 #: not derived.** Deriving it is how the prompt-families test stopped checking
 #: anything when a module moved: a list that computes itself agrees with
 #: whatever the code happens to be.
+#: The keywords every one of them must be handed. Two now, and the second was
+#: added a ticket later and forgotten here — the test that exists precisely to
+#: catch a forgotten wire read one keyword while a second was being threaded
+#: through the same four calls, three lines away.
+SEAMS = ("record", "spent")
+
 AGENT_BUILDERS = (
     "register_extractors",   # the three extractors
     "TriageRunner.build",    # triage
@@ -105,6 +111,8 @@ def test_every_agent_is_built_with_somewhere_to_record():
     """D1: the sink is handed over at construction, and the composition root
     is the only place it comes from.
 
+    Every seam in `SEAMS`, not just the first one somebody wrote this for.
+
     The sink has to be a name, not merely a keyword: `record=None` at all four
     call sites is the whole system recording nothing, and that is what this
     board exists to fix. And one name, not four — a second sink would be a
@@ -118,26 +126,29 @@ def test_every_agent_is_built_with_somewhere_to_record():
     sink here.
     """
     calls = _calls_in_run()
-    missing, sinks = [], set()
+    missing = []
+    per_seam: dict[str, set[str]] = {seam: set() for seam in SEAMS}
     for builder in AGENT_BUILDERS:
         node = calls.get(builder)
         if node is None:
             missing.append(f"{builder} is not called in _run at all")
             continue
-        given = next((kw.value for kw in node.keywords if kw.arg == "record"), None)
-        if given is None:
-            missing.append(f"{builder} is built without a record sink")
-        elif not isinstance(given, ast.Name):
-            # Presence is not enough. `record=None` everywhere is the system
-            # recording nothing, which is the bug this board exists to fix,
-            # and a check that only asks whether the keyword was spelled would
-            # pass straight through it.
-            missing.append(f"{builder} is handed {ast.dump(given)}, not a sink")
-        else:
-            sinks.add(given.id)
+        for seam in SEAMS:
+            given = next((kw.value for kw in node.keywords if kw.arg == seam), None)
+            if given is None:
+                missing.append(f"{builder} is built without {seam}")
+            elif not isinstance(given, (ast.Name, ast.Attribute)):
+                # Presence is not enough. `record=None` everywhere is the
+                # system recording nothing, which is the bug this board exists
+                # to fix, and a check that only asks whether the keyword was
+                # spelled would pass straight through it.
+                missing.append(f"{builder}'s {seam} is {ast.dump(given)}, not a name")
+            else:
+                per_seam[seam].add(ast.dump(given))
 
     assert missing == [], "; ".join(missing)
-    assert len(sinks) == 1, f"one sink, not {len(sinks)}: {sorted(sinks)}"
+    for seam, names in per_seam.items():
+        assert len(names) == 1, f"one {seam}, not {len(names)}"
 
 
 def test_the_sink_is_built_once_and_only_here():
