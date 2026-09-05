@@ -643,12 +643,12 @@ def test_no_family_escapes_anything_twice():
 
     **Scope, stated because the first version of this docstring overclaimed.**
     It covers the *per-call input* each family builds from a message it was
-    just handed. It does not cover a prompt assembled from something a model
-    wrote earlier and this system stored — the summary that becomes a
-    channel's `derived`, which `channel_derived` escapes on the way back out.
-    That round trip can stack an escape too; it is a different mechanism with
-    its own decision to make, so it has its own ticket rather than a quiet
-    assertion here.
+    just handed, plus the one section built from something a model wrote and
+    this system stored: `channel_derived`. That second one was ticket 07 —
+    the summariser is shown an escaped transcript, so a model quoting what it
+    read hands back `&lt;b&gt;`, and the seam escaped it again. The summary is
+    normalised before storage now, and `tests/test_channel_context.py` walks
+    the whole round trip; this holds the section end of it.
 
     Each family needs different arguments, so the map is written out; what is
     not written out is *which* families exist. The assertion below fails when
@@ -661,11 +661,21 @@ def test_no_family_escapes_anything_twice():
     from friday.responder.prompt import build_input as responder_input
     from friday.triage.prompt import build_input as triage_input
 
+    # What a model wrote earlier and this system stored, as it comes back out.
+    # Plain in the store, escaped once here — the split ticket 07 restored.
+    from friday.agent.instruction_prompt import channel_derived
+    from friday.memory.channel_context import ChannelContext
+
+    stored = ChannelContext(
+        channel_id="c", base={}, derived={"summary": HAS_MARKUP}, overrides={}
+    )
+
     built = {
         "triage": triage_input(_events([HAS_MARKUP])),
         "extraction": extraction_input(HAS_MARKUP, ApiIssueParams),
         "responder": responder_input(asking="q", context=_events([HAS_MARKUP])),
         "summariser": _transcript(_events([HAS_MARKUP])),
+        "channel_derived": channel_derived(stored).render(),
     }
 
     from pathlib import Path

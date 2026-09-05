@@ -13,6 +13,7 @@ fact without its reason next to it is a fact nobody dares change.
 
 from __future__ import annotations
 
+import html
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -71,7 +72,16 @@ SUMMARY_INSTRUCTIONS = SUMMARY_JOB
 
 @dataclass(frozen=True, slots=True)
 class ChannelContext:
-    """One channel's knowledge, already layered: base < derived < overrides."""
+    """One channel's knowledge, already layered: base < derived < overrides.
+
+    **Every value here is plain text.** Escaping happens once, on the way into
+    a prompt, in `instruction_prompt` — which is what lets a hallucinated note
+    be rendered as data rather than read as a section. A writer that stores an
+    already-escaped value gets it escaped twice and shows the model
+    `&amp;lt;b&amp;gt;`; `_maybe_summarize` is the one that had to be taught
+    this, because the summariser is shown an escaped transcript and quotes it
+    back (ticket 07).
+    """
 
     channel_id: str
     base: dict[str, Any]
@@ -268,7 +278,14 @@ class ContextRebuilder:
             model=self._model,
         )
         result = await harness.run(_transcript(messages))
-        return result.final_output if result else None
+        if not result or not result.final_output:
+            return None
+        # `derived` holds plain text — see `ChannelContext`. This agent is
+        # *shown* an escaped transcript, so one that quotes what it read hands
+        # back `&lt;b&gt;`; one unescape undoes the one escape the transcript
+        # applied. The escape at the seam still runs, and runs last, which is
+        # what keeps a hostile summary inert (ticket 07).
+        return html.unescape(result.final_output)
 
 
 def _transcript(messages) -> str:

@@ -184,6 +184,21 @@ def test_prompt_escaping_happens_at_one_seam():
 
     assert set(hits) <= allowed, f"a second escaping seam: {set(hits) - allowed}"
 
+    # The inverse verb is as load-bearing, and grepping only for the first
+    # would leave it invisible — which is the argument this whole file is
+    # built on: the rules that were only written down are the ones that
+    # drifted. `channel_context` normalises the summariser's output on the way
+    # into the store, because `derived` holds plain text (ticket 07); a second
+    # module reaching for it is either a second store or a mistake.
+    unescapes = {"friday/memory/channel_context.py"}
+    hits = subprocess.run(
+        ["grep", "-rl", "--include=*.py", "html.unescape(", "friday/"],
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+
+    assert set(hits) <= unescapes, f"an unexpected unescape: {set(hits) - unescapes}"
+
 
 def test_no_family_imports_another_familys_prompt_module():
     """The rule tickets 42–45 bought: one prompt module per family, and no
