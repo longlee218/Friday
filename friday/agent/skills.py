@@ -41,6 +41,17 @@ _FRONTMATTER = "---"
 #: of system-shipped content.
 _MUTABILITY = ("built_in", "custom")
 
+#: How many names a miss may recite before it stops reciting and gives a
+#: count instead. One number in one place, because both misses phrase
+#: themselves through `known()`.
+#:
+#: The miss exists so an agent that guessed wrong can recover. Up to this
+#: many, the names *are* the recovery. Past it they are the catalogue's whole
+#: cost paid a second time, on the failure path, by the tool that exists so
+#: the catalogue would not have to grow — and paid at the moment the agent is
+#: already unsure. Ten is about a line.
+_MISS_NAMES_MAX = 10
+
 
 @dataclass(frozen=True, slots=True)
 class Skill:
@@ -171,13 +182,29 @@ class SkillLibrary:
         )
 
     def known(self) -> str:
-        """Every name an agent could have asked for, for a sentence saying so.
+        """What an agent could have asked for, for a sentence saying so.
 
         One phrase rather than three copies: `fetch` says it for a name it
         does not have, `search` for a query nothing matched, and
         `describe_skill` for the same miss as `fetch`.
+
+        Names while there are few enough to be the recovery (see
+        `_MISS_NAMES_MAX`); a count past that, pointing at the catalogue the
+        agent already has in front of it. Reciting a hundred names into a tool
+        result spends the catalogue's cost twice and spends it on the failure
+        path.
+
+        There is a second reason not to recite them, found while fixing the
+        fourth search rank: a test asserted `name in answer`, and a miss that
+        lists every name satisfied that assertion — so the test passed against
+        the bug it was written to catch. A miss that does not recite the
+        library cannot do that again.
         """
-        return ", ".join(sorted(self._skills)) or "none are defined"
+        if not self._skills:
+            return "none are defined"
+        if len(self._skills) > _MISS_NAMES_MAX:
+            return f"{len(self._skills)} skills, named in the catalogue you were shown"
+        return ", ".join(sorted(self._skills))
 
     def location_of(self, name: str) -> Path | None:
         """Where a skill's `SKILL.md` is, absolute, or `None` if not here.

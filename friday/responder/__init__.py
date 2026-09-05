@@ -100,6 +100,13 @@ class Responder:
         #: `harness.py` is the only module that may know the SDK's shape — the
         #: `Harness` properties exist so nobody reaches through it, and the
         #: turn budget below is the one caller that wanted to.
+        #: **Non-empty**, not merely present. A library with nothing in it
+        #: gives four tools that can only answer "none are defined", and it
+        #: used to: the tools were wired on `skills is not None` while the
+        #: prompt described them only when the catalogue had lines, so a fresh
+        #: install handed the agent three tools it was never told about. The
+        #: two facts agree now because they are read off the same one, which
+        #: is what lets `build_input` keep deciding from the catalogue alone.
         tools = (
             [
                 fetch_skill_tool(skills),
@@ -107,7 +114,7 @@ class Responder:
                 describe_skill_tool(skills),
                 read_skill_file_tool(skills),
             ]
-            if skills is not None
+            if skills is not None and len(skills) > 0
             else []
         )
         #: Two turns each — the call and its answer — for however many it got.

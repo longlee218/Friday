@@ -6,9 +6,8 @@ ship today.
 
 **Blocked by:** None (01–04 are done; this is work on top of what they landed)
 
-**Status:** needs-triage — **one open decision, named below.** The other two
-parts are decided and could be lifted into their own ticket if the first one
-sits.
+**Status:** done — **the operator chose D: the matching does not change.**
+The other two are fixed.
 
 None of these three came from watching a real thread. They came out of
 reviewing 01–04, which is worth saying: every one of them is a heuristic that
@@ -18,7 +17,7 @@ them down now rather than the argument for building them now.
 
 ---
 
-## The open decision: a query whose word form does not match
+## Decided: D, the matching does not change
 
 `search("vietnamese writing")` does not find `answer-in-vietnamese`, whose
 description reads "How the operator writes to their team". Every token must
@@ -44,13 +43,28 @@ enough, and it is a real trade rather than an obvious fix:
   front of it and search is a convenience over a list it can read. This is the
   option the other three have to beat, and at today's size it is winning.
 
-**D is the current behaviour, and stays the behaviour until somebody picks
-otherwise.** Whoever takes this ticket should not choose quietly.
+**The operator chose D.** The reason is the one D was written with: the
+catalogue is already in the prompt in full, so a search miss is not a dead
+end — the agent has every name and description in front of it, and search is
+a convenience over a list it can already read. None of A, B or C beats that
+at three skills, and B in particular buys a fixed case at the price of being
+silently wrong on irregular forms, where a miss and an absent skill look
+identical.
 
-- [ ] The decision is recorded here with its reason before any code
-- [ ] Whatever is chosen, the tool description tells the model what the last
-      rank actually does — 04 exists because a rank was advertised as token
-      matching and was not
+**What follows from choosing D is not "nothing".** If the behaviour stays,
+the model has to be told how to work with it, or it will read an empty result
+as "there is no such skill" — which is the wrong conclusion and the expensive
+one. `search_skills` now says that every word must turn up, that matching is
+literal (`writing` does not find `writes`), and that a miss is usually one
+word away from a hit — try fewer words, or read the catalogue.
+
+Revisit if the library passes a few dozen skills, when reading the whole
+catalogue stops being a cheap fallback. That is the same threshold the second
+part of this ticket is about.
+
+- [x] The decision is recorded here with its reason before any code
+- [x] The tool description tells the model what the last rank actually does —
+      04 exists because a rank was advertised as token matching and was not
 
 ---
 
@@ -69,14 +83,15 @@ the miss sentence containing every name is what let a bad test pass. It
 asserted `name in answer`, and the miss it was meant to catch satisfied that
 assertion. A miss that does not recite the library cannot do that again.
 
-- [ ] A miss names what is available only while that is short; past a
+- [x] A miss names what is available only while that is short; past a
       threshold it says how many there are and points at the catalogue the
       agent already has
-- [ ] The threshold is one number in one place, not a rule each caller
-      remembers
-- [ ] `fetch`'s miss and `search`'s miss stay one phrase — 04 folded three
-      copies into `known()`, and this must not unfold them
-- [ ] A test pins that a large library's miss does not contain every name
+- [x] The threshold is one number in one place — `_MISS_NAMES_MAX`, ten,
+      which is about a line
+- [x] `fetch`'s miss and `search`'s miss stay one phrase — both still go
+      through `known()`, which is where the threshold lives
+- [x] A test pins that a large library's miss does not contain every name,
+      and a second pins that a small one still recites them
 
 ---
 
@@ -96,15 +111,22 @@ apart exactly when the library is empty.
 An empty library is not hypothetical. It is what a fresh install has, and
 `test_a_directory_that_does_not_exist_is_not_an_error` says so deliberately.
 
-- [ ] Whether the three sections render is decided by whether the agent was
-      given the tools, not by whether the catalogue has lines in it
-- [ ] A responder built with an empty library either has no skill tools or is
-      told about the ones it has — the two must agree, and which way they
-      agree is the implementer's call to state
-- [ ] `skill_system` keeps rendering nothing for an empty catalogue: there is
+- [x] **They agree by the tools going away, not by the sections appearing.**
+      Of the two ways the ticket left open, this is the one that removes the
+      divergence at its source: four tools over zero skills can only ever
+      answer "none are defined", so an empty library gets none of them, and
+      their schemas stop costing tokens on an install that has no skills.
+      The responder wires on `len(skills) > 0`.
+- [x] `build_input` still decides from the catalogue alone, and that is now
+      *sound* rather than lucky — a non-empty catalogue and the four tools are
+      the same fact, read off the same library. A comment there says so, since
+      the soundness is the thing a later edit would break.
+- [x] `skill_system` keeps rendering nothing for an empty catalogue: there is
       genuinely nothing to list, and that is a different question from
       whether the tools exist
-- [ ] A test covers the empty-library case, which nothing does today
+- [x] A test covers the empty-library case — no tools *and* no sections, for
+      the same reason. Reverting the wiring to `skills is not None` reddens
+      it.
 
 ---
 

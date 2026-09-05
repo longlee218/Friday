@@ -128,6 +128,39 @@ def test_fetching_one_that_does_not_exist_is_an_answer_not_an_error(tmp_path):
     assert "trace-a-request" in answer
 
 
+def test_a_miss_does_not_recite_a_large_library(tmp_path):
+    """The miss exists so a wrong guess can recover, and up to a point the
+    names *are* the recovery. Past it they are the catalogue's whole cost paid
+    again, on the failure path, by the tool that exists so the catalogue would
+    not have to grow.
+
+    It is also what let a bad test pass once: an assertion of `name in answer`
+    is satisfied by a miss that lists every name.
+    """
+    for i in range(30):
+        write(
+            tmp_path,
+            f"skill-{i:02d}",
+            f"---\nname: skill-{i:02d}\ndescription: d{i}\n---\nB",
+        )
+
+    library = SkillLibrary(tmp_path).load()
+
+    for answer in (library.fetch("nope"), library.search("nope")):
+        assert "skill-00" not in answer, answer
+        assert "30" in answer, answer
+
+
+def test_a_miss_still_names_them_while_there_are_few(tmp_path):
+    """The threshold cuts the recital off, it does not remove it — a handful
+    of names is the cheapest recovery there is."""
+    write(tmp_path, "trace-a-request", SKILL)
+
+    library = SkillLibrary(tmp_path).load()
+
+    assert "trace-a-request" in library.fetch("nope")
+
+
 def test_fetching_when_nothing_is_defined_still_answers(tmp_path):
     answer = SkillLibrary(tmp_path).load().fetch("anything")
 
@@ -257,6 +290,42 @@ def test_the_responder_is_given_the_catalogue_and_the_tool(tmp_path):
         "describe_skill",
         "read_skill_file",
     ]
+
+
+def test_an_empty_library_gives_neither_the_tools_nor_the_sections(tmp_path):
+    """A library with nothing in it used to hand over four tools that could
+    only answer "none are defined" — and the prompt described none of them,
+    because the sections are decided by the catalogue having lines while the
+    tools were wired on the library merely existing. A fresh install is
+    exactly that case.
+
+    The two facts agree now, and this is what says so: no tools, no sections,
+    for the same reason.
+    """
+    from friday.config import AgentConfig
+    from friday.responder import Responder
+    from friday.responder.prompt import build_input
+
+    cfg = AgentConfig(
+        name="responder",
+        api_key="sk-x",
+        base_url="https://example.invalid/v1",
+        model="m",
+    )
+    empty = SkillLibrary(tmp_path).load()
+    assert len(empty) == 0, "the fixture is the point of the test"
+
+    responder = Responder(config=cfg, skills=empty)
+    text = build_input(asking="x", skills_catalogue=empty.catalogue())
+
+    assert responder._run.agent.tools == []
+    for section in (
+        "skill_system",
+        "search_skills_system",
+        "describe_skill_system",
+        "read_skill_file_system",
+    ):
+        assert f"<{section}>" not in text, section
 
 
 def test_the_responder_without_skills_carries_no_tool():

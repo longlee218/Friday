@@ -205,6 +205,10 @@ def build_input(
     responder without skills produces the exact bytes it did before
     this ticket, including no extra sections.
     """
+    # A non-empty catalogue and the four skill tools are the same fact: the
+    # responder wires the tools only for a library that has something in it
+    # (see its `__init__`). So this decides both, and an agent is never told
+    # about a tool it was not given — the rule `memory_tool_system` follows.
     has_skills = bool(skills_catalogue)
     parts = [
         base(now or datetime.now(timezone.utc)),

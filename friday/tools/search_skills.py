@@ -37,6 +37,12 @@ def search_skills_tool(library: SkillLibrary):
         Returns up to five `name: description` lines, best match first. Never
         the bodies — call fetch_skill once you have picked one.
 
+        Every word of your query has to turn up somewhere, and it is matched
+        as written: "writing" does not find "writes". So a search that comes
+        back with nothing is usually a word away from one that works — try
+        fewer words, or read the catalogue you were given, which lists every
+        skill there is.
+
         Args:
             query: a phrase describing what you are trying to do, not the
                 skill's name. Word order does not matter.
