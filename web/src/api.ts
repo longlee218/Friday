@@ -5,7 +5,7 @@
 // `tests/test_web_contract.py`, on the Python side, because that is the side
 // that can call the real converters.
 
-import type { Board, ChannelContext, Flow, Spend } from "./api-types";
+import type { Board, ChannelContext, Flow, Spend, TaskCalls } from "./api-types";
 
 async function get<T>(path: string): Promise<T> {
   const answer = await fetch(path);
@@ -32,6 +32,7 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 export const api = {
   board: () => get<Board>("/api/board"),
   spend: () => get<Spend>("/api/spend"),
+  taskCalls: (id: number) => get<TaskCalls>(`/api/tasks/${id}/calls`),
   flow: (provider: string, id: string) =>
     get<Flow>(`/api/messages/${provider}/${encodeURIComponent(id)}/flow`),
   channels: () => get<string[]>("/api/channels"),

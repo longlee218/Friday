@@ -160,14 +160,17 @@ export function TasksScreen({
 }
 
 function TaskCard({ task }: { task: Task }) {
-  const calls = useAsync(
-    () => fetch(`/api/tasks/${task.id}/model-calls`).then((r) => r.json()),
-    [task.id],
-  );
-  const spent = ((calls.value as ModelCall[]) ?? []).reduce(
-    (n, c) => n + c.input_tokens + c.output_tokens,
-    0,
-  );
+  const calls = useAsync(() => api.taskCalls(task.id), [task.id]);
+  const spent = calls.value?.spent ?? 0;
+  // Model and tool calls are one sequence — a tool call is usually the answer
+  // to the model call before it — so they interleave on time rather than
+  // arriving as two lists a reader has to zip. This screen claimed to do that
+  // while fetching only the model half, because `tool_calls` had no per-task
+  // route at all until a review noticed.
+  const timeline = [
+    ...(calls.value?.model_calls ?? []).map((c) => ({ at: c.created_at, model: c })),
+    ...(calls.value?.tool_calls ?? []).map((t) => ({ at: t.created_at, tool: t })),
+  ].sort((a, b) => a.at.localeCompare(b.at));
 
   return (
     <div className="card" style={{ marginTop: 8 }}>
@@ -182,10 +185,14 @@ function TaskCard({ task }: { task: Task }) {
         <pre>{JSON.stringify(task.params, null, 2)}</pre>
       )}
       <details>
-        <summary>What it asked the model ({(calls.value as ModelCall[])?.length ?? 0})</summary>
-        {((calls.value as ModelCall[]) ?? []).map((c, i) => (
-          <CallCard key={i} call={c} />
-        ))}
+        <summary>What it did ({timeline.length})</summary>
+        {timeline.map((step, i) =>
+          "model" in step ? (
+            <CallCard key={i} call={step.model!} />
+          ) : (
+            <ToolCard key={i} call={step.tool!} />
+          ),
+        )}
       </details>
     </div>
   );

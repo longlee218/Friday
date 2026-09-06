@@ -153,6 +153,19 @@ class TriageRunner:
         self._batch_size = batch_size
         self._poll_interval = poll_interval_seconds
 
+    @property
+    def confidence_threshold(self) -> float:
+        """The line a classification is judged against.
+
+        Exposed because the board draws a confidence *against* it and a
+        number without its line is unreadable — and because the composition
+        root must not read it out of `config.yaml` itself: which knobs a step
+        has is that step's business, enforced by
+        `test_no_agent_configuration_is_read_in_the_composition_root`, which
+        is what caught this being done the other way.
+        """
+        return self._threshold
+
     async def run_forever(self) -> None:
         while True:
             if not await self.run_once():

@@ -57,6 +57,12 @@ export function FlowScreen({
 
 function Path({ provider, id }: { provider: string; id: string }) {
   const flow = useAsync(() => api.flow(provider, id), [provider, id]);
+  // The line the confidence is judged against is `config.yaml`'s, served on
+  // `/api/board`. It was hardcoded as 0.70 here — right by luck, and silently
+  // wrong the first time the operator tuned it, which is the one thing this
+  // badge exists to prevent.
+  const board = useAsync(() => api.board(), []);
+  const threshold = board.value?.confidence_threshold ?? null;
 
   if (flow.error) {
     return (
@@ -126,8 +132,18 @@ function Path({ provider, id }: { provider: string; id: string }) {
             <Pill label={it.decision.type ?? "—"} />
             {it.decision.confidence != null && (
               <Pill
-                tone={it.decision.confidence >= 0.7 ? "good" : "warn"}
-                label={`confidence ${it.decision.confidence.toFixed(2)} of 0.70`}
+                tone={
+                  threshold == null
+                    ? undefined
+                    : it.decision.confidence >= threshold
+                      ? "good"
+                      : "warn"
+                }
+                label={
+                  threshold == null
+                    ? `confidence ${it.decision.confidence.toFixed(2)}`
+                    : `confidence ${it.decision.confidence.toFixed(2)} of ${threshold.toFixed(2)}`
+                }
               />
             )}
             <span className="faint mono">{shortTime(it.triaged_at)}</span>

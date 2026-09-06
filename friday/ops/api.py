@@ -70,6 +70,12 @@ def build_api(
     #: what a caller can reach is composition, and a door that is not in the
     #: room should not be described.
     context_store: Any = None,
+    #: `config.yaml`'s `triage.confidence_threshold`, served so the page can
+    #: show a confidence against the line it is judged by. The flow screen
+    #: hardcoded `0.70`, which agreed by luck and would have diverged
+    #: silently the first time the operator tuned it — and a confidence
+    #: without the threshold beside it is a number nobody can read.
+    confidence_threshold: float | None = None,
 ) -> FastAPI:
     api = FastAPI(title="friday", docs_url="/api/docs", redoc_url=None)
 
@@ -106,6 +112,7 @@ def build_api(
         return _clean(
             {
                 "status": provider_status(),
+                "confidence_threshold": confidence_threshold,
                 "counts": await db.counts(),
                 "failed": [_outbound(row) for row in await db.outbound(FAILED, limit=50)],
                 "tasks_by_state": {
@@ -195,6 +202,36 @@ def build_api(
             asdict(c) | {"created_at": c.created_at}
             for c in await db.calls_for_task(task_id)
         ])
+
+    @api.get("/api/tasks/{task_id}/calls")
+    async def task_calls(task_id: int = Path(...)) -> dict:
+        """What one task asked a model *and* what it reached for, plus what
+        that cost.
+
+        Both kinds together because they are one sequence — a tool call is
+        usually the answer to the model call before it — and because the task
+        screen claimed to interleave them while only ever fetching the model
+        half: `tool_calls` had no per-task route at all, so ticket 07 of the
+        previous board recorded what an agent reached for and this screen
+        could not show it.
+
+        Two lists rather than one merged one: they are different shapes, and
+        merging them here would mean inventing a tag for a reader that can
+        interleave on `created_at` itself.
+        """
+        calls = await db.calls_for_task(task_id)
+        tools = (await db.tools_for_tasks([task_id])).get(task_id, [])
+        return _clean(
+            {
+                "model_calls": [
+                    asdict(c) | {"created_at": c.created_at} for c in calls
+                ],
+                "tool_calls": [
+                    asdict(t) | {"created_at": t.created_at} for t in tools
+                ],
+                "spent": sum(c.input_tokens + c.output_tokens for c in calls),
+            }
+        )
 
     @api.get("/api/model-calls")
     async def recent_model_calls(

@@ -50,7 +50,11 @@ that happened on purpose, naming the word that caused it.
 - [x] Each step carries its own evidence: the prompt behind the classification,
       the confidence, the tokens, the latency
 - [x] The classification shows its confidence **against the configured
-      threshold**, since "0.62" means nothing without knowing the line is at
+      threshold** — and it did not until a review checked: the page hardcoded
+      `0.70`, which agreed by luck and would have diverged silently the first
+      time the operator tuned it. `/api/board` serves the real value now, and
+      the composition root asks `TriageRunner` for it rather than reading
+      `config.yaml` — which an architecture test caught me doing, since "0.62" means nothing without knowing the line is at
       0.7 — that number is `confidence_threshold` in `config.yaml`, documented
       there as a placeholder nobody should trust yet, and this screen is how it
       would ever stop being one

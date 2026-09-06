@@ -41,7 +41,7 @@ async def ingest(inbox: Inbox) -> None:
         pass
 
 
-async def serve_board(db, provider, config, sock, context_store) -> None:
+async def serve_board(db, provider, config, sock, context_store, threshold) -> None:
     """The board's server runs in this process like everything else.
 
     Only the JSON API for now: the server-rendered page was deleted with the
@@ -65,6 +65,10 @@ async def serve_board(db, provider, config, sock, context_store) -> None:
         # process buys. A write here reaches the next prompt assembled in that
         # room once somebody reloads (board D8).
         context_store=context_store,
+        # Asked of the runner, not read out of config: which knobs triage
+        # has is triage's business. The page draws a confidence against this
+        # line and must not invent it.
+        confidence_threshold=threshold,
     )
     # Nothing is mounted at `/` until `web/` exists (board ticket 05). The
     # server-rendered page that used to live there was deleted with the
@@ -305,7 +309,10 @@ async def _run(stack: AsyncExitStack) -> None:
                 group.create_task(bot.start())
             group.create_task(heartbeat.run_forever())
             group.create_task(
-                serve_board(db, provider, config, board_socket, context_store)
+                serve_board(
+                    db, provider, config, board_socket, context_store,
+                    runner.confidence_threshold,
+                )
             )
     except* CredentialRejected as group_exc:
         raise SystemExit(

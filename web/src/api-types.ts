@@ -120,6 +120,9 @@ export interface Counts {
 
 export interface Board {
   status: string;
+  /** `config.yaml`'s `triage.confidence_threshold`. `null` when unset, which
+   *  is not the same as 0.7 — the page must not invent the line it draws. */
+  confidence_threshold: number | null;
   counts: Counts;
   failed: Outbound[];
   tasks_by_state: Record<string, Task[]>;
@@ -149,4 +152,13 @@ export interface ChannelContext {
 export interface Spend {
   total: number;
   by_agent: Record<string, number>;
+}
+
+/** One task's calls, both kinds, and what they cost. Two lists rather than
+ *  one merged one: they are different shapes, and a reader can interleave on
+ *  `created_at` without a tag invented for it. */
+export interface TaskCalls {
+  model_calls: ModelCall[];
+  tool_calls: ToolCall[];
+  spent: number;
 }

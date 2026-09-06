@@ -35,10 +35,16 @@ summed rather than merely listed.
       an empty column is information, a missing one is a bug the operator
       cannot see
 - [x] One task expands to its calls in time order, model and tool interleaved,
-      each showing agent, node, latency, attempt
+      each showing agent, node, latency, attempt — **false when first ticked**,
+      and a review found it: `TaskCard` fetched `/api/tasks/{id}/model-calls`
+      and nothing else, because there was no per-task tool route in the API at
+      all. `/api/tasks/{id}/calls` serves both now and the screen interleaves
+      them on `created_at`
 - [x] A model call shows its **full** prompt and output, not a preview. This is
       the debug view; truncation defeats it
-- [x] A tool call shows its arguments, its result, and whether it failed —
+- [x] A tool call shows its arguments, its result, and whether it failed — on
+      the flow screen from the start, and on *this* screen only after the
+      missing route above was added —
       `ToolCall.failed` exists precisely because a failure that reads as an
       answer is the one this board's ticket 07 was written for
 - [x] Token totals per task, and per agent for the day. `Database.spent_today`

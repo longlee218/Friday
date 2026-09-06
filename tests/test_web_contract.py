@@ -52,6 +52,7 @@ def client(db, store):
             db=db,
             provider_status=lambda: "connected",
             context_store=store,
+            confidence_threshold=0.7,
         )
     )
 
@@ -325,3 +326,42 @@ def test_every_entrypoint_that_binds_a_port_checks_its_exposure():
             "every captured message, every model prompt, and a write path into "
             "what the agents believe about a room"
         )
+
+
+async def test_the_board_carries_the_threshold_the_page_compares_against(client):
+    """`FlowScreen` renders "confidence 0.62 of 0.70" and the 0.70 was
+    hardcoded — `config.yaml`'s `confidence_threshold` was never served. It
+    agreed by luck and would diverge silently the first time the operator
+    tuned it, which defeats the only thing that badge exists to show: a
+    number is meaningless without the line it is being judged against."""
+    board = client.get("/api/board").json()
+
+    assert board["confidence_threshold"] == 0.7
+    assert set(board) == declared("Board")
+
+
+async def test_a_tasks_tool_calls_are_reachable_beside_its_prompts(client, db):
+    """The task screen claimed model and tool calls interleaved, and fetched
+    only `/api/tasks/{id}/model-calls` — there was no per-task tool route at
+    all, so nothing on that screen had ever shown a tool call. Two ticked
+    criteria, one missing route."""
+    task = await db.create_task(
+        conversation=WATCHED, type="api_issue", state=TaskState.PENDING,
+        confidence=0.9, params={},
+    )
+    await db.record_model_call(
+        message_id=None, task_id=task.id, node="prepare", agent="extractor",
+        model="m", system_prompt="s", prompt="p", output="o",
+        input_tokens=4, output_tokens=1,
+    )
+    await db.record_tool_call(
+        task_id=task.id, node="prepare", agent="extractor",
+        tool="ask_for_fields", arguments="{}", result="asked", failed=False,
+    )
+
+    calls = client.get(f"/api/tasks/{task.id}/calls").json()
+
+    assert set(calls) == declared("TaskCalls")
+    assert [c["agent"] for c in calls["model_calls"]] == ["extractor"]
+    assert [t["tool"] for t in calls["tool_calls"]] == ["ask_for_fields"]
+    assert calls["spent"] == 5

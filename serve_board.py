@@ -30,6 +30,7 @@ from friday.memory.channel_context import ContextStore
 from friday.ops.api import bind, build_api, check_exposure
 from friday.config import load_config
 from friday.store.db import Database
+from friday.triage.runner import TriageRunner
 
 
 async def main() -> None:
@@ -46,6 +47,11 @@ async def main() -> None:
         provider_status=status,
         origins=list(config.board_origins),
         context_store=ContextStore.build(config),
+        # Asked of the runner rather than read out of config, for the reason
+        # `run_agent.py` is held to: which knobs triage has is triage's.
+        confidence_threshold=(
+            await TriageRunner.build(config, db=db)
+        ).confidence_threshold,
     )
     sock = bind(config.board_host, config.board_port)
     server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))
