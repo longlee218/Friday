@@ -302,3 +302,47 @@ async def test_a_call_naming_both_a_message_and_its_task_is_listed_once(db):
     assert len(flow.model_calls) == 1, "a call with both keys was counted twice"
     assert len(flow.tool_calls) == 1, "a tool call with both keys was counted twice"
     assert sum(c.input_tokens + c.output_tokens for c in flow.model_calls) == 10
+
+
+def test_there_is_still_only_one_provider_name():
+    """A tripwire, not a rule — the thing it guards is in `db.py`.
+
+    `flow_for` correlates model and tool calls by `message_id` alone: those
+    tables carry no provider column, only `messages` has the composite key.
+    That is honest while one platform exists, because a Discord snowflake
+    does not collide with itself. The day a second provider name appears, two
+    messages can share an id and each path will show the other's calls.
+
+    Written as a test rather than a comment because this codebase's own
+    convention is that the rules only written down are the ones that drifted.
+    A note naming a trigger condition is worth exactly as much as the next
+    person happening to read it; this fails on the day the condition arrives.
+    """
+    import ast
+    import pathlib
+
+    names = set()
+    for path in pathlib.Path("friday/providers").rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for stmt in node.body:
+                if (
+                    isinstance(stmt, ast.Assign)
+                    and any(
+                        isinstance(t, ast.Name) and t.id == "name"
+                        for t in stmt.targets
+                    )
+                    and isinstance(stmt.value, ast.Constant)
+                    and isinstance(stmt.value.value, str)
+                ):
+                    names.add(stmt.value.value)
+
+    assert names == {"discord"}, (
+        f"a second provider exists ({sorted(names)}), and `Database.flow_for` "
+        "correlates model and tool calls by `message_id` with no provider "
+        "beside it — see the known-limitation note on `_calls_about` in "
+        "friday/store/db.py. Two messages can now share an id, and each "
+        "flow will show the other's calls. Scoping them needs a column on "
+        "`model_calls` and `tool_calls`, and a migration."
+    )

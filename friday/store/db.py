@@ -467,6 +467,13 @@ class Database:
         could share an id and each would show the other's calls. Recorded
         rather than fixed because the fix is a column and a migration, and
         the trigger is a change nobody has made.
+
+        Recorded as a **tripwire**, not as this paragraph:
+        `test_there_is_still_only_one_provider_name` fails the day a second
+        provider name appears and says what it means for this method. A note
+        naming a trigger condition is worth what the next person reading it
+        is worth, and this repo's own convention is that the rules only
+        written down are the ones that drifted.
         """
         by_key = lambda table: (  # noqa: E731
             (table.message_id == message_id) | (table.task_id == task_id)
