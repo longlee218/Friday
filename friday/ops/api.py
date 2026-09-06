@@ -466,29 +466,34 @@ _CONTAINER_MARKER = pathlib.Path("/.dockerenv")
 def check_exposure(host: str, *, token: str | None) -> None:
     """Refuse to serve this to a network without a credential.
 
-    The board has no authentication, and the design says that is safe because
+    The board has no authentication, and the design said that was safe because
     it is read-only. That argument was always about *writes*. Reading it hands
     over every captured message and every model prompt, and what actually made
-    that safe was that it only ever answered on loopback. Binding wider is a
-    different decision, and it has to be made deliberately.
+    that safe was that it only ever answered on loopback.
+
+    **There is a write now** (board D7): a channel's context `overrides`, which
+    reaches the instructions of every agent working in that room. So this is no
+    longer a judgement about disclosure — somebody who reaches this can change
+    what the agent believes about a room, and every reply after that carries
+    it — and the branch that used to let a container through is gone.
+
+    That branch was not wrong when it was written. A container's loopback is
+    unreachable from outside it, so binding there means the port mapping never
+    arrives; `0.0.0.0` inside one means "this container", and who can reach
+    *that* is the publish rule one layer out — `ports: ["127.0.0.1:8086:8086"]`
+    in compose.yaml. But that reasoning trusts a compose file this process
+    cannot see, which is a fine thing to do about reads and not about writes.
     """
     if host in _LOOPBACK or token:
         return
-    if _CONTAINER_MARKER.exists():
-        # A container's loopback is unreachable from outside it, so binding
-        # there would mean the port mapping never arrives. `0.0.0.0` here means
-        # "this container", and who can reach *that* is the publish rule one
-        # layer out — `ports: ["127.0.0.1:8086:8086"]` in compose.yaml.
-        log.warning(
-            "serving the board on %s inside a container — it is unauthenticated, "
-            "so publish it to the host's loopback only",
-            host,
-        )
-        return
+    inside = " inside a container" if _CONTAINER_MARKER.exists() else ""
     raise SystemExit(
-        f"refusing to serve the board on {host}: it is unauthenticated and shows "
-        "every captured message and model prompt. Bind it to loopback, or set "
-        "BOARD_TOKEN."
+        f"refusing to serve the board on {host}{inside}: it is unauthenticated, "
+        "it shows every captured message and model prompt, and it now accepts "
+        "writes — a channel's context overrides, which reach the instructions "
+        "of every agent in that room.\n"
+        "Set BOARD_TOKEN, or bind loopback and publish it with "
+        'ports: ["127.0.0.1:8086:8086"].'
     )
 
 

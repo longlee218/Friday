@@ -170,17 +170,59 @@ def test_binding_hands_back_a_listening_socket():
         sock.close()
 
 
-def test_a_container_may_bind_its_own_network(tmp_path, monkeypatch):
-    """Inside a container, loopback is unreachable from outside it — the port
-    mapping never arrives. `0.0.0.0` there means "this container", and what
-    restricts who can reach it is the publish rule, one layer out."""
+def test_a_container_may_no_longer_bind_its_own_network_uncredentialed(
+    tmp_path, monkeypatch
+):
+    """This used to warn and continue, and the reason was sound while the
+    board could only be read: inside a container loopback is unreachable from
+    outside it, `0.0.0.0` means "this container", and who can reach *that* is
+    the publish rule one layer out.
+
+    It is not sound any more (board D10). One thing here writes — a channel's
+    context `overrides`, which reaches the instructions of every agent in that
+    room — so the question stopped being about disclosure and became one about
+    control, and the old branch answered it by trusting a compose file this
+    process cannot see.
+    """
     from friday.ops import api
 
     marker = tmp_path / ".dockerenv"
     marker.write_text("")
     monkeypatch.setattr(api, "_CONTAINER_MARKER", marker)
 
-    api.check_exposure("0.0.0.0", token=None)
+    with pytest.raises(SystemExit):
+        api.check_exposure("0.0.0.0", token=None)
+
+
+def test_a_container_with_a_credential_still_may(tmp_path, monkeypatch):
+    """A guard that leaves no correct path is a guard somebody deletes."""
+    from friday.ops import api
+
+    marker = tmp_path / ".dockerenv"
+    marker.write_text("")
+    monkeypatch.setattr(api, "_CONTAINER_MARKER", marker)
+
+    api.check_exposure("0.0.0.0", token="a-real-token")
+
+
+def test_the_refusal_says_what_changed_and_what_to_do(tmp_path, monkeypatch):
+    """Two failures this message exists to prevent: somebody reading it as the
+    old read-only warning and ignoring it, and somebody finding no supported
+    way forward and deleting the check."""
+    from friday.ops import api
+
+    marker = tmp_path / ".dockerenv"
+    marker.write_text("")
+    monkeypatch.setattr(api, "_CONTAINER_MARKER", marker)
+
+    with pytest.raises(SystemExit) as refused:
+        api.check_exposure("0.0.0.0", token=None)
+
+    said = str(refused.value)
+    assert "write" in said, "does not say the process now accepts writes"
+    assert "context" in said, "does not name what a write reaches"
+    assert "BOARD_TOKEN" in said, "names no supported way forward"
+    assert "loopback" in said
 
 
 def test_a_host_still_may_not(tmp_path, monkeypatch):

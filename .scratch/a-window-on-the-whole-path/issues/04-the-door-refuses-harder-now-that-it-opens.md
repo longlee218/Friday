@@ -7,7 +7,7 @@ the thing behind it can now be written to.
 
 **Decisions:** D10
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -41,17 +41,17 @@ guard belongs at the door to the outside, which is this function.
 
 ## Acceptance criteria
 
-- [ ] Binding a non-loopback address with no `BOARD_TOKEN` refuses, container
+- [x] Binding a non-loopback address with no `BOARD_TOKEN` refuses, container
       or not — the warn-and-continue branch no longer applies once a write path
       exists
-- [ ] The refusal message says *why* it changed: that the process now accepts
+- [x] The refusal message says *why* it changed: that the process now accepts
       writes, and names what they reach (a channel's context, and through it
       every prompt in that room). A guard whose message only says "refusing" is
       one somebody works around
-- [ ] The container case still has a supported answer — set `BOARD_TOKEN`, or
+- [x] The container case still has a supported answer — set `BOARD_TOKEN`, or
       bind loopback and publish through compose — and the message names it,
       because a guard that leaves no correct path is one that gets deleted
-- [ ] Tests cover every branch: loopback, token-set, container-without-token,
+- [x] Tests cover every branch: loopback, token-set, container-without-token,
       plain-without-token. Each is deleted once and watched go red
 
 ## Notes
