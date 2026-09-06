@@ -8,7 +8,7 @@ TypeScript client generated from the API's own OpenAPI schema.
 
 **Decisions:** D2, D3, D4, D11
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -46,21 +46,24 @@ runner.
 
 ## Acceptance criteria
 
-- [ ] `web/` builds to static files with `npm run build`, and the app runs
+- [x] `web/` builds to static files with `npm run build`, and the app runs
       against the live API in development (`board_origins` in `config.yaml` is
       the CORS hook and is currently `[]`)
-- [ ] FastAPI serves the built bundle, with client-side routes falling back to
+- [x] FastAPI serves the built bundle, with client-side routes falling back to
       `index.html` rather than 404-ing
-- [ ] One Dockerfile, one `docker compose up`, no Node in the runtime image —
+- [x] One Dockerfile, one `docker compose up`, no Node in the runtime image —
       check by looking for `node` in the final stage, not by assuming
-- [ ] `web/dist/` and `node_modules/` are both in `.gitignore`
-- [ ] A TypeScript client is generated from `/openapi.json` and committed, and
-      a test fails when regenerating it would produce a diff
-- [ ] The generation command is written down in `CLAUDE.md` next to the other
-      `uv run` commands — an undocumented codegen step is one nobody reruns
-- [ ] `CLAUDE.md`'s layout table gains `web/`, and its Environment section
+- [x] `web/dist/` and `node_modules/` are both in `.gitignore`
+- [~] ~~A TypeScript client is generated from `/openapi.json` and committed,
+      and a test fails when regenerating it would produce a diff~~ — **not met
+      as written, and it could not be**: see "What it came to" below. The
+      guard it asked for exists (`tests/test_web_contract.py`); the generator
+      it asked for would have pinned nothing worth pinning
+- [~] ~~The generation command is written down in `CLAUDE.md`~~ — there is no
+      generation step. `CLAUDE.md` says why the types are hand-written instead
+- [x] `CLAUDE.md`'s layout table gains `web/`, and its Environment section
       gains whatever `npm` commands a person needs
-- [ ] The suite passes; `pyproject.toml` gains no JS-related dependency
+- [x] The suite passes; `pyproject.toml` gains no JS-related dependency
 
 ## Notes
 
@@ -76,3 +79,25 @@ Ticket 19 of `discord-mention-triage` (Liquid Glass) and ticket 20 (SSE) stay
 open and out of scope. The SPA polls, exactly as ticket 20's own escape hatch
 allows: *"Polling already works… if it turns out not to be small, the honest
 outcome is to stop and keep polling."*
+
+## What it came to
+
+**The generated client could not exist, and the criterion asking for one was
+wrong.** Every route here is annotated `-> dict` and builds its body by hand,
+so `/openapi.json` describes each response as
+`{"type": "object", "additionalProperties": true}`. A client generated from
+that would pin the *routes* and none of the *fields* — while the failure D11
+names as the expensive one is a renamed field rendering `undefined` in
+silence. Checked before building it, not after.
+
+So `web/src/api-types.ts` is hand-written and the guard moved to Python:
+`tests/test_web_contract.py` calls the real converters, reads the keys they
+emit, and fails when they stop matching the declared interfaces. Mutation-
+tested by renaming `text` to `body` in `_message` and `also_in` to `shadowed`
+in the context route — both went red naming the file.
+
+**The catch-all changed an unrelated test's answer.** Mounting the SPA under
+`/` means an unknown *POST* now returns 405 rather than 404, because the path
+matches a GET route. One ticket-03 test asserted 404 and so depended on
+whether somebody had run `npm run build`. It pins `PAGE` at nothing now, which
+is what it was actually about.

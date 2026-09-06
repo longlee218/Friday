@@ -510,6 +510,31 @@ class Database:
         async with self._sessions() as session:
             return int(await session.scalar(query) or 0)
 
+    async def spent_today_by_agent(self) -> dict[str, int]:
+        """Today's tokens, per agent, in one query.
+
+        Grouped from the rows rather than asked once per name, because there
+        is no list of names to ask for: which agents exist is `config.yaml`'s
+        business — `extractor_<type>` alone is one per task type — and a
+        hardcoded list here would be wrong the first time somebody adds one.
+        An agent that has not spent anything today is simply absent, which is
+        the same answer as zero and does not require knowing it exists.
+        """
+        start = _now().replace(hour=0, minute=0, second=0, microsecond=0)
+        query = (
+            select(
+                schema.ModelCall.agent,
+                func.sum(
+                    schema.ModelCall.input_tokens + schema.ModelCall.output_tokens
+                ),
+            )
+            .where(schema.ModelCall.created_at >= start)
+            .group_by(schema.ModelCall.agent)
+        )
+        async with self._sessions() as session:
+            rows = await session.execute(query)
+            return {agent: int(total or 0) for agent, total in rows}
+
     async def calls_for_tasks(self, task_ids) -> dict[int, list[ModelCall]]:
         """Every call for each of these tasks, oldest first within a task.
 

@@ -1,0 +1,241 @@
+import { useEffect, useState } from "react";
+
+import { api } from "../api";
+import type { ChannelContext } from "../api-types";
+import { useAsync } from "../useAsync";
+import { Pill } from "./TasksScreen";
+
+/** Board ticket 08 — telling it what is true here.
+ *
+ *  The one screen that writes, and only to `overrides`: the layer of a
+ *  channel's context file the machine never touches. Decisions still happen
+ *  in Discord.
+ *
+ *  Key/value pairs rather than a YAML field (D9), so "this channel's file is
+ *  malformed and it now has no context" is a state this UI cannot produce. */
+export function ContextScreen() {
+  const channels = useAsync(() => api.channels(), []);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [creating, setCreating] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (picked === null && channels.value?.length) setPicked(channels.value[0]);
+  }, [channels.value, picked]);
+
+  async function create() {
+    setProblem(null);
+    try {
+      await api.createContext(creating);
+      setPicked(creating);
+      setCreating("");
+      channels.reload();
+    } catch (e) {
+      setProblem((e as Error).message);
+    }
+  }
+
+  return (
+    <>
+      <section className="card">
+        <div className="row wrap" style={{ justifyContent: "space-between" }}>
+          <div className="row wrap">
+            <h1>Channel context</h1>
+            {(channels.value ?? []).map((id) => (
+              <button
+                key={id}
+                className="tab"
+                aria-current={picked === id ? "page" : undefined}
+                onClick={() => setPicked(id)}
+              >
+                {id}
+              </button>
+            ))}
+            {channels.value?.length === 0 && (
+              <span className="faint">
+                No channel has a context file yet.
+              </span>
+            )}
+          </div>
+          <div className="row">
+            <input
+              type="text"
+              aria-label="New channel id"
+              placeholder="channel id"
+              value={creating}
+              onChange={(e) => setCreating(e.target.value)}
+            />
+            <button disabled={!creating} onClick={create}>
+              Create
+            </button>
+          </div>
+        </div>
+        {problem && <p className="mono error">{problem}</p>}
+      </section>
+
+      {picked && <Editor channelId={picked} />}
+    </>
+  );
+}
+
+function Editor({ channelId }: { channelId: string }) {
+  const loaded = useAsync(() => api.context(channelId), [channelId]);
+  const [pairs, setPairs] = useState<[string, string][]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (loaded.value) {
+      setPairs(Object.entries(loaded.value.overrides));
+      setDirty(false);
+      setSaved(false);
+    }
+  }, [loaded.value]);
+
+  if (loaded.error) {
+    return <div className="card error">Could not load {channelId}: {loaded.error}</div>;
+  }
+  if (!loaded.value) return <div className="empty">Loading…</div>;
+  const it: ChannelContext = loaded.value;
+
+  const edit = (i: number, which: 0 | 1, value: string) => {
+    setPairs((was) =>
+      was.map((pair, at) =>
+        at === i ? ((which === 0 ? [value, pair[1]] : [pair[0], value]) as [string, string]) : pair,
+      ),
+    );
+    setDirty(true);
+    setSaved(false);
+  };
+
+  async function save() {
+    setProblem(null);
+    try {
+      await api.setOverrides(channelId, Object.fromEntries(pairs.filter(([k]) => k)));
+      setDirty(false);
+      setSaved(true);
+      loaded.reload();
+    } catch (e) {
+      setProblem((e as Error).message);
+    }
+  }
+
+  async function reload() {
+    const answer = await api.reload();
+    setSaved(false);
+    if (answer.problems.length) setProblem(answer.problems.join("\n"));
+    loaded.reload();
+  }
+
+  return (
+    <>
+      <section className="card">
+        <div className="row wrap" style={{ justifyContent: "space-between" }}>
+          <div className="row wrap">
+            <h2>overrides · {channelId}</h2>
+            <span className="faint">yours; the machine never writes here</span>
+          </div>
+          <div className="row">
+            <button className="primary" disabled={!dirty} onClick={save}>
+              Save
+            </button>
+            {/* One rule for when an edit takes effect (D8): this button, and
+                it re-reads every file, so a hand-edit lands the same way. */}
+            <button onClick={reload}>Reload into the agents</button>
+          </div>
+        </div>
+
+        {saved && (
+          <p className="mono warn">
+            Saved to disk. The running agents are still using the previous
+            values — press “Reload into the agents” to make it live.
+          </p>
+        )}
+        {problem && <p className="mono error">{problem}</p>}
+        {it.also_in.length > 0 && (
+          <p className="mono">
+            <Pill tone="warn" label="also set elsewhere" />{" "}
+            {it.also_in.join(", ")} — the model is shown both sections and
+            reconciles them itself; there is no merge that picks a winner.
+          </p>
+        )}
+
+        <table>
+          <thead>
+            <tr>
+              <th style={{ width: "30%" }}>key</th>
+              <th>value</th>
+              <th style={{ width: 40 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {pairs.map(([key, value], i) => (
+              <tr key={i}>
+                <td>
+                  <input
+                    type="text"
+                    aria-label={`Key ${i + 1}`}
+                    value={key}
+                    onChange={(e) => edit(i, 0, e.target.value)}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="text"
+                    aria-label={`Value for ${key || `key ${i + 1}`}`}
+                    value={value}
+                    onChange={(e) => edit(i, 1, e.target.value)}
+                  />
+                </td>
+                <td>
+                  <button
+                    aria-label={`Remove ${key || `key ${i + 1}`}`}
+                    onClick={() => {
+                      setPairs((was) => was.filter((_, at) => at !== i));
+                      setDirty(true);
+                      setSaved(false);
+                    }}
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button
+          style={{ marginTop: 8 }}
+          onClick={() => {
+            setPairs((was) => [...was, ["", ""]]);
+            setDirty(true);
+          }}
+        >
+          Add a line
+        </button>
+      </section>
+
+      <section className="card">
+        <h2>What the model is told about this room</h2>
+        <p className="faint">
+          The three layers as an agent actually receives them — escaped, in
+          order. This is the rendering on disk; “live” below is what the running
+          agents hold.
+        </p>
+        <pre>{it.prompt || "nothing"}</pre>
+        <details>
+          <summary>Live (what the agents are using now)</summary>
+          <pre>{it.live || "nothing"}</pre>
+        </details>
+        <details>
+          <summary>Machine-written (derived)</summary>
+          <pre>{JSON.stringify(it.derived, null, 2)}</pre>
+        </details>
+        <details>
+          <summary>Everywhere (base.yaml)</summary>
+          <pre>{JSON.stringify(it.base, null, 2)}</pre>
+        </details>
+      </section>
+    </>
+  );
+}

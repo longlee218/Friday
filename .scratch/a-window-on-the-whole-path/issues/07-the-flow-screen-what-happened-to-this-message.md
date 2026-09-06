@@ -7,7 +7,7 @@ ordered path.
 
 **Decisions:** D5, D6
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -38,24 +38,24 @@ that happened on purpose, naming the word that caused it.
 
 ## Acceptance criteria
 
-- [ ] A path renders as ordered steps: arrived → (held?) → turn closed →
+- [x] A path renders as ordered steps: arrived → (held?) → turn closed →
       classified → task opened or skipped → extraction → question or hand-over
       → queued → approved → sent or failed
-- [ ] A step that did not happen is *absent*, not shown as empty — but a step
+- [x] A step that did not happen is *absent*, not shown as empty — but a step
       that happened and produced nothing (a search that found nothing) is
       present and says so
-- [ ] The skip path renders as a complete, correct outcome
-- [ ] The held-by-prefilter path names the word that held it and makes clear no
+- [x] The skip path renders as a complete, correct outcome
+- [x] The held-by-prefilter path names the word that held it and makes clear no
       model saw the message
-- [ ] Each step carries its own evidence: the prompt behind the classification,
+- [x] Each step carries its own evidence: the prompt behind the classification,
       the confidence, the tokens, the latency
-- [ ] The classification shows its confidence **against the configured
+- [x] The classification shows its confidence **against the configured
       threshold**, since "0.62" means nothing without knowing the line is at
       0.7 — that number is `confidence_threshold` in `config.yaml`, documented
       there as a placeholder nobody should trust yet, and this screen is how it
       would ever stop being one
-- [ ] Getting to a flow is easy from the message feed and from a task
-- [ ] Built through the `ui-ux-pro-max` skill; a vertical timeline is a chart —
+- [x] Getting to a flow is easy from the message feed and from a task
+- [x] Built through the `ui-ux-pro-max` skill; a vertical timeline is a chart —
       colour alone must not carry the difference between a step that succeeded
       and one that failed
 

@@ -35,6 +35,8 @@ from typing import Any
 
 from fastapi import Body, FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from friday.agent.instruction_prompt import channel_sections
 from friday.domain.conversation import ConversationId
@@ -249,6 +251,26 @@ def build_api(
         )
         return _clean([_task(t) for t in found])
 
+    @api.get("/api/spend")
+    async def spend() -> dict:
+        """Tokens spent today, in total and per agent.
+
+        `Database.spent_today` has existed since ticket 03 of
+        `nothing-runs-unmeasured` and nothing could reach it: the ceiling it
+        feeds (`daily_token_budget`) is unset by default, deliberately,
+        because a number guessed before anyone knows what a normal day costs
+        makes the first busy day look like a fault. This route is how an
+        operator would ever learn what to set it to.
+
+        Per agent as well as in total, because they are different jobs against
+        different models — the classifier on every mention and the responder
+        on a few are not one pool.
+        """
+        return {
+            "total": await db.spent_today(),
+            "by_agent": await db.spent_today_by_agent(),
+        }
+
     @api.get("/api/outbound")
     async def outbound(
         state: str | None = None,
@@ -260,7 +282,39 @@ def build_api(
     if context_store is not None:
         _mount_context(api, context_store)
 
+    _mount_page(api)
     return api
+
+
+#: Where `npm run build` puts the page, relative to the repo root. Served by
+#: this app rather than by a second server — one process, one container.
+PAGE = pathlib.Path(__file__).resolve().parents[2] / "web" / "dist"
+
+
+def _mount_page(api: FastAPI) -> None:
+    """Serve `web/dist` under `/`, if it has been built.
+
+    Mounted last, so every `/api/...` route above matches first. Absent when
+    nobody has run `npm run build` — which is the state of a fresh checkout
+    and of every test in this suite, and is why this is a condition rather
+    than an assumption. The API is usable on its own; that is what
+    `serve_board.py` is.
+    """
+    if not (PAGE / "index.html").exists():
+        log.info("no built page at %s — serving the API alone", PAGE)
+        return
+
+    api.mount("/assets", StaticFiles(directory=PAGE / "assets"), name="assets")
+
+    @api.get("/{path:path}", include_in_schema=False)
+    async def page(path: str) -> FileResponse:
+        """The SPA's own routes are not files. A request for `/flow/123`
+        reaches the browser's router, not the filesystem, so anything that is
+        not a real file is answered with `index.html` rather than a 404."""
+        candidate = PAGE / path
+        if path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(PAGE / "index.html")
 
 
 def _mount_context(api: FastAPI, store: Any) -> None:

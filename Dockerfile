@@ -3,6 +3,19 @@
 # bugs, so the gateways, the runners, the outbox and the board are all asyncio
 # tasks in here together.
 
+# The page is built here and copied into the runtime stage below. One
+# Dockerfile, several stages: `web/dist` is never committed, because a build
+# artefact in git can disagree with its source and nobody notices — which is
+# the drift the board's D4 refuses.
+FROM node:24-bookworm-slim AS web
+
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS build
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -29,6 +42,8 @@ FROM python:3.13-slim-bookworm AS runtime
 RUN useradd --create-home --uid 10001 friday
 
 COPY --from=build --chown=friday:friday /app /app
+# No Node in the runtime image — only what it produced.
+COPY --from=web --chown=friday:friday /web/dist /app/web/dist
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \

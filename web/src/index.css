@@ -1,0 +1,328 @@
+/* Swiss/terminal, dense, dark-first — what `ui-ux-pro-max` returns for a
+   developer tool: "Dark Mode (OLED) + Minimalism & Swiss Style", dashboard
+   style "Real-Time Monitor + Terminal", dark syntax colours with a blue
+   focus. Density from its data-dense-dashboard profile: 8px grid, 12px card
+   padding, 12–14px text, 36px rows.
+
+   Deliberately not: gradients, glassmorphism, emoji as icons, colour as the
+   only carrier of meaning. Every one of those is on the skill's own
+   anti-pattern list, and the last is what makes a failed tool call invisible
+   to somebody who cannot distinguish red from grey. */
+
+:root {
+  --grid-gap: 8px;
+  --card-padding: 12px;
+  --row-height: 36px;
+
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  --text: 13px;
+  --text-small: 12px;
+
+  color-scheme: dark light;
+
+  /* Dark is the default because this is read beside a terminal. */
+  --bg: #0b0d10;
+  --bg-raised: #14171c;
+  --bg-sunken: #070809;
+  --line: #262b33;
+  --line-strong: #39414d;
+  --ink: #e6e9ee;
+  --ink-dim: #9aa4b2;
+  --ink-faint: #6b7684;
+
+  --accent: #4c9aff;
+  --accent-ink: #0b0d10;
+  --good: #4ec9a5;
+  --warn: #e2b341;
+  --bad: #f2705d;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f7f8fa;
+    --bg-raised: #ffffff;
+    --bg-sunken: #eceef2;
+    --line: #dfe3e9;
+    --line-strong: #c2c9d4;
+    --ink: #1b1f26;
+    --ink-dim: #4d5765;
+    --ink-faint: #737f8f;
+
+    --accent: #0b64d4;
+    --accent-ink: #ffffff;
+    --good: #10795c;
+    --warn: #8a5d00;
+    --bad: #b3261e;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: var(--text) / 1.5 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Never removed, only restyled — taking the ring away is the skill's first
+   listed anti-pattern, and this page is navigable entirely by keyboard. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 6px 10px;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+input[type="text"] {
+  font: var(--text) / 1.4 var(--font-data);
+  color: inherit;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 7px 8px;
+  min-height: 32px;
+  width: 100%;
+}
+
+code,
+pre {
+  font-family: var(--font-data);
+  font-size: var(--text-small);
+}
+
+pre {
+  margin: 0;
+  padding: var(--card-padding);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  /* Wide content scrolls inside its own box; the page never scrolls
+     sideways. A prompt is the widest thing here by a distance. */
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+a {
+  color: var(--accent);
+}
+
+/* --- chrome ------------------------------------------------------------- */
+
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 var(--card-padding);
+  height: 48px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.brand {
+  font-family: var(--font-data);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--ink-dim);
+  padding: 5px 10px;
+}
+
+.tab[aria-current="page"] {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--bg-sunken);
+}
+
+.spacer {
+  margin-left: auto;
+}
+
+main {
+  padding: var(--card-padding);
+  display: grid;
+  gap: var(--grid-gap);
+  align-content: start;
+}
+
+/* --- pieces ------------------------------------------------------------- */
+
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: var(--card-padding);
+}
+
+.muted {
+  color: var(--ink-dim);
+}
+
+.faint {
+  color: var(--ink-faint);
+}
+
+.mono {
+  font-family: var(--font-data);
+  font-size: var(--text-small);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--grid-gap);
+}
+
+.wrap {
+  flex-wrap: wrap;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-size: var(--text);
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 15px;
+}
+
+/* A status never rests on colour alone — it carries its own word, so it
+   survives greyscale, colour blindness, and a screenshot in a chat. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.pill.good {
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 45%, transparent);
+}
+.pill.warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+.pill.bad {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+}
+
+.empty {
+  color: var(--ink-faint);
+  padding: 24px var(--card-padding);
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+}
+
+.error {
+  border-color: color-mix(in srgb, var(--bad) 50%, var(--line));
+  color: var(--bad);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-small);
+}
+
+th {
+  text-align: left;
+  color: var(--ink-dim);
+  font-weight: 500;
+  border-bottom: 1px solid var(--line);
+  padding: 6px var(--grid-gap);
+  position: sticky;
+  top: 48px;
+  background: var(--bg-raised);
+}
+
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 6px var(--grid-gap);
+  height: var(--row-height);
+  vertical-align: top;
+}
+
+tbody tr:hover {
+  background: var(--bg-sunken);
+}
+
+details > summary {
+  cursor: pointer;
+  color: var(--ink-dim);
+  padding: 4px 0;
+}
+
+details > summary:hover {
+  color: var(--ink);
+}
+
+/* Motion carries meaning or it does not happen, and it never happens for
+   somebody who asked it not to. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -7,7 +7,7 @@ as key/value pairs, with a reload that makes the change live.
 
 **Decisions:** D7, D8, D9
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -40,24 +40,24 @@ legitimate thing to want and a terrible thing to do by accident.
 
 ## Acceptance criteria
 
-- [ ] A channel with no file can be created from the page; the
+- [x] A channel with no file can be created from the page; the
       `FileExistsError` guard in `ContextStore.init_channel` still holds and
       reads as a real message, not a 500
-- [ ] `overrides` edits as key/value pairs — never a raw YAML textarea (D9), so
+- [x] `overrides` edits as key/value pairs — never a raw YAML textarea (D9), so
       "this channel's file is malformed" is a state the UI cannot produce
-- [ ] The three layers are visible as layers: what `base` says, what the
+- [x] The three layers are visible as layers: what `base` says, what the
       machine derived, what the operator is overriding, and what the model will
       actually read
-- [ ] Overriding a key the machine writes is allowed and **flagged** — the
+- [x] Overriding a key the machine writes is allowed and **flagged** — the
       summariser will keep recomputing a value nobody will ever see again
-- [ ] The reload is a visible action with a visible result, and it re-reads
+- [x] The reload is a visible action with a visible result, and it re-reads
       *every* file so a hand-edit is picked up by the same button (D8). One
       rule for when an edit takes effect
-- [ ] Values are stored plain — escaping happens once, on the way into a
+- [x] Values are stored plain — escaping happens once, on the way into a
       prompt. A test in ticket 03 pins this; the UI must not pre-escape
-- [ ] It is obvious that a saved change does nothing until reloaded, and
+- [x] It is obvious that a saved change does nothing until reloaded, and
       obvious once it has
-- [ ] Built through the `ui-ux-pro-max` skill: visible labels not
+- [x] Built through the `ui-ux-pro-max` skill: visible labels not
       placeholder-only, errors next to the field, 44×44px touch targets
 
 ## Notes

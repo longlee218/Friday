@@ -8,7 +8,7 @@ tokens.
 
 **Decisions:** D11
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -31,23 +31,23 @@ summed rather than merely listed.
 
 ## Acceptance criteria
 
-- [ ] Tasks grouped by state, every `TaskState` present even when empty —
+- [x] Tasks grouped by state, every `TaskState` present even when empty —
       an empty column is information, a missing one is a bug the operator
       cannot see
-- [ ] One task expands to its calls in time order, model and tool interleaved,
+- [x] One task expands to its calls in time order, model and tool interleaved,
       each showing agent, node, latency, attempt
-- [ ] A model call shows its **full** prompt and output, not a preview. This is
+- [x] A model call shows its **full** prompt and output, not a preview. This is
       the debug view; truncation defeats it
-- [ ] A tool call shows its arguments, its result, and whether it failed —
+- [x] A tool call shows its arguments, its result, and whether it failed —
       `ToolCall.failed` exists precisely because a failure that reads as an
       answer is the one this board's ticket 07 was written for
-- [ ] Token totals per task, and per agent for the day. `Database.spent_today`
+- [x] Token totals per task, and per agent for the day. `Database.spent_today`
       exists from ticket 03 of `nothing-runs-unmeasured` and has no route yet
-- [ ] An attempt greater than 1 is visible without expanding anything — a
+- [x] An attempt greater than 1 is visible without expanding anything — a
       retried call is the cheapest early sign a provider is struggling
-- [ ] Long prompts scroll inside their own container; the page does not scroll
+- [x] Long prompts scroll inside their own container; the page does not scroll
       sideways
-- [ ] Built through the `ui-ux-pro-max` skill: contrast, focus rings, SVG icons
+- [x] Built through the `ui-ux-pro-max` skill: contrast, focus rings, SVG icons
       rather than emoji, real timings
 
 ## Notes
@@ -63,3 +63,13 @@ nothing when there is not — an empty ceiling is not an error state.
 
 Nothing here is editable. Task state, approvals and classifications stay
 decided in Discord (D7).
+
+## What it came to
+
+`spent_today` had no route and this ticket's own criterion asked for one, so
+`GET /api/spend` exists — total and per agent. Per agent is grouped in one
+query (`Database.spent_today_by_agent`) rather than asked once per name,
+because there is no list of names to ask for: `extractor_<type>` alone is one
+per task type, and which agents exist is `config.yaml`'s business. An agent
+that spent nothing today is absent rather than zero, which is the same answer
+and does not require knowing it exists.

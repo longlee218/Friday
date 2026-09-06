@@ -67,6 +67,27 @@ uv add <package>        # add a dependency (updates pyproject.toml and uv.lock)
 uv run pytest -q        # the whole suite; -k <expr> for one test
 ```
 
+The page in `web/` is React + Vite, built to static files that
+`friday/ops/api.py` serves from the same process — one container, no Node at
+runtime, and `web/dist/` is never committed (board D4: a build artefact in git
+can disagree with its source and nobody notices):
+
+```bash
+cd web && npm install     # once
+cd web && npm run build   # produces web/dist, which the API then serves at /
+cd web && npm run dev     # port 5173, proxying /api to 127.0.0.1:8086
+uv run serve_board.py     # the API alone against the live db, for `npm run dev`
+```
+
+`web/src/api-types.ts` is **written by hand, not generated**, and that is a
+decision rather than an omission: every route is annotated `-> dict` and
+builds its body by hand, so `/openapi.json` describes each response as a bare
+object — a generated client would pin the *routes* and none of the *fields*,
+while the failure worth catching is a renamed field rendering `undefined` in
+silence. `tests/test_web_contract.py` is the guard instead. It calls the real
+converters, reads the keys they emit, and fails when they stop matching those
+types. There are no JavaScript tests, deliberately.
+
 Persistence is **SQLAlchemy 2.0 async** (`friday/store/schema.py` holds the mapped
 classes, `friday/store/db.py` converts them to and from the domain dataclasses) with
 **Alembic** migrations in `migrations/`. `run_agent.py` upgrades to head at

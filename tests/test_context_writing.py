@@ -144,16 +144,27 @@ def client(db, store):
     )
 
 
-def test_the_write_routes_are_absent_when_no_store_is_wired(db):
+def test_the_write_routes_are_absent_when_no_store_is_wired(db, tmp_path, monkeypatch):
     """Composition, not configuration: an API built without a context store
-    has no way to write, and does not describe one."""
+    has no way to write, and does not describe one.
+
+    `PAGE` is pointed at nothing on purpose. With a built `web/dist` present
+    the SPA catch-all matches every unknown path for GET, so an unknown POST
+    comes back 405 rather than 404 — a difference that would make this test
+    depend on whether somebody had run `npm run build`.
+    """
     from fastapi.testclient import TestClient
 
+    from friday.ops import api as api_module
     from friday.ops.api import build_api
 
+    monkeypatch.setattr(api_module, "PAGE", tmp_path / "absent")
     read_only = TestClient(build_api(db=db, provider_status=lambda: "x"))
 
     assert read_only.post("/api/context/reload").status_code == 404
+    assert read_only.put(
+        "/api/channels/c1/context/overrides", json={"overrides": {}}
+    ).status_code == 404
 
 
 def test_a_channel_list_works_before_any_channel_has_a_file(client):
