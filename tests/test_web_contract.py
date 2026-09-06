@@ -24,7 +24,7 @@ from conftest import captured, make_event
 from friday.domain.conversation import ConversationId
 from friday.domain.states import TaskState
 from friday.memory.channel_context import ContextStore
-from friday.ops.api import build_api
+from friday.ops.api import build_api, servable
 from friday.outbox import Kind
 
 WATCHED = ConversationId("fake", "watched")
@@ -142,6 +142,7 @@ async def test_the_summary_shown_beside_a_message_agrees(client, inbox, provider
 
 def _built(tmp_path):
     """A believable `web/dist`: an index and one hashed asset."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "assets").mkdir()
     (tmp_path / "index.html").write_text('<div id="root"></div>')
     (tmp_path / "assets" / "index-abc.js").write_text("console.log(1)")
@@ -220,3 +221,107 @@ async def test_an_agent_that_spent_nothing_is_simply_absent(client, db):
     )
 
     assert list(client.get("/api/spend").json()["by_agent"]) == ["triage"]
+
+
+# --- the catch-all does not hand out the filesystem --------------------------
+
+
+def _repo(tmp_path):
+    """The real layout: `PAGE` is `<repo>/web/dist`, so a credential file is
+    exactly two `..` away. Every secret here is a decoy with a real file
+    behind it — a parametrised case whose target does not exist passes
+    whether or not the guard is present, which is how the first version of
+    this test was vacuous for five of its six cases."""
+    page = _built(tmp_path / "repo" / "web" / "dist")
+    (tmp_path / "repo" / ".env").write_text("DISCORD_USER_TOKEN=not-a-real-token")
+    (tmp_path / "repo" / "config.yaml").write_text("database_path: ./data/friday.db")
+    (tmp_path / "repo" / "data").mkdir()
+    (tmp_path / "repo" / "data" / "friday.db").write_text("SQLite format 3")
+    (tmp_path / "outside.txt").write_text("not even in the repo")
+    return page
+
+
+@pytest.mark.parametrize(
+    "attempt",
+    [
+        "../../.env",
+        "../../config.yaml",
+        "../../data/friday.db",
+        "assets/../../../.env",
+        "../../../outside.txt",
+        "./../../.env",
+    ],
+)
+def test_the_page_route_refuses_to_walk_out_of_its_directory(tmp_path, attempt):
+    """`FileResponse` streams bytes and never touches `_clean`, so the one
+    route that bypasses scrubbing must not reach a credential file. `PAGE` is
+    `<repo>/web/dist`, which puts `.env`, `config.yaml` and the whole task
+    database two `..` away — and in a container `/proc/self/environ`, where
+    the runtime-injected Discord token lives.
+
+    This was real and was served: uvicorn percent-decodes before routing and
+    `pathlib`'s `/` walks upward without complaint, so `/../../.env` and
+    `/%2e%2e/%2e%2e/.env` both returned the file. It is the board's own scrub
+    gap — the stated reason `friday/board/` was deleted — reintroduced by the
+    commit that replaced it.
+
+    **Tested at the function, not over HTTP, and that is the point.** The
+    first version drove `TestClient`, which normalises `..` out of the path
+    before the route sees it, so it passed against the vulnerable code. A real
+    uvicorn does not normalise, which is how the reviewer found it. The
+    containment decision is a function so it can be checked where it is made,
+    and every target below is a file that actually exists so that the guard
+    is what makes the case pass.
+    """
+    assert servable(_repo(tmp_path), attempt) is None
+
+
+def test_the_containment_check_still_serves_what_the_page_owns(tmp_path):
+    """A guard that breaks the thing it guards is one somebody deletes."""
+    page = _built(tmp_path / "dist")
+
+    assert servable(page, "assets/index-abc.js") == page / "assets" / "index-abc.js"
+    assert servable(page, "index.html") == page / "index.html"
+    assert servable(page, "") is None, "the empty path is the SPA, not a file"
+    assert servable(page, "flow/discord/123") is None, "a browser route is not a file"
+
+
+def test_a_symlink_out_of_the_page_is_not_a_way_around_it(tmp_path):
+    """`resolve()` follows symlinks, so a link planted inside `web/dist`
+    resolves outside it and is refused — checking the unresolved path would
+    not catch this."""
+    page = _repo(tmp_path)
+    (page / "sneaky").symlink_to(tmp_path / "repo" / ".env")
+
+    assert servable(page, "sneaky") is None
+
+
+def test_every_entrypoint_that_binds_a_port_checks_its_exposure():
+    """There are two doors and ticket 04 only hardened one.
+
+    `run_agent.py` calls `check_exposure`; `serve_board.py` called `bind` and
+    nothing else, while the same commit made it *writable* — so an operator
+    who set `board_host: 0.0.0.0` got a refusal from the agent and an
+    unauthenticated write endpoint from the script. Both read the same
+    `config.board_host`.
+
+    Asserted by reading the source rather than by remembering, because the
+    thing that failed here was somebody remembering.
+    """
+    import ast
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    for name in ("run_agent.py", "serve_board.py"):
+        tree = ast.parse((root / name).read_text())
+        called = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        if "bind" not in called:
+            continue
+        assert "check_exposure" in called, (
+            f"{name} binds a port without checking its exposure — it can serve "
+            "every captured message, every model prompt, and a write path into "
+            "what the agents believe about a room"
+        )

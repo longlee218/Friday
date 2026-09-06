@@ -250,6 +250,40 @@ class ContextStore:
         return problems
 
     def path_for(self, channel_id: str) -> Path:
+        """This channel's file, which is always *directly* in the directory.
+
+        Refuses anything that could name something else. `channel_id` reaches
+        here from an unauthenticated HTTP route (board ticket 03), and while
+        Starlette's routing happens to reject the encoded-slash spellings —
+        `{channel_id}` matches one path segment — that is the router
+        defending the store, and this is the module that owns the directory.
+
+        Not hypothetical: the read side had the same shape and *was*
+        reachable. `servable` in `friday/ops/api.py` joined a user-supplied
+        path onto a directory the same way, and `/../../.env` came back with
+        the Discord token in it.
+
+        Containment is checked on the resolved path rather than on the name,
+        which is what the first version got wrong: `Path("..").name` is
+        `".."`, so a name test lets it through.
+
+        `.` and `..` are refused for a different reason and it is worth not
+        confusing the two. They are *contained* — `f"{'..'}.yaml"` is the
+        ordinary filename `...yaml` sitting in this directory — so they are
+        not a security matter at all. They are refused because a channel is
+        not called that, and a file named `...yaml` appearing in `context/`
+        would be somebody's afternoon.
+        """
+        path = (self._dir / f"{channel_id}.yaml").resolve()
+        if (
+            not channel_id
+            or channel_id in (".", "..")
+            or path.parent != self._dir.resolve()
+        ):
+            raise ValueError(
+                f"{channel_id!r} is not a channel id: a context file sits "
+                "directly in the context directory, and cannot be a path"
+            )
         return self._dir / f"{channel_id}.yaml"
 
     def _read(self, path: Path) -> dict[str, Any] | None:

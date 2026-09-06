@@ -281,3 +281,34 @@ def test_a_value_reaches_the_prompt_escaped_exactly_once(client, store):
 
     assert "&lt;b&gt;prod&lt;/b&gt;" in rendered
     assert "&amp;lt;" not in rendered
+
+
+# --- the store owns its directory --------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    ["../escaped", "../../escaped", "a/b", "/etc/passwd", "..", ".", ""],
+)
+def test_a_channel_id_cannot_name_a_file_outside_the_context_directory(
+    store, hostile
+):
+    """`path_for` is `self._dir / f"{channel_id}.yaml"` and `channel_id`
+    arrives from an unauthenticated HTTP route.
+
+    Starlette's routing happens to refuse the encoded-slash spellings today,
+    because `{channel_id}` is one path segment — but that is the router
+    defending the store, and the store is the thing that owns this directory.
+    The sibling failure on the read side (`servable`) was exactly this shape
+    and it *was* reachable, so this is the belt to that braces rather than a
+    hypothetical.
+    """
+    with pytest.raises(ValueError):
+        store.path_for(hostile)
+
+
+def test_an_ordinary_channel_id_still_resolves(store):
+    """Discord ids are digits; the tests here use words. Both are files
+    directly inside the directory and must keep working."""
+    assert store.path_for("1234567890").name == "1234567890.yaml"
+    assert store.path_for("watched").parent == store.path_for("other").parent

@@ -48,7 +48,7 @@ from friday.domain.states import TaskState
 
 log = logging.getLogger(__name__)
 
-__all__ = ["MAX_PAGE", "bind", "build_api", "check_exposure"]
+__all__ = ["MAX_PAGE", "bind", "build_api", "check_exposure", "servable"]
 
 #: The server decides how much it will hand over, not the caller.
 MAX_PAGE = 200
@@ -291,6 +291,39 @@ def build_api(
 PAGE = pathlib.Path(__file__).resolve().parents[2] / "web" / "dist"
 
 
+def servable(page: pathlib.Path, path: str) -> pathlib.Path | None:
+    """The file under `page` that `path` names, or `None` for anything else.
+
+    `None` covers three cases the caller treats alike — the SPA's own routes,
+    a file that does not exist, and **a path trying to leave `page`** — and
+    the third is why this is a function rather than two lines inline.
+
+    It was two lines inline, and it served the repository. `@api.get(
+    "/{path:path}")` matches slashes by design, uvicorn percent-decodes the
+    target *before* routing, and `pathlib`'s `/` walks upward without
+    complaint, so `/../../.env` and `/%2e%2e/%2e%2e/.env` both returned the
+    file. `PAGE` is `<repo>/web/dist`, which puts `.env`, `config.yaml` and
+    the whole task database two `..` away, and `/proc/self/environ` — where a
+    container's injected `DISCORD_USER_TOKEN` lives — a few more.
+
+    That made this the one route that both bypasses `scrub` (`FileResponse`
+    streams bytes; `_clean` never sees them) and can read the credential file
+    directly. Which is the board's own scrub gap, the stated reason
+    `friday/board/` was deleted, reintroduced by the commit that replaced it.
+
+    `resolve()` before comparing, so a symlink planted inside the bundle is
+    caught too — checking the unresolved path would not see it.
+    """
+    if not path:
+        return None
+    root = page.resolve()
+    candidate = (page / path).resolve()
+    if not candidate.is_relative_to(root):
+        log.warning("refused a page request that left %s: %r", root, path)
+        return None
+    return candidate if candidate.is_file() else None
+
+
 def _mount_page(api: FastAPI) -> None:
     """Serve `web/dist` under `/`, if it has been built.
 
@@ -311,10 +344,8 @@ def _mount_page(api: FastAPI) -> None:
         """The SPA's own routes are not files. A request for `/flow/123`
         reaches the browser's router, not the filesystem, so anything that is
         not a real file is answered with `index.html` rather than a 404."""
-        candidate = PAGE / path
-        if path and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(PAGE / "index.html")
+        found = servable(PAGE, path)
+        return FileResponse(found if found is not None else PAGE / "index.html")
 
 
 def _mount_context(api: FastAPI, store: Any) -> None:
