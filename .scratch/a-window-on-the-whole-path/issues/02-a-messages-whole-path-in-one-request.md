@@ -8,7 +8,7 @@ instant.
 
 **Decisions:** D5, D6
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -50,21 +50,21 @@ the agent reached for is recorded" — is recorded and unreachable.
 
 ## Acceptance criteria
 
-- [ ] One route returns the whole path for a message, in order, in one
+- [x] One route returns the whole path for a message, in order, in one
       database instant
-- [ ] It answers for a message that was **skipped** — no task ever opened — as
+- [x] It answers for a message that was **skipped** — no task ever opened — as
       a normal outcome, not a 404 and not an empty object
-- [ ] It answers for a message the prefilter **held**, and says which word held
+- [x] It answers for a message the prefilter **held**, and says which word held
       it, since that is a step where no model call exists to explain the gap
-- [ ] Model calls and tool calls both appear, interleaved in time, each
+- [x] Model calls and tool calls both appear, interleaved in time, each
       carrying what it cost (`input_tokens`, `output_tokens`), how long it took
       (`latency_ms`), which attempt it was, and which node it came from
-- [ ] Every string goes through `_clean()` like every other response here —
+- [x] Every string goes through `_clean()` like every other response here —
       prompts and `last_error` are the two fields most likely to carry a
       credential
-- [ ] A message that does not exist is a 404, distinguishable from one that
+- [x] A message that does not exist is a 404, distinguishable from one that
       exists and did nothing
-- [ ] Tests cover: the skip path, the held-by-prefilter path, a full path
+- [x] Tests cover: the skip path, the held-by-prefilter path, a full path
       through to a sent outbound row, and that scrubbing is applied
 
 ## Notes

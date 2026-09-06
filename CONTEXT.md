@@ -282,6 +282,25 @@ reasoning node in a graph followed.
 is here for speed, not for keeps, and that is only true while replacing it
 means rewriting one file.
 
+## Flow
+
+Everything that followed from one message: the turn it belonged to, what triage
+concluded and how confident it was, the task if one opened, every model call and
+tool call in order, and the outbound rows at the end. A read-side assembly, not
+a thing that is stored — `Database.flow_for` builds it at one instant and
+`MessageFlow` is its shape.
+
+**Its spine is a message, not a task or a graph**, and both exclusions are
+deliberate. A task-spined flow loses triage, because when the classifier runs
+there is no task and its call correlates by message alone; it also loses every
+`skip`, which is the outcome an operator most often wants to interrogate. A
+graph-spined flow would draw one box: every task type gets the same one-node
+graph, so the multi-step thing here is the path through the process, not the
+`Workflow`.
+
+Not to be confused with `Workflow`/`Graph`, which is what a task's own DAG does
+once it is running. A Flow contains one of those as a step.
+
 ## Memory
 
 Something an agent chose to write down, scoped to one channel, reached through

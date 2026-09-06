@@ -7,7 +7,7 @@ every document that describes either of them.
 
 **Decisions:** D1, D12
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -36,28 +36,34 @@ the work on the wrong artefact; the fix is the deletion.
 counter-argument in hand: 384 messages, 22 tasks, 137 model calls and 58
 outbound rows *would* have rendered in the new UI — they lack only the
 per-task and per-node correlation, since they predate the 2026-09-06
-migration. `data/friday.db.backup-20260906-184554-pre-migration` holds them.
-Recorded so a later reader does not mistake it for an accident.
+migration. Recorded so a later reader does not mistake it for an accident.
+
+Two backups hold that data, and the difference matters if either is ever
+restored: `data/friday.db.backup-20260906-203748-pre-wipe` is the one to use —
+same rows, schema already at head. `data/friday.db.backup-20260906-184554-pre-migration`
+is the same rows at the *old* schema, eleven migrations behind, kept only
+because it is what the database looked like before anything on the previous
+board had ever run against it.
 
 ## Acceptance criteria
 
-- [ ] `friday/board/` is gone, and nothing imports it — `serve_board.py`'s
+- [x] `friday/board/` is gone, and nothing imports it — `serve_board.py`'s
       `app.mount("/", build_board(...))` included
-- [ ] `serve_board.py` still runs and still serves the JSON API alone, or is
+- [x] `serve_board.py` still runs and still serves the JSON API alone, or is
       itself removed if it has nothing left to do — decide it here rather than
       leaving a script that starts a server with no pages
-- [ ] `run_agent.py` starts with no board task, and the process still comes up
-- [ ] The database is wiped and rebuilt from `alembic upgrade head`, and
+- [x] `run_agent.py` starts with no board task, and the process still comes up
+- [x] The database is wiped and rebuilt from `alembic upgrade head`, and
       `alembic check` reports no drift afterwards
-- [ ] A fresh backup is taken immediately before the wipe, named in the
+- [x] A fresh backup is taken immediately before the wipe, named in the
       convention `data/` already uses, and its row counts are printed before
       anything is destroyed
-- [ ] `CLAUDE.md`'s layout table no longer claims `friday/board/` exists; its
+- [x] `CLAUDE.md`'s layout table no longer claims `friday/board/` exists; its
       "Board — :8086" description in `docs/DESIGN.md` is rewritten rather than
       left describing a deleted file
-- [ ] `docs/SPEC.md` stories 39–42 are annotated: what still holds, and that 42
+- [x] `docs/SPEC.md` stories 39–42 are annotated: what still holds, and that 42
       ("read-only") is narrowed by D7 rather than deleted
-- [ ] The whole suite passes with the board's own tests removed, not skipped
+- [x] The whole suite passes with the board's own tests removed, not skipped
 
 ## Notes
 

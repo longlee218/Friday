@@ -272,3 +272,79 @@ async def test_a_channels_memories_are_bounded_like_every_other_list_route(clien
     got = client.get("/api/channels/100/memories?limit=2").json()
 
     assert len(got) == 2
+
+
+# --- a message's whole path (board `a-window-on-the-whole-path`, ticket 02) ---
+
+
+async def test_a_messages_whole_path_arrives_in_one_request(client, inbox, provider, db):
+    provider.emit(make_event(message_id="10", text="checkout is 500ing"))
+    await captured(inbox)
+    task = await db.create_task(
+        conversation=WATCHED, type="api_issue", state=TaskState.PENDING,
+        confidence=0.9, params={},
+    )
+    await db.record_model_call(
+        message_id="10", agent="triage", model="m", system_prompt="s",
+        prompt="p", output="o", input_tokens=10, output_tokens=2,
+    )
+    await db.record_tool_call(
+        task_id=task.id, node="prepare", agent="extractor", tool="ask_for_fields",
+        arguments='{"missing": []}', result="asked", failed=False,
+    )
+    await db.mark_triaged(
+        make_event(message_id="10"), task.id,
+        decision={"type": "api_issue", "confidence": 0.9, "params": {}},
+    )
+
+    flow = client.get("/api/messages/fake/10/flow").json()
+
+    assert flow["message"]["text"] == "checkout is 500ing"
+    assert flow["decision"]["type"] == "api_issue"
+    assert flow["task"]["id"] == task.id
+    assert [c["agent"] for c in flow["model_calls"]] == ["triage"]
+    assert [t["tool"] for t in flow["tool_calls"]] == ["ask_for_fields"]
+
+
+async def test_a_skipped_message_still_has_a_path(client, inbox, provider, db):
+    """200 with no task, not a 404. "Why did it ignore this" is the question
+    this route exists for, and a skip is its most common answer."""
+    provider.emit(make_event(message_id="11", text="anyone want lunch"))
+    await captured(inbox)
+    await db.mark_triaged(
+        make_event(message_id="11"), None,
+        decision={"type": "skip", "confidence": 0.95, "params": {}},
+    )
+
+    flow = client.get("/api/messages/fake/11/flow").json()
+
+    assert flow["decision"]["type"] == "skip"
+    assert flow["task"] is None
+
+
+async def test_an_untriaged_message_is_a_state_not_a_missing_path(client, inbox, provider):
+    provider.emit(make_event(message_id="12"))
+    await captured(inbox)
+
+    flow = client.get("/api/messages/fake/12/flow").json()
+
+    assert flow["decision"] is None
+    assert flow["task"] is None
+
+
+async def test_a_message_that_never_existed_is_a_404(client):
+    assert client.get("/api/messages/fake/nope/flow").status_code == 404
+
+
+async def test_a_credential_does_not_cross_the_wire_on_a_path(client, inbox, provider, db):
+    provider.emit(make_event(message_id="13", text="it broke"))
+    await captured(inbox)
+    await db.record_model_call(
+        message_id="13", agent="triage", model="m", system_prompt="s",
+        prompt="the user said: token is sk-abcdefghijklmnopqrstuvwx",
+        output="o", input_tokens=1, output_tokens=1,
+    )
+
+    body = client.get("/api/messages/fake/13/flow").text
+
+    assert "sk-abcdefghijklmnopqrstuvwx" not in body

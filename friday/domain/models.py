@@ -394,3 +394,43 @@ class ModelCall:
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
+
+
+@dataclass(frozen=True, slots=True)
+class MessageFlow:
+    """Everything that followed from one message, read at one instant.
+
+    The spine is a message and not a task, which is the whole of D5 on
+    `.scratch/a-window-on-the-whole-path/`: when the classifier runs there is
+    no task yet and its call correlates by `message_id` alone, so a
+    task-spined view loses triage entirely — and it loses every `skip`, which
+    is the outcome an operator most wants to interrogate.
+
+    Assembled in one store call rather than joined in a browser (D6). Four
+    requests read four instants of a database being written to, and the path
+    they render is one that never existed.
+
+    `decision` is the triage verdict as `mark_triaged` stored it — `type`,
+    `confidence`, `params` — and `None` means nothing has looked at this
+    message yet, which is a state and not an absence. A message the
+    sensitive-word prefilter held has a decision and no `model_calls` at all;
+    the word that held it is in `params["reason"]`, and without that the path
+    stops with nothing to explain it.
+
+    `model_calls` merges the calls correlated by message with the ones
+    correlated by task and orders the result by time, because they are one
+    sequence — triage, then extraction — and handing a reader two lists to
+    interleave is handing them the join this class exists to do.
+    """
+
+    message: InboundEvent
+    #: Everything the same person went on to say. Triage reads the turn, not
+    #: the message, so a path showing only the mention shows less than what
+    #: was actually classified.
+    turn: list[InboundEvent]
+    decision: dict[str, Any] | None
+    triaged_at: datetime | None
+    task: Task | None
+    model_calls: list[ModelCall]
+    tool_calls: list[ToolCall]
+    outbound: list[Outbound]

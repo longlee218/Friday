@@ -21,7 +21,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import FastAPI, Path, Query
+from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from friday.domain.conversation import ConversationId
@@ -109,6 +109,49 @@ def build_api(
         """
         calls = await db.model_calls(message_id=message_id, limit=20)
         return _clean([asdict(c) | {"created_at": c.created_at} for c in calls])
+
+    @api.get("/api/messages/{provider}/{message_id}/flow")
+    async def message_flow(
+        provider: str = Path(...),
+        message_id: str = Path(...),
+    ) -> dict:
+        """Everything that followed from one message, in one request.
+
+        The spine is a message and not a task (board D5): triage runs before a
+        task exists, so its call correlates by `message_id` alone, and a
+        task-spined view would lose both it and every `skip` — which is the
+        outcome somebody looking at this screen most wants to interrogate.
+
+        One aggregate rather than four calls joined in the browser (D6), for
+        the reason `/api/board` gives above: four requests read four instants
+        of a database being written to, and the path they render is one that
+        never existed.
+
+        A message nobody has triaged yet is a 200 with `decision: null` — that
+        is a state, queued and unread, not an absence. Only a message that does
+        not exist is a 404.
+        """
+        flow = await db.flow_for(provider=provider, message_id=message_id)
+        if flow is None:
+            raise HTTPException(
+                status_code=404, detail=f"no message {message_id!r} from {provider!r}"
+            )
+        return _clean(
+            {
+                "message": _message(flow.message, None),
+                "turn": [_message(m, None) for m in flow.turn],
+                "decision": flow.decision,
+                "triaged_at": flow.triaged_at,
+                "task": _task(flow.task) if flow.task else None,
+                "model_calls": [
+                    asdict(c) | {"created_at": c.created_at} for c in flow.model_calls
+                ],
+                "tool_calls": [
+                    asdict(t) | {"created_at": t.created_at} for t in flow.tool_calls
+                ],
+                "outbound": [_outbound(row) for row in flow.outbound],
+            }
+        )
 
     @api.get("/api/tasks/{task_id}/model-calls")
     async def task_model_calls(task_id: int = Path(...)) -> list[dict]:

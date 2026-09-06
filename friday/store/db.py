@@ -42,6 +42,7 @@ from friday.domain.models import (
     MemoryScope,
     InboundEvent,
     MentionType,
+    MessageFlow,
     ModelCall,
     ToolCall,
     Outbound,
@@ -360,6 +361,97 @@ class Database:
         async with self._sessions() as session:
             return [_event(row) for row in await session.scalars(query)]
 
+    async def flow_for(
+        self, *, provider: str, message_id: str
+    ) -> MessageFlow | None:
+        """Everything that followed from one message, read at one instant.
+
+        One method rather than four calls a browser joins (D6): a task can
+        change state between the second request and the third, and the path
+        rendered would be one that never existed. `/api/board` is one
+        aggregate for the same reason and says so.
+
+        `None` only when there is no such message. A message nothing has
+        triaged yet comes back with `decision=None`, which is a state — queued
+        and unread — and not an absence.
+
+        The two correlation keys are read separately and merged, because they
+        are separate facts: triage's call names a message and no task, since
+        no task existed when it ran; everything after names the task and not
+        the message. Merging here is the join this exists to do — a caller
+        handed two lists is a caller doing it again, differently.
+        """
+        async with self._sessions() as session:
+            row = await session.get(schema.Message, (provider, message_id))
+            if row is None:
+                return None
+            event = _event(row)
+            task = await session.get(schema.Task, row.task_id) if row.task_id else None
+
+        calls = await self.model_calls(message_id=message_id, limit=None)
+        tools = await self._tool_calls(message_id=message_id)
+        outbound: list[Outbound] = []
+        if row.task_id is not None:
+            calls += await self.calls_for_task(row.task_id)
+            tools += (await self.tools_for_tasks([row.task_id])).get(row.task_id, [])
+            outbound = await self._outbound_for_task(row.task_id)
+
+        turn, _ = await self.turn_from(event)
+        return MessageFlow(
+            message=event,
+            # `turn_from` shows only what it can attribute to the reporter, so
+            # a message this process posted has an empty turn. Falling back to
+            # the message itself keeps the path readable rather than showing a
+            # flow whose first step is missing.
+            turn=turn or [event],
+            decision=(
+                {
+                    "type": row.decision_type,
+                    "confidence": row.decision_confidence,
+                    "params": row.decision_params or {},
+                }
+                if row.triaged_at is not None
+                else None
+            ),
+            triaged_at=row.triaged_at,
+            task=_task(task) if task is not None else None,
+            # Stable sort on the timestamp alone, and the merge order above is
+            # the tiebreak: message-correlated calls were appended first, and
+            # they are the ones that happened first — triage runs before the
+            # task it opens exists. Neither dataclass carries the row id, so
+            # there is no second key to sort on, and inventing one would mean
+            # widening the domain to serve an ordering the merge already knows.
+            model_calls=sorted(calls, key=lambda c: c.created_at),
+            tool_calls=sorted(tools, key=lambda t: t.created_at),
+            outbound=outbound,
+        )
+
+    async def _tool_calls(self, *, message_id: str) -> list[ToolCall]:
+        """What was reached for while working on one message.
+
+        The counterpart of `model_calls(message_id=...)`, which existed while
+        this did not — `tools_for_tasks` was the only reader of `tool_calls`
+        and it needs a task, so a tool call made during triage (there are none
+        today, and `stop_when` is the only reason) was unreachable by any key.
+        """
+        query = (
+            select(schema.ToolCall)
+            .where(schema.ToolCall.message_id == message_id)
+            .order_by(schema.ToolCall.created_at.asc(), schema.ToolCall.id.asc())
+        )
+        async with self._sessions() as session:
+            return [_tool_call(row) for row in await session.scalars(query)]
+
+    async def _outbound_for_task(self, task_id: int) -> list[Outbound]:
+        """Everything queued about one task, oldest first — the end of a path."""
+        query = (
+            select(schema.Outbound)
+            .where(schema.Outbound.task_id == task_id)
+            .order_by(schema.Outbound.id)
+        )
+        async with self._sessions() as session:
+            return [_outbound(row) for row in await session.scalars(query)]
+
     # ---- model calls ---------------------------------------------------
 
     async def record_model_call(self, **values) -> None:
@@ -391,20 +483,7 @@ class Database:
             for row in await session.scalars(query):
                 if row.task_id is None:  # excluded by the filter; narrows the type
                     continue
-                grouped.setdefault(row.task_id, []).append(
-                    ToolCall(
-                        agent=row.agent,
-                        tool=row.tool,
-                        arguments=row.arguments,
-                        result=row.result,
-                        failed=bool(row.failed),
-                        latency_ms=row.latency_ms,
-                        message_id=row.message_id,
-                        task_id=row.task_id,
-                        node=row.node,
-                        created_at=row.created_at,
-                    )
-                )
+                grouped.setdefault(row.task_id, []).append(_tool_call(row))
         return grouped
 
     async def spent_today(self, agent: str | None = None) -> int:
@@ -508,7 +587,12 @@ class Database:
         #: this exists: after every agent started recording, most rows name no
         #: message and there was no way to ask for them.
         uncorrelated: bool = False,
-        limit: int = 50,
+        #: `None` is unbounded, the same spelling `outbound` already uses.
+        #: Every HTTP caller passes a number — the routes cap it at `MAX_PAGE`
+        #: — and the one caller that does not is `flow_for`, which is already
+        #: narrowed to a single message and must not silently truncate the
+        #: path it exists to assemble.
+        limit: int | None = 50,
     ) -> list[ModelCall]:
         query = select(schema.ModelCall)
         if message_id is not None:
@@ -1861,6 +1945,28 @@ def _model_call(row: schema.ModelCall) -> ModelCall:
         node=row.node,
         latency_ms=row.latency_ms,
         attempt=row.attempt or 1,
+        created_at=row.created_at,
+    )
+
+
+def _tool_call(row: schema.ToolCall) -> ToolCall:
+    """One row, as the domain sees it — for the reason `_model_call` gives.
+
+    It was built by hand inside `tools_for_tasks`, which was the table's only
+    reader, so it read as a local detail rather than a missing converter. It
+    stopped being one the moment a second reader existed (`flow_for`), which
+    is exactly the shape `_model_call`'s own docstring warns about.
+    """
+    return ToolCall(
+        agent=row.agent,
+        tool=row.tool,
+        arguments=row.arguments,
+        result=row.result,
+        failed=bool(row.failed),
+        latency_ms=row.latency_ms,
+        message_id=row.message_id,
+        task_id=row.task_id,
+        node=row.node,
         created_at=row.created_at,
     )
 
