@@ -8,7 +8,7 @@ the running process.
 
 **Decisions:** D7, D8, D9
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -50,25 +50,25 @@ has no context" a state the UI can produce. Pairs make it unreachable.
 
 ## Acceptance criteria
 
-- [ ] `GET` a channel's context returns the three layers separately — `base`,
+- [x] `GET` a channel's context returns the three layers separately — `base`,
       `derived`, `overrides` — and the merged result, so the page can show what
       the operator's edit is actually overriding
-- [ ] `PUT` replaces a channel's `overrides` wholesale from key/value pairs;
+- [x] `PUT` replaces a channel's `overrides` wholesale from key/value pairs;
       `derived` and `state` come back from disk untouched, byte for byte
-- [ ] Creating a channel's file goes through `ContextStore.init_channel`, whose
+- [x] Creating a channel's file goes through `ContextStore.init_channel`, whose
       `FileExistsError` guard is kept and surfaces as a real HTTP status rather
       than a 500
-- [ ] Reload re-reads every file, not just the one just written, and the next
+- [x] Reload re-reads every file, not just the one just written, and the next
       prompt assembled uses the new value — proven by a test, not by inspection
-- [ ] Values are stored **plain**. `ChannelContext`'s docstring is the rule:
+- [x] Values are stored **plain**. `ChannelContext`'s docstring is the rule:
       *"Every value here is plain text. Escaping happens once, on the way into
       a prompt."* A value escaped on the way in reaches the model as
       `&amp;lt;b&amp;gt;`
-- [ ] A key that would collide with `derived`'s own keys is allowed — that is
+- [x] A key that would collide with `derived`'s own keys is allowed — that is
       what an override *is* — but the page is told, since silently shadowing
       the summariser's work is a surprise worth one line of UI
-- [ ] Listing channels works when `context/` is empty, which is its state today
-- [ ] Tests cover: the write reaching a prompt after reload, `derived`
+- [x] Listing channels works when `context/` is empty, which is its state today
+- [x] Tests cover: the write reaching a prompt after reload, `derived`
       surviving a write to `overrides`, the create-guard, plain storage, and an
       empty `context/`
 
@@ -87,3 +87,26 @@ way — go through the store, do not open the file from a route.
 *"This is the last place anything leaves the process."* Adding ingress changes
 what that module is, and the docstring must say so rather than becoming quietly
 false.
+
+## What it came to
+
+**`merged()` was dead code, and a test found it.** The API first returned a
+`merged` field and a `shadowed` list, both built on `ChannelContext.merged()`.
+A test that rendered a written override through the real prompt seam failed —
+and the reason is the finding: **no prompt has ever used `merged()`**. The
+three layers reach a model as three separate labelled sections
+(`channel_base`, `channel_derived`, `channel_overrides`, assembled by
+`channel_sections`), and the model is told what each one means.
+
+So a key present in both `derived` and `overrides` does not quietly resolve to
+one value the way a merge implies — the model is shown both and reconciles
+them itself, which is a worse thing to do by accident than shadowing a dict
+key. The route returns `prompt` (the real rendering, escaping and all) and
+`live` (the same for what the agents currently hold), and the warning is
+`also_in` rather than `shadowed`.
+
+**A free variable nearly shipped.** `build_api(context_store=context_store)`
+was written inside `serve_board`, where that name is a local of `_run` — a
+`NameError` at runtime that neither mypy nor the suite could see, because
+nothing imports and runs that function. `test_every_name_a_module_level_coroutine_uses_is_one_it_can_see`
+is the guard, and it was mutation-tested by restoring exactly the bug.

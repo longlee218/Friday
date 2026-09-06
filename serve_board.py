@@ -16,6 +16,7 @@ import asyncio
 import uvicorn
 from dotenv import load_dotenv
 
+from friday.memory.channel_context import ContextStore
 from friday.ops.api import bind, build_api
 from friday.config import load_config
 from friday.store.db import Database
@@ -26,7 +27,15 @@ async def main() -> None:
     config = load_config()
     db = await Database.connect(config.database_path)
     status = lambda: "not connected (board only)"  # noqa: E731
-    app = build_api(db=db, provider_status=status, origins=list(config.board_origins))
+    # Writable, like the agent's own board: this is the copy pointed at the
+    # live database while `web/` is being built, and a page that cannot write
+    # is not the page being built.
+    app = build_api(
+        db=db,
+        provider_status=status,
+        origins=list(config.board_origins),
+        context_store=ContextStore.build(config),
+    )
     sock = bind(config.board_host, config.board_port)
     server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))
     print(f"api on http://localhost:{config.board_port}/api/board")

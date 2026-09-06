@@ -1,7 +1,10 @@
 """The board's data, over HTTP.
 
-The server-rendered board is one reader of this; a frontend written in
-something other than Python is the other. Both see the same shapes.
+`web/` is the reader. It was written for two — a server-rendered board in
+Python and a frontend in something else — and the first of those was deleted
+(board `a-window-on-the-whole-path`, ticket 01) precisely because two readers
+of one dataset drift: that one rendered the same prompts and provider errors
+as this module while running none of them through `scrub`.
 
 **This is the last place anything leaves the process**, so it is the last place
 a credential can be caught. Task parameters and decision parameters are
@@ -10,6 +13,15 @@ against a failed send began life as a provider exception. All of it is scrubbed
 on the way out, even where it was already scrubbed on the way in — the cost is
 a regex over a few kilobytes, and the thing it prevents is unscoped access to
 the operator's account.
+
+**It is no longer only the way out.** One thing enters here: a channel's
+context `overrides`, the layer of its YAML file the machine never writes
+(board D7). That is context and not a decision — task state, approvals,
+classifications and the agent's own memory are all still decided in Discord,
+and none of them is reachable by any verb here. The consequence is
+`check_exposure` at the foot of this file, which stopped warning and started
+refusing: "unauthenticated is safe because it is read-only" was always an
+argument about writes, and there is now a write.
 """
 
 from __future__ import annotations
@@ -21,9 +33,10 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi import Body, FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from friday.agent.instruction_prompt import channel_sections
 from friday.domain.conversation import ConversationId
 from friday.store.db import Database
 from friday.domain.models import InboundEvent, Outbound, Task
@@ -47,17 +60,32 @@ def build_api(
     db: Database,
     provider_status: Callable[[], str],
     origins: list[str] | None = None,
+    #: The live `ContextStore` the agents read from — the same object, not a
+    #: copy, which is what one process buys (the architecture's first
+    #: constraint). Given it, the routes that write a channel's `overrides`
+    #: are registered; without it they are not registered at all rather than
+    #: answering 503, the shape `Responder` already uses for its memory tools:
+    #: what a caller can reach is composition, and a door that is not in the
+    #: room should not be described.
+    context_store: Any = None,
 ) -> FastAPI:
     api = FastAPI(title="friday", docs_url="/api/docs", redoc_url=None)
 
     if origins:
         # Named exactly, and no credentials: the browser is not carrying an
         # identity here because there is none to carry.
+        #
+        # `PUT`/`POST` are here because one thing is now writable — a channel's
+        # context `overrides` (board D7). That is the whole of the widening:
+        # nothing that *decides* anything is reachable by either verb, and the
+        # guard that made an unauthenticated board defensible moved to
+        # `check_exposure` below, which stopped warning and started refusing.
+        allow_methods = ["GET"] if context_store is None else ["GET", "PUT", "POST"]
         api.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
             allow_credentials=False,
-            allow_methods=["GET"],
+            allow_methods=allow_methods,
             allow_headers=["*"],
         )
 
@@ -229,7 +257,137 @@ def build_api(
         """What was sent, what is waiting, and what nobody could deliver."""
         return _clean([_outbound(r) for r in await db.outbound(state, limit=limit)])
 
+    if context_store is not None:
+        _mount_context(api, context_store)
+
     return api
+
+
+def _mount_context(api: FastAPI, store: Any) -> None:
+    """The one part of this API that writes (board D7).
+
+    `docs/SPEC.md` said "any interaction on the web page" was out of scope,
+    and this narrows that rather than deleting it. The rule exists so that
+    **decisions** have one home, and a channel's `overrides` is not a
+    decision — it is context, what is true about a room, and it is the one
+    section the machine is forbidden to touch. Nothing that decides anything
+    is reachable here: not a task's state, not an approval, not a
+    classification, not the agent's own memory.
+    """
+
+    @api.get("/api/channels")
+    async def channels() -> list[str]:
+        """Channels that have a context file. Empty is the shipped state —
+        `context/` has never had one written to it."""
+        return store.known_channels()
+
+    @api.get("/api/channels/{channel_id}/context")
+    async def channel_context(channel_id: str = Path(...)) -> dict:
+        """The three layers separately, and what they merge to.
+
+        Separately because the page has to show what an edit is *overriding*:
+        a key typed into `overrides` that also exists in `derived` silently
+        shadows the summariser forever, which is a legitimate thing to want
+        and a bad thing to do by accident.
+
+        `live` is what the running agents are currently using — held from the
+        last reload — and it differs from what is on disk exactly when
+        somebody has saved and not reloaded. That difference is the one rule
+        of D8 made visible.
+
+        `prompt` is the three layers rendered by the seam that actually feeds
+        an agent, `instruction_prompt.channel_sections`, rather than a merge
+        of them. That distinction is not cosmetic and it cost a test to find:
+        `ChannelContext.merged()` exists, and **nothing has ever rendered a
+        prompt from it** — the layers reach a model as three separate labelled
+        sections, and the model is told what each one means. So a key in both
+        `derived` and `overrides` does not resolve to one value the way a
+        merge implies; the model sees both and reconciles them itself. That is
+        what `also_in` is warning about, and it is a worse thing to do by
+        accident than a shadowed dict key would be.
+        """
+        on_disk = store.load(channel_id)
+        held = store.context(channel_id)
+        return _clean(
+            {
+                "channel_id": channel_id,
+                "exists": store.path_for(channel_id).exists(),
+                "base": on_disk.base,
+                "derived": on_disk.derived,
+                "overrides": on_disk.overrides,
+                # What an agent is actually told about this room, through the
+                # one seam that renders it — including the escaping, so the
+                # page shows what the model reads rather than what was typed.
+                "prompt": channel_sections(on_disk),
+                "live": channel_sections(held) if held is not None else None,
+                "also_in": sorted(
+                    set(on_disk.overrides) & (set(on_disk.derived) | set(on_disk.base))
+                ),
+            }
+        )
+
+    @api.post("/api/channels/{channel_id}/context", status_code=201)
+    async def create_channel_context(channel_id: str = Path(...)) -> dict:
+        """Create a file for a channel that has none — what `init_channel.py`
+        does from a terminal.
+
+        `FileExistsError` is the store's own guard and it means something
+        specific: `overrides` is never clobbered, an operator's second `init`
+        included. It reaches the page as a 409, not a 500.
+        """
+        try:
+            store.init_channel(channel_id)
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        return {"channel_id": channel_id, "created": True}
+
+    @api.put("/api/channels/{channel_id}/context/overrides")
+    async def set_overrides(
+        channel_id: str = Path(...), body: dict[str, Any] = Body(...)
+    ) -> dict:
+        """Replace a channel's `overrides` from key/value pairs.
+
+        Pairs, not YAML (D9): `merged()` is a flat dict with no schema, and a
+        raw-YAML field would make "this channel's file is malformed and it now
+        has no context" a state the UI can produce. So values must be strings,
+        and anything else is a 422 rather than something that reaches a prompt
+        as a rendered `dict`.
+
+        Stored plain. `ChannelContext`'s own rule — *"Every value here is
+        plain text. Escaping happens once, on the way into a prompt"* — so
+        escaping here would show the model `&amp;lt;b&amp;gt;`.
+
+        Takes effect on reload, not now. That is the one rule (D8), and
+        `GET .../context` exposes the difference as `live`.
+        """
+        overrides = body.get("overrides")
+        if not isinstance(overrides, dict):
+            raise HTTPException(422, "body needs an 'overrides' object")
+        for key, value in overrides.items():
+            if not isinstance(value, str):
+                raise HTTPException(
+                    422,
+                    f"{key!r} is a {type(value).__name__}; overrides are key/value "
+                    "pairs of text, because every value here is rendered into a "
+                    "prompt as a line",
+                )
+        if not store.path_for(channel_id).exists():
+            raise HTTPException(
+                404, f"{channel_id} has no context file — create it first"
+            )
+        store.set_overrides(channel_id, overrides)
+        return {"channel_id": channel_id, "saved": True, "live": False}
+
+    @api.post("/api/context/reload")
+    async def reload_context() -> dict:
+        """Make every file on disk live — the page's edits and a hand-edit
+        alike, which is what keeps it one rule rather than two.
+
+        Reports what would not parse, because unlike startup there is somebody
+        watching this one.
+        """
+        problems = store.reload()
+        return {"reloaded": store.known_channels(), "problems": problems}
 
 
 def _message(message: InboundEvent, call) -> dict:

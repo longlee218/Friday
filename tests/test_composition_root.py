@@ -11,6 +11,7 @@ it while the branch was still off.
 from __future__ import annotations
 
 import ast
+import builtins
 import pathlib
 
 
@@ -179,3 +180,96 @@ def test_the_responder_is_given_the_store_its_memory_tools_need():
         f"Responder.build is handed {ast.dump(given) if given else 'nothing'} "
         "for db, not a name"
     )
+
+
+def test_the_board_is_handed_the_context_store_the_agents_read_from():
+    """The write path is only correct if it writes to the *same* store the
+    responder and the rebuilder hold — one process is what makes that a
+    reference rather than an IPC problem (board D7/D8).
+
+    A second store built here would write files nobody reads until a restart,
+    which is the failure mode that looks like the feature working.
+    """
+    source = pathlib.Path(__file__).resolve().parents[1] / "run_agent.py"
+    tree = ast.parse(source.read_text())
+    call = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "build_api"
+    )
+
+    given = next((kw.value for kw in call.keywords if kw.arg == "context_store"), None)
+    assert isinstance(given, ast.Name), (
+        "build_api is not handed a context store by name — the page would have "
+        "no way to write, or would write to a store nothing reads"
+    )
+
+
+def test_every_name_a_module_level_coroutine_uses_is_one_it_can_see():
+    """`serve_board` is called from `_run` but defined beside it, so a local
+    of `_run` referenced inside it is a `NameError` at runtime and nothing
+    earlier than runtime says so — not mypy, not the suite, because nothing
+    imports and runs this function.
+
+    Caught exactly this while wiring the context store into `build_api`: the
+    call read `context_store=context_store` inside `serve_board`, where the
+    name is `_run`'s local. It is a parameter now.
+    """
+    source = pathlib.Path(__file__).resolve().parents[1] / "run_agent.py"
+    tree = ast.parse(source.read_text())
+    module_level = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            module_level |= {(a.asname or a.name).split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            module_level |= {a.asname or a.name for a in node.names}
+        elif isinstance(node, ast.Assign):
+            module_level |= {
+                t.id for t in node.targets if isinstance(t, ast.Name)
+            }
+
+    for func in tree.body:
+        if not isinstance(func, ast.AsyncFunctionDef) or func.name == "_run":
+            continue
+        args = func.args
+        visible = set(module_level) | {
+            a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)
+        }
+        if args.vararg:
+            visible.add(args.vararg.arg)
+        if args.kwarg:
+            visible.add(args.kwarg.arg)
+        for inner in ast.walk(func):
+            if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                visible.add(inner.name)
+                visible |= {a.arg for a in inner.args.args}
+            elif isinstance(inner, ast.Import):
+                visible |= {
+                    (a.asname or a.name).split(".")[0] for a in inner.names
+                }
+            elif isinstance(inner, ast.ImportFrom):
+                visible |= {a.asname or a.name for a in inner.names}
+            elif isinstance(inner, ast.Assign):
+                visible |= {t.id for t in inner.targets if isinstance(t, ast.Name)}
+            elif isinstance(inner, ast.comprehension) and isinstance(
+                inner.target, ast.Name
+            ):
+                visible.add(inner.target.id)
+            elif isinstance(inner, ast.withitem) and isinstance(
+                inner.optional_vars, ast.Name
+            ):
+                visible.add(inner.optional_vars.id)
+
+        used = {
+            n.id
+            for n in ast.walk(func)
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+        }
+        unseen = used - visible - set(dir(builtins))
+        assert not unseen, f"{func.name} reads names it cannot see: {sorted(unseen)}"

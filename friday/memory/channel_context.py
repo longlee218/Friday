@@ -151,6 +151,49 @@ class ContextStore:
             raise FileExistsError(f"{path} already exists — edit it directly")
         self._write(path, {"derived": {}, "overrides": overrides or {}})
 
+    def set_overrides(self, channel_id: str, overrides: dict[str, Any]) -> None:
+        """Replace the operator's section. Never touches `derived` or `state`.
+
+        The mirror image of `rebuild_derived`, and deliberately asymmetric
+        with it in one way: **this does not refresh what is held.** That is
+        D8 on `.scratch/a-window-on-the-whole-path/` and it is the reading of
+        `_held`'s own comment above — *"two rules for 'when does my edit take
+        effect' is one too many"*. An operator has exactly one rule: it takes
+        effect when they reload. A page edit that landed instantly while a
+        hand-edit of the same file waited for a restart would be the two rules
+        that comment refuses.
+
+        `rebuild_derived` refreshing immediately is not the second rule,
+        because nobody is waiting to be told about it: it is the machine
+        writing the machine's own section between beats, and no operator edit
+        is involved.
+
+        Replaces rather than merges. A key the operator deleted has to
+        actually go, and merging would make removal impossible from the only
+        interface that can write.
+        """
+        existing = self._read(self.path_for(channel_id)) or {}
+        existing.setdefault("derived", {})
+        existing["overrides"] = overrides
+        self._write(self.path_for(channel_id), existing)
+
+    def reload(self) -> list[str]:
+        """Re-read every file, and say which ones could not be parsed.
+
+        The one action that makes an edit live, whoever made it — the page or
+        a text editor. Deliberately not per channel: a caller who has to know
+        which files changed is a caller who can be wrong about it, and reading
+        a handful of small YAML files is not worth the bookkeeping.
+
+        Returns `validate_all`'s problems rather than logging them, because
+        unlike startup there is somebody watching this one — a channel that
+        silently loses its context is exactly what that function exists to
+        catch, and the moment of the reload is when it can be said out loud.
+        """
+        problems = self.validate_all()
+        self.hold_all()
+        return problems
+
     def rebuild_derived(self, channel_id: str, derived: dict[str, Any]) -> None:
         """Replace the machine-written section. Never touches `overrides`."""
         existing = self._read(self.path_for(channel_id)) or {}

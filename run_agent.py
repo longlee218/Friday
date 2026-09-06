@@ -41,7 +41,7 @@ async def ingest(inbox: Inbox) -> None:
         pass
 
 
-async def serve_board(db, provider, config, sock) -> None:
+async def serve_board(db, provider, config, sock, context_store) -> None:
     """The board's server runs in this process like everything else.
 
     Only the JSON API for now: the server-rendered page was deleted with the
@@ -58,7 +58,13 @@ async def serve_board(db, provider, config, sock) -> None:
     check_exposure(config.board_host, token=os.environ.get("BOARD_TOKEN"))
 
     app = build_api(
-        db=db, provider_status=status, origins=list(config.board_origins)
+        db=db,
+        provider_status=status,
+        origins=list(config.board_origins),
+        # The same object the agents read from, not a copy — which is what one
+        # process buys. A write here reaches the next prompt assembled in that
+        # room once somebody reloads (board D8).
+        context_store=context_store,
     )
     # Nothing is mounted at `/` until `web/` exists (board ticket 05). The
     # server-rendered page that used to live there was deleted with the
@@ -298,7 +304,9 @@ async def _run(stack: AsyncExitStack) -> None:
             if bot is not None:
                 group.create_task(bot.start())
             group.create_task(heartbeat.run_forever())
-            group.create_task(serve_board(db, provider, config, board_socket))
+            group.create_task(
+                serve_board(db, provider, config, board_socket, context_store)
+            )
     except* CredentialRejected as group_exc:
         raise SystemExit(
             f"Discord rejected the credential: {group_exc.exceptions[0]}"
