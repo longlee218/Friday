@@ -364,7 +364,21 @@ class Database:
     async def flow_for(
         self, *, provider: str, message_id: str
     ) -> MessageFlow | None:
-        """Everything that followed from one message, read at one instant.
+        """Everything that followed from one message, in one request.
+
+        **"One request", not "one instant", and the difference is deliberate.**
+        D6 argues against joining in the browser because "four requests read four
+        instants of a database being written to". This narrows that window to
+        microseconds inside one process — the reads are `_calls_about` (one
+        session, both tables), the outbound rows, the message and its task, and
+        the turn — but SQLite in WAL gives each session its own snapshot, so it
+        is not one atomic read and this docstring said it was.
+
+        Left as several sessions on purpose. Making it atomic means threading a
+        session through `turn_from` and the outbound reader, which are shared
+        with callers that have no such need, and what is bought is a torn *debug
+        view* rather than a wrong decision — nothing acts on this. The claim is
+        corrected instead, which is the half that was actually wrong.
 
         One method rather than four calls a browser joins (D6): a task can
         change state between the second request and the third, and the path
@@ -388,13 +402,12 @@ class Database:
             event = _event(row)
             task = await session.get(schema.Task, row.task_id) if row.task_id else None
 
-        calls = await self.model_calls(message_id=message_id, limit=None)
-        tools = await self._tool_calls(message_id=message_id)
-        outbound: list[Outbound] = []
-        if row.task_id is not None:
-            calls += await self.calls_for_task(row.task_id)
-            tools += (await self.tools_for_tasks([row.task_id])).get(row.task_id, [])
-            outbound = await self._outbound_for_task(row.task_id)
+        calls, tools = await self._calls_about(message_id, row.task_id)
+        outbound = (
+            await self._outbound_for_task(row.task_id)
+            if row.task_id is not None
+            else []
+        )
 
         turn, _ = await self.turn_from(event)
         return MessageFlow(
@@ -415,32 +428,53 @@ class Database:
             ),
             triaged_at=row.triaged_at,
             task=_task(task) if task is not None else None,
-            # Stable sort on the timestamp alone, and the merge order above is
-            # the tiebreak: message-correlated calls were appended first, and
-            # they are the ones that happened first — triage runs before the
-            # task it opens exists. Neither dataclass carries the row id, so
-            # there is no second key to sort on, and inventing one would mean
-            # widening the domain to serve an ordering the merge already knows.
-            model_calls=sorted(calls, key=lambda c: c.created_at),
-            tool_calls=sorted(tools, key=lambda t: t.created_at),
+            # Already ordered by `_calls_about`, in SQL, with the row id as
+            # the tiebreak — which is better than the sort that used to be
+            # here: neither dataclass carries the id, so a Python sort had
+            # only the timestamp and leaned on the merge order for ties.
+            model_calls=calls,
+            tool_calls=tools,
             outbound=outbound,
         )
 
-    async def _tool_calls(self, *, message_id: str) -> list[ToolCall]:
-        """What was reached for while working on one message.
+    async def _calls_about(
+        self, message_id: str, task_id: int | None
+    ) -> tuple[list[ModelCall], list[ToolCall]]:
+        """Every model and tool call that names this message *or* its task.
 
-        The counterpart of `model_calls(message_id=...)`, which existed while
-        this did not — `tools_for_tasks` was the only reader of `tool_calls`
-        and it needs a task, so a tool call made during triage (there are none
-        today, and `stop_when` is the only reason) was unreachable by any key.
+        `OR` in one query rather than two lists concatenated, and that is a
+        correctness fix rather than a tidiness one. The first version read the
+        two keys separately and appended, on the assumption that no call
+        carries both — and nothing enforces that: `_About` in
+        `friday/agent/harness.py` holds `message_id` and `task_id`
+        independently, and `Harness.run`'s docstring invites both ("a caller
+        supplies whichever it knows"). Only triage passes one today, so the
+        assumption held by coincidence of the current call sites. The first
+        node to pass both would have had every call rendered twice and its
+        tokens counted twice on the task screen.
+
+        Ordered here rather than by the caller, since the two kinds are one
+        sequence: triage's call names the message and everything after names
+        the task.
         """
-        query = (
-            select(schema.ToolCall)
-            .where(schema.ToolCall.message_id == message_id)
-            .order_by(schema.ToolCall.created_at.asc(), schema.ToolCall.id.asc())
+        by_key = lambda table: (  # noqa: E731
+            (table.message_id == message_id) | (table.task_id == task_id)
+            if task_id is not None
+            else (table.message_id == message_id)
         )
         async with self._sessions() as session:
-            return [_tool_call(row) for row in await session.scalars(query)]
+            calls = await session.scalars(
+                select(schema.ModelCall)
+                .where(by_key(schema.ModelCall))
+                .order_by(schema.ModelCall.created_at.asc(), schema.ModelCall.id.asc())
+            )
+            model_calls = [_model_call(row) for row in calls]
+            tools = await session.scalars(
+                select(schema.ToolCall)
+                .where(by_key(schema.ToolCall))
+                .order_by(schema.ToolCall.created_at.asc(), schema.ToolCall.id.asc())
+            )
+            return model_calls, [_tool_call(row) for row in tools]
 
     async def _outbound_for_task(self, task_id: int) -> list[Outbound]:
         """Everything queued about one task, oldest first — the end of a path."""

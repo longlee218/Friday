@@ -370,3 +370,58 @@ def test_an_id_the_store_refuses_reads_as_a_bad_request_not_a_crash(client):
     assert created.status_code == 400, created.text
     assert written.status_code == 400, written.text
     assert "not a channel id" in created.json()["detail"]
+
+
+def test_a_parse_failure_does_not_hand_back_the_file_it_failed_on(client, store):
+    """`validate_all` returns `f"{path}: {exc}"`, and a `yaml.YAMLError`
+    quotes the offending source line — so a broken context file returns its
+    own content over HTTP. That content is operator-written and can hold
+    anything they pasted into it.
+
+    `friday/ops/api.py`'s whole stated reason to exist is that it is "the last
+    place a credential can be caught" and that "all of it is scrubbed on the
+    way out". The routes added for this ticket were the exception."""
+    store._dir.mkdir(parents=True, exist_ok=True)
+    (store._dir / "broken.yaml").write_text(
+        "overrides: [unclosed\ntoken: sk-abcdefghijklmnopqrstuvwx\n"
+    )
+
+    answer = client.post("/api/context/reload")
+
+    assert answer.status_code == 200
+    assert "sk-abcdefghijklmnopqrstuvwx" not in answer.text
+    assert answer.json()["problems"], "the operator still has to be told"
+
+
+def test_every_route_on_this_api_scrubs_what_it_returns():
+    """A rule worth stating is worth a test, and this one is stated in the
+    module's own docstring. It stopped being true the moment the context
+    routes were added — four of them returned strings straight."""
+    import ast
+    import pathlib
+
+    source = pathlib.Path("friday/ops/api.py").read_text()
+    tree = ast.parse(source)
+    unscrubbed = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        decorated = any(
+            isinstance(d, ast.Call)
+            and isinstance(d.func, ast.Attribute)
+            and d.func.attr in {"get", "post", "put"}
+            for d in node.decorator_list
+        )
+        if not decorated or node.name == "page":
+            continue  # `page` streams a file; it has no strings of its own
+        returns = [n for n in ast.walk(node) if isinstance(n, ast.Return) and n.value]
+        for ret in returns:
+            called = {
+                n.func.id
+                for n in ast.walk(ret)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            }
+            if "_clean" not in called:
+                unscrubbed.append(f"{node.name}:{ret.lineno}")
+
+    assert not unscrubbed, f"routes returning unscrubbed strings: {unscrubbed}"

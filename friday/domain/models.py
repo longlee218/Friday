@@ -398,7 +398,21 @@ class ModelCall:
 
 @dataclass(frozen=True, slots=True)
 class MessageFlow:
-    """Everything that followed from one message, read at one instant.
+    """Everything that followed from one message, in one request.
+
+    **"One request", not "one instant", and the difference is deliberate.**
+    D6 argues against joining in the browser because "four requests read four
+    instants of a database being written to". This narrows that window to
+    microseconds inside one process — the reads are `_calls_about` (one
+    session, both tables), the outbound rows, the message and its task, and
+    the turn — but SQLite in WAL gives each session its own snapshot, so it
+    is not one atomic read and this docstring said it was.
+
+    Left as several sessions on purpose. Making it atomic means threading a
+    session through `turn_from` and the outbound reader, which are shared
+    with callers that have no such need, and what is bought is a torn *debug
+    view* rather than a wrong decision — nothing acts on this. The claim is
+    corrected instead, which is the half that was actually wrong.
 
     The spine is a message and not a task, which is the whole of D5 on
     `.scratch/a-window-on-the-whole-path/`: when the classifier runs there is

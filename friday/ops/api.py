@@ -266,10 +266,12 @@ def build_api(
         different models — the classifier on every mention and the responder
         on a few are not one pool.
         """
-        return {
-            "total": await db.spent_today(),
-            "by_agent": await db.spent_today_by_agent(),
-        }
+        return _clean(
+            {
+                "total": await db.spent_today(),
+                "by_agent": await db.spent_today_by_agent(),
+            }
+        )
 
     @api.get("/api/outbound")
     async def outbound(
@@ -364,7 +366,7 @@ def _mount_context(api: FastAPI, store: Any) -> None:
     async def channels() -> list[str]:
         """Channels that have a context file. Empty is the shipped state —
         `context/` has never had one written to it."""
-        return store.known_channels()
+        return _clean(store.known_channels())
 
     def _named(channel_id: str) -> str:
         """A channel id the store will accept, or a 400 saying why.
@@ -439,7 +441,7 @@ def _mount_context(api: FastAPI, store: Any) -> None:
             store.init_channel(_named(channel_id))
         except FileExistsError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
-        return {"channel_id": channel_id, "created": True}
+        return _clean({"channel_id": channel_id, "created": True})
 
     @api.put("/api/channels/{channel_id}/context/overrides")
     async def set_overrides(
@@ -476,7 +478,7 @@ def _mount_context(api: FastAPI, store: Any) -> None:
                 404, f"{channel_id} has no context file — create it first"
             )
         store.set_overrides(channel_id, overrides)
-        return {"channel_id": channel_id, "saved": True, "live": False}
+        return _clean({"channel_id": channel_id, "saved": True, "live": False})
 
     @api.post("/api/context/reload")
     async def reload_context() -> dict:
@@ -486,8 +488,13 @@ def _mount_context(api: FastAPI, store: Any) -> None:
         Reports what would not parse, because unlike startup there is somebody
         watching this one.
         """
+        # Scrubbed like everything else, and here it is not ceremony: a
+        # `yaml.YAMLError` quotes the source line it failed on, so an
+        # unscrubbed `problems` hands back the content of the file that
+        # could not be parsed — operator-written, and able to hold whatever
+        # they pasted into it.
         problems = store.reload()
-        return {"reloaded": store.known_channels(), "problems": problems}
+        return _clean({"reloaded": store.known_channels(), "problems": problems})
 
 
 def _message(message: InboundEvent, call) -> dict:

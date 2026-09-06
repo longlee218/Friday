@@ -251,3 +251,54 @@ async def test_another_conversations_work_is_not_in_this_path(db):
 
     assert flow.model_calls == []
     assert flow.task is None
+
+
+async def test_a_call_naming_both_a_message_and_its_task_is_listed_once(db):
+    """The two correlation keys were read separately and concatenated, on the
+    assumption that no call carries both. Nothing enforces that: `_About` in
+    `friday/agent/harness.py` holds `message_id` and `task_id` independently
+    and `Harness.run`'s docstring invites both — *"a caller supplies whichever
+    it knows"*. Only triage passes one today, so the assumption holds by
+    coincidence of the current call sites.
+
+    The first extractor or graph node to pass both would have every call
+    rendered twice and its tokens counted twice in the task screen's total.
+    """
+    event = await _seen(db)
+    task = await db.create_task(
+        conversation=event.conversation,
+        type="api_issue",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
+    )
+    await db.mark_triaged(
+        event, task.id, decision={"type": "api_issue", "confidence": 0.9, "params": {}}
+    )
+    await db.record_model_call(
+        message_id="m1",
+        task_id=task.id,
+        node="prepare",
+        agent="extractor",
+        model="m",
+        system_prompt="s",
+        prompt="p",
+        output="o",
+        input_tokens=7,
+        output_tokens=3,
+    )
+    await db.record_tool_call(
+        message_id="m1",
+        task_id=task.id,
+        agent="extractor",
+        tool="ask_for_fields",
+        arguments="{}",
+        result="asked",
+        failed=False,
+    )
+
+    flow = await db.flow_for(provider="fake", message_id="m1")
+
+    assert len(flow.model_calls) == 1, "a call with both keys was counted twice"
+    assert len(flow.tool_calls) == 1, "a tool call with both keys was counted twice"
+    assert sum(c.input_tokens + c.output_tokens for c in flow.model_calls) == 10

@@ -50,8 +50,10 @@ the agent reached for is recorded" — is recorded and unreachable.
 
 ## Acceptance criteria
 
-- [x] One route returns the whole path for a message, in order, in one
-      database instant
+- [~] ~~in one database **instant**~~ — one *request*, which is not the same
+      thing and the docstring claimed it was. Several sessions, and SQLite in
+      WAL gives each its own snapshot; corrected rather than made atomic, and
+      the reason is written where the claim was
 - [x] It answers for a message that was **skipped** — no task ever opened — as
       a normal outcome, not a 404 and not an empty object
 - [x] It answers for a message the prefilter **held**, and says which word held
@@ -61,7 +63,11 @@ the agent reached for is recorded" — is recorded and unreachable.
       (`latency_ms`), which attempt it was, and which node it came from
 - [x] Every string goes through `_clean()` like every other response here —
       prompts and `last_error` are the two fields most likely to carry a
-      credential
+      credential. **True of this route and false of the four added in the next
+      commit**, which a review caught: `reload`'s `problems` returns a
+      `yaml.YAMLError`, and that quotes the source line it failed on. All
+      scrubbed now, with an AST test so the invariant is enforced rather than
+      remembered
 - [x] A message that does not exist is a 404, distinguishable from one that
       exists and did nothing
 - [x] Tests cover: the skip path, the held-by-prefilter path, a full path
