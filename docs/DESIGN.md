@@ -431,13 +431,36 @@ invisible and the task would wait forever for a decision nobody was asked for.
 
 ## Board — `:8086`
 
-FastAPI, server-rendered HTML, HTMX polling. **Read-only** — it displays, and
-every action happens in Discord. That is what lets it run without auth.
+**Superseded 2026-09-06** by `.scratch/a-window-on-the-whole-path/`. What this
+section described — FastAPI, server-rendered HTML, HTMX polling — was deleted
+in that board's ticket 01, and what replaces it is a React SPA in `web/`
+reading the JSON API in `friday/ops/api.py`. The original text follows, with
+what changed marked.
 
-It is a **debug view**, not a control panel: tasks by state, the live message
-stream, model calls with their prompts and tool calls, outbound rows including
-what failed to send and its text to copy, plus per-provider connection status
-and the time of the last captured event.
+> FastAPI, server-rendered HTML, HTMX polling. **Read-only** — it displays, and
+> every action happens in Discord. That is what lets it run without auth.
+>
+> It is a **debug view**, not a control panel: tasks by state, the live message
+> stream, model calls with their prompts and tool calls, outbound rows including
+> what failed to send and its text to copy, plus per-provider connection status
+> and the time of the last captured event.
+
+**Still true:** it is a debug view; it answers on loopback only and is reached
+over an SSH tunnel; every *decision* still happens in Discord — task state,
+approvals and classifications are not editable from a browser.
+
+**No longer true: "read-only".** One thing is writable, a channel's context
+`overrides` — the section of `context/<channel>.yaml` the machine never touches
+and which was created for the operator. That reverses this document's own
+premise, and the argument is D7 on the new board: the rule exists so that
+*decisions* have one home, and context is not a decision. It is also why
+`check_exposure` stopped warning and started refusing (D10) — "unauthenticated
+is safe because it is read-only" was an argument about writes, and there are
+now writes.
+
+**No longer true: "server-rendered HTML, HTMX".** The page is a static React
+bundle built by a Node stage in the same Dockerfile and served by the same
+FastAPI app. Still one process, one container.
 
 ## Ops
 

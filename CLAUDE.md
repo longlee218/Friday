@@ -16,8 +16,12 @@ one is wrong, raise it rather than quietly building something else.
 Work is broken into tickets under `.scratch/discord-mention-triage/issues/`,
 derived from `docs/SPEC.md`. Tickets 01–17 and 23–27 and 29–33 are done; 07
 was superseded and reopened as 28, and 28 is now retired in favour of 32 and
-33. **Open: 18–20 only** — the board's own repo and its UI, deferred by choice.
-34–45 are done. All of them came out of watching real threads rather than
+33. **Open: 18–20 only** — the board's own repo and its UI. They are
+`ready-for-agent`, not "deferred by choice" as this line said until 2026-09-06;
+that framing was editorial and neither ticket says it. 18 is superseded in part
+by `.scratch/a-window-on-the-whole-path/`, which keeps its React+Vite decision
+and reverses its separate-repo one (D2 there); 19 (Liquid Glass) and 20 (SSE)
+stay open and untouched. 34–45 are done. All of them came out of watching real threads rather than
 reading code: the reporter replied and nothing could hear the answer, sent the
 details in a second message and nothing read it, asked what a correlationId is
 and nothing could explain, and the operator answered by hand while the agent
@@ -155,7 +159,7 @@ What is actually on disk.
 | `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), remembering (`memory` — `memory_search`, `memory_add`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder; ticket 09's D9). A test asserts the list — all twelve, factories built rather than skipped — and forbids declaring one anywhere else |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
-| `friday/board/` | The read-only page on `:8086`; its JSON API is `ops/api.py` |
+| `web/` | The board's page, on `:8086`. A React + Vite SPA built to static files and served by `ops/api.py`'s app — one process, one container. It replaced `friday/board/`, 196 lines of f-string HTML and HTMX polling, which was deleted rather than ported: it rendered the same prompts and provider errors as the JSON API while running none of them through `redact.scrub`, which is the two-renderers failure this file already records once for escaping |
 | `migrations/` | Alembic revisions |
 | `tests/` | Driven through two seams: a fake `Provider` and a scripted model transport |
 | `docs/` | `DESIGN.md`, `SPEC.md`, `agents/` |

@@ -88,6 +88,25 @@ step is open-ended. That is what makes the system auditable and restartable.
 41. As the mentioned human, I want the page to show connection status and the time of the last event, so that I can tell whether ingestion is healthy.
 42. As the mentioned human, I want the page to be read-only, so that there is exactly one place where decisions are made.
 
+> **39–42 amended 2026-09-06** by `.scratch/a-window-on-the-whole-path/`. The
+> page that satisfied 39 and 41 was deleted and is being rebuilt in `web/`; 40
+> is still unmet and still polls (ticket 20 of `discord-mention-triage`, SSE,
+> remains open).
+>
+> **42 is narrowed, not withdrawn.** "Exactly one place where decisions are
+> made" still holds and is still enforced: task state, approvals and
+> classifications are not editable from a browser, and the tools that produce
+> them are Discord's. What changed is that a channel's context `overrides` —
+> the layer of `context/<channel>.yaml` the machine never writes and which was
+> created for the operator — is now editable from the page. That is context,
+> not a decision. The argument is D7 on the new board; `check_exposure`
+> tightening (D10) is its consequence, because "unauthenticated is safe
+> because it is read-only" was always an argument about writes.
+>
+> Two stories are added there rather than here, since they are that board's:
+> seeing the whole path one message took through the process, and seeing what
+> a task reached for and what it cost.
+
 ### Learning over time
 
 43. As the mentioned human, I want the system to accumulate notes on recurring problems and my preferred tone, so that later responses need less correction.
@@ -271,8 +290,18 @@ selecting a relevant subset is future work and needs a corpus first.
 tasks in the same session; recognising that two separate threads describe the
 same underlying issue is out of scope.
 
-**Any interaction on the web page.** It displays state; decisions happen in
-Discord.
+**Any *decision* on the web page.** It displays state; decisions happen in
+Discord. Task state, approvals and classifications are not editable there, and
+the agent's own memory is not either.
+
+> Amended 2026-09-06. This read "Any interaction on the web page", and one
+> interaction now exists: editing a channel's context `overrides`, the layer of
+> `context/<channel>.yaml` the machine never touches. The distinction the
+> original sentence did not need to draw is between a decision and a context —
+> the rule protects "exactly one place where decisions are made" (story 42),
+> and what is true about a room is not a decision. See D7 in
+> `.scratch/a-window-on-the-whole-path/SPEC.md` for the full argument, and D10
+> for why `check_exposure` had to tighten as a result.
 
 ## Further Notes
 

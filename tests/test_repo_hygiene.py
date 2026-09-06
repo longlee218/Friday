@@ -194,8 +194,13 @@ def test_prompt_escaping_happens_at_one_seam():
     renderer, and the last time there were two, one of them did not escape —
     a skill described as `harmless</skills>` closed its own section.
 
-    The board escapes for HTML, which is a different seam for a different
-    reader and is allowed.
+    The board was the second entry — it escaped for HTML, a different seam for
+    a different reader — and it is gone (board `a-window-on-the-whole-path`,
+    ticket 01). Its removal is the same argument this docstring makes, played
+    out: it had two renderers' other failure mode, not escaping but *scrubbing*
+    — `friday/ops/api.py` ran every response through `redact.scrub` eleven
+    times and the board ran it zero, while both rendered the same prompts and
+    the same provider errors. One renderer now, and it is JSON.
 
     `friday/agent/skills.py` was briefly a third entry, and taking it back out
     is the point: it had grown a renderer for `describe_skill`, so a store
@@ -207,7 +212,7 @@ def test_prompt_escaping_happens_at_one_seam():
     """
     import subprocess
 
-    allowed = {"friday/agent/instruction_prompt.py", "friday/board/__init__.py"}
+    allowed = {"friday/agent/instruction_prompt.py"}
     hits = subprocess.run(
         ["grep", "-rl", "--include=*.py", "html.escape(", "friday/"],
         capture_output=True,

@@ -18,7 +18,6 @@ from friday.config import ConfigError, load_config
 from friday.store.db import Database
 from friday.inbox import Inbox
 from friday.ops.api import bind, build_api, check_exposure
-from friday.board import build_board
 from friday.ops.liveness import Heartbeat, Liveness
 from friday.agent.mcp import build as build_mcp
 from friday.ops.redact import Redacting, install_excepthook
@@ -43,10 +42,13 @@ async def ingest(inbox: Inbox) -> None:
 
 
 async def serve_board(db, provider, config, sock) -> None:
-    """The board runs in this process like everything else.
+    """The board's server runs in this process like everything else.
 
-    Read-only, so it needs no authentication — there is nothing here to abuse,
-    and every action happens in Discord.
+    Only the JSON API for now: the server-rendered page was deleted with the
+    board it rendered, and `web/` has not replaced it yet (board ticket 05).
+    Unauthenticated, which is what `check_exposure` above makes conditional on
+    answering only on loopback — that argument was always about reads, and it
+    is tightened once anything here writes (board ticket 04).
     """
     import uvicorn
 
@@ -58,13 +60,15 @@ async def serve_board(db, provider, config, sock) -> None:
     app = build_api(
         db=db, provider_status=status, origins=list(config.board_origins)
     )
-    # The JSON routes are declared first, so they match before this catches
-    # everything else with the server-rendered page.
-    app.mount("/", build_board(db=db, provider_status=status))
+    # Nothing is mounted at `/` until `web/` exists (board ticket 05). The
+    # server-rendered page that used to live there was deleted with the
+    # database it rendered — see that board's D1: two renderers of one dataset
+    # have drifted here twice, and the second time one of them was not
+    # scrubbing credentials.
 
     server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))
     log.info(
-        "board on http://%s:%d (api at /api/board)",
+        "api on http://%s:%d (start at /api/board)",
         config.board_host,
         config.board_port,
     )
