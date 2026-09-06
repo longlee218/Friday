@@ -29,7 +29,14 @@
   --line-strong: #39414d;
   --ink: #e6e9ee;
   --ink-dim: #9aa4b2;
-  --ink-faint: #6b7684;
+  /* `--ink-faint` was #6b7684 and failed AA — 4.22 on `bg`, 3.89 on
+     `bg-raised`, against a 4.5 floor at 13px. Not decorative: `.faint`
+     carries the timestamps, "not reached", "No call was made about this
+     message", and most of the flow screen's explanatory copy — the text that
+     makes an absent step legible as an outcome rather than a gap, which is
+     ticket 07's whole point. #76818f is eleven steps lighter and clears both
+     grounds (4.92 / 4.54). The light theme had the same problem below. */
+  --ink-faint: #76818f;
 
   --accent: #4c9aff;
   --accent-ink: #0b0d10;
@@ -47,7 +54,7 @@
     --line-strong: #c2c9d4;
     --ink: #1b1f26;
     --ink-dim: #4d5765;
-    --ink-faint: #737f8f;
+    --ink-faint: #677383;
 
     --accent: #0b64d4;
     --accent-ink: #ffffff;

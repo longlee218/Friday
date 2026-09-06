@@ -106,8 +106,20 @@ function Editor({ channelId }: { channelId: string }) {
     setDirty(true);
   };
 
+  // `Object.fromEntries` keeps the last of two rows sharing a key, so the
+  // first would vanish on the refetch with nothing said — on the screen whose
+  // whole job is precision about what the model is told. D9 chose pairs over
+  // a YAML field to make a bad state unreachable; silently losing a line is a
+  // different bad state, so saving is refused until it is resolved.
+  const named = pairs.filter(([k]) => k).map(([k]) => k);
+  const duplicated = named.filter((k, i) => named.indexOf(k) !== i);
+
   async function save() {
     setProblem(null);
+    if (duplicated.length) {
+      setProblem(`two lines share a key: ${[...new Set(duplicated)].join(", ")}`);
+      return;
+    }
     try {
       await api.setOverrides(channelId, Object.fromEntries(pairs.filter(([k]) => k)));
       setDirty(false);
@@ -118,8 +130,17 @@ function Editor({ channelId }: { channelId: string }) {
   }
 
   async function reload() {
-    const answer = await api.reload();
-    if (answer.problems.length) setProblem(answer.problems.join("\n"));
+    // The only handler here that was unguarded, and the worst one to leave
+    // that way: D8 makes this button the single thing that turns a saved edit
+    // into a live one, so a failed POST that reads as "nothing happened" is
+    // exactly the wrong silence.
+    setProblem(null);
+    try {
+      const answer = await api.reload();
+      if (answer.problems.length) setProblem(answer.problems.join("\n"));
+    } catch (e) {
+      setProblem((e as Error).message);
+    }
     loaded.reload();
   }
 
@@ -132,7 +153,11 @@ function Editor({ channelId }: { channelId: string }) {
             <span className="faint">yours; the machine never writes here</span>
           </div>
           <div className="row">
-            <button className="primary" disabled={!dirty} onClick={save}>
+            <button
+              className="primary"
+              disabled={!dirty || duplicated.length > 0}
+              onClick={save}
+            >
               Save
             </button>
             {/* One rule for when an edit takes effect (D8): this button, and
@@ -180,6 +205,9 @@ function Editor({ channelId }: { channelId: string }) {
                     value={key}
                     onChange={(e) => edit(i, 0, e.target.value)}
                   />
+                  {key && duplicated.includes(key) && (
+                    <span className="pill bad">duplicate key</span>
+                  )}
                 </td>
                 <td>
                   <input

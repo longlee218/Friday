@@ -120,7 +120,6 @@ function Path({ provider, id }: { provider: string; id: string }) {
         n={held ? 3 : 2}
         title="Classified"
         done={it.decision !== null}
-        tone={it.decision === null ? undefined : undefined}
       >
         {it.decision === null ? (
           <p className="faint">
