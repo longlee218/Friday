@@ -85,6 +85,32 @@ def test_report_names_the_dataset_size_and_the_accuracy():
     assert "50.0%" in text
 
 
+def test_report_on_an_empty_run_does_not_crash():
+    """An eval set nobody has built yet, or a dataset path pointed at
+    nothing, should say so as a report — not `max()` on an empty sequence."""
+    text = report([])
+
+    assert "0 examples" in text
+    assert "0.0%" in text
+
+
+def test_report_lays_out_three_or_more_predicted_labels():
+    """`width = max(16, *(...))` takes a `*args` unpacking of the label
+    widths — with three or more labels that is `max(16, a, b, c)`, not the
+    two-argument form a shorter dataset happens to exercise."""
+    text = report(
+        [
+            Prediction(expected="api_issue", predicted="api_issue", confidence=0.9),
+            Prediction(expected="access_request", predicted="access_request", confidence=0.9),
+            Prediction(expected="doc_question", predicted="doc_question", confidence=0.9),
+            Prediction(expected="skip", predicted="needs_human", confidence=0.0),
+        ]
+    )
+
+    for label in ("api_issue", "access_request", "doc_question", "skip", "needs_human"):
+        assert label in text
+
+
 def _scripted_triage(*steps):
     from friday.triage import Triage
 
