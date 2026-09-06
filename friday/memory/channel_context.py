@@ -273,16 +273,28 @@ class ContextStore:
         not a security matter at all. They are refused because a channel is
         not called that, and a file named `...yaml` appearing in `context/`
         would be somebody's afternoon.
+
+        `base` is refused for a third reason, and it is the one that
+        was actually reachable. `BASE_NAME` is `base.yaml`, so
+        `path_for("base")` named the file that applies to *every* channel —
+        the layer `channel_base` calls "considered trusted… so it does not
+        escape" — and `set_overrides` only asked whether the path existed,
+        which it does. No slash, so neither the routing regex nor the
+        containment check above stood in the way. `known_channels()` hides it
+        from listings, which made it invisible rather than unreachable.
         """
         path = (self._dir / f"{channel_id}.yaml").resolve()
         if (
             not channel_id
             or channel_id in (".", "..")
+            or f"{channel_id}.yaml" == BASE_NAME
             or path.parent != self._dir.resolve()
         ):
             raise ValueError(
-                f"{channel_id!r} is not a channel id: a context file sits "
-                "directly in the context directory, and cannot be a path"
+                f"{channel_id!r} is not a channel id. A context file sits "
+                f"directly in the context directory and cannot be a path, and "
+                f"{BASE_NAME} is not a channel — it is what is true in every "
+                "one of them, and it is edited as a file under review."
             )
         return self._dir / f"{channel_id}.yaml"
 

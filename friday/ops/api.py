@@ -366,6 +366,21 @@ def _mount_context(api: FastAPI, store: Any) -> None:
         `context/` has never had one written to it."""
         return store.known_channels()
 
+    def _named(channel_id: str) -> str:
+        """A channel id the store will accept, or a 400 saying why.
+
+        `ContextStore.path_for` refuses ids that are not ids — a path, `.`,
+        `..`, or `base`, which is the file that reaches *every* channel.
+        Unhandled that arrives as a 500, which reads as "the server is
+        broken" rather than "that is not a channel"; ticket 03 made the same
+        objection about `FileExistsError`.
+        """
+        try:
+            store.path_for(channel_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return channel_id
+
     @api.get("/api/channels/{channel_id}/context")
     async def channel_context(channel_id: str = Path(...)) -> dict:
         """The three layers separately, and what they merge to.
@@ -391,7 +406,7 @@ def _mount_context(api: FastAPI, store: Any) -> None:
         what `also_in` is warning about, and it is a worse thing to do by
         accident than a shadowed dict key would be.
         """
-        on_disk = store.load(channel_id)
+        on_disk = store.load(_named(channel_id))
         held = store.context(channel_id)
         return _clean(
             {
@@ -421,7 +436,7 @@ def _mount_context(api: FastAPI, store: Any) -> None:
         included. It reaches the page as a 409, not a 500.
         """
         try:
-            store.init_channel(channel_id)
+            store.init_channel(_named(channel_id))
         except FileExistsError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
         return {"channel_id": channel_id, "created": True}
@@ -456,7 +471,7 @@ def _mount_context(api: FastAPI, store: Any) -> None:
                     "pairs of text, because every value here is rendered into a "
                     "prompt as a line",
                 )
-        if not store.path_for(channel_id).exists():
+        if not store.path_for(_named(channel_id)).exists():
             raise HTTPException(
                 404, f"{channel_id} has no context file — create it first"
             )

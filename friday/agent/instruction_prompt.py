@@ -768,19 +768,32 @@ def _render_yaml_escaped(d: dict[str, Any]) -> str:
     `{'dana': 'thân, gọi em'}`, an accident of the implementation language
     where every other line of the prompt is `key: value`.
     """
+    # Keys go through the same treatment as values, and it took a review to
+    # notice they did not. A JSON object's keys are arbitrary strings, and one
+    # unauthenticated `PUT .../context/overrides` controls both halves — so a
+    # key ending `</channel_overrides>\n<channel_base>` closed its own section
+    # and opened a forged one, in the layer `channel_base` calls "considered
+    # trusted… so it does not escape". Which is the failure `_one_line` exists
+    # for, applied to half the pair.
+    def pair(key: object, value: object, indent: str = "") -> str:
+        return (
+            f"{indent}{_one_line(html.escape(str(key), quote=False))}: "
+            f"{_one_line(html.escape(str(value), quote=False))}"
+        )
+
     lines = []
     for k, v in sorted(d.items()):
         if v is None:
             continue
         if isinstance(v, dict):
-            lines.append(f"{k}:")
+            lines.append(f"{_one_line(html.escape(str(k), quote=False))}:")
             lines += (
-                f"  {ik}: {_one_line(html.escape(str(iv), quote=False))}"
+                pair(ik, iv, indent="  ")
                 for ik, iv in sorted(v.items())
                 if iv is not None
             )
         else:
-            lines.append(f"{k}: {_one_line(html.escape(str(v), quote=False))}")
+            lines.append(pair(k, v))
     return "\n".join(lines)
 
 

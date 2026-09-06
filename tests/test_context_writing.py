@@ -312,3 +312,61 @@ def test_an_ordinary_channel_id_still_resolves(store):
     directly inside the directory and must keep working."""
     assert store.path_for("1234567890").name == "1234567890.yaml"
     assert store.path_for("watched").parent == store.path_for("other").parent
+
+
+def test_base_is_not_a_channel_and_cannot_be_written_as_one(store):
+    """`BASE_NAME` is `base.yaml` and `path_for` built it from any
+    `channel_id`. `known_channels()` hides it from listings, so it never
+    appears as a tab — but `set_overrides("base", ...)` found it, because the
+    only check was `path_for(channel_id).exists()` and it does.
+
+    No slash needed, so neither the routing regex nor the containment check
+    added for the read-side traversal helps. What it costs: `base.yaml` is
+    the layer that reaches *every* channel, and it is the layer
+    `channel_base` calls trusted and does not escape.
+    """
+    from friday.memory.channel_context import BASE_NAME
+
+    store.path_for("real").parent.mkdir(parents=True, exist_ok=True)
+    (store._dir / BASE_NAME).write_text("who: the operator's agent\n")
+
+    with pytest.raises(ValueError):
+        store.path_for("base")
+
+    assert "who: the operator's agent" in (store._dir / BASE_NAME).read_text()
+
+
+def test_the_base_layer_still_reaches_a_channel_that_has_one(store):
+    """Refusing to *write* it must not stop it being *read* — `base` is
+    where what is true everywhere lives."""
+    from friday.memory.channel_context import BASE_NAME
+
+    store._dir.mkdir(parents=True, exist_ok=True)
+    (store._dir / BASE_NAME).write_text("who: the operator's agent\n")
+    store.init_channel("c1")
+
+    assert store.load("c1").base == {"who": "the operator's agent"}
+
+
+def test_an_id_the_store_refuses_reads_as_a_bad_request_not_a_crash(client):
+    """The store raises `ValueError` for an id that is not one. Unhandled,
+    that reaches the page as a 500 — which reads as "the server is broken"
+    rather than "that is not a channel", and is the same objection ticket 03
+    already made about `FileExistsError` arriving as one.
+
+    Only `base` is exercised here, and the omission is deliberate: `.` and
+    `..` cannot reach a route at all, because an HTTP client normalises them
+    out of the path before the request is sent. Parametrising them would add
+    two cases that pass whether or not the handler exists — the vacuity this
+    review has already caught twice. They are covered at the store, which is
+    where they are decidable.
+    """
+    hostile = "base"
+    created = client.post(f"/api/channels/{hostile}/context")
+    written = client.put(
+        f"/api/channels/{hostile}/context/overrides", json={"overrides": {"a": "b"}}
+    )
+
+    assert created.status_code == 400, created.text
+    assert written.status_code == 400, written.text
+    assert "not a channel id" in created.json()["detail"]
