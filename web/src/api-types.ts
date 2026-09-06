@@ -106,9 +106,21 @@ export interface Flow {
   outbound: Outbound[];
 }
 
+/** `db.counts()` is deliberately mixed, not a flat tally: two of its entries
+ *  are themselves breakdowns by state, and one is a timestamp. Typing it
+ *  `Record<string, number>` is what crashed the first build of this page —
+ *  React will not render an object as a child. */
+export interface Counts {
+  messages: number;
+  untriaged: number;
+  last_message_at: string | null;
+  tasks: Record<string, number>;
+  outbound: Record<string, number>;
+}
+
 export interface Board {
   status: string;
-  counts: Record<string, number>;
+  counts: Counts;
   failed: Outbound[];
   tasks_by_state: Record<string, Task[]>;
   messages: Message[];

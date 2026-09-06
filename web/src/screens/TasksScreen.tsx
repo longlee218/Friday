@@ -31,10 +31,20 @@ export function TasksScreen({
             tone={board.value.status === "connected" ? "good" : "warn"}
             label={board.value.status}
           />
-          {Object.entries(board.value.counts).map(([what, n]) => (
-            <span key={what} className="mono muted">
-              {what} <strong>{n}</strong>
-            </span>
+          <span className="mono muted">
+            messages <strong>{board.value.counts.messages}</strong>
+          </span>
+          <span className="mono muted">
+            untriaged <strong>{board.value.counts.untriaged}</strong>
+          </span>
+          <span className="mono faint">
+            last {shortTime(board.value.counts.last_message_at)}
+          </span>
+          {/* `tasks` and `outbound` are breakdowns by state, not tallies —
+              rendering the object itself is what crashed this page's first
+              build (React error #31). */}
+          {Object.entries(board.value.counts.outbound).map(([state, n]) => (
+            <Pill key={state} label={`${state} ${n}`} />
           ))}
         </div>
         <div className="row wrap">

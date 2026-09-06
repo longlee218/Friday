@@ -72,6 +72,15 @@ async def test_the_page_and_the_board_route_agree(client, inbox, provider, db):
     board = client.get("/api/board").json()
 
     assert set(board) == declared("Board")
+    # Nested, and the reason this line exists: the first version of the page
+    # typed `counts` as `Record<string, number>` and rendered each value
+    # directly. Two of its entries are breakdowns by state and one is a
+    # timestamp, so the page crashed on load with React error #31 — caught in
+    # a browser, not by this file, because comparing top-level key names says
+    # nothing about what a value *is*.
+    assert set(board["counts"]) == declared("Counts")
+    assert isinstance(board["counts"]["tasks"], dict)
+    assert isinstance(board["counts"]["outbound"], dict)
     assert set(board["messages"][0]) == declared("Message")
     assert set(board["tasks_by_state"]["pending"][0]) == declared("Task")
     assert set(board["failed"][0]) == declared("Outbound")

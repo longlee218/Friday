@@ -82,14 +82,12 @@ function Editor({ channelId }: { channelId: string }) {
   const loaded = useAsync(() => api.context(channelId), [channelId]);
   const [pairs, setPairs] = useState<[string, string][]>([]);
   const [dirty, setDirty] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
     if (loaded.value) {
       setPairs(Object.entries(loaded.value.overrides));
       setDirty(false);
-      setSaved(false);
     }
   }, [loaded.value]);
 
@@ -106,7 +104,6 @@ function Editor({ channelId }: { channelId: string }) {
       ),
     );
     setDirty(true);
-    setSaved(false);
   };
 
   async function save() {
@@ -114,7 +111,6 @@ function Editor({ channelId }: { channelId: string }) {
     try {
       await api.setOverrides(channelId, Object.fromEntries(pairs.filter(([k]) => k)));
       setDirty(false);
-      setSaved(true);
       loaded.reload();
     } catch (e) {
       setProblem((e as Error).message);
@@ -123,7 +119,6 @@ function Editor({ channelId }: { channelId: string }) {
 
   async function reload() {
     const answer = await api.reload();
-    setSaved(false);
     if (answer.problems.length) setProblem(answer.problems.join("\n"));
     loaded.reload();
   }
@@ -146,10 +141,16 @@ function Editor({ channelId }: { channelId: string }) {
           </div>
         </div>
 
-        {saved && (
+        {/* Derived from what the server says, not from a local flag. A flag
+            set on save is wiped by the refetch that follows it — the notice
+            flashed and vanished, which a browser found and the type checker
+            could not. This also catches a file edited by hand, and survives a
+            page refresh, because "on disk" and "in the agents" are two facts
+            the server already reports. */}
+        {it.prompt !== (it.live ?? "") && (
           <p className="mono warn">
-            Saved to disk. The running agents are still using the previous
-            values — press “Reload into the agents” to make it live.
+            What is on disk is not what the running agents are using. Press
+            “Reload into the agents” to make it live.
           </p>
         )}
         {problem && <p className="mono error">{problem}</p>}
@@ -194,7 +195,6 @@ function Editor({ channelId }: { channelId: string }) {
                     onClick={() => {
                       setPairs((was) => was.filter((_, at) => at !== i));
                       setDirty(true);
-                      setSaved(false);
                     }}
                   >
                     Remove
