@@ -160,6 +160,7 @@ What is actually on disk.
 | `tests/` | Driven through two seams: a fake `Provider` and a scripted model transport |
 | `docs/` | `DESIGN.md`, `SPEC.md`, `agents/` |
 | `.scratch/` | Local issue tracker |
+| `evals/` | The classifier's regression net (ticket 06): `triage.jsonl`, frozen; `build_triage_set.py` refreshes it from live data, by hand; `run_triage_eval.py` scores the live classifier against it and is not run by the suite — it calls the configured provider. `evals/README.md` says what a run costs |
 
 Packaging: **explicit `__init__.py`**, not namespace packages. That is a
 statement about PEP 420, not a licence to put implementation in `__init__.py` —
@@ -659,6 +660,12 @@ A ticket, an edit to logic, a refactor — none of them are done until:
    seeing.
 3. **Any guard you added has been deleted once and watched go red.** A test
    that still passes without its guard was testing nothing.
+4. **A change to `friday/triage/prompt.py`, or to anything upstream of it,
+   also needs `uv run python -m evals.run_triage_eval` run against
+   `evals/triage.jsonl`, with the accuracy, confusion matrix and threshold
+   table reported alongside the change.** The suite's scripted transport
+   pins wiring and says nothing about whether the classifier is right; this
+   is the only thing that does. See `evals/README.md`.
 
 Report what the suite actually said. A step you skipped is worth saying out
 loud; a failing test reported as passing is the one failure this file cannot

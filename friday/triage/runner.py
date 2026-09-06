@@ -19,9 +19,10 @@ from datetime import datetime, timezone
 from friday.store.db import Database
 from friday.domain.states import TaskState
 from friday.domain.models import InboundEvent, Task
-from friday.triage import Decided, NeedsHuman, TriageOutcome
+from friday.triage import Decided, NeedsHuman, Triage, TriageOutcome
+from friday.triage.prefilter import Sensitive
 
-__all__ = ["PENDING", "NEEDS_HUMAN", "TriageRunner"]
+__all__ = ["PENDING", "NEEDS_HUMAN", "TriageRunner", "build_triage"]
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,57 @@ def _record(outcome: TriageOutcome) -> dict:
     return {"type": outcome.type, "confidence": outcome.confidence, "params": {}}
 
 
+async def build_triage(config, *, db: Database, record=None, spent=None) -> Triage:
+    """The real classifier, assembled the one place this is done.
+
+    Split out of `TriageRunner.build` for ticket 06's eval harness:
+    `evals/run_triage_eval.py` needs the same examples and the same
+    sensitive-word prefilter production uses, and a second copy of "which
+    examples, which model" is exactly the kind of duplicate this codebase
+    keeps finding and keeps regretting after it has already drifted (ticket
+    09's review caught `MemoryScope` behind a quoted forward reference and a
+    bare `8` standing in for `RESULTS`). One function, two callers, instead.
+    """
+    try:
+        settings = config.agents["triage"]
+    except KeyError:
+        raise SystemExit(
+            "No 'triage' agent in config.yaml — see the agents section."
+        ) from None
+
+    # Read once, at build time. Examples belong in the stable front of the
+    # prompt, and a list that changed per call would cost the cache hit on
+    # everything after it — a mark made now takes effect at the next start.
+    examples = list(config.triage_examples) + await db.confirmed_classifications(
+        limit=int(settings.options.get("examples", 8))
+    )
+    if examples:
+        log.info("triage: %d example(s) the operator vouched for", len(examples))
+
+    log.info("triage on %s via %s", settings.model, settings.base_url)
+
+    sensitive = Sensitive(config.sensitive_words)
+    if len(sensitive):
+        log.info(
+            "%d word(s) keep a message away from the model — it is held "
+            "for you instead", len(sensitive),
+        )
+    else:
+        log.warning(
+            "sensitive_words is empty — every message goes to %s, "
+            "including anything about pay, health or credentials",
+            settings.base_url,
+        )
+
+    return Triage(
+        config=settings,
+        examples=examples,
+        sensitive=sensitive,
+        record=record,
+        spent=spent,
+    )
+
+
 class TriageRunner:
     @classmethod
     async def build(
@@ -61,9 +113,6 @@ class TriageRunner:
         `register_dags` already use, for the same reason: adding a knob is a
         change here, not there.
         """
-        from friday.triage import Triage
-        from friday.triage.prefilter import Sensitive
-
         try:
             settings = config.agents["triage"]
         except KeyError:
@@ -71,39 +120,9 @@ class TriageRunner:
                 "No 'triage' agent in config.yaml — see the agents section."
             ) from None
 
-        # Read once, at build time. Examples belong in the stable front of the
-        # prompt, and a list that changed per call would cost the cache hit on
-        # everything after it — a mark made now takes effect at the next start.
-        examples = list(config.triage_examples) + await db.confirmed_classifications(
-            limit=int(settings.options.get("examples", 8))
-        )
-        if examples:
-            log.info("triage: %d example(s) the operator vouched for", len(examples))
-
-        log.info("triage on %s via %s", settings.model, settings.base_url)
-
-        sensitive = Sensitive(config.sensitive_words)
-        if len(sensitive):
-            log.info(
-                "%d word(s) keep a message away from the model — it is held "
-                "for you instead", len(sensitive),
-            )
-        else:
-            log.warning(
-                "sensitive_words is empty — every message goes to %s, "
-                "including anything about pay, health or credentials",
-                settings.base_url,
-            )
-
         return cls(
             db=db,
-            triage=Triage(
-                config=settings,
-                examples=examples,
-                sensitive=sensitive,
-                record=record,
-                spent=spent,
-            ),
+            triage=await build_triage(config, db=db, record=record, spent=spent),
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)
             ),
