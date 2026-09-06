@@ -83,3 +83,17 @@ exist and there is no `tools_for_task` (singular) yet.
 Do not add a `dag_state` route. Every graph has one node; when a multi-node
 graph exists and somebody has described its steps, that becomes worth a route
 and a screen. Building it now is drawing one box.
+
+## Known limitation
+
+**`message_id` is not scoped by provider.** `model_calls` and `tool_calls`
+carry a bare `message_id`; only `messages` has the composite
+`(provider, provider_message_id)` key. So `/flow` takes a `{provider}` segment
+and uses it for the message lookup alone, and the call queries match on the id
+by itself.
+
+Honest today — one provider, and Discord snowflakes do not collide with
+themselves. Wrong the day a second provider exists: two messages could share
+an id and each path would show the other's calls. The fix is a column and a
+migration, and the trigger is a change nobody has made, so this is written
+down rather than built. Found by review, not by the tests.

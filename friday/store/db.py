@@ -456,6 +456,17 @@ class Database:
         Ordered here rather than by the caller, since the two kinds are one
         sequence: triage's call names the message and everything after names
         the task.
+
+        **Known limitation: `message_id` is not scoped by provider.** Neither
+        `model_calls` nor `tool_calls` carries a provider column — only the
+        message table does, as half of its composite key — so a call is
+        correlated by a bare id. `flow_for` takes a provider and uses it for
+        the message lookup alone, which is honest today because there is one
+        provider and Discord snowflakes do not collide with themselves. It
+        stops being honest the day a second provider exists: two messages
+        could share an id and each would show the other's calls. Recorded
+        rather than fixed because the fix is a column and a migration, and
+        the trigger is a change nobody has made.
         """
         by_key = lambda table: (  # noqa: E731
             (table.message_id == message_id) | (table.task_id == task_id)
