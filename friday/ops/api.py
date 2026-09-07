@@ -276,6 +276,32 @@ def build_api(
             for m in await db.memories_for_channel(channel_id, limit=limit)
         ])
 
+    @api.get("/api/conversations")
+    async def conversations() -> list[dict]:
+        """The rooms, newest first — what the left-hand list renders."""
+        return _clean(await db.rooms())
+
+    @api.put("/api/conversations/{conversation_id:path}/name")
+    async def name_conversation(
+        conversation_id: str = Path(...), body: dict[str, Any] = Body(...)
+    ) -> dict:
+        """Name a room, or take its name back with an empty string.
+
+        The operator's label, and only theirs: it reaches no prompt and no
+        agent reads it, which is what makes it a plain write rather than one
+        of the `channel_context` kind. A room nobody has spoken in has no row
+        to name, and saying so beats creating one.
+
+        `:path` on the segment because a conversation id carries a `/` when
+        it names a thread, and the default converter stops at one.
+        """
+        name = body.get("name")
+        if not isinstance(name, str):
+            raise HTTPException(422, "body needs a 'name' string")
+        if not await db.name_conversation(conversation_id, name):
+            raise HTTPException(404, f"no conversation {conversation_id!r}")
+        return _clean({"id": conversation_id, "name": name.strip() or None})
+
     @api.get("/api/tasks")
     async def tasks(
         state: TaskState | None = None,

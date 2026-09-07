@@ -120,3 +120,35 @@ export const STATE_LABEL: Record<string, string> = {
  *  board that shows six equal columns makes the reader find the two that
  *  matter, every time they look. */
 export const DEMANDS_ATTENTION = new Set(["needs_human", "review"]);
+
+/** States where the work is over. Their column header carries a green edge,
+ *  the ones above an amber one, the rest nothing — so which column a card
+ *  sits in survives being screenshotted out of its board. */
+export const SETTLED = new Set(["done", "handled_by_operator"]);
+
+/** A task type as a label. The hue is recognised before the word is read;
+ *  the word is there because nothing on this page may be knowable by colour
+ *  alone. An unknown type falls back to grey rather than to no label — a
+ *  type nobody styled is still a type, and hiding it would hide the task. */
+export function Tag({ type }: { type: string }) {
+  const known = ["api_issue", "access_request", "doc_question", "skip"];
+  return (
+    <span className={`tag ${known.includes(type) ? type : "unknown"}`}>{type}</span>
+  );
+}
+
+/** What a room is called, or the least-bad thing to call it.
+ *
+ *  The operator's name first — that is what naming is for. Then the channel
+ *  if it reads as a word, then a short stable tail of the id, because
+ *  nineteen digits is not a name and nothing in this system holds a real
+ *  one: the provider is never asked. */
+export function roomName(
+  conversation: string,
+  name?: string | null,
+): string {
+  if (name) return name;
+  const [, place = conversation] = conversation.split(":");
+  if (/^\d{12,}$/.test(place)) return `#${place.slice(-6)}`;
+  return place.length > 24 ? `…${place.slice(-22)}` : place;
+}

@@ -17,10 +17,8 @@
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-data: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
 
-  /* One modular scale, four steps, and nothing outside it. The skill's own
-     rule — "consistent type hierarchy aids scanning; don't: random font
-     sizes" — and the first thing that makes a dense screen read as noise
-     is six sizes that each looked reasonable where they were written. */
+  /* One modular scale, four steps, nothing outside it — the skill's own
+     "consistent type hierarchy aids scanning; don't: random font sizes". */
   --text-xs: 11px;
   --text-sm: 12px;
   --text: 13px;
@@ -28,46 +26,64 @@
 
   color-scheme: dark light;
 
-  /* Dark is the default because this is read beside a terminal. */
-  --bg: #0b0d10;
-  --bg-raised: #14171c;
-  --bg-sunken: #070809;
-  --line: #262b33;
-  --line-strong: #39414d;
-  --ink: #e6e9ee;
-  --ink-dim: #9aa4b2;
-  /* `--ink-faint` was #6b7684 and failed AA — 4.22 on `bg`, 3.89 on
-     `bg-raised`, against a 4.5 floor at 13px. Not decorative: `.faint`
-     carries the timestamps, "not reached", "No call was made about this
-     message", and most of the flow screen's explanatory copy — the text that
-     makes an absent step legible as an outcome rather than a gap, which is
-     ticket 07's whole point. #76818f is eleven steps lighter and clears both
-     grounds (4.92 / 4.54). The light theme had the same problem below. */
-  --ink-faint: #76818f;
+  /* The skill's Developer Tool / IDE palette — slate with a run-green
+     accent — rather than the greys this page had, which were readable and
+     said nothing. Colour here is doing work: a task type is recognised
+     before it is read, and a column is found without counting across.
+
+     Every hue still carries a word beside it. That is not a hedge against
+     the colour being wrong, it is the rule: nothing on this page is knowable
+     by colour alone. */
+  --bg: #0f172a;
+  --bg-raised: #1b2336;
+  --bg-sunken: #131a2b;
+  --line: #2b3purple;
+  --line: #2b3650;
+  --line-strong: #475569;
+  --ink: #f8fafc;
+  --ink-dim: #cbd5e1;
+  --ink-faint: #94a3b8;
 
   --accent: #4c9aff;
-  --accent-ink: #0b0d10;
-  --good: #4ec9a5;
-  --warn: #e2b341;
-  --bad: #f2705d;
+  --accent-ink: #0b1220;
+  --good: #22c55e;
+  --warn: #f0b429;
+  /* The skill's palette gives #ef4444 here; it measures 4.16 on the card,
+     under the 4.5 floor. Lightened one step — the same failure the previous
+     palette had in the same place, which is worth noticing: a red chosen to
+     look urgent is chosen against white, and this ground is not white. */
+  --bad: #f87171;
+
+  /* One hue per task type, so the board is scannable sideways. Chosen apart
+     from the status hues above: a type is not a state, and sharing a colour
+     between the two would make "green" mean two things on one screen. */
+  --type-api: #38bdf8;
+  --type-access: #c084fc;
+  --type-doc: #34d399;
+  --type-other: #94a3b8;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f7f8fa;
+    --bg: #f1f5f9;
     --bg-raised: #ffffff;
-    --bg-sunken: #eceef2;
-    --line: #dfe3e9;
-    --line-strong: #c2c9d4;
-    --ink: #1b1f26;
-    --ink-dim: #4d5765;
-    --ink-faint: #677383;
+    --bg-sunken: #e8edf4;
+    --line: #d8e0ea;
+    --line-strong: #94a3b8;
+    --ink: #0f172a;
+    --ink-dim: #334155;
+    --ink-faint: #5b6b80;
 
     --accent: #0b64d4;
     --accent-ink: #ffffff;
-    --good: #10795c;
-    --warn: #8a5d00;
-    --bad: #b3261e;
+    --good: #15803d;
+    --warn: #92620a;
+    --bad: #b91c1c;
+
+    --type-api: #0369a1;
+    --type-access: #7c3aed;
+    --type-doc: #047857;
+    --type-other: #5b6b80;
   }
 }
 
@@ -351,16 +367,25 @@ details > summary:hover {
    columns make the reader find the two that matter every time they look —
    which is the "rối mắt" this layout is answering. */
 
+/* Even columns, not a flex row of stubs. The previous version narrowed
+   empty ones to save space and produced a ragged board where the eye had to
+   re-find the grid on every render — a column moved because a task closed.
+   Equal tracks: the board's shape is the states, and those do not change. */
 .board {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  /* 200 so all six states fit a 1280px laptop without the last one hanging
+     off the edge — a cut-off column reads as a rendering fault rather than
+     as "scroll for more". They still scroll when there are more, and grow
+     to fill a wider screen. */
+  grid-auto-columns: minmax(200px, 1fr);
   gap: var(--grid-gap);
-  align-items: flex-start;
+  align-items: start;
   overflow-x: auto;
   padding-bottom: var(--grid-gap);
 }
 
 .column {
-  flex: 0 0 268px;
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - 140px);
@@ -369,16 +394,16 @@ details > summary:hover {
   border-radius: 8px;
 }
 
+/* An empty column keeps its width and loses its weight: still countable at a
+   glance, no longer competing for attention. */
 .column.quiet {
-  /* A column with nothing in it is information — the absence of work — so it
-     stays, narrowed, rather than disappearing and moving everything else. */
-  flex-basis: 148px;
   background: none;
   border-style: dashed;
 }
 
 .column > header {
   display: flex;
+  gap: 6px;
   align-items: center;
   gap: 6px;
   padding: 10px var(--card-padding);
@@ -598,4 +623,147 @@ details > summary:hover {
   border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line));
   border-radius: 8px;
   background: color-mix(in srgb, var(--bad) 7%, var(--bg-raised));
+}
+
+
+/* A task type is a label, not a word to read. One hue each, and the hue is
+   never alone — the type's own name is the label's text, so it survives
+   greyscale and a screenshot in a chat. */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--tag);
+  background: color-mix(in srgb, var(--tag) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tag) 38%, transparent);
+  white-space: nowrap;
+}
+
+.tag::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.tag.api_issue { --tag: var(--type-api); }
+.tag.access_request { --tag: var(--type-access); }
+.tag.doc_question { --tag: var(--type-doc); }
+.tag.unknown, .tag.skip { --tag: var(--type-other); }
+
+/* The column a card sits in is readable from the card itself, so a card
+   pulled into a screenshot still says where it was. */
+.column > header::before {
+  content: "";
+  width: 3px;
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+.column.attention > header::before { background: var(--warn); }
+.column.settled > header::before { background: var(--good); }
+
+/* --- master and detail ---------------------------------------------------
+   Rooms: the list on the left, one room's messages on the right. A list that
+   navigated away from itself made "which room was that in" a round trip. */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  gap: var(--grid-gap);
+  align-items: start;
+  min-height: calc(100vh - 96px);
+}
+
+.rooms {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  position: sticky;
+  top: 60px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.room {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--grid-gap);
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  min-height: 44px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.room:hover {
+  background: var(--bg-raised);
+}
+
+.room[aria-current="true"] {
+  background: var(--bg-raised);
+  border-color: var(--line-strong);
+}
+
+.room .label {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room .meta {
+  grid-column: 1 / -1;
+  color: var(--ink-faint);
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+}
+
+/* --- dialog --------------------------------------------------------------
+   Context and memory belong to a room, so they open over the room rather
+   than living on a tab of their own. `<dialog>` for the focus trap and the
+   Escape key the platform already implements. */
+
+dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: 84vh;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  color: var(--ink);
+}
+
+dialog::backdrop {
+  background: rgb(2 6 23 / 0.62);
+}
+
+dialog > header {
+  display: flex;
+  align-items: center;
+  gap: var(--grid-gap);
+  padding: var(--card-padding);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--bg-raised);
+}
+
+dialog > .body {
+  padding: var(--card-padding);
+  overflow-y: auto;
+  max-height: calc(84vh - 56px);
+  display: grid;
+  gap: var(--grid-gap);
 }

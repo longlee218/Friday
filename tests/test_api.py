@@ -390,3 +390,96 @@ async def test_a_credential_does_not_cross_the_wire_on_a_path(client, inbox, pro
     body = client.get("/api/messages/fake/13/flow").text
 
     assert "sk-abcdefghijklmnopqrstuvwx" not in body
+
+
+# --- naming a room (rooms redesign) ------------------------------------------
+
+
+async def test_a_conversation_can_be_given_a_name(client, inbox, provider, db):
+    """A Discord channel id is nineteen digits and means nothing to anybody.
+    Nothing in this system holds a channel *name* — the provider is never
+    asked for one — so the operator supplies it, and it is theirs: a label
+    for their own work, not something the agent reads."""
+    provider.emit(make_event(message_id="10"))
+    await captured(inbox)
+
+    saved = client.put(
+        f"/api/conversations/{WATCHED}/name", json={"name": "backend on-call"}
+    )
+
+    assert saved.status_code == 200
+    rooms = client.get("/api/conversations").json()
+    assert rooms[0]["name"] == "backend on-call"
+    assert rooms[0]["id"] == str(WATCHED)
+
+
+async def test_a_room_with_no_name_says_so_rather_than_inventing_one(
+    client, inbox, provider
+):
+    provider.emit(make_event(message_id="10"))
+    await captured(inbox)
+
+    (room,) = client.get("/api/conversations").json()
+
+    assert room["name"] is None
+
+
+async def test_a_name_can_be_taken_back(client, inbox, provider):
+    provider.emit(make_event(message_id="10"))
+    await captured(inbox)
+    client.put(f"/api/conversations/{WATCHED}/name", json={"name": "temporary"})
+
+    client.put(f"/api/conversations/{WATCHED}/name", json={"name": ""})
+
+    (room,) = client.get("/api/conversations").json()
+    assert room["name"] is None, "an empty name is no name, not the string ''"
+
+
+async def test_naming_a_conversation_nobody_has_spoken_in_is_refused(client):
+    answer = client.put("/api/conversations/fake:ghost/name", json={"name": "x"})
+
+    assert answer.status_code == 404
+
+
+async def test_a_room_carries_what_a_list_of_rooms_needs(client, inbox, provider, db):
+    """One request for what the left-hand list renders: which rooms exist,
+    what they are called, how busy, and how stale. Without the counts the
+    page fetches every room's messages to render a sidebar."""
+    for n in (10, 11):
+        provider.emit(make_event(message_id=str(n)))
+    await captured(inbox)
+
+    (room,) = client.get("/api/conversations").json()
+
+    assert room["messages"] == 2
+    assert room["last_at"] is not None
+    assert room["channel_id"] == "watched"
+
+
+async def test_a_room_that_has_spoken_is_listed_even_without_a_conversation_row(
+    client, db
+):
+    """`rooms()` joined `conversations`, which only `record_conversation`
+    writes — so a room whose row was never written vanished from the list
+    while its messages sat plainly in the table.
+
+    A list of rooms that silently omits one with twenty-one messages in it is
+    the same shape as a dropped mention: indistinguishable from there being
+    no such room. Driven from `messages` now, with the name joined on."""
+    await db.record_message(make_event(message_id="10", text="hello"))
+
+    (room,) = client.get("/api/conversations").json()
+
+    assert room["messages"] == 1
+    assert room["name"] is None
+
+
+async def test_naming_works_for_a_room_with_no_conversation_row_yet(client, db):
+    """And naming it has to work too, or the list shows a room the operator
+    cannot label."""
+    await db.record_message(make_event(message_id="10"))
+
+    saved = client.put(f"/api/conversations/{WATCHED}/name", json={"name": "ops"})
+
+    assert saved.status_code == 200
+    assert client.get("/api/conversations").json()[0]["name"] == "ops"

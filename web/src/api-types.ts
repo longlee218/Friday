@@ -162,3 +162,29 @@ export interface TaskCalls {
   tool_calls: ToolCall[];
   spent: number;
 }
+
+/** A room in the left-hand list. `name` is the operator's own label and
+ *  `null` when they have not given one — which the list renders as the
+ *  channel, not as an empty string. */
+export interface Room {
+  id: string;
+  name: string | null;
+  channel_id: string;
+  messages: number;
+  last_at: string | null;
+}
+
+/** Something an agent chose to write down about a room. `deleted_at` is set
+ *  rather than the row removed, so the operator can see what was forgotten
+ *  and who forgot it. */
+export interface Memory {
+  id: string;
+  channel_id: string;
+  agent: string;
+  text: string;
+  task_id: number | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
+}

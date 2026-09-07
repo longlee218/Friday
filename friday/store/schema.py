@@ -206,6 +206,12 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[str] = mapped_column(primary_key=True)
+    #: What the operator calls this room. Theirs alone: nothing assembles it
+    #: into a prompt and no agent reads it, so it carries none of the
+    #: escaping obligations a context value does. It exists because a Discord
+    #: channel id is nineteen digits, the provider is never asked for a name,
+    #: and a person cannot manage work in rooms they cannot tell apart.
+    name: Mapped[str | None] = mapped_column(default=None)
 
 
 class Outbound(Base):

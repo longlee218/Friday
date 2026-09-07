@@ -5,78 +5,58 @@ import type { ChannelContext } from "../api-types";
 import { useAsync } from "../useAsync";
 import { Pill } from "../ui";
 
-/** Board ticket 08 — telling it what is true here.
+/** One room's context, for the dialog the room opens.
  *
- *  The one screen that writes, and only to `overrides`: the layer of a
- *  channel's context file the machine never touches. Decisions still happen
- *  in Discord.
+ *  It was a screen with its own channel picker, on its own tab — so editing
+ *  what a room is told meant leaving the room, finding it again in a second
+ *  list, and matching it by id. The room already knows which channel it is;
+ *  the picker was asking a question the caller had already answered.
  *
- *  Key/value pairs rather than a YAML field (D9), so "this channel's file is
- *  malformed and it now has no context" is a state this UI cannot produce. */
-export function ContextScreen() {
-  const channels = useAsync(() => api.channels(), []);
-  const [picked, setPicked] = useState<string | null>(null);
-  const [creating, setCreating] = useState("");
+ *  Everything below is unchanged from that screen and still true: pairs
+ *  rather than YAML so a malformed file is unreachable, a save that does
+ *  nothing until reloaded, and the rendered prompt beside the values so
+ *  what the model actually reads is visible. */
+export function ContextPanel({ channelId }: { channelId: string }) {
+  const exists = useAsync(() => api.context(channelId), [channelId]);
   const [problem, setProblem] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (picked === null && channels.value?.length) setPicked(channels.value[0]);
-  }, [channels.value, picked]);
+  if (exists.error) {
+    return <p className="mono error">{exists.error}</p>;
+  }
+  if (!exists.value) return <p className="empty">Loading…</p>;
 
-  async function create() {
-    setProblem(null);
-    try {
-      await api.createContext(creating);
-      setPicked(creating);
-      setCreating("");
-      channels.reload();
-    } catch (e) {
-      setProblem((e as Error).message);
-    }
+  if (!exists.value.exists) {
+    return (
+      <>
+        <p className="faint">
+          This room has no context file. Creating one gives it a place for what
+          is true here — an escalation path, a name for the system they mean,
+          anything a reply should assume. The machine never writes this part.
+        </p>
+        {problem && <p className="mono error">{problem}</p>}
+        <div>
+          <button
+            className="primary"
+            onClick={async () => {
+              setProblem(null);
+              try {
+                await api.createContext(channelId);
+                exists.reload();
+              } catch (e) {
+                setProblem((e as Error).message);
+              }
+            }}
+          >
+            Create it
+          </button>
+        </div>
+      </>
+    );
   }
 
-  return (
-    <>
-      <section className="card">
-        <div className="row wrap" style={{ justifyContent: "space-between" }}>
-          <div className="row wrap">
-            <h1>Channel context</h1>
-            {(channels.value ?? []).map((id) => (
-              <button
-                key={id}
-                className="tab"
-                aria-current={picked === id ? "page" : undefined}
-                onClick={() => setPicked(id)}
-              >
-                {id}
-              </button>
-            ))}
-            {channels.value?.length === 0 && (
-              <span className="faint">
-                No channel has a context file yet.
-              </span>
-            )}
-          </div>
-          <div className="row">
-            <input
-              type="text"
-              aria-label="New channel id"
-              placeholder="channel id"
-              value={creating}
-              onChange={(e) => setCreating(e.target.value)}
-            />
-            <button disabled={!creating} onClick={create}>
-              Create
-            </button>
-          </div>
-        </div>
-        {problem && <p className="mono error">{problem}</p>}
-      </section>
-
-      {picked && <Editor channelId={picked} />}
-    </>
-  );
+  return <Editor channelId={channelId} />;
 }
+
 
 function Editor({ channelId }: { channelId: string }) {
   const loaded = useAsync(() => api.context(channelId), [channelId]);

@@ -1,7 +1,7 @@
 import { api } from "../api";
 import type { Board, Task } from "../api-types";
 import { useAsync } from "../useAsync";
-import { DEMANDS_ATTENTION, Pill, STATE_LABEL, ago, room } from "../ui";
+import { DEMANDS_ATTENTION, Pill, SETTLED, STATE_LABEL, Tag, ago, roomName } from "../ui";
 
 /** The board, as a kanban: one column per task state.
  *
@@ -33,6 +33,12 @@ export function BoardScreen({
 }) {
   const board = useAsync(() => api.board(), []);
   const spend = useAsync(() => api.spend(), []);
+  // The operator's own labels, so a card says which room in words they chose
+  // rather than in nineteen digits.
+  const rooms = useAsync(() => api.conversations(), []);
+  const names = new Map(
+    (rooms.value ?? []).map((r) => [r.id, r.name] as const),
+  );
 
   if (board.error) {
     return <div className="card error">Could not load the board: {board.error}</div>;
@@ -119,6 +125,7 @@ export function BoardScreen({
             lastSpoke={newest}
             onOpen={onOpenFlow}
             messages={it.messages}
+            names={names}
           />
         ))}
       </div>
@@ -131,40 +138,46 @@ function Column({
   tasks,
   lastSpoke,
   messages,
+  names,
   onOpen,
 }: {
   state: string;
   tasks: Task[];
   lastSpoke: Map<number, string | null>;
   messages: Board["messages"];
+  names: Map<string, string | null>;
   onOpen: (provider: string, id: string) => void;
 }) {
-  const quiet = tasks.length === 0 && !DEMANDS_ATTENTION.has(state);
+  const quiet = tasks.length === 0;
+  const edge = DEMANDS_ATTENTION.has(state)
+    ? " attention"
+    : SETTLED.has(state)
+      ? " settled"
+      : "";
   return (
-    <section className={quiet ? "column quiet" : "column"}>
+    <section className={`column${quiet ? " quiet" : ""}${edge}`}>
       <header>
         <h2 title={state}>{STATE_LABEL[state] ?? state}</h2>
         <span className="count">{tasks.length}</span>
       </header>
-      {!quiet && (
-        <div className="stack">
-          {tasks.length === 0 ? (
-            // An empty column that carries an obligation says so, because
-            // "nothing needs you" is the answer somebody came here for.
-            <p className="faint mono">nothing</p>
-          ) : (
-            tasks.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                spokeAt={lastSpoke.get(task.id) ?? task.created_at}
-                onOpen={onOpen}
-                messages={messages}
-              />
-            ))
-          )}
-        </div>
-      )}
+      <div className="stack">
+        {tasks.length === 0 ? (
+          // An empty column still says so: "nothing needs you" is the answer
+          // somebody came to this screen for.
+          <p className="faint mono">nothing</p>
+        ) : (
+          tasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              spokeAt={lastSpoke.get(task.id) ?? task.created_at}
+              onOpen={onOpen}
+              messages={messages}
+              names={names}
+            />
+          ))
+        )}
+      </div>
     </section>
   );
 }
@@ -173,11 +186,13 @@ function TaskCard({
   task,
   spokeAt,
   messages,
+  names,
   onOpen,
 }: {
   task: Task;
   spokeAt: string | null;
   messages: Board["messages"];
+  names: Map<string, string | null>;
   onOpen: (provider: string, id: string) => void;
 }) {
   const from = messages.find((m) => m.conversation === task.conversation);
@@ -204,7 +219,7 @@ function TaskCard({
       }
     >
       <div className="row wrap">
-        <span className="title">{task.type}</span>
+        <Tag type={task.type} />
         <span className="faint mono">#{task.id}</span>
         <span className="count">{ago(spokeAt)}</span>
       </div>
@@ -216,7 +231,7 @@ function TaskCard({
           title="how sure the classifier was"
         />
         <span className="faint mono" title={task.conversation}>
-          {room(task.conversation)}
+          {roomName(task.conversation, names.get(task.conversation))}
         </span>
       </div>
     </button>
