@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 
+import { BoardScreen } from "./screens/BoardScreen";
 import { ContextScreen } from "./screens/ContextScreen";
+import { ConversationsScreen } from "./screens/ConversationsScreen";
 import { FlowScreen } from "./screens/FlowScreen";
-import { TasksScreen } from "./screens/TasksScreen";
 
 /** Real paths, not a hash — the server answers any unknown path with
  *  `index.html` (see `_mount_page`), so a flow can be linked to and reloaded.
@@ -21,19 +22,23 @@ export function useRoute(): [string, (to: string) => void] {
   return [path, go];
 }
 
+//: In the order somebody works: what is outstanding, what was said, what one
+//: message did, what this room is told. `Path` is last because it is reached
+//: by clicking a card far more often than by typing an id.
 const TABS = [
-  { path: "/", label: "Tasks" },
-  { path: "/flow", label: "Flow" },
+  { path: "/", label: "Board" },
+  { path: "/rooms", label: "Rooms" },
   { path: "/context", label: "Context" },
+  { path: "/flow", label: "Path" },
 ];
 
 export function App() {
   const [path, go] = useRoute();
-  const section = path.startsWith("/context")
-    ? "/context"
-    : path.startsWith("/flow")
-      ? "/flow"
-      : "/";
+  const section = TABS.map((t) => t.path)
+    .filter((p) => p !== "/")
+    .find((p) => path.startsWith(p)) ?? "/";
+
+  const openFlow = (provider: string, id: string) => go(`/flow/${provider}/${id}`);
 
   return (
     <div className="shell">
@@ -53,11 +58,10 @@ export function App() {
         </nav>
       </header>
       <main>
-        {section === "/" && <TasksScreen onOpenFlow={(p, id) => go(`/flow/${p}/${id}`)} />}
-        {section === "/flow" && (
-          <FlowScreen path={path} onOpenFlow={(p, id) => go(`/flow/${p}/${id}`)} />
-        )}
+        {section === "/" && <BoardScreen onOpenFlow={openFlow} />}
+        {section === "/rooms" && <ConversationsScreen onOpenFlow={openFlow} />}
         {section === "/context" && <ContextScreen />}
+        {section === "/flow" && <FlowScreen path={path} onOpenFlow={openFlow} />}
       </main>
     </div>
   );

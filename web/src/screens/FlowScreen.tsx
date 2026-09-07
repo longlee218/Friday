@@ -3,7 +3,7 @@ import { useState } from "react";
 import { api } from "../api";
 import type { Flow } from "../api-types";
 import { useAsync } from "../useAsync";
-import { CallCard, Pill, ToolCard, shortTime } from "./TasksScreen";
+import { CallCard, Pill, ToolCard, shortTime } from "../ui";
 
 /** Board ticket 07 — what happened to this message.
  *

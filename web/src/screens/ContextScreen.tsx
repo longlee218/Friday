@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ChannelContext } from "../api-types";
 import { useAsync } from "../useAsync";
-import { Pill } from "./TasksScreen";
+import { Pill } from "../ui";
 
 /** Board ticket 08 — telling it what is true here.
  *
