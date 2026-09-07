@@ -277,10 +277,20 @@ def test_ask_clarification_cannot_name_a_field_that_does_not_exist():
 # --- triage classifies; extraction is the only producer ---------------------
 
 
-def test_every_classifiable_type_has_an_extractor_configured():
-    """Triage fills nothing in. A task type whose extractor is missing opens
-    with no parameters at all, and the reporter is asked for what they just
-    said — so a block per type in `config.yaml` is not optional any more."""
+def test_one_extractor_block_serves_every_classifiable_type():
+    """Triage fills nothing in. A task type with no extractor opens with no
+    parameters at all and the reporter is asked for what they just said — so
+    the block is not optional.
+
+    **One block, not one per type.** It was `extractor_api_issue`,
+    `extractor_access_request` and `extractor_doc_question`, on the argument
+    that the jobs differ — reading a correlationId is not reading a repo name
+    — and that a type could therefore want its own model. In practice all
+    three held identical values, so it was one configuration written three
+    times and three places to edit when the provider changes. The divergence
+    it was reserving is available again the day somebody actually needs it,
+    by splitting the key back out; reserving it in advance bought nothing.
+    """
     import os
 
     from friday.config import load_config
@@ -293,8 +303,10 @@ def test_every_classifiable_type_has_an_extractor_configured():
     repo = Path(__file__).resolve().parents[1]
     agents = load_config(repo / "config.yaml").agents
 
-    missing = [t for t in EXTRACTS if f"extractor_{t}" not in agents]
-    assert missing == [], f"no extractor configured for {missing}"
+    assert "extractor" in agents, "no extractor configured at all"
+    assert EXTRACTS, "nothing to extract for"
+    stale = [name for name in agents if name.startswith("extractor_")]
+    assert stale == [], f"per-type extractor blocks are gone; found {stale}"
 
 
 def test_extracts_covers_every_task_type_that_opens_a_task():

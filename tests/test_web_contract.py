@@ -214,8 +214,8 @@ async def test_the_days_spend_is_reachable_and_split_by_agent(client, db):
 
 
 async def test_an_agent_that_spent_nothing_is_simply_absent(client, db):
-    """Which agents exist is config.yaml's business — `extractor_<type>` is
-    one per task type — so there is no list to enumerate against."""
+    """Which agents exist is config.yaml's business, so there is no list to
+    enumerate against."""
     await db.record_model_call(
         message_id=None, agent="triage", model="m", system_prompt="s",
         prompt="p", output="o", input_tokens=1, output_tokens=1,

@@ -567,8 +567,8 @@ class Database:
 
         Grouped from the rows rather than asked once per name, because there
         is no list of names to ask for: which agents exist is `config.yaml`'s
-        business — `extractor_<type>` alone is one per task type — and a
-        hardcoded list here would be wrong the first time somebody adds one.
+        business, and a hardcoded list here would be wrong the first time
+        somebody adds one.
         An agent that has not spent anything today is simply absent, which is
         the same answer as zero and does not require knowing it exists.
         """

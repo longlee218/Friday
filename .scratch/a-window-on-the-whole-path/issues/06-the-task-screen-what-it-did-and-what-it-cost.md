@@ -75,7 +75,7 @@ decided in Discord (D7).
 `spent_today` had no route and this ticket's own criterion asked for one, so
 `GET /api/spend` exists — total and per agent. Per agent is grouped in one
 query (`Database.spent_today_by_agent`) rather than asked once per name,
-because there is no list of names to ask for: `extractor_<type>` alone is one
-per task type, and which agents exist is `config.yaml`'s business. An agent
+because there is no list of names to ask for: which agents exist is
+`config.yaml`'s business. An agent
 that spent nothing today is absent rather than zero, which is the same answer
 and does not require knowing it exists.

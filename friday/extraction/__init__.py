@@ -327,20 +327,34 @@ def register_extractors(config: "Config", *, record=None, spent=None) -> None:  
     A missing block is a warning rather than a failure, because a broken
     install that starts and says what is wrong beats one that will not start.
     It is a loud warning: nothing else fills those fields.
+
+    **One block for every type, not one per type.** There were three —
+    `extractor_api_issue`, `extractor_access_request`, `extractor_doc_question`
+    — on the argument that the jobs differ enough to want different models:
+    reading a correlationId out of a stack trace is not reading a repo name
+    out of a request. That argument was never wrong, it was just never
+    *taken*: all three blocks held identical values for as long as they
+    existed, so what it actually bought was one configuration written three
+    times and three places to edit when the provider changes. Splitting the
+    key back out is a small change on the day a type genuinely needs its own
+    model; reserving it in advance cost more than it saved.
+
+    Each type still gets its own *agent* — its own prompt, its own `Params`
+    schema, its own registration — because that part was never the
+    duplication. Only where the model lives is shared.
     """
     from friday.domain import models
 
+    agent_config = config.agents.get("extractor")
+    if agent_config is None:
+        log.warning(
+            "no 'extractor' agent in config.yaml — every task type will open "
+            "with no parameters and the reporter will be asked for what they "
+            "already said"
+        )
+        return
+
     for task_type, params_name in EXTRACTS.items():
-        block = f"extractor_{task_type}"
-        agent_config = config.agents.get(block)
-        if agent_config is None:
-            log.warning(
-                "no %s in config.yaml — %s tasks will open with no parameters "
-                "and the reporter will be asked for what they already said",
-                block,
-                task_type,
-            )
-            continue
         register(
             task_type,
             getattr(models, params_name),

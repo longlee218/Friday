@@ -83,15 +83,14 @@ async def test_triage_records(spy, db):
 
 
 async def test_every_extractor_records(spy):
+    """One block now, but still one agent per task type — the sink has to
+    reach each of them. Collapsing the *configuration* must not collapse the
+    agents: each type keeps its own prompt and its own schema."""
     from friday.extraction import EXTRACTS, register_extractors
 
-    register_extractors(
-        _config(**{f"extractor_{t}": CONFIG for t in EXTRACTS}),
-        record=SINK,
-        spent=LEDGER,
-    )
+    register_extractors(_config(extractor=CONFIG), record=SINK, spent=LEDGER)
 
-    assert spy == [(SINK, LEDGER)] * len(EXTRACTS), "one per configured extractor"
+    assert spy == [(SINK, LEDGER)] * len(EXTRACTS), "one per task type"
 
 
 async def test_the_responder_records(spy):

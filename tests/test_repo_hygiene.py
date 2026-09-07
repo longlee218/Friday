@@ -515,6 +515,13 @@ def test_every_agent_block_in_config_is_one_the_code_builds():
     `summary` is the shape this permits: absent from the file, commented out
     with its reason, and warned about at startup. Present-but-unread is the
     thing being caught.
+
+    The set is written out rather than derived. `extractor` used to be one
+    block per task type and this test derived those names from `EXTRACTS` —
+    which would have gone on passing through the collapse to a single block,
+    because a derived list agrees with whatever it is derived from. That is
+    the failure `CLAUDE.md` records about the prompt-family test, which
+    stopped checking a module the moment the module moved.
     """
     import yaml
     from pathlib import Path
@@ -523,9 +530,8 @@ def test_every_agent_block_in_config_is_one_the_code_builds():
 
     root = Path(__file__).resolve().parents[1]
     blocks = set((yaml.safe_load((root / "config.yaml").read_text())["agents"] or {}))
-    buildable = {"triage", "responder", "summary"} | {
-        f"extractor_{task_type}" for task_type in EXTRACTS
-    }
+    assert EXTRACTS, "nothing to extract for, so 'extractor' would be dead too"
+    buildable = {"triage", "responder", "summary", "extractor"}
 
     assert blocks <= buildable, (
         f"config.yaml configures agents nothing builds: "

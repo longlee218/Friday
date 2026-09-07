@@ -92,36 +92,28 @@ agents:
   #     temperature: 0
   #   max_turns: 1
 
-  # ── Extractors, one per task type ─────────────────────────────────────────
+  # ── The extractor ─────────────────────────────────────────────────────────
   # Triage says what a message is and stops. Everything a task knows is lifted
   # out of the message here, by the extractor for its type, reading every
   # message the reporter has sent about it — the answer to "which environment?"
   # arrives as an ordinary follow-up.
   #
-  # **A type without a block here opens tasks with no parameters at all**, and
-  # the reporter is asked for what they already said. Startup warns about it;
-  # nothing else fills those fields.
+  # **Without this block every type opens tasks with no parameters at all**,
+  # and the reporter is asked for what they already said. Startup warns about
+  # it; nothing else fills those fields.
+  #
+  # One block for every type. There were three — one per task type — on the
+  # argument that reading a correlationId is a different job from reading a
+  # repo name and might want a different model. All three held identical
+  # values for as long as they existed, so it was one configuration written
+  # three times. Each type still has its own prompt and its own schema; only
+  # where the model lives is shared. Split the key back out on the day a type
+  # actually needs its own.
   #
   # The model is allowed to hallucinate — `friday/domain/validation.py` catches what
   # it gets wrong. Cheap models on purpose: the job is copying values out of
   # text, not reasoning.
-  extractor_api_issue:
-    api_key: ${TRIAGE_API_KEY}
-    base_url: "https://api.minimax.io/v1"
-    model: "MiniMax-M3"
-    settings:
-      temperature: 0
-    max_turns: 1
-
-  extractor_access_request:
-    api_key: ${TRIAGE_API_KEY}
-    base_url: "https://api.minimax.io/v1"
-    model: "MiniMax-M3"
-    settings:
-      temperature: 0
-    max_turns: 1
-
-  extractor_doc_question:
+  extractor:
     api_key: ${TRIAGE_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"
@@ -237,7 +229,8 @@ ingest:
   #   direct — someone @s the account
   #   role   — a role the account holds is @d
   #   dm     — a one-to-one DM (always watched; not subject to the list below)
-  mention_types: ["direct", "role", "dm"]
+  # mention_types: ["direct", "role", "dm"]
+  mention_types: ["direct", "role"]
 
   # How long somebody has to be quiet — not sending, not typing — before what
   # they said is read as finished. People send one thought in three messages,
