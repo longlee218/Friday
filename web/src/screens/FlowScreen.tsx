@@ -178,18 +178,39 @@ function Path({ provider, id }: { provider: string; id: string }) {
           <p className="faint">No call was made about this message.</p>
         ) : (
           <>
-            {it.model_calls.map((c, i) => (
-              <CallCard key={`m${i}`} call={c} />
+            {/* Interleaved on time, and numbered, because the two questions
+                somebody opens this for are "what did it reach for" and "why
+                did it go round again" — and neither is answerable from a list
+                of prompts followed by a separate list of tools. A turn is a
+                model call and whatever it reached for before the next one:
+                that is the unit the turn cap counts, so it is the unit shown. */}
+            {turns(it).map((turn) => (
+              <div key={turn.n} style={{ marginTop: 10 }}>
+                <div className="row wrap">
+                  <span className="pill mono">turn {turn.n}</span>
+                  <span className="faint mono">{turn.agent}</span>
+                  {/* `attempt` is the call's, and `CallCard` already carries
+                      it — saying it twice on one row is noise, not emphasis. */}
+                  {turn.unanswered && (
+                    <Pill
+                      tone="bad"
+                      label="no answer"
+                      title="sent, nothing came back — this is what a timed-out call looks like"
+                    />
+                  )}
+                </div>
+                {turn.call && <CallCard call={turn.call} />}
+                {turn.tools.map((t, j) => (
+                  <ToolCard key={`t${j}`} call={t} />
+                ))}
+              </div>
             ))}
-            {it.tool_calls.map((c, i) => (
-              <ToolCard key={`t${i}`} call={c} />
-            ))}
-            <p className="faint mono">
+            <p className="faint mono" style={{ marginTop: 8 }}>
               {it.model_calls.reduce(
                 (n, c) => n + c.input_tokens + c.output_tokens,
                 0,
               )}{" "}
-              tokens in total
+              tokens over {it.model_calls.length} calls
             </p>
           </>
         )}
@@ -220,6 +241,36 @@ function Path({ provider, id }: { provider: string; id: string }) {
       </Step>
     </>
   );
+}
+
+/** One turn: a model call and whatever it reached for before the next one.
+ *
+ *  That is the unit `max_turns` counts, so it is the unit to show. Rendering
+ *  every prompt and then every tool call — which is what this did — hides
+ *  both of the things somebody opens a path to find out: which call reached
+ *  for what, and whether the agent went round again.
+ *
+ *  A call with no tokens either way is one that was sent and never answered.
+ *  That is not an inference: `Harness` records `unfinished()` in a `finally`
+ *  precisely so a call that hung leaves a row, and a hung call is the only
+ *  way to get a row with a prompt and no usage. */
+function turns(flow: Flow) {
+  const tools = [...flow.tool_calls];
+  return flow.model_calls.map((call, i) => {
+    const next = flow.model_calls[i + 1]?.created_at;
+    const mine = tools.filter(
+      (t) => t.created_at >= call.created_at && (!next || t.created_at < next),
+    );
+    return {
+      n: i + 1,
+      call,
+      agent: call.agent,
+      attempt: call.attempt,
+      retried: call.attempt > 1,
+      unanswered: call.input_tokens === 0 && call.output_tokens === 0,
+      tools: mine,
+    };
+  });
 }
 
 /** The prefilter records itself as a `needs_human` decision whose reason names

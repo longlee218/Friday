@@ -189,7 +189,7 @@ translated one is not a softer version of the right answer; it is a value that
 no longer refers to anything."""
 
 
-def build_instructions() -> str:
+def build_instructions(skills_catalogue: list[str] | None = None) -> str:
     """Who it is, then the job — through the shared builders, like every
     other agent.
 
@@ -202,12 +202,24 @@ def build_instructions() -> str:
     It asks by handing over rather than by a tool of its own, so
     `clarification_system` names nothing here — the composing node has
     `hand_over`, and this one falls back to a template instead.
+
+    The skill catalogue and its three tool renderers are here rather than in
+    `build_input` for the reason the voice is: they do not change between
+    calls. A non-empty catalogue and the four skill tools are the same fact —
+    the responder wires the tools only for a library with something in it —
+    so this decides both, and an agent is never told about a tool it was not
+    given.
     """
+    has_skills = bool(skills_catalogue)
     return assemble(
         role("Friday", "Long Lee's assistant", "you write the reply he would send"),
         soul(VOICE),
         trust_boundary(),
         job(INSTRUCTIONS),
+        skill_system(skills_catalogue),
+        search_skills_system(has_skills),
+        describe_skill_system(has_skills),
+        read_skill_file_system(has_skills),
         response_style(STYLE),
         critical_reminder(REMINDERS),
     )
@@ -233,21 +245,24 @@ def build_input(
     responder without skills produces the exact bytes it did before
     this ticket, including no extra sections.
     """
-    # A non-empty catalogue and the four skill tools are the same fact: the
-    # responder wires the tools only for a library that has something in it
-    # (see its `__init__`). So this decides both, and an agent is never told
-    # about a tool it was not given.
-    has_skills = bool(skills_catalogue)
+    # The four skill renderers used to sit here, between the catalogue and
+    # the tone examples. They are in `build_instructions` now: the catalogue
+    # is read once at startup — `SkillLibrary.load()` globs in `build()` and
+    # its docstring says a skill added while the process runs appears at the
+    # next restart — so it is stable bytes, and stable bytes belong at the
+    # front where a provider's cache reuses them. Sending them again on every
+    # call was the same waste triage's few-shot examples are kept out of the
+    # per-call input to avoid.
+    #
+    # It also meant the operator reading a responder's *instruction* prompt
+    # found no mention of skills at all, while the agent called `fetch_skill`
+    # off the tool schema anyway.
     parts = [
         base(now or datetime.now(timezone.utc)),
         channel_base(room),
         channel_derived(room),
         channel_overrides(room),
         counterpart(COUNTERPART if stranger else ""),
-        skill_system(skills_catalogue),
-        search_skills_system(has_skills),
-        describe_skill_system(has_skills),
-        read_skill_file_system(has_skills),
         # `has_memory` is decided the same way, by `__init__`: whether a
         # `db` was given to build the four memory tools from. Same rule as
         # the skill tools above — never claim a door that is not in the room.

@@ -262,3 +262,38 @@ def test_a_responder_with_memory_is_built_with_the_matching_context_type(monkeyp
     Responder(config=CONFIG, model=ScriptedModel([]))
 
     assert given == [MemoryScope, None]
+
+
+def test_the_skill_catalogue_is_in_the_instructions_not_the_per_call_input():
+    """It was in `build_input`, so the operator reading a responder's
+    *instruction* prompt found no mention of skills at all — while the agent
+    called `fetch_skill` anyway, off the tool schema alone.
+
+    Two things are wrong with that, and the second is the one that costs.
+    A prompt that describes no door the model is standing in front of is the
+    failure this repo already names. And the catalogue is **stable**:
+    `SkillLibrary.load()` globs once at startup and its own docstring says a
+    skill added while the process runs appears at the next restart. Stable
+    bytes belong at the front, where a provider's cache reuses them — the
+    same argument that puts triage's few-shot examples in instructions rather
+    than sending them again on every classification.
+    """
+    from friday.responder.prompt import build_input, build_instructions
+
+    catalogue = ["trace-a-request: follow one request through the logs"]
+
+    told = build_instructions(skills_catalogue=catalogue)
+    per_call = build_input(asking="which environment?", skills_catalogue=catalogue)
+
+    assert "trace-a-request" in told, "the catalogue is not in the instructions"
+    assert "trace-a-request" not in per_call, (
+        "the catalogue is still being re-sent on every call"
+    )
+
+
+def test_a_responder_with_no_skills_says_nothing_about_them():
+    """`available=False` renders nothing, which is the rule: an agent told
+    about a tool it does not have goes looking for it."""
+    from friday.responder.prompt import build_instructions
+
+    assert "fetch_skill" not in build_instructions()

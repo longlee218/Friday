@@ -140,7 +140,13 @@ class Responder:
         self._tool_turns = 2 * len(tools)
         self._run = Harness(
             config=config,
-            instructions=build_instructions(),
+            # The catalogue goes in the stable half now, so it is built here
+            # rather than on every call. Same fact as the tools below.
+            instructions=build_instructions(
+                skills_catalogue=(
+                    skills.catalogue() if skills is not None and len(skills) else None
+                )
+            ),
             model=model,
             tools=tools,
             context_type=MemoryScope if self._has_memory else None,

@@ -85,6 +85,19 @@ agents:
   # Runs only on tasks that reached a reply. Low volume, and the output goes out
   # under your name — worth a better model and some warmth.
   responder:
+    # 150s, not the 60 every other agent takes. `timeout_seconds` bounds the
+    # whole run and each HTTP request gets `timeout_seconds / max_attempts` —
+    # so 60 with three attempts gave each try 20 seconds, and a real draft
+    # measured 20012ms and 20183ms before being cut off. Three attempts, all
+    # cut at the same wall, the run failed, the pool re-planned, and the
+    # whole extract-and-respond cycle ran again: what looked like a loop was
+    # a budget.
+    #
+    # It is the slow one on purpose. It runs on a prompt carrying the room's
+    # context and a fetched skill body, it writes prose rather than a label,
+    # and it runs on tasks that reached a reply rather than on every mention
+    # — so a longer wait costs little and a truncated one costs a reply.
+    timeout_seconds: 150
     api_key: ${RESPONDER_API_KEY}
     base_url: "https://api.minimax.io/v1"
     model: "MiniMax-M3"

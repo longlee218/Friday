@@ -181,10 +181,37 @@ def conversation(events: list[InboundEvent], *, quoted: bool = False) -> Section
     # author_name and text are both attacker-controlled on Discord. Both
     # escape: a nickname that closes its own message's tags is the same
     # attack as one in text.
+    #
+    # The timestamp is not: it is this system's own reading of the clock, so
+    # it is written outside the escaped part and cannot be forged by anything
+    # a reporter types. Without it the model saw a list of lines with no
+    # clock at all — "vẫn còn lỗi" could be a minute or a week after the
+    # report it follows, and nothing in the prompt distinguished them. It
+    # matters more since `max_message_age`, which can now judge a turn too
+    # old to answer using a fact the agent reading that turn could not see.
     body = "\n".join(
-        f"{_escape(m.author_name)}: {_escape(m.text)}" for m in events
+        f"[{_when(m.created_at)}] {_escape(m.author_name)}: {_escape(m.text)}"
+        for m in events
     )
+    # Said, rather than left to be inferred from the timestamps: a list with
+    # no stated order is one the model has to guess at, and the guess decides
+    # which message answers which. Oldest first is what `relevant_messages`
+    # and `turn_from` both produce.
+    body = f"Oldest first, times in UTC.\n{body}"
     return Section("conversation", _quoted(body) if quoted else body)
+
+
+def _when(at) -> str:
+    """A message's clock, short and absolute.
+
+    UTC and stated as such: the process has no opinion about where anybody
+    is, and a local time nobody can place is worse than none. Date included
+    only when it is not today's, so an ordinary same-day turn stays readable.
+    """
+    if at is None:
+        return "no time"
+    today = datetime.now(timezone.utc).date()
+    return at.strftime("%H:%M" if at.date() == today else "%d %b %H:%M")
 
 
 def tone_examples(events: list[InboundEvent]) -> Section:
