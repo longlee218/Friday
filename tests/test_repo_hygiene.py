@@ -499,3 +499,36 @@ def test_a_reply_row_is_queued_in_exactly_one_place():
         f"is queued in one place, `_propose`: {queued}"
     )
     assert len(queued["friday/tasks/pool.py"]) == 1, f"one queue, not several: {queued}"
+
+
+def test_every_agent_block_in_config_is_one_the_code_builds():
+    """`config.yaml` is version-controlled so changes are reviewable diffs,
+    and a block nobody reads is a diff nobody can review: it looks like a
+    knob, it costs nothing to leave, and the next person tunes it and waits
+    for an effect that never arrives.
+
+    Four survived the removal of the five-node `api_issue` graph —
+    `dag_read_logs`, `dag_find_code`, `dag_analyze`, `dag_compose` — with
+    sixty lines of comment describing nodes that no longer exist. Nothing
+    failed, which is exactly why this is a test rather than a habit.
+
+    `summary` is the shape this permits: absent from the file, commented out
+    with its reason, and warned about at startup. Present-but-unread is the
+    thing being caught.
+    """
+    import yaml
+    from pathlib import Path
+
+    from friday.extraction import EXTRACTS
+
+    root = Path(__file__).resolve().parents[1]
+    blocks = set((yaml.safe_load((root / "config.yaml").read_text())["agents"] or {}))
+    buildable = {"triage", "responder", "summary"} | {
+        f"extractor_{task_type}" for task_type in EXTRACTS
+    }
+
+    assert blocks <= buildable, (
+        f"config.yaml configures agents nothing builds: "
+        f"{sorted(blocks - buildable)}. Either the code that read them is gone "
+        "and the blocks should follow it, or a builder was renamed."
+    )

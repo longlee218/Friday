@@ -102,7 +102,7 @@ agents:
   # the reporter is asked for what they already said. Startup warns about it;
   # nothing else fills those fields.
   #
-  # The model is allowed to hallucinate — `friday/validation.py` catches what
+  # The model is allowed to hallucinate — `friday/domain/validation.py` catches what
   # it gets wrong. Cheap models on purpose: the job is copying values out of
   # text, not reasoning.
   extractor_api_issue:
@@ -129,68 +129,23 @@ agents:
       temperature: 0
     max_turns: 1
 
-  # ── The api_issue graph, one block per node ───────────────────────────────
-  # A node whose block is absent runs without an agent and skips. That is a
-  # working state, not a broken one: with none of these the graph ends where
-  # the old planner did, asking for a correlationId. But it means the whole
-  # investigation is off, silently, which is not something to discover from a
-  # week of logs where nothing was ever traced.
+  # ── The api_issue graph's node agents ─────────────────────────────────────
+  # Removed 2026-09-07. There were four blocks here — `dag_read_logs`,
+  # `dag_find_code`, `dag_analyze`, `dag_compose`, plus a commented-out
+  # `dag_fix` — one per node of a five-node `api_issue` investigation. That
+  # graph is gone: the operator removed it as "a workflow nobody had
+  # described, built from a guess at what investigating an API fault looks
+  # like, and every node of it skipped on every run because no tool server was
+  # ever configured" (`friday/dag/router.py`).
   #
-  # `read_logs`, `find_code_path` and `fix_bug` also need their tool server —
-  # `loki` and `source` under mcp_servers below. An agent without its server
-  # skips too; one WITH a server and no agent block does nothing either. Both
-  # halves or neither.
-
-  # Fetches log lines for one request. Tool work, not reasoning — the cheap
-  # model, and `max_turns` high enough to page through a query.
-  dag_read_logs:
-    api_key: ${TRIAGE_API_KEY}
-    base_url: "https://api.minimax.io/v1"
-    model: "MiniMax-M3"
-    settings:
-      temperature: 0
-    max_turns: 6
-
-  # Follows a stack trace to the file and line it names. Also tool work.
-  dag_find_code:
-    api_key: ${TRIAGE_API_KEY}
-    base_url: "https://api.minimax.io/v1"
-    model: "MiniMax-M3"
-    settings:
-      temperature: 0
-    max_turns: 6
-
-  # Says why the request failed, and whether that is certain enough to act on.
-  # The one node whose answer decides whether code gets changed — temperature 0,
-  # and worth the better model when there is one.
-  dag_analyze:
-    api_key: ${RESPONDER_API_KEY}
-    base_url: "https://api.minimax.io/v1"
-    model: "MiniMax-M3"
-    settings:
-      temperature: 0
-    max_turns: 1
-
-  # Proposes the patch. Commented out on purpose: turning it on is a
-  # decision, not a default. It needs the `source` server as well.
-  # dag_fix:
-  #   # Calls apply_fix (needs the operator's yes before it is used anywhere
-  #   # — the one tool in this codebase marked needs_approval) or hand_over.
-  #   api_key: ${RESPONDER_API_KEY}
-  #   base_url: "https://api.minimax.io/v1"
-  #   model: "MiniMax-M3"
-  #   settings:
-  #     temperature: 0
-  #   max_turns: 4
-
-  # Writes what goes back to the reporter. The draft still needs approval.
-  dag_compose:
-    api_key: ${RESPONDER_API_KEY}
-    base_url: "https://api.minimax.io/v1"
-    model: "MiniMax-M3"
-    settings:
-      temperature: 0.7
-    max_turns: 1
+  # The blocks outlived it and nothing read them. Kept as this note rather
+  # than deleted quietly, because a knob that vanishes without a reason is one
+  # somebody adds back. `tests/test_repo_hygiene.py` now fails on an agent
+  # block nothing builds, so the next one cannot sit here unread.
+  #
+  # Every task type gets the same one-node graph now: extract, validate, then
+  # ask for what is missing or hand over. Build a multi-node graph when there
+  # are steps worth skipping and somebody has said what they are.
 
 # ── Workflows ──────────────────────────────────────────────────────────────
 # How often to say the process is alive and what it is holding.
@@ -221,9 +176,14 @@ keep_model_calls_days: 14
 # server offers — including its write tools, if it has any. A trace is a
 # read-only act, so name what it may use.
 mcp_servers: {}
-# The two the api_issue graph looks for, by name. `allow` is the filter — a
-# prompt is a request and a filter is not, so nothing about answering "why did
-# this request fail" is able to delete a log stream or write a file.
+# Empty, and nothing looks for a named server any more: the two below were
+# `loki` and `source`, wanted by the `api_issue` graph's nodes, and that graph
+# was removed (see the note in the agents section). They are left as a worked
+# example of the shape, not as something to switch on.
+#
+# `allow` is the filter — a prompt is a request and a filter is not, so an
+# agent asked "why did this request fail" is not able to delete a log stream
+# or write a file.
 #
 #  loki:
 #    command: npx
@@ -235,8 +195,8 @@ mcp_servers: {}
 #  source:
 #    command: npx
 #    args: ["-y", "<a filesystem mcp server>", "/path/to/the/repo"]
-#    # Read-only until dag_fix is turned on. Adding a write tool here is the
-#    # other half of that decision, not a separate one.
+#    # Read-only. Nothing here writes, and the node that would have
+#    # (`dag_fix`, calling `apply_fix`) went with the graph.
 #    allow: [read_file, search_files]
 
 outbox:
