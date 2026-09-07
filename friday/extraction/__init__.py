@@ -25,13 +25,23 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, fields
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from friday.agent.harness import Harness, Refused
 from friday.extraction.clarify import Clarify, FieldsCapture
 from friday.tools.ask_for_fields import ask_for_fields_tool
 from friday.domain.models import MODEL_AUTHORED, PARAMS, Params
 from friday.extraction.prompt import build_input, build_instructions
+
+if TYPE_CHECKING:
+    # `friday.config` sits above the packages because it is read before any of
+    # them, so naming it here is a type-checking edge and not an import. It was
+    # a string annotation with a `name-defined` suppression on it, and the
+    # suppression is the thing that rots: reflowing this signature to take
+    # `skills` moved the comment off the line the error is reported on, and
+    # mypy went from silent to complaining about a name that had been undefined
+    # the whole time.
+    from friday.config import Config
 
 __all__ = [
     "Clarify",
@@ -76,6 +86,10 @@ class Extractor:
         nothing to hallucinate means nothing to validate. Whether the model
         also called `ask_clarification` is independent of that — one extra
         turn covers the tool call landing before or after the field text.
+
+        `Harness.run` adds its own `tool_turns` on top, so this line owns
+        only what it has to: the one retry. The skill tools' turns come from
+        the harness, which is the only thing that knows whether it wired any.
         """
         capture = FieldsCapture()
         result = await self._harness.run(
@@ -174,6 +188,11 @@ def register(
     params_cls: type[Params],
     config: "AgentConfig",  # type: ignore[name-defined]  # noqa: F821
     *,
+    #: The skill library, if this install has one. Handed to the harness,
+    #: which wires the four tools and grants the turn they need — an
+    #: extractor reading a skill that says where a correlationId lives is
+    #: the case this is for.
+    skills=None,
     record=None,
     spent=None,
 ) -> None:
@@ -200,8 +219,13 @@ def register(
         params_cls=params_cls,
         harness=Harness(
             config=config,
-            instructions=build_instructions(),
+            instructions=build_instructions(
+                skills_catalogue=(
+                    skills.catalogue() if skills is not None and len(skills) else None
+                )
+            ),
             tools=[ask_for_fields_tool(params_cls)],
+            skills=skills,
             context_type=FieldsCapture,
             record=record,
             spent=spent,
@@ -317,7 +341,9 @@ EXTRACTS = {
 }
 
 
-def register_extractors(config: "Config", *, record=None, spent=None) -> None:  # type: ignore[name-defined]  # noqa: F821
+def register_extractors(
+    config: Config, *, skills=None, record=None, spent=None
+) -> None:
     """Wire every extractor the configuration declares.
 
     Composition root calls this once at startup and learns nothing about any
@@ -359,6 +385,7 @@ def register_extractors(config: "Config", *, record=None, spent=None) -> None:  
             task_type,
             getattr(models, params_name),
             agent_config,
+            skills=skills,
             record=record,
             spent=spent,
         )

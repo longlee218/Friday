@@ -659,10 +659,12 @@ not an implementation detail:
 
   **Wired to the responder, never to triage.** The responder is the agent
   that writes text a person reads, and a room's habits are exactly the kind
-  of thing worth remembering; triage stops on its first tool call by design,
-  the same reason it has no skill tools. Whether an extractor or the
-  summariser should get them is undecided and left that way — nothing here
-  argues either side yet.
+  of thing worth remembering; triage stops on `capture.decided is not None`
+  rather than on the first tool output (see the stop-when note on
+  `friday/agent/harness.py`), which is the same rule that means a
+  `fetch_skill` does not terminate the run before the model classifies.
+  Whether an extractor or the summariser should get memory tools is
+  undecided and left that way — nothing here argues either side yet.
 
 ## Conventions
 

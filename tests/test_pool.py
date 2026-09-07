@@ -291,6 +291,11 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     prompts_seen: list[str] = []
 
     class StubHarness:
+        #: What a real `Harness` with no skill library has. A stub with
+        #: fewer attributes than the type it stands in for passes and is
+        #: describing itself.
+        tool_turns = 0
+
         async def run(self, prompt, *, context=None, extra_turns=0,
                       task_id=None, node=None):
             prompts_seen.append(prompt)

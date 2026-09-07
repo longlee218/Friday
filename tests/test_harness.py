@@ -892,3 +892,138 @@ async def test_a_tool_that_failed_is_recorded_as_having_failed():
     assert reached.failed is True
     assert "unavailable" in reached.result
     assert "skill file" not in reached.result, "the model was told less"
+
+
+# --- skills are the harness's, not each agent's (operator, 2026-09-07) -------
+
+
+class _Library:
+    """A skill library the size of its catalogue."""
+
+    def __init__(self, *names):
+        self._names = list(names)
+
+    def __len__(self):
+        return len(self._names)
+
+    def catalogue(self):
+        # `catalogue()` and `__len__` are the whole of what `Harness` uses,
+        # and both exist on the real `SkillLibrary`. An earlier version of
+        # this stub also had a `names()` the real one does not — a fixture
+        # that invents an API passes while describing itself.
+        return [f"{n}: what {n} does" for n in self._names]
+
+
+def _config():
+    from friday.config import AgentConfig
+
+    return AgentConfig(
+        name="any", api_key="k", base_url="https://example.invalid/v1", model="m"
+    )
+
+
+def test_a_harness_given_skills_wires_the_four_tools_itself():
+    """Every agent that could reach a skill had to remember to wire four
+    tools, and the operator's point is that a thing every agent needs is the
+    harness's job. Forgetting it is invisible: the agent simply never reaches
+    for anything, which reads as a model that did not think to."""
+    from friday.agent.harness import Harness
+
+    agent = Harness(config=_config(), instructions="x", skills=_Library("trace"))
+
+    named = {t.name for t in agent.agent.tools}
+    assert named == {
+        "fetch_skill",
+        "search_skills",
+        "describe_skill",
+        "read_skill_file",
+    }
+
+
+def test_a_harness_with_an_empty_library_is_told_about_no_skills():
+    """An empty catalogue and no tools are the same fact. An agent told about
+    a door that is not in the room goes looking for it — the rule this
+    codebase already applies to `clarification_system` and the memory tools."""
+    from friday.agent.harness import Harness
+
+    assert Harness(config=_config(), instructions="x", skills=_Library()).agent.tools == []
+    assert Harness(config=_config(), instructions="x").agent.tools == []
+
+
+def test_the_catalogue_is_readable_off_the_harness():
+    """The prompt needs the catalogue and the tools need the library; both
+    come from one place so the two cannot describe different skills."""
+    from friday.agent.harness import Harness
+
+    agent = Harness(config=_config(), instructions="x", skills=_Library("a", "b"))
+
+    assert agent.skills == ["a: what a does", "b: what b does"]
+    assert Harness(config=_config(), instructions="x").skills == []
+
+
+def test_skill_tools_do_not_eat_the_turn_that_answers():
+    """Every agent here is `max_turns: 1`. A skill tool spends a turn, so
+    without room for it a `fetch_skill` consumes the only turn and the agent
+    never classifies, never extracts, never drafts — the mention lands in
+    `needs_human` and the reason is invisible.
+
+    So the harness that hands out the tools also hands out the turns for
+    them. Wiring the one without the other is worse than wiring neither."""
+    from friday.agent.harness import Harness
+
+    bare = Harness(config=_config(), instructions="x")
+    withskills = Harness(config=_config(), instructions="x", skills=_Library("a"))
+
+    assert withskills.tool_turns > bare.tool_turns
+
+
+def test_the_two_step_reach_for_a_skill_fits_in_the_budget():
+    """The catalogue names a skill in a line, so an agent that recognises the
+    line calls `fetch_skill` and answers: one tool turn. An agent that does
+    not recognise it is told to `search_skills` first and *then* fetch —
+    which is the documented split, and it is two tool turns.
+
+    A budget of one funds the first path and quietly forbids the second, so
+    the tool that exists for the harder case is the one an agent can never
+    afford to follow through on."""
+    from friday.agent.harness import Harness
+
+    withskills = Harness(config=_config(), instructions="x", skills=_Library("a"))
+
+    assert withskills.tool_turns >= 2
+
+
+
+def test_run_owns_the_turns_for_its_own_tools():
+    """The harness wires the skill tools; the caller passes `extra_turns`
+    for its own (memory tools on the responder, the answer-call-then-
+    answer two turns on triage). The caller must not have to remember
+    the harness's. A `fetch_skill` spent the only turn that classifies,
+    the mention went to `needs_human` with no reason on it, and the
+    answer was that every caller was once told to write `1 + tool_turns`
+    and one of three did.
+
+    So the harness adds its own. The caller's `extra_turns` is on top,
+    and that is the only thing the caller has to know about. The previous
+    test read this contract out of three call sites; this one reads it
+    out of one, and deleting the addition from `run` flips it red."""
+    import asyncio
+
+    from friday.agent.harness import Harness
+
+    budgeted = Harness(config=_config(), instructions="x", skills=_Library("a"))
+    bare = Harness(config=_config(), instructions="x")
+
+    asked: list[int] = []
+
+    async def fake_settle(*_a, max_turns: int, **_kw) -> None:
+        asked.append(max_turns)
+
+    budgeted._settle = fake_settle  # type: ignore[assignment]
+    bare._settle = fake_settle  # type: ignore[assignment]
+
+    asyncio.run(budgeted.run("p"))
+    asyncio.run(bare.run("p"))
+    # 1 from max_turns, +1 tool turn for the harness that wired skill tools.
+    # The bare harness has no skill tools and so no tool turn.
+    assert asked == [3, 1]

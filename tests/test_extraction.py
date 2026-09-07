@@ -62,6 +62,11 @@ def test_extractor_decorator_registers_under_task_type():
         environment: Optional[str] = None
 
     class StubHarness:
+        #: What a real `Harness` with no skill library has. A stub with
+        #: fewer attributes than the type it stands in for passes and is
+        #: describing itself.
+        tool_turns = 0
+
         async def run(self, *a, **kw):
             return None
 
@@ -122,6 +127,8 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
         final_output = '{"environment": "production"}'
 
     class StubHarness:
+        tool_turns = 0
+
         last_error = None
 
         async def run(self, prompt, *, context=None, extra_turns=0,
@@ -144,6 +151,8 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
 
 def test_an_extractor_returns_none_when_harness_fails():
     class FailingHarness:
+        tool_turns = 0
+
         last_error = "boom"
         #: The model was asked and could not answer, which is not the same as
         #: not asking it — see `Refused`. This is the first of the two.
@@ -175,6 +184,8 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
         final_output = "not even close to JSON"
 
     class StubHarness:
+        tool_turns = 0
+
         async def run(self, prompt, *, context=None, extra_turns=0,
                       task_id=None, node=None):
             return StubResult()
@@ -396,6 +407,8 @@ async def test_a_model_that_could_not_answer_is_not_a_refusal():
     from friday.extraction import build_extractor
 
     class Refuses:
+        tool_turns = 0
+
         last_error = "over budget"
         refusal = "an-agent has spent 999 of its 10 tokens today"
 

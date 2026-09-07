@@ -38,6 +38,10 @@ class Triage:
         model=None,
         examples: Sequence[tuple[str, str]] = (),
         sensitive: Sensitive | None = None,
+        #: The skill library, if this install has one. Triage gets it like
+        #: every other agent now (the operator's call, 2026-09-07) — the
+        #: harness wires the four tools and grants the turn they need.
+        skills=None,
         record=None,
         spent=None,
     ) -> None:
@@ -52,7 +56,13 @@ class Triage:
         # A mark made now therefore takes effect at the next start.
         self._run = Harness(
             config=config,
-            instructions=build_instructions(examples),
+            instructions=build_instructions(
+                examples,
+                skills_catalogue=(
+                    skills.catalogue() if skills is not None and len(skills) else None
+                ),
+            ),
+            skills=skills,
             tools=TOOLS,
             model=model,
             record=record,
@@ -112,6 +122,9 @@ class Triage:
         result = await self._run.run(
             said,
             context=capture,
+            # One for a malformed classify call, plus whatever the skill
+            # tools need — the harness knows whether it wired them, so the
+            # number is asked for rather than assumed here.
             extra_turns=1,
             message_id=event.provider_message_id,
         )

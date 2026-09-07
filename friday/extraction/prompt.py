@@ -23,6 +23,10 @@ the reporter is asked for everything they just wrote.
 from __future__ import annotations
 
 from friday.agent.instruction_prompt import (
+    describe_skill_system,
+    read_skill_file_system,
+    search_skills_system,
+    skill_system,
     assemble,
     clarification_system,
     critical_reminder,
@@ -72,7 +76,7 @@ REMINDERS = [
 INSTRUCTIONS = JOB
 
 
-def build_instructions() -> str:
+def build_instructions(skills_catalogue: list[str] | None = None) -> str:
     """Who it is, the job, how to read, how to ask, what not to get wrong."""
     return assemble(
         role("Friday", "a field extractor", "you lift values out of what someone wrote"),
@@ -80,6 +84,14 @@ def build_instructions() -> str:
         job(JOB),
         thinking_style(THINKING),
         clarification_system("ask_for_fields", blocking=False),
+        # Skills reach every agent now (the operator's call, 2026-09-07).
+        # For an extractor the case is direct: a skill saying where a
+        # correlationId lives is the difference between lifting one out of a
+        # stack trace and asking the reporter for what they already sent.
+        skill_system(skills_catalogue),
+        search_skills_system(bool(skills_catalogue)),
+        describe_skill_system(bool(skills_catalogue)),
+        read_skill_file_system(bool(skills_catalogue)),
         critical_reminder(REMINDERS),
     )
 

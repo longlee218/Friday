@@ -265,6 +265,18 @@ class Harness:
         #: set one pays nothing for the ceiling it does not have.
         spent=None,
         model=None,
+        #: The skill library this agent may reach, or `None` for one that may
+        #: not. Given it, **the harness wires the four skill tools itself** —
+        #: the operator's call, 2026-09-07, and the argument is that a thing
+        #: every agent needs is not four lines every agent has to remember.
+        #: Forgetting them was invisible: the agent simply never reached for
+        #: anything, which reads as a model that did not think to rather than
+        #: as a door nobody built.
+        #:
+        #: An empty library is the same as none: an agent told about a tool it
+        #: does not have goes looking for it, which is the rule
+        #: `clarification_system` and `memory_tool_system` already follow.
+        skills=None,
         context_type: type | None = None,
         **agent_options: Any,
     ) -> None:
@@ -276,6 +288,50 @@ class Harness:
         #: failing. `last_error` carries the same words; this is what lets a
         #: caller branch on it without reading them.
         self.refusal: str | None = None
+        #: The catalogue, for whoever builds this agent's instructions. Read
+        #: off the same object the tools came from, so the prompt and the
+        #: tools cannot describe different skills.
+        #:
+        #: `catalogue()` rather than a names accessor, because that is what
+        #: `SkillLibrary` actually offers — the first version of this called
+        #: a `names()` a test stub had invented, which is the same fixture
+        #: failure as a stub with fewer attributes than the real type: it
+        #: passes, and it is describing itself.
+        self.skills: list[str] = (
+            list(skills.catalogue()) if skills is not None and len(skills) else []
+        )
+        #: The budget for the tools this harness wires itself, added to
+        #: `max_turns` in `run`. Every agent here is `max_turns: 1`, so a
+        #: `fetch_skill` without this spends the only turn and the agent
+        #: never classifies, extracts or drafts — the mention lands in
+        #: `needs_human` and the reason is invisible. Handing out the tools
+        #: and not the turns is worse than handing out neither.
+        #:
+        #: Two, not one, and the second is the whole point of the split: an
+        #: agent that recognises a catalogue line fetches and answers, but one
+        #: that does not is told to search *and then* fetch. A budget of one
+        #: funds only the easy path, so `search_skills` — the tool that exists
+        #: for the case the catalogue does not cover — could be called and
+        #: never acted on.
+        #:
+        #: Read by `run`, not by callers: a caller that has to remember to add
+        #: it has three places to forget in, and one of them did. The harness
+        #: owns its own wiring; it owns its own budget.
+        self.tool_turns = 2 if self.skills else 0
+        tools = list(tools or [])
+        if self.skills:
+            from friday.tools.describe_skill import describe_skill_tool
+            from friday.tools.fetch_skill import fetch_skill_tool
+            from friday.tools.read_skill_file import read_skill_file_tool
+            from friday.tools.search_skills import search_skills_tool
+
+            tools += [
+                fetch_skill_tool(skills),
+                search_skills_tool(skills),
+                describe_skill_tool(skills),
+                read_skill_file_tool(skills),
+            ]
+
         agent_class = Agent[context_type] if context_type else Agent
         self.agent = agent_class(
             name=config.name,
@@ -342,7 +398,7 @@ class Harness:
         return await self._settle(
             prompt,
             context=context,
-            max_turns=self._config.max_turns + extra_turns,
+            max_turns=self._config.max_turns + self.tool_turns + extra_turns,
             about=_About(message_id=message_id, task_id=task_id, node=node),
         )
 

@@ -57,7 +57,9 @@ def _record(outcome: TriageOutcome) -> dict:
     return {"type": outcome.type, "confidence": outcome.confidence, "params": {}}
 
 
-async def build_triage(config, *, db: Database, record=None, spent=None) -> Triage:
+async def build_triage(
+    config, *, db: Database, skills=None, record=None, spent=None
+) -> Triage:
     """The real classifier, assembled the one place this is done.
 
     Split out of `TriageRunner.build` for ticket 06's eval harness:
@@ -103,6 +105,7 @@ async def build_triage(config, *, db: Database, record=None, spent=None) -> Tria
         config=settings,
         examples=examples,
         sensitive=sensitive,
+        skills=skills,
         record=record,
         spent=spent,
     )
@@ -111,7 +114,14 @@ async def build_triage(config, *, db: Database, record=None, spent=None) -> Tria
 class TriageRunner:
     @classmethod
     async def build(
-        cls, config, *, db: Database, still_typing=None, record=None, spent=None
+        cls,
+        config,
+        *,
+        db: Database,
+        skills=None,
+        still_typing=None,
+        record=None,
+        spent=None,
     ) -> "TriageRunner":
         """Everything triage needs, read from configuration here.
 
@@ -131,7 +141,9 @@ class TriageRunner:
 
         return cls(
             db=db,
-            triage=await build_triage(config, db=db, record=record, spent=spent),
+            triage=await build_triage(
+                config, db=db, skills=skills, record=record, spent=spent
+            ),
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)
             ),

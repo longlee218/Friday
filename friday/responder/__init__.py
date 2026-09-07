@@ -25,12 +25,8 @@ from dataclasses import dataclass
 from friday.config import AgentConfig
 from friday.responder.prompt import build_input, build_instructions
 from friday.agent.harness import Harness
-from friday.tools.describe_skill import describe_skill_tool
-from friday.tools.fetch_skill import fetch_skill_tool
 from friday.domain.models import MemoryScope
 from friday.tools.memory import memory_tools
-from friday.tools.read_skill_file import read_skill_file_tool
-from friday.tools.search_skills import search_skills_tool
 from friday.domain.models import Params, InboundEvent
 
 __all__ = ["Draft", "Responder"]
@@ -120,33 +116,34 @@ class Responder:
         #: install handed the agent three tools it was never told about. The
         #: two facts agree now because they are read off the same one, which
         #: is what lets `build_input` keep deciding from the catalogue alone.
-        tools = (
-            [
-                fetch_skill_tool(skills),
-                search_skills_tool(skills),
-                describe_skill_tool(skills),
-                read_skill_file_tool(skills),
-            ]
-            if skills is not None and len(skills) > 0
-            else []
-        )
-        #: Same rule as the skill tools: given only when there is a store to
-        #: back them, and `build_input`'s `has_memory` reads this same fact
-        #: rather than a second flag that could drift from it.
+        #: Only the memory tools are wired here now. The four skill tools
+        #: moved into `Harness`, which hands them to any agent given a
+        #: library — the operator's call, 2026-09-07: four lines every agent
+        #: has to remember is four lines every agent can forget, and
+        #: forgetting them looks like a model that did not think to reach.
+        #:
+        #: Given only when there is a store to back them, and `build_input`'s
+        #: `has_memory` reads this same fact rather than a second flag that
+        #: could drift from it.
         self._has_memory = db is not None
-        if self._has_memory:
-            tools = tools + memory_tools(db)
-        #: Two turns each — the call and its answer — for however many it got.
+        tools = memory_tools(db) if self._has_memory else []
+        #: Two turns each — the call and its answer — for the memory tools.
+        #: The skill tools' turns come from the harness, which is the only
+        #: thing that knows whether it wired them.
         self._tool_turns = 2 * len(tools)
         self._run = Harness(
             config=config,
             # The catalogue goes in the stable half now, so it is built here
             # rather than on every call. Same fact as the tools below.
+            # Built from the same library the harness is about to wire tools
+            # from, so the catalogue in the prompt and the tools in the agent
+            # cannot describe different skills.
             instructions=build_instructions(
                 skills_catalogue=(
                     skills.catalogue() if skills is not None and len(skills) else None
                 )
             ),
+            skills=skills,
             model=model,
             tools=tools,
             context_type=MemoryScope if self._has_memory else None,
@@ -216,7 +213,10 @@ class Responder:
         # answers in one turn, and without it an agent that reaches for a
         # skill spends its only turn on the fetch and returns nothing.
         result = await self._run.run(
-            said, context=scope, extra_turns=self._tool_turns, task_id=task_id
+            said,
+            context=scope,
+            extra_turns=self._tool_turns,
+            task_id=task_id,
         )
         if result is None:
             log.warning("falling back to the template")
