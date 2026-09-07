@@ -162,7 +162,6 @@ What is actually on disk.
 | `run_agent.py` | Composition root — the only place adapters are constructed, and the only place the asyncio tasks are started. It asks each module to build itself; it reads no agent's knobs |
 | `serve_board.py` | The board alone, against the live database, without connecting to Discord |
 | `init_channel.py` | One-off: create a channel's context file for the operator to fill in |
-| `poke.py` | Put a message in the queue by hand, as if somebody had reported it. The only way to test end to end without a second Discord account — the watched account's own messages never open work, deliberately (ticket 37), so a self-mention does nothing. Skips the gateway and the scope check and nothing else; `FRIDAY_DB` points it at a throwaway copy |
 | `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, and the sensitive words that keep a message away from the model |
 | `friday/config.py` | Loads `config.yaml` and resolves `${VAR}`. Outside the packages because it is read before any of them |
 | **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `states.py` (`TaskState`, `OutboundState`, and the legal transitions), `actions.py` (`Ask`/`Reply`/`HandOver`, what a decision about a task comes to), `validation.py` (the rule engine, one call site) |

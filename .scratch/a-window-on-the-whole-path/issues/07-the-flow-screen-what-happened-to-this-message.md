@@ -68,11 +68,11 @@ that happened on purpose, naming the word that caused it.
 The screen will be empty until the agent is restarted and new messages arrive.
 The database was wiped in ticket 01, and the pre-migration rows that existed
 before it had no `task_id`, `node` or tool calls anyway. Build against a
-`poke.py`-style hand-fed message or a throwaway database rather than waiting.
+a throwaway database rather than waiting.
 
-`poke.py` is currently deleted in the working tree and untracked-for-deletion —
-that is unrelated to this board and unresolved. If it is restored it is the
-fastest way to produce a real path end to end without a second Discord account.
+`poke.py` was the fastest way to produce a real path end to end without a
+second Discord account, and the operator removed it (2026-09-07). Feeding one
+in by hand now means writing a row, or using a second account.
 
 Do not add a graph visualisation (out of scope). If a multi-node graph ever
 exists, this screen is where its nodes would nest, as one step containing
