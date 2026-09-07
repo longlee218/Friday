@@ -185,7 +185,7 @@ function Path({ provider, id }: { provider: string; id: string }) {
                 model call and whatever it reached for before the next one:
                 that is the unit the turn cap counts, so it is the unit shown. */}
             {turns(it).map((turn) => (
-              <div key={turn.n} style={{ marginTop: 10 }}>
+              <div key={turn.n} className="turn-block">
                 <div className="row wrap">
                   <span className="pill mono">turn {turn.n}</span>
                   <span className="faint mono">{turn.agent}</span>
@@ -205,7 +205,7 @@ function Path({ provider, id }: { provider: string; id: string }) {
                 ))}
               </div>
             ))}
-            <p className="faint mono" style={{ marginTop: 8 }}>
+            <p className="faint mono summary-line">
               {it.model_calls.reduce(
                 (n, c) => n + c.input_tokens + c.output_tokens,
                 0,
@@ -225,7 +225,7 @@ function Path({ provider, id }: { provider: string; id: string }) {
           <p className="faint">Nothing was queued about this message.</p>
         ) : (
           it.outbound.map((row) => (
-            <div key={row.id} className="card" style={{ marginTop: 8 }}>
+            <div key={row.id} className="card outbound-row">
               <div className="row wrap">
                 <Pill
                   tone={row.state === "failed" ? "bad" : undefined}
@@ -306,7 +306,7 @@ function Step({
         {tone && <Pill tone={tone} label={tone === "warn" ? "held" : tone} />}
         {!done && <span className="faint mono">not reached</span>}
       </div>
-      <div style={{ marginTop: 6 }}>{children}</div>
+      <div className="flow-children">{children}</div>
     </section>
   );
 }

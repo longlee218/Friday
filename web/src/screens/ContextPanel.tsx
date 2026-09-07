@@ -127,7 +127,7 @@ function Editor({ channelId }: { channelId: string }) {
   return (
     <>
       <section className="card">
-        <div className="row wrap" style={{ justifyContent: "space-between" }}>
+        <div className="row wrap between">
           <div className="row wrap">
             <h2>overrides · {channelId}</h2>
             <span className="faint">yours; the machine never writes here</span>
@@ -170,9 +170,9 @@ function Editor({ channelId }: { channelId: string }) {
         <table>
           <thead>
             <tr>
-              <th style={{ width: "30%" }}>key</th>
+              <th className="col-key">key</th>
               <th>value</th>
-              <th style={{ width: 40 }} />
+              <th className="col-action" />
             </tr>
           </thead>
           <tbody>
@@ -213,7 +213,7 @@ function Editor({ channelId }: { channelId: string }) {
           </tbody>
         </table>
         <button
-          style={{ marginTop: 8 }}
+          className="above-table"
           onClick={() => {
             setPairs((was) => [...was, ["", ""]]);
             setDirty(true);

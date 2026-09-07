@@ -62,7 +62,7 @@ export function BoardScreen({
 
   return (
     <>
-      <div className="row wrap" style={{ justifyContent: "space-between" }}>
+      <div className="row wrap between">
         <div className="row wrap">
           <Pill
             tone={it.status === "connected" ? "good" : "warn"}
@@ -74,10 +74,7 @@ export function BoardScreen({
           </span>
           {spend.value && (
             <span
-              className="faint mono"
-              // Its own separator: without one this ran straight on from the
-              // line before it — "last 7m ago 57752 tok today".
-              style={{ borderLeft: "1px solid var(--line)", paddingLeft: 8 }}
+              className="faint mono with-divider"
               title={Object.entries(spend.value.by_agent)
                 .map(([a, n]) => `${a} ${n}`)
                 .join(" · ")}
@@ -99,12 +96,12 @@ export function BoardScreen({
       {it.failed.length > 0 && (
         <section className="banner">
           <Pill tone="bad" label={`${it.failed.length} unsent`} />
-          <div style={{ minWidth: 0 }}>
+          <div className="grow">
             {/* First and loudest: it is the only thing on this screen that
                 needs a person, and the text is here to be copied. */}
             <h2>Could not be sent</h2>
             {it.failed.map((row) => (
-              <div key={row.id} style={{ marginTop: 8 }}>
+              <div key={row.id} className="banner-row">
                 <span className="faint mono">
                   task {row.task_id ?? "—"} · {row.kind} · {row.attempts} attempts
                 </span>

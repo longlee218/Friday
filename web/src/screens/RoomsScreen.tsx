@@ -102,8 +102,8 @@ function RoomDetail({
     .reverse();
 
   return (
-    <section style={{ display: "grid", gap: "var(--grid-gap)", minWidth: 0 }}>
-      <header className="card row wrap" style={{ justifyContent: "space-between" }}>
+    <section className="room-detail">
+      <header className="card row wrap between">
         <Rename room={room} onRenamed={onRenamed} />
         <div className="row">
           <button onClick={() => setShowing("context")}>What it is told</button>
@@ -154,9 +154,9 @@ function RoomDetail({
               <span className="said">{m.text}</span>
               <span className="when">
                 <button
+                  className="time-link"
                   onClick={() => onOpenFlow(m.provider, m.provider_message_id)}
                   title="What happened because of this message"
-                  style={{ background: "none", border: "none", padding: "0 6px" }}
                 >
                   {shortTime(m.created_at)}
                 </button>
@@ -211,7 +211,7 @@ function Rename({ room, onRenamed }: { room: Room; onRenamed: () => void }) {
           if (e.key === "Enter") save();
           if (e.key === "Escape") setEditing(false);
         }}
-        style={{ width: 260 }}
+        className="rename-input"
       />
       <button className="primary" onClick={save}>
         Save
@@ -252,7 +252,7 @@ function MemoryPanel({ channelId }: { channelId: string }) {
             <span className="mono faint">{m.id}</span>
             <Pill label={m.agent} />
             {m.deleted_at && <Pill tone="bad" label="forgotten" />}
-            <span className="count" style={{ marginLeft: "auto" }}>
+            <span className="count auto">
               {ago(m.created_at)}
             </span>
           </header>
@@ -291,7 +291,7 @@ function Dialog({
     <dialog ref={ref} onClose={onClose} onCancel={onClose}>
       <header>
         <h2>{title}</h2>
-        <button style={{ marginLeft: "auto" }} onClick={onClose}>
+        <button className="primary" onClick={onClose}>
           Close
         </button>
       </header>

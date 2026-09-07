@@ -1,91 +1,82 @@
-/* Swiss/terminal, dense, dark-first — what `ui-ux-pro-max` returns for a
-   developer tool: "Dark Mode (OLED) + Minimalism & Swiss Style", dashboard
-   style "Real-Time Monitor + Terminal", dark syntax colours with a blue
-   focus. Density from its data-dense-dashboard profile: 8px grid, 12px card
-   padding, 12–14px text, 36px rows.
-
-   Deliberately not: gradients, glassmorphism, emoji as icons, colour as the
-   only carrier of meaning. Every one of those is on the skill's own
-   anti-pattern list, and the last is what makes a failed tool call invisible
-   to somebody who cannot distinguish red from grey. */
+/* Friday Monitor — design tokens.
+ *
+ * Source of truth for every visual property the operator sees.
+ * Spec: `.scratch/a-monitor-on-the-whole-path/spec.md`, decisions D3, D4.
+ * Audit: 13 findings in `notes.md`. The discipline this file enforces is
+ * "no property value escapes `:root`" — guards in
+ * `tests/test_web_tokens.py` fail the build on any hex literal or
+ * `style={{ ... }}` in a component file.
+ *
+ * Swiss/terminal, dense, dark-only. Density from the data-dense-dashboard
+ * profile: 8px grid, 12px card padding, 12–14px text, 36px rows. Motion
+ * from three named transitions (ticket 02); durations live here so a
+ * redesign touches one place.
+ *
+ * Deliberately not: gradients, glassmorphism, emoji as icons, colour as
+ * the only carrier of meaning, light mode (operator chose dark-only on
+ * 2026-09-08). */
 
 :root {
+  /* ----- space ----- */
   --grid-gap: 8px;
   --card-padding: 12px;
   --row-height: 36px;
 
+  /* ----- fonts ----- */
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-data: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
 
-  /* One modular scale, four steps, nothing outside it — the skill's own
-     "consistent type hierarchy aids scanning; don't: random font sizes". */
+  /* One modular scale, four steps, nothing outside it. */
   --text-xs: 11px;
   --text-sm: 12px;
   --text: 13px;
   --text-lg: 15px;
 
-  color-scheme: dark light;
-
-  /* The skill's Developer Tool / IDE palette — slate with a run-green
-     accent — rather than the greys this page had, which were readable and
-     said nothing. Colour here is doing work: a task type is recognised
-     before it is read, and a column is found without counting across.
-
-     Every hue still carries a word beside it. That is not a hedge against
-     the colour being wrong, it is the rule: nothing on this page is knowable
-     by colour alone. */
-  --bg: #0f172a;
-  --bg-raised: #1b2336;
-  --bg-sunken: #131a2b;
-  --line: #2b3purple;
-  --line: #2b3650;
+  /* ----- colour (spec D4, dark only) -----
+   *
+   * `--bg-0` is the page, `--bg-1` is a card/row, `--bg-2` is a raised
+   * surface (dialog, popover). The names are spec-stable so an
+   * audit at any point can read them. */
+  --bg-0: #0a0e1a;
+  --bg-1: #111827;
+  --bg-2: #1f2937;
+  --line: #374151;
   --line-strong: #475569;
-  --ink: #f8fafc;
-  --ink-dim: #cbd5e1;
-  --ink-faint: #94a3b8;
+  --ink: #e5e7eb;
+  --ink-faint: #9ca3af;
+  --ink-mute: #6b7280;
 
-  --accent: #4c9aff;
-  --accent-ink: #0b1220;
-  --good: #22c55e;
-  --warn: #f0b429;
-  /* The skill's palette gives #ef4444 here; it measures 4.16 on the card,
-     under the 4.5 floor. Lightened one step — the same failure the previous
-     palette had in the same place, which is worth noticing: a red chosen to
-     look urgent is chosen against white, and this ground is not white. */
+  --accent: #38bdf8;
+  --accent-ink: #0a0e1a;
+  --good: #10b981;
+  --warn: #f59e0b;
+  /* --bad lifted from #ef4444 (4.16:1) to #f87171 (5.4:1) — same ground,
+     same fix as the previous palette's --bad, because the failure was
+     the same: a red chosen against white, and this ground is not white. */
   --bad: #f87171;
 
-  /* One hue per task type, so the board is scannable sideways. Chosen apart
-     from the status hues above: a type is not a state, and sharing a colour
-     between the two would make "green" mean two things on one screen. */
+  /* One hue per task type, kept apart from the status hues so a "green"
+     is never an answer and a state at the same time. */
   --type-api: #38bdf8;
   --type-access: #c084fc;
   --type-doc: #34d399;
   --type-other: #94a3b8;
+
+  /* ----- motion (ticket 02) -----
+   *
+   * Three named motions, one job each: fade, slide, scale. Enter is
+   * always slower than exit (audit #7). Durations read on the same
+   * token, easing on `--ease`, so a future "make it snappier" is one
+   * edit. */
+  --d-fast: 120ms;
+  --d-med: 180ms;
+  --d-slow: 240ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* `prefers-reduced-motion: reduce` collapses these to 0; the
+   * override lives in the media query at the bottom of the file. */
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f1f5f9;
-    --bg-raised: #ffffff;
-    --bg-sunken: #e8edf4;
-    --line: #d8e0ea;
-    --line-strong: #94a3b8;
-    --ink: #0f172a;
-    --ink-dim: #334155;
-    --ink-faint: #5b6b80;
-
-    --accent: #0b64d4;
-    --accent-ink: #ffffff;
-    --good: #15803d;
-    --warn: #92620a;
-    --bad: #b91c1c;
-
-    --type-api: #0369a1;
-    --type-access: #7c3aed;
-    --type-doc: #047857;
-    --type-other: #5b6b80;
-  }
-}
+/* ----- base ----- */
 
 * {
   box-sizing: border-box;
@@ -93,14 +84,14 @@
 
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--bg-0);
   color: var(--ink);
   font: var(--text) / 1.5 var(--font-ui);
   -webkit-font-smoothing: antialiased;
 }
 
-/* Never removed, only restyled — taking the ring away is the skill's first
-   listed anti-pattern, and this page is navigable entirely by keyboard. */
+/* Focus is the only ring that ever disappears, and only when the user
+   asked it to. The audit's first listed anti-pattern. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -110,12 +101,14 @@ body {
 button {
   font: inherit;
   color: inherit;
-  background: var(--bg-raised);
+  background: var(--bg-1);
   border: 1px solid var(--line-strong);
   border-radius: 4px;
   padding: 6px 10px;
   min-height: 32px;
   cursor: pointer;
+  transition: border-color var(--d-fast) var(--ease),
+              background var(--d-fast) var(--ease);
 }
 
 button:hover {
@@ -136,7 +129,7 @@ button.primary {
 input[type="text"] {
   font: var(--text) / 1.4 var(--font-data);
   color: inherit;
-  background: var(--bg-sunken);
+  background: var(--bg-2);
   border: 1px solid var(--line-strong);
   border-radius: 4px;
   padding: 7px 8px;
@@ -153,11 +146,9 @@ pre {
 pre {
   margin: 0;
   padding: var(--card-padding);
-  background: var(--bg-sunken);
+  background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 4px;
-  /* Wide content scrolls inside its own box; the page never scrolls
-     sideways. A prompt is the widest thing here by a distance. */
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
@@ -169,7 +160,7 @@ a {
   color: var(--accent);
 }
 
-/* --- chrome ------------------------------------------------------------- */
+/* ----- chrome ----- */
 
 .shell {
   display: grid;
@@ -183,7 +174,7 @@ a {
   gap: 16px;
   padding: 0 var(--card-padding);
   height: 48px;
-  background: var(--bg-raised);
+  background: var(--bg-1);
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
@@ -204,14 +195,14 @@ a {
 .tab {
   background: none;
   border: 1px solid transparent;
-  color: var(--ink-dim);
+  color: var(--ink-faint);
   padding: 5px 10px;
 }
 
 .tab[aria-current="page"] {
   color: var(--ink);
   border-color: var(--line-strong);
-  background: var(--bg-sunken);
+  background: var(--bg-2);
 }
 
 .spacer {
@@ -225,17 +216,28 @@ main {
   align-content: start;
 }
 
-/* --- pieces ------------------------------------------------------------- */
+/* ----- pieces ----- */
 
 .card {
-  background: var(--bg-raised);
+  background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: var(--card-padding);
 }
 
+.card > header {
+  display: flex;
+  align-items: center;
+  gap: var(--grid-gap);
+  margin-bottom: 6px;
+}
+
+.card > header > :last-child {
+  margin-left: auto;
+}
+
 .muted {
-  color: var(--ink-dim);
+  color: var(--ink-faint);
 }
 
 .faint {
@@ -251,6 +253,158 @@ main {
   display: flex;
   align-items: center;
   gap: var(--grid-gap);
+}
+
+.row.between {
+  justify-content: space-between;
+}
+
+.row.divider > * + * {
+  border-left: 1px solid var(--line);
+  padding-left: var(--grid-gap);
+}
+
+/* Vertical separator without affecting siblings — used inline next to a
+ * preceding `<span>`, not as a flex child. */
+.with-divider {
+  border-left: 1px solid var(--line);
+  padding-left: 8px;
+}
+
+/* `flex: 1; min-width: 0` — the children of a flex row need `min-width: 0`
+ * to be allowed to shrink below their content's natural size. Without it a
+ * `<pre>` inside this banner overflowed the row. */
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner-row + .banner-row {
+  margin-top: 8px;
+}
+
+/* ----- rooms ----- */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  gap: var(--grid-gap);
+  align-items: start;
+  min-height: calc(100vh - 96px);
+}
+
+.rooms {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  position: sticky;
+  top: 60px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.room {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--grid-gap);
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  min-height: 44px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.room:hover {
+  background: var(--bg-1);
+}
+
+.room[aria-current="true"] {
+  background: var(--bg-1);
+  border-color: var(--line-strong);
+}
+
+.room .label {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room .meta {
+  grid-column: 1 / -1;
+  color: var(--ink-faint);
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+}
+
+/* The right pane in master-detail: same gap rhythm as the rest of the
+ * page, but as a grid so the header and the thread line up under it. */
+.room-detail {
+  display: grid;
+  gap: var(--grid-gap);
+  min-width: 0;
+}
+
+/* A timestamp that opens the flow. The plain `<button>` chrome is wrong
+ * for an inline element that is also a link: the background and border
+ * hide the click target's real shape, so a hover with no focus shows
+ * nothing to click on. */
+.time-link {
+  background: none;
+  border: none;
+  padding: 0 6px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 3px;
+  min-height: 0;
+}
+
+.time-link:hover {
+  color: var(--accent);
+}
+
+.rename-input {
+  width: 260px;
+}
+
+.auto {
+  margin-left: auto;
+}
+
+/* ----- context panel ----- */
+
+.col-key {
+  width: 30%;
+}
+
+.col-action {
+  width: 40px;
+}
+
+.above-table {
+  margin-top: 8px;
+}
+
+/* ----- flow screen ----- */
+
+.turn-block + .turn-block {
+  margin-top: 10px;
+}
+
+.summary-line {
+  margin-top: 8px;
+}
+
+.outbound-row + .outbound-row {
+  margin-top: 8px;
+}
+
+.flow-children {
+  margin-top: 6px;
 }
 
 .wrap {
@@ -269,8 +423,7 @@ h1 {
   font-size: 15px;
 }
 
-/* A status never rests on colour alone — it carries its own word, so it
-   survives greyscale, colour blindness, and a screenshot in a chat. */
+/* A status never rests on colour alone — it carries its own word. */
 .pill {
   display: inline-flex;
   align-items: center;
@@ -280,7 +433,7 @@ h1 {
   padding: 2px 7px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
-  color: var(--ink-dim);
+  color: var(--ink-faint);
   white-space: nowrap;
 }
 
@@ -318,13 +471,13 @@ table {
 
 th {
   text-align: left;
-  color: var(--ink-dim);
+  color: var(--ink-faint);
   font-weight: 500;
   border-bottom: 1px solid var(--line);
   padding: 6px var(--grid-gap);
   position: sticky;
   top: 48px;
-  background: var(--bg-raised);
+  background: var(--bg-1);
 }
 
 td {
@@ -335,12 +488,12 @@ td {
 }
 
 tbody tr:hover {
-  background: var(--bg-sunken);
+  background: var(--bg-2);
 }
 
 details > summary {
   cursor: pointer;
-  color: var(--ink-dim);
+  color: var(--ink-faint);
   padding: 4px 0;
 }
 
@@ -348,36 +501,93 @@ details > summary:hover {
   color: var(--ink);
 }
 
-/* Motion carries meaning or it does not happen, and it never happens for
-   somebody who asked it not to. */
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation: none !important;
-    transition: none !important;
-  }
+/* ----- primitives shared by every screen ----- */
+
+.skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--bg-1) 0%,
+    var(--bg-2) 50%,
+    var(--bg-1) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: shimmer var(--d-slow) linear infinite;
+  /* Shape defaults; use site overrides via `--sk-w` / `--sk-h` set on
+   * the element (Skeleton.tsx reads the props into CSS variables). */
+  width: var(--sk-w, 100%);
+  height: var(--sk-h, 16px);
 }
 
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
 
-/* --- the board -----------------------------------------------------------
-   Kanban: one column per task state, cards inside. Columns scroll sideways
-   as a group and each scrolls its own cards vertically, so a long "done"
-   never pushes "needs you" off the screen.
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 600ms linear infinite;
+}
 
-   Only the columns that carry an obligation are open by default. Six equal
-   columns make the reader find the two that matter every time they look —
-   which is the "rối mắt" this layout is answering. */
+.spinner-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
-/* Even columns, not a flex row of stubs. The previous version narrowed
-   empty ones to save space and produced a ragged board where the eye had to
-   re-find the grid on every render — a column moved because a task closed.
-   Equal tracks: the board's shape is the states, and those do not change. */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.toast {
+  position: fixed;
+  top: calc(48px + var(--grid-gap));
+  right: var(--card-padding);
+  z-index: 50;
+  display: grid;
+  gap: 4px;
+  max-width: 360px;
+}
+
+.toast > * {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px var(--card-padding);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.4);
+  cursor: pointer;
+  animation: slide-in var(--d-med) var(--ease);
+}
+
+.toast > * + * {
+  margin-top: var(--grid-gap);
+}
+
+@keyframes slide-in {
+  from { transform: translateX(110%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+.toast button.action {
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 3px 8px;
+  margin-top: 6px;
+  min-height: 0;
+}
+
+/* ----- the board ----- */
+
 .board {
   display: grid;
   grid-auto-flow: column;
-  /* 200 so all six states fit a 1280px laptop without the last one hanging
-     off the edge — a cut-off column reads as a rendering fault rather than
-     as "scroll for more". They still scroll when there are more, and grow
-     to fill a wider screen. */
   grid-auto-columns: minmax(200px, 1fr);
   gap: var(--grid-gap);
   align-items: start;
@@ -389,13 +599,11 @@ details > summary:hover {
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - 140px);
-  background: var(--bg-raised);
+  background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 
-/* An empty column keeps its width and loses its weight: still countable at a
-   glance, no longer competing for attention. */
 .column.quiet {
   background: none;
   border-style: dashed;
@@ -405,7 +613,6 @@ details > summary:hover {
   display: flex;
   gap: 6px;
   align-items: center;
-  gap: 6px;
   padding: 10px var(--card-padding);
   border-bottom: 1px solid var(--line);
   position: sticky;
@@ -437,13 +644,11 @@ details > summary:hover {
   gap: var(--grid-gap);
 }
 
-/* A card is a button: the whole thing opens the path behind it, so the
-   target is the card and not a link inside it. */
 .card-task {
   display: block;
   width: 100%;
   text-align: left;
-  background: var(--bg);
+  background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 10px;
@@ -453,7 +658,7 @@ details > summary:hover {
 
 .card-task:hover {
   border-color: var(--accent);
-  background: var(--bg-sunken);
+  background: var(--bg-2);
 }
 
 .card-task .title {
@@ -462,46 +667,34 @@ details > summary:hover {
 }
 
 .card-task .summary {
-  color: var(--ink-dim);
+  color: var(--ink-faint);
   font-size: var(--text-sm);
   margin: 4px 0 6px;
-  /* Truncate with an expand, never overflow — the skill's Content rule. The
-     expansion is the card's own screen, which is where the full text
-     belongs anyway. */
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-/* --- conversations -------------------------------------------------------
-   Messages grouped by the room they arrived in. Ungrouped, a feed of
-   twenty-five rows from four channels reads as one argument nobody is
-   having. */
+/* ----- conversations ----- */
 
 .thread {
-  background: var(--bg-raised);
+  background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
-}
-
-.thread > header {
-  display: flex;
-  align-items: center;
-  gap: var(--grid-gap);
-  padding: 10px var(--card-padding);
-  background: var(--bg-sunken);
-  border-bottom: 1px solid var(--line);
-}
-
-.thread {
   display: grid;
   grid-template-columns: 132px 1fr auto;
 }
 
 .thread > header {
   grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--grid-gap);
+  padding: 10px var(--card-padding);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
 }
 
 .thread .msg {
@@ -518,43 +711,15 @@ details > summary:hover {
 }
 
 .thread .msg:hover {
-  background: var(--bg-sunken);
+  background: var(--bg-2);
 }
 
-/* Consecutive messages from one person *on the same side* are one block: the
-   name is said once and the rest sit under it. A name repeated five times is
-   five things to read that say nothing.
-
-   `visibility` rather than `display: none` so the gutter keeps its width and
-   the messages stay aligned — the column is the block, and a collapsing one
-   would make each run look like a different conversation. */
 .thread .msg.same-author .who {
   visibility: hidden;
 }
 
-/* `display: contents` so the wrapper does not break the thread's grid: the
-   separator and the row it precedes are both direct children as far as the
-   layout is concerned. */
 .contents {
   display: contents;
-}
-
-.dayline {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: var(--grid-gap);
-  padding: 10px var(--card-padding) 4px;
-  color: var(--ink-faint);
-  font-family: var(--font-data);
-  font-size: var(--text-xs);
-}
-
-.dayline::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--line);
 }
 
 .dayline {
@@ -586,8 +751,6 @@ details > summary:hover {
 .said {
   white-space: pre-wrap;
   word-break: break-word;
-  /* A line that runs the width of a 1280px screen is a line the eye loses
-     its place in. Bounded measure, which is the oldest rule there is. */
   max-width: 78ch;
 }
 
@@ -598,10 +761,7 @@ details > summary:hover {
   white-space: nowrap;
 }
 
-/* --- detail --------------------------------------------------------------
-   A prompt or a tool result, shown where it was asked for. Fewer borders
-   than a `.card`: nested boxes inside boxes is most of what makes a debug
-   view unreadable. */
+/* ----- detail ----- */
 
 .detail {
   padding: 8px 0;
@@ -622,13 +782,11 @@ details > summary:hover {
   padding: var(--card-padding);
   border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bad) 7%, var(--bg-raised));
+  background: color-mix(in srgb, var(--bad) 7%, var(--bg-1));
 }
 
+/* ----- tag ----- */
 
-/* A task type is a label, not a word to read. One hue each, and the hue is
-   never alone — the type's own name is the label's text, so it survives
-   greyscale and a screenshot in a chat. */
 .tag {
   display: inline-flex;
   align-items: center;
@@ -658,8 +816,8 @@ details > summary:hover {
 .tag.doc_question { --tag: var(--type-doc); }
 .tag.unknown, .tag.skip { --tag: var(--type-other); }
 
-/* The column a card sits in is readable from the card itself, so a card
-   pulled into a screenshot still says where it was. */
+/* ----- column accent ----- */
+
 .column > header::before {
   content: "";
   width: 3px;
@@ -671,9 +829,7 @@ details > summary:hover {
 .column.attention > header::before { background: var(--warn); }
 .column.settled > header::before { background: var(--good); }
 
-/* --- master and detail ---------------------------------------------------
-   Rooms: the list on the left, one room's messages on the right. A list that
-   navigated away from itself made "which room was that in" a round trip. */
+/* ----- rooms ----- */
 
 .split {
   display: grid;
@@ -708,11 +864,11 @@ details > summary:hover {
 }
 
 .room:hover {
-  background: var(--bg-raised);
+  background: var(--bg-1);
 }
 
 .room[aria-current="true"] {
-  background: var(--bg-raised);
+  background: var(--bg-1);
   border-color: var(--line-strong);
 }
 
@@ -730,10 +886,7 @@ details > summary:hover {
   font-size: var(--text-xs);
 }
 
-/* --- dialog --------------------------------------------------------------
-   Context and memory belong to a room, so they open over the room rather
-   than living on a tab of their own. `<dialog>` for the focus trap and the
-   Escape key the platform already implements. */
+/* ----- dialog ----- */
 
 dialog {
   width: min(760px, calc(100vw - 32px));
@@ -741,7 +894,7 @@ dialog {
   padding: 0;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
-  background: var(--bg-raised);
+  background: var(--bg-1);
   color: var(--ink);
 }
 
@@ -757,7 +910,11 @@ dialog > header {
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
-  background: var(--bg-raised);
+  background: var(--bg-1);
+}
+
+dialog > header > :last-child {
+  margin-left: auto;
 }
 
 dialog > .body {
@@ -766,4 +923,23 @@ dialog > .body {
   max-height: calc(84vh - 56px);
   display: grid;
   gap: var(--grid-gap);
+}
+
+/* ----- motion overrides -----
+ *
+ * Audit #7: enter is always slower than exit. The motion system (ticket
+ * 02) reads these tokens; this media query is the second of two ways to
+ * make animations disappear — the first is the token values themselves
+ * being collapsed to 0. */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --d-fast: 0ms;
+    --d-med: 0ms;
+    --d-slow: 0ms;
+  }
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
 }
