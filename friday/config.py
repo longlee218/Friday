@@ -37,6 +37,44 @@ class IngestConfig:
     turn_seconds: float = 12.0
 
 
+#: How long, written as a number and a unit: `10s`, `10m`, `10h`.
+_DURATION = re.compile(r"^(\d+)([smh])$")
+_IN_SECONDS = {"s": 1, "m": 60, "h": 3600}
+
+
+def duration(written: object, *, key: str) -> int | None:
+    """Seconds, from `10s` / `10m` / `10h`. `None` in, `None` out.
+
+    Refused here rather than where it is used, because the two ways an
+    unparsed threshold can arrive downstream are both worse than a failure to
+    start: a crash on the first message, or a silent zero — and a zero here
+    marks every message outdated, which reads as the agent having quietly
+    stopped working rather than as a typo in a file.
+
+    Strict on purpose. A bare `24` is refused rather than guessed at, because
+    the guess would have to be a unit and every unit is somebody's reasonable
+    assumption; `1.5h` is refused because the format has no fraction and
+    accepting one invites `0.5s`. `-1h` is refused because a negative age is
+    not a shorter cutoff, it is a cutoff in the future.
+
+    This is the only key in this configuration that parses. Every other time
+    here is a float with its unit in its name — `turn_seconds`,
+    `heartbeat_seconds`, `backoff_seconds`. That inconsistency is accepted
+    deliberately: converting the rest is a separate change nobody has asked
+    for, and doing it as a side effect would put six behaviour-carrying
+    numbers through a new parser for tidiness.
+    """
+    if written is None:
+        return None
+    found = _DURATION.match(written) if isinstance(written, str) else None
+    if found is None:
+        raise ConfigError(
+            f"{key}: {written!r} is not a duration. Write a whole number and a "
+            "unit — 10s, 10m, 10h — or leave it out for no limit."
+        )
+    return int(found.group(1)) * _IN_SECONDS[found.group(2)]
+
+
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 _REQUIRED_AGENT_FIELDS = ("api_key", "base_url", "model")

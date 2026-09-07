@@ -669,3 +669,124 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(db, provider, inbo
 
     (task,) = await db.tasks_in_state(NEEDS_HUMAN, 10)
     assert "gave up after 3 attempts" in task.params["reason"]
+
+
+# --- too old to answer (board `work-that-has-gone-cold`, ticket 01) ----------
+
+
+def stale(hours: float, **kw):
+    """A message written `hours` ago. The clock, not the capture — a message
+    the sweep finds a week late is a week old (D2)."""
+    return make_event(
+        created_at=datetime.now(timezone.utc) - timedelta(hours=hours), **kw
+    )
+
+
+async def test_a_message_older_than_the_cutoff_never_reaches_the_model(db):
+    """The whole ticket. `StubTriage.seen` is the assertion: an outdated
+    message must not appear there, because appearing there means a model call
+    was paid for on work nobody wants done."""
+    event = stale(30, message_id="10")
+    await db.record_message(event)
+    triage = StubTriage(api_issue())
+    r = TriageRunner(
+        db=db, triage=triage, confidence_threshold=0.7, max_message_age=24 * 3600
+    )
+
+    touched = await r.run_once()
+
+    assert triage.seen == [], "an outdated message was sent to the model"
+    assert touched == [], "an outdated message opened a task"
+
+
+async def test_an_outdated_message_is_recorded_rather_than_dropped(db):
+    """The never-drop argument, as a test. The mention is kept, marked, and
+    legible — what is skipped is the model call, not the record."""
+    event = stale(30, message_id="10")
+    await db.record_message(event)
+    r = TriageRunner(
+        db=db, triage=StubTriage(), confidence_threshold=0.7, max_message_age=24 * 3600
+    )
+
+    await r.run_once()
+
+    flow = await db.flow_for(provider="fake", message_id="10")
+    assert flow.decision["type"] == "outdated"
+    assert "old" in flow.decision["params"]["reason"]
+    assert flow.task is None
+    assert await db.untriaged_mentions(10) == [], "it stayed in the queue"
+
+
+async def test_with_no_cutoff_configured_nothing_changes(db):
+    """Absent means the behaviour that exists today, for the reason
+    `daily_token_budget` has no default."""
+    event = stale(24 * 30, message_id="10")
+    await db.record_message(event)
+    triage = StubTriage(api_issue())
+
+    await TriageRunner(db=db, triage=triage, confidence_threshold=0.7).run_once()
+
+    assert [e.provider_message_id for e in triage.seen] == ["10"]
+
+
+async def test_a_message_exactly_at_the_cutoff_is_still_answered(db):
+    """The boundary, both sides. Tested because "older than" and "at least as
+    old as" differ by exactly the case somebody hits at 24 hours and one
+    second."""
+    await db.record_message(stale(23.9, message_id="10"))
+    triage = StubTriage(api_issue())
+
+    await TriageRunner(
+        db=db, triage=triage, confidence_threshold=0.7, max_message_age=24 * 3600
+    ).run_once()
+
+    assert [e.provider_message_id for e in triage.seen] == ["10"]
+
+
+async def test_a_fresh_follow_up_brings_its_older_turn_with_it(db):
+    """D5. Three messages from yesterday and one from an hour ago are one
+    turn, and it is fresh — otherwise a reporter returning to their own thread
+    is answered without the context they wrote."""
+    for n, hours in ((1, 30), (2, 29), (3, 0.5)):
+        await db.record_message(
+            stale(hours, message_id=str(n), text=f"part {n}")
+        )
+    triage = StubTriage(api_issue())
+
+    await TriageRunner(
+        db=db, triage=triage, confidence_threshold=0.7, max_message_age=24 * 3600
+    ).run_once()
+
+    assert triage.seen, "a turn with a fresh message was treated as outdated"
+    assert "part 1" in triage.seen[0].text, "the older messages were dropped"
+
+
+async def test_a_late_answer_to_our_own_question_is_never_outdated(db):
+    """D6. The task asked something and is still waiting; the answer arriving
+    three days late is still the answer. Without this the reporter replies,
+    nothing hears it, and the task waits forever for something it has already
+    been told — the failure this system shipped once and wrote a ticket about."""
+    from friday.outbox import Kind
+
+    reported = make_event(message_id="1", text="the api is down")
+    await db.record_message(reported)
+    task = await db.create_task(
+        conversation=reported.conversation, type="api_issue",
+        state=TaskState.WAITING_FOR_DETAILS, confidence=0.9, params={},
+    )
+    asked = await db.queue_outbound(
+        task_id=task.id, conversation=reported.conversation, kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user", text="which environment?",
+    )
+    await db.mark_outbound_sent(asked.id, sent_message_id="99")
+
+    await db.record_message(stale(72, message_id="100", text="production", reply_to="99"))
+    triage = StubTriage(api_issue())
+
+    await TriageRunner(
+        db=db, triage=triage, confidence_threshold=0.7, max_message_age=24 * 3600
+    ).run_once()
+
+    assert [e.provider_message_id for e in triage.seen] == ["100"], (
+        "a late answer to our own question was marked outdated"
+    )

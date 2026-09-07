@@ -16,6 +16,7 @@ import logging
 from dataclasses import replace
 from datetime import datetime, timezone
 
+from friday.config import duration
 from friday.store.db import Database
 from friday.domain.states import TaskState
 from friday.domain.models import InboundEvent, Task
@@ -25,6 +26,14 @@ from friday.triage.prefilter import Sensitive
 __all__ = ["PENDING", "NEEDS_HUMAN", "TriageRunner", "build_triage"]
 
 log = logging.getLogger(__name__)
+
+#: What triage concluded about a message too old to be worth answering. A
+#: decision and not a `TaskState` (D3): everything `classify` names opens
+#: work, and this names the absence of it — the shape `skip` already has.
+#: Deliberately not in `db.CLASSIFIABLE`, which decides what may become a
+#: few-shot example: "this was old" is a fact about the clock, not something
+#: to learn to predict from a message's text.
+OUTDATED = "outdated"
 
 PENDING = TaskState.PENDING
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN
@@ -126,6 +135,9 @@ class TriageRunner:
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)
             ),
+            max_message_age=duration(
+                settings.options.get("max_message_age"), key="max_message_age"
+            ),
             turn_seconds=config.ingest.turn_seconds,
             still_typing=still_typing,
         )
@@ -140,6 +152,10 @@ class TriageRunner:
         poll_interval_seconds: float = 2.0,
         #: How long the author has to be quiet before their turn is read.
         turn_seconds: float = 0.0,
+        #: How old a turn may be before it is marked outdated rather than
+        #: answered, in seconds. `None` is no cutoff, which is the shipped
+        #: default and the behaviour that existed before this knob.
+        max_message_age: float | None = None,
         #: `(conversation, author_id) -> bool`, from the inbox. Keeps a turn
         #: open past the window while they are still writing. Optional: the
         #: recovery sweep has no typing signal, and neither do tests.
@@ -149,6 +165,7 @@ class TriageRunner:
         self._triage = triage
         self._threshold = confidence_threshold
         self._turn_seconds = turn_seconds
+        self._max_age = max_message_age
         self._still_typing = still_typing or (lambda conversation, author_id: False)
         self._batch_size = batch_size
         self._poll_interval = poll_interval_seconds
@@ -219,6 +236,15 @@ class TriageRunner:
             return None
         if not closed_by_someone_else and self._still_open(turn):
             return None
+        stale = await self._too_old(event, turn)
+        if stale is not None:
+            await self._db.mark_triaged(
+                event,
+                None,
+                decision={"type": OUTDATED, "confidence": 0.0, "params": {"reason": stale}},
+            )
+            log.info("%s is %s — not sent to the model", event.provider_message_id, stale)
+            return None
         said = replace(event, text="\n".join(m.text for m in turn if m.text))
         outcome = await self._decide(said)
         task = await self._apply(event, outcome)
@@ -226,6 +252,47 @@ class TriageRunner:
             event, task.id if task else None, decision=_record(outcome)
         )
         return task
+
+    def _age(self, turn: list[InboundEvent]) -> float:
+        """How old the turn is, in seconds, judged by its **newest** message.
+
+        D5: three messages from yesterday and one from an hour ago are one
+        turn, and it is fresh. Judging by the oldest would answer a reporter
+        who came back to their own thread without the context they wrote —
+        which is the failure this system has already shipped once, from the
+        other direction.
+        """
+        newest = max(m.created_at for m in turn)
+        return (datetime.now(timezone.utc) - newest).total_seconds()
+
+    async def _too_old(
+        self, event: InboundEvent, turn: list[InboundEvent]
+    ) -> str | None:
+        """Why this turn has stopped being worth answering, or `None`.
+
+        A reason rather than a boolean, so the sentence is built where the
+        cutoff is known to exist. The caller has no way to narrow
+        `self._max_age` from a `True`, and formatting it there meant dividing
+        an `Optional` by 3600.
+
+        Never for a reply to something we asked (D6). A task in
+        `WAITING_FOR_DETAILS` asked a question and is still waiting; the
+        answer arriving three days late is still the answer, and the lookup
+        that recognises it is the same one `_apply` uses rather than a second
+        way of spotting the same thing.
+        """
+        cutoff = self._max_age
+        if cutoff is None:
+            return None
+        if await self._db.task_answered_by(event.reply_to) is not None:
+            return None
+        age = self._age(turn)
+        if age <= cutoff:
+            return None
+        return (
+            f"written {age / 3600:.0f}h ago, older than the "
+            f"{cutoff / 3600:.0f}h cutoff"
+        )
 
     def _still_open(self, turn: list[InboundEvent]) -> bool:
         """They may not be finished: too recent, or still typing.

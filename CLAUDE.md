@@ -327,6 +327,17 @@ not an implementation detail:
   refusals, classifier errors and the sensitive-word prefilter all route to
   `HITL` — never to a silent discard. A dropped mention is indistinguishable
   from correct operation.
+
+  **One outcome answers nothing, and it is still not a discard.** A turn
+  older than `max_message_age` is recorded as `outdated`, opens no task and
+  reaches no model. What the rule above forbids is a mention that leaves no
+  trace; this one leaves a row, a reason and a place on the board, and only
+  the reply is skipped. It is the prefilter's shape with the opposite
+  conclusion — that one **holds** a message *for a person*, because somebody
+  still needs to see it; this one decides nobody does. Judged by the turn's
+  newest message, so a live follow-up pulls its older part in, and never
+  applied to a reply answering something this system asked. Unset by default,
+  for the reason `daily_token_budget` is.
 - **Some messages must not reach the model at all**, and that is decided
   before the call, by `config.yaml`'s `sensitive_words` — pay, health records,
   credentials. A rule that runs first cannot be argued out of by a persuasive

@@ -60,6 +60,23 @@ agents:
     # Escalate to a human below this rather than guessing. A placeholder until
     # real decisions accumulate — do not trust this number yet.
     confidence_threshold: 0.7
+    # How old a turn may be before it is marked `outdated` instead of
+    # answered — written as a number and a unit: 10s, 10m, 10h.
+    #
+    # Leave it out for no limit, which is what happened before this existed.
+    # Set it and a message written longer ago than this is recorded, kept and
+    # shown on the board, and never sent to a model: nothing is dropped, the
+    # reply is. The case it exists for is a restart against a cold cursor —
+    # the sweep asks each channel for everything after it, and with no cursor
+    # that is the whole history, so without this the agent works through a
+    # week of messages whose authors moved on.
+    #
+    # A turn is judged by its newest message, so somebody returning to their
+    # own thread pulls the older part back in with them. A reply to something
+    # this system asked is never outdated, however late — the task asked, and
+    # is still waiting.
+    # max_message_age: '24h'
+
     # How many past classifications the operator marked right to show as
     # examples. Read once at startup: examples belong in the stable front of
     # the prompt, so a mark made now takes effect on the next restart.

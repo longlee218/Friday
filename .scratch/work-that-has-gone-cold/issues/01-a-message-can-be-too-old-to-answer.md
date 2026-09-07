@@ -1,13 +1,13 @@
 # 01: A message can be too old to answer
 
 **What to build:** A message whose author wrote it more than
-`max_message_age_hours` ago is marked outdated and never reaches the model.
+`max_message_age` ago is marked outdated and never reaches the model.
 
 **Blocked by:** None
 
-**Decisions:** D1–D4, below
+**Decisions:** D1–D7, below
 
-**Status:** todo
+**Status:** done
 
 ## Why
 
@@ -80,51 +80,67 @@ genuinely a new outcome, not an existing one reused.
 - **D4. The threshold is configuration, and the default is off.** A number
   guessed before anyone knows what a normal delay looks like will discard real
   work on its first busy day — the argument `config.yaml` already makes for
-  `daily_token_budget` being unset. `max_message_age_hours` absent means no
+  `daily_token_budget` being unset. `max_message_age` absent means no
   cutoff and the behaviour that exists today; the operator sets it once they
   have seen the board's number.
 
 ## Acceptance criteria
 
-- [ ] A message older than the configured age is recorded with an `outdated`
+- [x] A message older than the configured age is recorded with an `outdated`
       decision, opens no task, and reaches no model — asserted by a test that
       fails if a model call happens
-- [ ] With no `max_message_age_hours` configured, behaviour is exactly what it
+- [x] With no `max_message_age` configured, behaviour is exactly what it
       is today, and a test says so
-- [ ] Age is computed from `created_at`; a test covers the backfill case — a
+- [x] Age is computed from `created_at`; a test covers the backfill case — a
       message captured now that was written three days ago
-- [ ] The boundary is tested at exactly the cutoff, not only well past it
-- [ ] The message is still stored and still visible on the board, with the
+- [x] The boundary is tested at exactly the cutoff, not only well past it
+- [x] The message is still stored and still visible on the board, with the
       reason legible — this is the whole of the never-drop argument, so it is a
       test and not a note
-- [ ] A `/flow` path for an outdated message renders as a complete outcome,
+- [x] A `/flow` path for an outdated message renders as a complete outcome,
       the way `skip` and the prefilter hold already do
-- [ ] The startup log says whether a cutoff is in force, the way the
+- [x] The startup log says whether a cutoff is in force, the way the
       sensitive-word list already does
-- [ ] `CLAUDE.md`'s never-drop paragraph gains this outcome and the sentence
+- [x] `CLAUDE.md`'s never-drop paragraph gains this outcome and the sentence
       distinguishing it from the prefilter's hold
-- [ ] Each guard deleted once and watched go red
+- [x] A turn whose newest message is fresh is worked on in full, older
+      messages included (D5)
+- [x] A reply to a question the agent asked is never outdated, however late
+      (D6)
+- [x] `'10s'`, `'10m'`, `'10h'` all parse; a bare number and an unknown suffix
+      are refused at load with a message naming the key (D7)
+- [x] Each guard deleted once and watched go red
 
-## Open — needs the operator
+## Answered by the operator, 2026-09-07
 
-Three things this ticket does not decide, because they are judgement calls
-about how the system should behave rather than about how to build it.
+- **D5. A turn is judged by its newest message.** Three messages from 25 hours
+  ago and a fourth from an hour ago are one turn, and it is fresh. The
+  alternative answers a reporter who came back to their own thread without the
+  context they wrote — which is the failure this system has already shipped
+  once, from the other direction: "the reporter replied and nothing could hear
+  the answer".
 
-1. **Does an outdated message still count as a turn for the messages around
-   it?** A turn is everything one person went on to say. If somebody wrote
-   three messages 25 hours ago and a fourth an hour ago, is that one turn with
-   an answer owed, or three stale messages and one fresh one? Recommendation:
-   the *turn* is judged by its newest message, so a live follow-up pulls the
-   older ones back in with it. Otherwise a reporter who returns to their own
-   thread is answered without the context they wrote.
+- **D6. A reply to something the agent asked is exempt, whatever its age.** A
+  task in `WAITING_FOR_DETAILS` asked a question; getting the answer three days
+  late is still getting it, and the task is still open and still waiting.
+  `task_answered_by(event.reply_to)` already routes these past classification,
+  so the exemption sits beside that lookup rather than inventing a second way
+  to recognise them.
 
-2. **What about a reply to something the agent asked?** `task_answered_by`
-   routes a reply to the task it answers, deliberately bypassing
-   classification. If the reporter answers a question three days later, the
-   task is still open and still waiting. Recommendation: exempt it — a task
-   in `WAITING_FOR_DETAILS` asked for something, and getting it late is still
-   getting it.
+- **D7. The threshold is a duration string, not a number of hours.**
+  `'10s'`, `'10m'`, `'10h'` — the operator's format. `24h` reads as what it
+  is, where `max_message_age: 24` puts the unit in the key and the
+  number somewhere else.
 
-3. **Is 24 hours right?** The number in the request. It is a fine starting
-   value and this ticket makes it configurable rather than fixed, so the
-   question is only what to ship as the documented suggestion.
+  Worth naming the cost, since it is the first of its kind here: every other
+  time in this configuration is a float with its unit in the name —
+  `turn_seconds`, `sweep_interval_seconds`, `heartbeat_seconds`,
+  `down_after_seconds`, `backoff_seconds`, `timeout_seconds`. This key is now
+  the only one that parses. That is a small inconsistency deliberately
+  accepted rather than a precedent: converting the others is a separate change
+  nobody has asked for, and doing it as a side effect of this ticket would put
+  six behaviour-carrying numbers through a new parser for tidiness.
+
+## Nothing open
+
+The three questions above were the operator's and are answered in D5–D7.
