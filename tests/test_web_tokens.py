@@ -328,3 +328,49 @@ def test_route_transition_uses_fade_enter() -> None:
     app = (SRC / "App.tsx").read_text(encoding="utf-8")
     assert "key={section}" in app, "App does not remount on route change"
     assert "fade-enter" in app, "App does not apply the fade-enter motion"
+
+
+def test_app_root_wires_toast_provider() -> None:
+    """<ToastProvider> lives at App root so any screen can call
+    `useToast()` to surface an action that needs the operator's
+    attention (a retry on a failed rename, a notification that a
+    task was opened, etc.). Without the provider, useToast throws."""
+    src = (SRC / "App.tsx").read_text(encoding="utf-8")
+    assert "ToastProvider" in src, "ToastProvider is not wired into App"
+    # Closing tag has to be there too — an open <ToastProvider> without
+    # a close wraps the whole app forever and React will warn.
+    assert "</ToastProvider>" in src, "ToastProvider has no closing tag"
+
+
+def test_no_screen_still_says_loading_literally() -> None:
+    """Every screen used to fall back to a `Loading…` text node when
+    its data was in flight. That is the failure the audit called
+    out: a screen that says "Loading…" with no shape is a screen
+    that has no idea what is coming. Skeleton and Spinner replace
+    every one. A regression that puts `Loading…` text back into a
+    screen is a regression in the operator's experience, and this
+    guard is what catches it."""
+    offenders: list[str] = []
+    for path in SRC.glob("screens/**/*.tsx"):
+        text = path.read_text(encoding="utf-8")
+        for n, line in enumerate(text.splitlines(), 1):
+            if "Loading…" in line or "Loading..." in line:
+                offenders.append(f"{path.relative_to(WEB)}:{n}: {line.strip()}")
+    assert not offenders, "literal Loading… text found:\n" + "\n".join(offenders)
+
+
+def test_skeleton_renders_a_real_element_not_a_text_placeholder() -> None:
+    """`Skeleton` is the primitive the audit asked for, and its
+    test is that it renders an actual element with the `skeleton`
+    class — not a div with `Loading…` text inside. The CSS for
+    `.skeleton` carries the shimmer animation; without the class
+    the placeholder is no better than the text it replaces."""
+    skeleton = (SRC / "ui" / "Skeleton.tsx").read_text(encoding="utf-8")
+    assert 'className="skeleton"' in skeleton, (
+        "Skeleton does not apply the skeleton class — a placeholder "
+        "without the class is no better than text"
+    )
+    assert "Loading" not in skeleton, (
+        "Skeleton renders a Loading… text — that is exactly what "
+        "ticket 03 replaces"
+    )

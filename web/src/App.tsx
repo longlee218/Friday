@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { BoardScreen } from "./screens/BoardScreen";
 import { FlowScreen } from "./screens/FlowScreen";
 import { RoomsScreen } from "./screens/RoomsScreen";
+import { ToastProvider } from "./ui";
 
 /** Real paths, not a hash — the server answers any unknown path with
  *  `index.html` (see `_mount_page`), so a flow can be linked to and reloaded.
@@ -43,38 +44,40 @@ export function App() {
   const openFlow = (provider: string, id: string) => go(`/flow/${provider}/${id}`);
 
   return (
-    <div className="shell">
-      <header className="topbar">
-        <span className="brand">friday</span>
-        <nav className="tabs" aria-label="Sections">
-          {TABS.map((tab) => (
-            <button
-              key={tab.path}
-              className="tab"
-              aria-current={section === tab.path ? "page" : undefined}
-              onClick={() => go(tab.path)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </header>
-      <main>
-        {/* `key={section}` remounts on route change so the `fade-enter`
-            keyframe runs every time. The DOM node is replaced, the
-            animation starts from `opacity: 0`, and `prefers-reduced-
-            motion: reduce` collapses the duration to 0 — the new
-            screen appears instantly, which is what the audit
-            asked for in note #1 (motion that respects the user's
-            own setting). The cost of the remount is one element
-            per route change, well below the threshold of
-            "expensive enough to memo". */}
-        <div key={section} className="fade-enter">
-          {section === "/" && <BoardScreen onOpenFlow={openFlow} />}
-          {section === "/rooms" && <RoomsScreen onOpenFlow={openFlow} />}
-          {section === "/flow" && <FlowScreen path={path} onOpenFlow={openFlow} />}
-        </div>
-      </main>
-    </div>
+    <ToastProvider>
+      <div className="shell">
+        <header className="topbar">
+          <span className="brand">friday</span>
+          <nav className="tabs" aria-label="Sections">
+            {TABS.map((tab) => (
+              <button
+                key={tab.path}
+                className="tab"
+                aria-current={section === tab.path ? "page" : undefined}
+                onClick={() => go(tab.path)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </header>
+        <main>
+          {/* `key={section}` remounts on route change so the `fade-enter`
+              keyframe runs every time. The DOM node is replaced, the
+              animation starts from `opacity: 0`, and `prefers-reduced-
+              motion: reduce` collapses the duration to 0 — the new
+              screen appears instantly, which is what the audit
+              asked for in note #1 (motion that respects the user's
+              own setting). The cost of the remount is one element
+              per route change, well below the threshold of
+              "expensive enough to memo". */}
+          <div key={section} className="fade-enter">
+            {section === "/" && <BoardScreen onOpenFlow={openFlow} />}
+            {section === "/rooms" && <RoomsScreen onOpenFlow={openFlow} />}
+            {section === "/flow" && <FlowScreen path={path} onOpenFlow={openFlow} />}
+          </div>
+        </main>
+      </div>
+    </ToastProvider>
   );
 }

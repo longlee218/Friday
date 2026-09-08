@@ -4,7 +4,7 @@ import { api } from "../api";
 import type { Memory, Message, Room } from "../api-types";
 import { useAsync } from "../useAsync";
 import { ContextPanel } from "./ContextPanel";
-import { Pill, ago, roomName, shortTime } from "../ui";
+import { Pill, Skeleton, ago, roomName, shortTime } from "../ui";
 
 /** Rooms: the list on the left, one room's messages on the right.
  *
@@ -40,7 +40,15 @@ export function RoomsScreen({
   if (rooms.error) {
     return <div className="card error">Could not load rooms: {rooms.error}</div>;
   }
-  if (!rooms.value) return <p className="empty">Loading…</p>;
+  if (!rooms.value) {
+    return (
+      <nav className="rooms">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} height={44} />
+        ))}
+      </nav>
+    );
+  }
   if (rooms.value.length === 0) {
     return (
       <p className="empty">
@@ -124,7 +132,10 @@ function RoomDetail({
 
       <div className="thread">
         {feed.error && <p className="msg error">{feed.error}</p>}
-        {!feed.value && <p className="empty">Loading…</p>}
+        {!feed.value &&
+          Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} height={48} />
+          ))}
         {messages.map((m, i) => (
           <div key={`${m.provider}:${m.provider_message_id}`} className="contents">
             {/* A thread spanning days shows clock times that run backwards —
@@ -253,7 +264,11 @@ function MemoryPanel({ channelId }: { channelId: string }) {
   const held = useAsync(() => api.memories(channelId), [channelId]);
 
   if (held.error) return <p className="mono error">{held.error}</p>;
-  if (!held.value) return <p className="empty">Loading…</p>;
+  if (!held.value) {
+    return Array.from({ length: 3 }).map((_, i) => (
+      <Skeleton key={i} height={64} />
+    ));
+  }
   if (held.value.length === 0) {
     return (
       <p className="empty">

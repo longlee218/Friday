@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ChannelContext } from "../api-types";
 import { useAsync } from "../useAsync";
-import { Pill } from "../ui";
+import { Pill, Skeleton } from "../ui";
 
 /** One room's context, for the dialog the room opens.
  *
@@ -23,7 +23,9 @@ export function ContextPanel({ channelId }: { channelId: string }) {
   if (exists.error) {
     return <p className="mono error">{exists.error}</p>;
   }
-  if (!exists.value) return <p className="empty">Loading…</p>;
+  if (!exists.value) {
+    return <Skeleton width="60%" height={20} />;
+  }
 
   if (!exists.value.exists) {
     return (
@@ -74,7 +76,15 @@ function Editor({ channelId }: { channelId: string }) {
   if (loaded.error) {
     return <div className="card error">Could not load {channelId}: {loaded.error}</div>;
   }
-  if (!loaded.value) return <div className="empty">Loading…</div>;
+  if (!loaded.value) {
+    return (
+      <div>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} height={28} />
+        ))}
+      </div>
+    );
+  }
   const it: ChannelContext = loaded.value;
 
   const edit = (i: number, which: 0 | 1, value: string) => {

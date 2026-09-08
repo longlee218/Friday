@@ -1,7 +1,7 @@
 import { api } from "../api";
 import type { Board, Task } from "../api-types";
 import { useAsync } from "../useAsync";
-import { DEMANDS_ATTENTION, Pill, SETTLED, STATE_LABEL, Tag, ago, roomName } from "../ui";
+import { DEMANDS_ATTENTION, Pill, SETTLED, STATE_LABEL, Skeleton, Tag, ago, roomName } from "../ui";
 
 /** The board, as a kanban: one column per task state.
  *
@@ -43,7 +43,15 @@ export function BoardScreen({
   if (board.error) {
     return <div className="card error">Could not load the board: {board.error}</div>;
   }
-  if (!board.value) return <p className="empty">Loading…</p>;
+  if (!board.value) {
+    return (
+      <div>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} height={80} />
+        ))}
+      </div>
+    );
+  }
   const it: Board = board.value;
 
   const newest = new Map<number, string | null>();

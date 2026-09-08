@@ -3,7 +3,7 @@ import { useState } from "react";
 import { api } from "../api";
 import type { Flow } from "../api-types";
 import { useAsync } from "../useAsync";
-import { CallCard, Pill, ToolCard, shortTime } from "../ui";
+import { CallCard, Pill, Skeleton, ToolCard, shortTime } from "../ui";
 import { toolState, turnState } from "../flowState";
 
 /** Board ticket 07 — what happened to this message.
@@ -72,7 +72,15 @@ function Path({ provider, id }: { provider: string; id: string }) {
       </div>
     );
   }
-  if (!flow.value) return <div className="empty">Loading…</div>;
+  if (!flow.value) {
+    return (
+      <div>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} height={56} />
+        ))}
+      </div>
+    );
+  }
 
   const it: Flow = flow.value;
   const held = reasonHeld(it);
