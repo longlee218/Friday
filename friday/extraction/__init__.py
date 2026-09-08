@@ -215,14 +215,26 @@ def register(
             f"is not {params_cls.__name__} (got {PARAMS.get(task_type)})"
         )
 
+    from friday.agent.instruction_prompt import SkillMeta
+
+    skills_meta = None
+    if skills is not None and len(skills):
+        skills_meta = [
+            SkillMeta(
+                name=s.name,
+                description=s.description,
+                mutability=s.mutability,
+                location=str(skills.location_of(s.name)),
+                allowed_tools=s.allowed_tools,
+            )
+            for s in skills.skills()
+        ]
     _EXTRACTORS[task_type] = build_extractor(
         params_cls=params_cls,
         harness=Harness(
             config=config,
             instructions=build_instructions(
-                skills_catalogue=(
-                    skills.catalogue() if skills is not None and len(skills) else None
-                )
+                skills_meta=skills_meta,
             ),
             tools=[ask_for_fields_tool(params_cls)],
             skills=skills,

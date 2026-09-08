@@ -233,6 +233,13 @@ class SkillLibrary:
         """
         return self._skills.get(name)
 
+    def skills(self) -> list[Skill]:
+        """Every installed skill, in catalogue order. The prompt builders
+        iterate this rather than `catalogue()` because they need each
+        skill's full record (mutability, allowed tools, location), not the
+        one-line summary `catalogue()` returns."""
+        return list(self._skills.values())
+
     def search(self, query: str) -> str:
         """Ranked `name: description` lines matching the query.
 

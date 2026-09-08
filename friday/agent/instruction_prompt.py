@@ -56,7 +56,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Sequence
 
 from friday.memory.channel_context import ChannelContext
 from friday.agent.skills import Skill
@@ -426,33 +426,67 @@ def user_input(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def skill_system(catalogue: list[str] | None, *, index: bool = True) -> Section:
-    """One line per skill: what it is called and what it is for, numbered.
+@dataclass(frozen=True, slots=True)
+class SkillMeta:
+    """What `skill_system` needs to render one `<skill>` block.
 
-    There were two of these — a `skills()` that rendered a `<skills>` section
-    without the count or the index, and this one — with the responder reading
-    from the first and the graph nodes from the second. Two builders for one
-    concept is two shapes of the same section, which is the thing this module
-    exists to stop.
+    Caller-built from a `Skill` + its path on disk. Keeping it here rather
+    than on `SkillLibrary` for the same reason `skill_metadata` is here: a
+    store that renders is a second renderer, and two of those have already
+    disagreed about escaping in this codebase."""
 
-    Never the bodies. The agent reads this to decide whether any of them is
-    worth having, then calls `fetch_skill` for the one it wants — which is
-    what keeps a hundred skills affordable. A hundred descriptions is a page;
-    a hundred bodies is a context window.
+    name: str
+    description: str
+    mutability: str
+    location: str
+    allowed_tools: tuple[str, ...] = ()
 
-    The index is there so an agent can refer to one without retyping its name,
-    and so a human reading a transcript can see how many there were.
+    @property
+    def mutability_label(self) -> str:
+        """The two strings DeerFlow uses, so a model trained on it recognises
+        the signal. The values are not negotiable — `[custom, editable]`
+        and `[built-in]` is what the model reads, and changing the wording
+        silently changes which skills it expects to be safe to edit."""
+        return "[custom, editable]" if self.mutability == "custom" else "[built-in]"
+
+
+def skill_system(skills: Sequence[SkillMeta] | None) -> Section:
+    """An index of installed skills, in DeerFlow's `<skill>` XML form.
+
+    Each skill becomes one block with `<name>`, `<description>` (with the
+    mutability tag), `<location>`, `<allowed_tools>`. The block is the
+    smallest thing an agent can read to decide whether to fetch the body,
+    which is what keeps a hundred skills affordable: a hundred blocks of
+    four fields is a page, a hundred bodies is a context window.
+
+    Numbered lists were tried first and removed: a name written as
+    `1. answer-in-vietnamese` reads as order, and a model that scans by
+    order calls them in order. The order they were catalogued in is not
+    the order the agent will need them. DeerFlow uses bare XML blocks
+    for the same reason — name, description, location, tools, nothing
+    else.
+
+    The four skill tools (`fetch_skill`, `search_skills`, `describe_skill`,
+    `read_skill_file`) are *not* described here. The openai-agents SDK
+    attaches them to the request via the function-calling schema, so the
+    model already knows what they do and how to call them; describing
+    them again in the prompt is duplication and the duplication rots
+    first when a tool's signature changes.
     """
-    if not catalogue:
+    if not skills:
         return Section("skill_system")
-    lines = [
-        "Call fetch_skill(name) to read one in full before acting on it.",
-        f"{len(catalogue)} available:",
-        "",
-    ]
-    for i, line in enumerate(catalogue, 1):
-        lines.append(f"{i}. {_escape(line)}" if index else f"- {_escape(line)}")
-    return Section("skill_system", "\n".join(lines))
+    blocks: list[str] = []
+    for s in skills:
+        tools = ", ".join(s.allowed_tools) if s.allowed_tools else "(all)"
+        blocks.append(
+            "<skill>\n"
+            f"    <name>{_escape(s.name)}</name>\n"
+            f"    <description>{_escape(s.description)} {_escape(s.mutability_label)}</description>\n"
+            f"    <location>{_escape(s.location)}</location>\n"
+            f"    <allowed_tools>{_escape(tools)}</allowed_tools>\n"
+            "</skill>"
+        )
+    return Section("skill_system", "\n".join(blocks))
 
 
 def skill_metadata(skill: Skill, location: str) -> str:
@@ -519,63 +553,6 @@ def memory_lines(found) -> str:
     )
 
 
-def search_skills_system(available: bool = True) -> Section:
-    """When the agent has `search_skills`, tell it what the tool does.
-
-    The catalogue is the index for skills the agent already knows about; this
-    is the way to find skills the catalogue does not surface.
-    """
-    if not available:
-        return Section("search_skills_system")
-    return Section(
-        "search_skills_system",
-        "Call search_skills(query) to find skills whose name or description "
-        "matches what you are looking for. Use it when the catalogue above "
-        "does not show a skill that sounds like what you need — a skill "
-        "named `deploy` whose description says `release a build` will be "
-        "missed by a reporter asking about `rolling out`, and search is "
-        "how you reach it. Returns up to five matches ranked by exact name, "
-        "then name prefix, then description.",
-    )
-
-
-def describe_skill_system(available: bool = True) -> Section:
-    """When the agent has `describe_skill`, tell it what the tool does.
-
-    The detail behind a catalogue line, before deciding whether to read the
-    body — name, mutability, allowed tools, location.
-    """
-    if not available:
-        return Section("describe_skill_system")
-    return Section(
-        "describe_skill_system",
-        "Call describe_skill(name) to see one skill's metadata before reading "
-        "its body. Returns the skill's name, description (with the mutability "
-        "tag `[custom, editable]` or `[built-in]`), the allowed tools list (or "
-        "`(all)`), and the absolute path to its `SKILL.md`. Use it when you "
-        "want to know what a skill is for without paying for the body.",
-    )
-
-
-def read_skill_file_system(available: bool = True) -> Section:
-    """When the agent has `read_skill_file`, tell it what the tool does.
-
-    The third step of disclosure — a file the body's text pointed at, by the
-    path the body wrote it.
-    """
-    if not available:
-        return Section("read_skill_file_system")
-    return Section(
-        "read_skill_file_system",
-        "Call read_skill_file(name, file_path) to read a supporting file "
-        "inside a skill's directory by its path — for example "
-        "`read_skill_file(\"deploy\", \"references/setup.md\")`. Use it when a "
-        "skill's body points at a file in a `references/` folder.",
-    )
-
-
-#: Named separately from the section that renders it so a caller can check
-#: what it is about to promise the model exists.
 MEMORY_TOOLS = ("memory_search", "memory_add", "memory_update", "memory_delete")
 
 _MEMORY_TOOL_SYSTEM = """You can reach for what has been remembered rather than
