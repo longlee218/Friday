@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import re
 from pathlib import Path
 
 import pytest
@@ -230,8 +231,21 @@ def test_buttons_have_visible_labels() -> None:
             # children is the regression we are catching. Skip
             # multi-line JSX — those have their children on
             # subsequent lines; this check still catches a one-liner.
+            #
+            # `endswith("</button>")` was the whole check and flagged the
+            # compliant case: `<button onClick={x}>Close</button>` ends that
+            # way and *has* the visible text the rule asks for. It reported
+            # `Dialog.tsx` for a "Close" button, which is exactly what the
+            # docstring above says is fine, and there is no way to satisfy a
+            # rule that rejects both having children and not having them.
+            #
+            # What is actually the regression: self-closing, so children are
+            # impossible, or a closing tag sitting straight after the opening
+            # one, so they were dropped. The second is matched on adjacency
+            # rather than by finding the opening tag's `>`, because an
+            # attribute can contain one — `onClick={() => close()}` does.
             stripped = line.strip()
-            if stripped.endswith("/>") or stripped.endswith("</button>"):
+            if stripped.endswith("/>") or re.search(r">\s*</button>", stripped):
                 offenders.append(
                     f"{path.relative_to(WEB)}:{n}: {stripped}"
                 )

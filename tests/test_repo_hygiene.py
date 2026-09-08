@@ -101,18 +101,33 @@ def test_doc_paths_resolve_to_existing_files() -> None:
     catches first."""
     docs = ROOT / "CLAUDE.md"
     src = docs.read_text(encoding="utf-8")
-    # Any path that starts with `.scratch/`, `friday/`, `docs/`,
-    # `web/`, `migrations/`, `tests/`, `run_agent.py`, or
-    # `serve_board.py` must exist on disk.
+    # A backticked path under one of this repo's own directories, or one of
+    # the two entrypoint scripts, must exist on disk.
+    #
+    # **The directory prefix has to be followed by a separator**, and that is
+    # the whole of what this pattern got wrong for a while: without it,
+    # `friday` matched the *dotted module* names this file writes on purpose
+    # (`friday.triage.prompt`), and `docs` matched the first four letters of
+    # `docstring_style`. Six false positives, none of them a path, and a red
+    # suite that told every later change the repo was broken.
     import re
     candidates = re.findall(
-        r"`((?:\.scratch|friday|docs|web|migrations|tests|run_agent\.py|serve_board\.py)[^`]+)`",
+        r"`((?:\.scratch|friday|docs|web|migrations|tests)/[^`]+"
+        r"|run_agent\.py|serve_board\.py)`",
         src,
     )
     missing: list[str] = []
     for path_str in candidates:
-        path = ROOT / path_str
-        if not path.exists():
+        # A template, not a path: `.scratch/<feature-slug>/issues/` describes
+        # where a board goes, and no such directory is meant to exist.
+        if "<" in path_str:
+            continue
+        # A path this file says outright is not there yet. `docs/adr/` is
+        # named as an absence — "does not exist yet" — and requiring it to
+        # exist would be requiring the sentence to be wrong.
+        if re.search(rf"`{re.escape(path_str)}`\s+does not exist", src):
+            continue
+        if not (ROOT / path_str).exists():
             missing.append(path_str)
     assert not missing, (
         f"CLAUDE.md names paths that do not exist: {missing}"
