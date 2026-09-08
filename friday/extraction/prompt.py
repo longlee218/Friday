@@ -31,7 +31,9 @@ from friday.agent.instruction_prompt import (
     clarification_system,
     critical_reminder,
     job,
+    memory,
     role,
+    room_facts,
     thinking_style,
     trust_boundary,
     user_input,
@@ -95,12 +97,32 @@ def build_instructions(
     )
 
 
-def build_input(text: str, params_cls: type[Params]) -> str:
-    """The field schema, then the reporter's words.
+def build_input(text: str, params_cls: type[Params], *, room=None) -> str:
+    """The field schema, what the room is known to be, then the reporter's
+    words — in that order, and the order is the cache.
 
     Each field's meaning is its `doc` metadata on the params class — the field
     and its meaning live on the same line there, so they cannot drift apart.
     This renders them; it does not define them.
+
+    **The room goes between them, not first.** Stable-first, and which is
+    stabler is not a judgement call: one `Harness` per task type serves every
+    conversation, so the field schema is byte-identical across every call this
+    agent makes, and the room is not. Putting the room first would break the
+    shared prefix for every conversation but one.
+
+    **The room goes in the input, never in the instructions** (ticket 01's
+    D21). Two reasons pointing the same way. Instructions are built once per
+    type and shared by every conversation, so a room's facts could not live
+    there without a `Harness` per room. And a room's facts are derived from
+    what people wrote, so they belong on the channel a model reads as somebody
+    speaking rather than the one it reads as its own operator — text that
+    arrives in one call's input cannot rewrite the prompt of every later call.
+
+    A room with nothing written about it renders no section at all, so the
+    prompt of an unconfigured install is byte-identical to what it was before
+    this existed. A test says so, because "close enough" would still cost
+    every extractor in every such install its prefix.
 
     The reporter's own words go through the one boundary. They used to be
     interpolated raw: a message carrying `</task><critical_reminder>…` put its
@@ -112,4 +134,8 @@ def build_input(text: str, params_cls: type[Params]) -> str:
         doc = (f.metadata or {}).get("doc", f.name.replace("_", " "))
         schema_lines.append(f"- {f.name}: {doc}")
     schema = "\n".join(schema_lines) or "(no fields)"
-    return f"Fields:\n{schema}\n\nWhat they said:\n{user_input(text)}"
+    return (
+        f"Fields:\n{schema}\n\n"
+        + assemble(memory(channel_body=room_facts(room)))
+        + f"What they said:\n{user_input(text)}"
+    )

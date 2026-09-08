@@ -160,7 +160,9 @@ async def _prepare_with_clarify(params_obj, clarify, *, extracted=None, monkeypa
     extractor or model."""
     import friday.dag.prepare as wf
 
-    async def stub_extract(task_type, text, *, task_id=None, node=None):
+    async def stub_extract(
+        task_type, text, *, channel_id=None, task_id=None, node=None
+    ):
         return extracted, clarify
 
     monkeypatch.setattr(wf, "_extract", stub_extract)
@@ -298,7 +300,9 @@ async def test_a_refused_extractor_hands_over_instead_of_asking(monkeypatch):
     from friday.domain.actions import HandOver
     from friday.domain.models import ApiIssueParams
 
-    async def refused(task_type, text, *, task_id=None, node=None):
+    async def refused(
+        task_type, text, *, channel_id=None, task_id=None, node=None
+    ):
         raise Refused("api_issue_extractor has spent 999 of its 10 tokens today")
 
     monkeypatch.setattr(wf, "_extract", refused)
@@ -331,14 +335,32 @@ async def _reported(db, *, text="@Lee API lỗi rồi a ơi"):
     return task
 
 
-class _CountingExtractor:
+class _StandsForAnExtractor:
+    """The half of `Extractor`'s contract a double has to keep.
+
+    `would_ask` is not optional politeness: `input_fingerprint` asks the
+    registered extractor what it would send, so a double that cannot answer
+    would have to be handled by a fallback — and a fallback here would
+    fingerprint something other than the prompt, which is the bug ticket 01's
+    review found in the first place.
+    """
+
+    _room = None
+
+    def would_ask(self, text, *, channel_id=None):
+        from friday.extraction.prompt import build_input
+
+        return build_input(text, ApiIssueParams, room=self._room)
+
+
+class _CountingExtractor(_StandsForAnExtractor):
     """Stands in for the model. Returns the same answer every time, which is
     the point: the same facts must not be paid for twice."""
 
     def __init__(self, params, clarify=None):
         self.params, self.clarify, self.texts = params, clarify, []
 
-    async def run(self, text, *, task_id=None, node=None):
+    async def run(self, text, *, channel_id=None, task_id=None, node=None):
         self.texts.append(text)
         return self.params, self.clarify
 
@@ -430,19 +452,41 @@ async def test_a_question_the_extractor_raised_survives_the_skipped_call(db):
     assert second == first
 
 
-def test_the_fingerprint_covers_the_field_schema_not_only_the_text():
-    """The extractor's prompt is the field schema and the text. Fingerprinting
-    the text alone would mean a task already marked is never read again under a
-    reworded field — the schema changed, the prompt changed, and nothing said
-    so."""
-    from friday.dag.prepare import _fingerprint
+def test_the_fingerprint_is_the_prompt_so_every_input_counts():
+    """It used to rebuild the two inputs node 0 knew about, and a review found
+    what that costs: ticket 01 gave the prompt a third input — the room — the
+    rebuild could not see, so an operator who wrote down what a room is got a
+    task that never read it. It hashes what the extractor would actually send
+    now, so a fourth input cannot be forgotten.
 
-    assert _fingerprint(ApiIssueParams, "API lỗi") != _fingerprint(
-        AccessRequestParams, "API lỗi"
+    Three things must move it: the reporter's words, the field schema, and the
+    room."""
+    from friday.extraction import input_fingerprint, registered
+    from friday.memory.channel_context import ChannelContext
+    from tests.test_extraction import _install
+
+    class _WithRoom(_StandsForAnExtractor):
+        _room = ChannelContext(
+            channel_id="watched", base={}, derived={}, overrides={"env": "staging"}
+        )
+
+    class _Bare(_StandsForAnExtractor):
+        pass
+
+    _install("fp_probe", _Bare())
+    try:
+        text_a = input_fingerprint("fp_probe", "API lỗi")
+        text_b = input_fingerprint("fp_probe", "API vẫn lỗi")
+        _install("fp_probe", _WithRoom())
+        with_room = input_fingerprint("fp_probe", "API lỗi")
+    finally:
+        registered().pop("fp_probe", None)
+
+    assert text_a != text_b, "the reporter's words do not move the fingerprint"
+    assert with_room != text_a, "the room does not move the fingerprint"
+    assert input_fingerprint("no_such_type", "x") == "", (
+        "an unregistered type should have nothing to remember"
     )
-    assert _fingerprint(ApiIssueParams, "API lỗi") == _fingerprint(
-        ApiIssueParams, "API lỗi"
-    ), "the same schema and the same text must be the same fingerprint"
 
 
 async def test_a_parameter_change_the_extractor_cannot_see_is_not_paid_for(db):
@@ -491,11 +535,11 @@ async def test_a_call_that_produced_nothing_is_not_remembered_as_an_answer(db):
     from friday.dag.prepare import prepare_node
     from tests.test_extraction import _install
 
-    class _Failing:
+    class _Failing(_StandsForAnExtractor):
         def __init__(self):
             self.calls = 0
 
-        async def run(self, text, *, task_id=None, node=None):
+        async def run(self, text, *, channel_id=None, task_id=None, node=None):
             self.calls += 1
             return None, None
 
@@ -509,3 +553,128 @@ async def test_a_call_that_produced_nothing_is_not_remembered_as_an_answer(db):
 
     assert extractor.calls == 2, "a failed call was remembered as an answer"
     assert await db.extraction_mark(task.id) is None, "marked an empty extraction"
+
+
+async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_path):
+    """The tracer bullet, end to end: the operator writes down what
+    `test.apero` is, and the extraction that asked about it stops asking.
+
+    **What this proves and what it cannot.** The stub stands where the model
+    stands, and it asserts the fact was in the prompt it was handed — so this
+    proves the fact reached the decision and that the graph then asks nothing.
+    Whether a real model uses a fact it can see is the model's business and no
+    test here can settle it; that is what the recorded flow on the board is
+    for.
+
+    The recorded failure this replaces: `environment` came back null because
+    the extractor could not tell whether `test.apero` was staging or dev, so
+    it asked, and nobody answered.
+    """
+    import yaml
+
+    from friday.dag.prepare import prepare_node
+    from friday.memory.channel_context import ContextStore
+    from tests.test_extraction import _install
+
+    (tmp_path / "watched.yaml").write_text(
+        yaml.safe_dump({"derived": {}, "overrides": {"test.apero": "staging"}})
+    )
+    store = ContextStore(tmp_path).hold_all()
+
+    seen: list[str] = []
+
+    class _ReadsTheRoom(_StandsForAnExtractor):
+        def would_ask(self, text, *, channel_id=None):
+            from friday.extraction.prompt import build_input
+
+            return build_input(text, ApiIssueParams, room=store.context(channel_id))
+
+        async def run(self, text, *, channel_id=None, task_id=None, node=None):
+            said = self.would_ask(text, channel_id=channel_id)
+            seen.append(said)
+            # Asserted on the *value* and on the section, never on
+            # `test.apero`: the reporter's own message says `test.apero`, so
+            # the first version of this test passed with `channel_id` never
+            # threaded at all. Only the room can put `staging` here.
+            assert "[channel" in said, (
+                f"no room section — channel_id was {channel_id!r}"
+            )
+            assert "staging" in said, "the room's value never reached the prompt"
+            return (
+                ApiIssueParams(
+                    summary="service down",
+                    environment="staging",
+                    curl="curl https://test.apero/health",
+                ),
+                None,
+            )
+
+    _install("api_issue", _ReadsTheRoom())
+    task = await _reported(db, text="@Lee kiểm tra cho e curl sau https://test.apero/health")
+    node = prepare_node("api_issue", ApiIssueParams)
+
+    outcome = await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+
+    assert seen, "the extractor was never reached"
+    assert not isinstance(outcome, Ask), f"still asking: {outcome!r}"
+    assert (await db.task(task.id)).params["environment"] == "staging"
+
+
+async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp_path):
+    """The bug ticket 01 and ticket 04 made together, which neither had alone.
+
+    Node 0 remembers what it extracted so it does not pay twice for the same
+    facts. Ticket 01 put the room's own facts into the prompt. The fingerprint
+    covered the reporter's text and the field schema, so writing a room fact
+    did not change it: the mark replayed the stale answer, no model was called,
+    and the fact never arrived.
+
+    That is not a corner. It is the *only* case that matters, because the
+    operator writes the fact **because** the task asked a question — so every
+    task that would benefit has already extracted once and already has a mark.
+
+    Reproduced with a probe before it was fixed: two passes, one model call,
+    `did the new fact reach a model? False`.
+    """
+    import yaml
+
+    from friday.dag.prepare import prepare_node
+    from friday.memory.channel_context import ContextStore
+    from tests.test_extraction import _install
+
+    store = ContextStore(tmp_path).hold_all()
+    asked: list[str] = []
+
+    class _Watching(_StandsForAnExtractor):
+        def would_ask(self, text, *, channel_id=None):
+            from friday.extraction.prompt import build_input
+
+            return build_input(text, ApiIssueParams, room=store.context(channel_id))
+
+        async def run(self, text, *, channel_id=None, task_id=None, node=None):
+            asked.append(self.would_ask(text, channel_id=channel_id))
+            return ApiIssueParams(summary="service down"), None
+
+    _install("api_issue", _Watching())
+    task = await _reported(db)
+    node = prepare_node("api_issue", ApiIssueParams)
+
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+    # `[channel`, not "staging": the field schema's own `doc` for
+    # `environment` reads "production, staging or dev", so asserting on the
+    # word passes and fails for reasons that have nothing to do with the room.
+    # That mistake cost two attempts on this ticket already.
+    assert len(asked) == 1 and "[channel" not in asked[0]
+
+    # The operator now writes down what the room is, and reloads — which is
+    # what the board's button does (D8: an override takes effect on reload).
+    (tmp_path / "watched.yaml").write_text(
+        yaml.safe_dump({"derived": {}, "overrides": {"test.apero": "staging"}})
+    )
+    store.reload()
+
+    await node.run(DAGState.empty(), DAGDeps(task=await db.task(task.id), db=db))
+
+    assert len(asked) == 2, "the new fact never reached a model"
+    assert "[channel" in asked[-1], "the model was called without the room"
+    assert "test.apero" in asked[-1], "the fact itself never arrived"

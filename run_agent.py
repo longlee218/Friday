@@ -187,7 +187,11 @@ async def _run(stack: AsyncExitStack) -> None:
     from friday.extraction import register_extractors
 
     register_extractors(
-        config, skills=skills, record=record_call, spent=db.spent_today
+        config,
+        skills=skills,
+        record=record_call,
+        spent=db.spent_today,
+        context=context_store,
     )
 
     # Register the workflow graphs. Same shape as the extractors above and for

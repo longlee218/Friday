@@ -1149,7 +1149,9 @@ async def test_a_node_0_hand_over_still_reaches_the_operator(db, monkeypatch):
 
     traced = "abcdef01-2345-6789-abcd-ef0123456789"
 
-    async def fills_something_in(task_type, text, *, task_id=None, node=None):
+    async def fills_something_in(
+        task_type, text, *, channel_id=None, task_id=None, node=None
+    ):
         """An extractor that finds a field — the ordinary case, and what moves
         the parameters out from under the pause."""
         return (

@@ -25,7 +25,11 @@ from friday.agent.harness import Refused
 from friday.domain.actions import Action, Ask, HandOver
 from friday.domain.models import MODEL_AUTHORED, ExtractionMark, Params
 from friday.domain.validation import Problem, asked_as, validate
-from friday.extraction import Clarify, extract as _extract
+from friday.extraction import (
+    Clarify,
+    extract as _extract,
+    input_fingerprint,
+)
 
 __all__ = ["plan_by_required_parameters", "prepare", "prepare_node", "prepared_ok"]
 
@@ -63,6 +67,7 @@ def prepare_node(
             known,
             text=text,
             extract=_remembering(deps.db, deps.task.id, params_cls),
+            channel_id=deps.task.conversation.channel_id,
             task_id=deps.task.id,
             node="prepare",
         )
@@ -98,6 +103,11 @@ async def prepare(
     #: would have quietly outlived every `monkeypatch.setattr(prepare,
     #: "_extract", ...)` in the suite — two tests went red saying so.
     extract: _Extract | None = None,
+    #: Which room this is, so the extractor's prompt can carry what the room
+    #: is known to be. A string rather than the resolved context: the store
+    #: lives with the extractor, and threading a dict through here would put
+    #: this module in the business of reading channel files.
+    channel_id: str | None = None,
     #: Whose work this is, for the row the extractor's call becomes. Node 0
     #: is the only step that knows both, and the extractor is the only agent
     #: it runs — so this is where the two meet.
@@ -126,7 +136,7 @@ async def prepare(
     if text is not None:
         try:
             extracted, clarify = await (extract or _extract)(
-                task_type, text, task_id=task_id, node=node
+                task_type, text, channel_id=channel_id, task_id=task_id, node=node
             )
         except Refused as refusal:
             # A ceiling, not a failure. Falling through would leave the fields
@@ -163,6 +173,11 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
     prompts share a sha256, seven and a half hours apart: it sat pending across
     a restart, and every pass paid again.
 
+    **The fingerprint is the prompt itself**, asked of the extraction family
+    rather than rebuilt here — see `input_fingerprint`. Rebuilding it meant
+    node 0 had to know every input the prompt has, and it stopped knowing the
+    day one was added.
+
     **A hit returns the same answer the call would have**, not merely nothing.
     The extracted values are replayed so the same fill happens, and the
     clarification is replayed so the same question is asked — without it a skip
@@ -175,8 +190,15 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
     call that did not happen.
     """
 
-    async def extract(task_type: str, text: str, *, task_id=None, node=None):
-        digest = _fingerprint(params_cls, text)
+    async def extract(
+        task_type: str, text: str, *, channel_id=None, task_id=None, node=None
+    ):
+        # Asked of the extraction family rather than reconstructed here. The
+        # reconstruction knew about the field schema and the reporter's text,
+        # and ticket 01 gave the prompt a third input it could not see — so an
+        # operator who wrote down what a room is got a task that never read
+        # it, because the fingerprint had not changed.
+        digest = input_fingerprint(task_type, text, channel_id=channel_id)
         mark = await db.extraction_mark(task_id)
         if mark is not None and mark.fingerprint == digest:
             log.info(
@@ -188,7 +210,7 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
                 Clarify(mark.asked_about, mark.because) if mark.asked_about else None,
             )
         extracted, clarify = await _extract(
-            task_type, text, task_id=task_id, node=node
+            task_type, text, channel_id=channel_id, task_id=task_id, node=node
         )
         if extracted is None and clarify is None:
             # Nothing to remember, so nothing is written — and the next pass
@@ -215,35 +237,6 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
         return extracted, clarify
 
     return extract
-
-
-def _fingerprint(params_cls: type[Params], text: str) -> str:
-    """What the extractor is about to be shown, reduced to one string.
-
-    **The reporter's text and the field schema** — the two things the
-    extractor's *per-call input* is built from, and the two things that vary.
-    The schema is in here rather than assumed fixed per type: adding a field,
-    or rewording what one means, changes the prompt, and a task already marked
-    would otherwise never be read again under the new one.
-
-    The task's parameters are not in it. They never reach the extractor's
-    prompt. Ticket 04 asked for them to count toward "has anything changed";
-    they cannot, because paying again for a change the extractor cannot see
-    buys the same answer twice.
-
-    Per-call input, not the whole prompt: `instructions` also carry the job
-    text and the skill catalogue. Those change on a restart, not per task, and
-    a newly installed skill is not new information about this report — so a
-    mark survives one, deliberately.
-
-    Reconstructed from the two inputs rather than calling `build_input`, which
-    would be the per-call prompt exactly: a module outside the extraction
-    family may not reach into that family's prompt module.
-    """
-    schema = "\n".join(
-        f"{f.name}:{(f.metadata or {}).get('doc', '')}" for f in fields(params_cls)
-    )
-    return hashlib.sha256(f"{schema}\n\n{text}".encode()).hexdigest()
 
 
 def plan_by_required_parameters(task_type: str, params: Params) -> Action:

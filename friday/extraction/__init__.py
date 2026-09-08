@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from friday.config import Config
 
 __all__ = [
+    "input_fingerprint",
     "Clarify",
     "EXTRACTS",
     "Extractor",
@@ -70,15 +71,52 @@ class Extractor:
     has decided the params are worth filling in.
     """
 
-    def __init__(self, harness: Harness, params_cls: type[Params], name: str) -> None:
+    def __init__(
+        self,
+        harness: Harness,
+        params_cls: type[Params],
+        name: str,
+        context=None,
+    ) -> None:
         self._harness = harness
         self._params_cls = params_cls
         self.name = name
+        #: Where the rooms' own facts live. `None` means no channel has a
+        #: context file, which is a fresh install — the prompt is then
+        #: byte-identical to what it was before rooms reached this agent.
+        self._context = context
+
+    def would_ask(self, text: str, *, channel_id: str | None = None) -> str:
+        """The per-call input this would send, without sending it.
+
+        One method so `run` and `input_fingerprint` cannot disagree about what
+        the prompt is — which is exactly how the mark came to be stale: two
+        places described the same prompt and only one of them learned about the
+        room.
+        """
+        room = (
+            self._context.context(channel_id)
+            if self._context is not None and channel_id is not None
+            else None
+        )
+        return build_input(text, self._params_cls, room=room)
 
     async def run(
-        self, text: str, *, task_id: int | None = None, node: str | None = None
+        self,
+        text: str,
+        *,
+        channel_id: str | None = None,
+        task_id: int | None = None,
+        node: str | None = None,
     ) -> tuple[Params | None, Clarify | None]:
         """Ask the model to fill the fields. `(None, None)` if the call failed.
+
+        `channel_id` is which room this is, so the prompt can carry what the
+        room is known to be. The store is closed over at registration and the
+        room is looked up here, which is the split the responder already uses:
+        a store lives as long as the process, a room lasts one call. Passing
+        the resolved `ChannelContext` down instead would thread a dict through
+        four layers where a string does.
 
         The harness already swallows exceptions into `last_error`, so a
         `None` params here means "the model could not answer" — the workflow
@@ -93,7 +131,7 @@ class Extractor:
         """
         capture = FieldsCapture()
         result = await self._harness.run(
-            build_input(text, self._params_cls),
+            self.would_ask(text, channel_id=channel_id),
             context=capture,
             extra_turns=1,
             task_id=task_id,
@@ -136,7 +174,7 @@ class Extractor:
 
 
 def build_extractor(
-    *, params_cls: type[Params], harness: Harness, name: str
+    *, params_cls: type[Params], harness: Harness, name: str, context=None
 ) -> Extractor:
     """Wire a Harness to a Params class under a name.
 
@@ -150,7 +188,9 @@ def build_extractor(
     runtime. The check is enforced at registration, not at extraction, so a
     misconfigured system fails to start rather than producing a wrong answer.
     """
-    return Extractor(harness=harness, params_cls=params_cls, name=name)
+    return Extractor(
+        harness=harness, params_cls=params_cls, name=name, context=context
+    )
 
 
 def registered() -> dict[str, Extractor]:
@@ -162,6 +202,7 @@ async def extract(
     task_type: str,
     text: str,
     *,
+    channel_id: str | None = None,
     task_id: int | None = None,
     node: str | None = None,
 ) -> tuple[Params | None, Clarify | None]:
@@ -177,10 +218,42 @@ async def extract(
     ext = _EXTRACTORS.get(task_type)
     if ext is None:
         return None, None
-    return await ext.run(text, task_id=task_id, node=node)
+    return await ext.run(
+        text, channel_id=channel_id, task_id=task_id, node=node
+    )
 
 
 
+
+
+def input_fingerprint(
+    task_type: str, text: str, *, channel_id: str | None = None
+) -> str:
+    """One string standing for everything this extractor is about to be shown.
+
+    **The prompt itself, hashed** — not a reconstruction of it. Node 0 used to
+    rebuild the two inputs it knew about (the field schema and the reporter's
+    text) because a module outside this family may not reach into its prompt
+    module. That was a fair compromise and it broke the day the prompt grew a
+    third input: ticket 01 put the room's own facts in here, the reconstruction
+    did not know about them, and so an operator who wrote down what
+    `test.apero` is got a task that never read it — the fingerprint had not
+    changed, so the mark replayed the stale answer with no model call. Which
+    is the one scenario ticket 01 exists for, since the operator writes the
+    fact *because* the task asked.
+
+    Computing it here removes the class of bug rather than the instance: a
+    fourth input cannot be forgotten, because there is nothing to remember.
+
+    Returns the empty string for an unregistered type, which is what `extract`
+    answers for one too — a caller with no extractor has nothing to remember.
+    """
+    import hashlib
+
+    ext = _EXTRACTORS.get(task_type)
+    if ext is None:
+        return ""
+    return hashlib.sha256(ext.would_ask(text, channel_id=channel_id).encode()).hexdigest()
 
 
 def register(
@@ -195,6 +268,10 @@ def register(
     skills=None,
     record=None,
     spent=None,
+    #: Where the rooms' own facts live. Injected here rather than looked up
+    #: per call, the same split the responder uses: a store lives as long as
+    #: the process, a room lasts one call.
+    context=None,
 ) -> None:
     """Register one task type's extractor from configuration.
 
@@ -230,6 +307,7 @@ def register(
             for s in skills.skills()
         ]
     _EXTRACTORS[task_type] = build_extractor(
+        context=context,
         params_cls=params_cls,
         harness=Harness(
             config=config,
@@ -354,7 +432,7 @@ EXTRACTS = {
 
 
 def register_extractors(
-    config: Config, *, skills=None, record=None, spent=None
+    config: Config, *, skills=None, record=None, spent=None, context=None
 ) -> None:
     """Wire every extractor the configuration declares.
 
@@ -400,4 +478,5 @@ def register_extractors(
             skills=skills,
             record=record,
             spent=spent,
+            context=context,
         )

@@ -424,3 +424,178 @@ async def test_a_model_that_could_not_answer_is_not_a_refusal():
 
     with pytest.raises(Refused, match="tokens today"):
         await ext.run("anything")
+
+
+# --- the room reaches the extractor (ticket 01) ---------------------------
+
+
+def _room(**overrides):
+    from friday.memory.channel_context import ChannelContext
+
+    return ChannelContext(
+        channel_id="watched", base={}, derived={}, overrides=overrides
+    )
+
+
+def test_a_room_with_no_context_file_leaves_the_prompt_exactly_as_it_was():
+    """The tracer bullet must not change the prompt of a room nobody has
+    written anything about, and "not much" is not the same as "not at all":
+    every extractor in every unconfigured install shares this prefix."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+
+    assert build_input("API lỗi", ApiIssueParams, room=None) == build_input(
+        "API lỗi", ApiIssueParams
+    )
+
+
+def test_the_rooms_facts_reach_the_input_and_not_the_instructions():
+    """D21. Memory is injected rather than fetched, because the extractor has
+    two turns and has been seen spending both on skill calls — but it goes on
+    the channel a model reads as somebody speaking, not the one it reads as
+    its own operator. Instructions are built once per *type* and shared by
+    every conversation, so a room's facts could not live there even if the
+    authority question did not settle it."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input, build_instructions
+
+    said = build_input(
+        "API lỗi", ApiIssueParams, room=_room(**{"test.apero": "staging"})
+    )
+
+    assert "test.apero" in said
+    assert "staging" in said
+    assert "test.apero" not in build_instructions()
+
+
+def test_the_rooms_facts_arrive_through_the_memory_section():
+    """Criterion: "through the existing memory section builder's channel
+    slot, which gains its first caller since it was written"."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+
+    said = build_input("API lỗi", ApiIssueParams, room=_room(register="thân mật"))
+
+    assert "<memory>" in said
+    assert "[channel" in said
+
+
+def test_the_field_schema_comes_before_the_room():
+    """Stable-first, and which is stabler is not a guess: one `Harness` per
+    task type serves every conversation, so the field schema is identical
+    across every call that agent makes and the room is not. Putting the room
+    first would break the shared prefix for every conversation but one."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+
+    said = build_input("API lỗi", ApiIssueParams, room=_room(register="thân mật"))
+
+    assert said.index("Fields:") < said.index("<memory>") < said.index("What they said:")
+
+
+def test_an_override_the_operator_wrote_wins_over_a_derived_summary():
+    """The three layers in the precedence order they already have. A rebuild
+    rewrites `derived` and must never change what an operator typed — which is
+    what makes writing a fact by hand the producer this board may not ship
+    without."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+    from friday.memory.channel_context import ChannelContext
+
+    room = ChannelContext(
+        channel_id="watched",
+        base={"env": "from base"},
+        derived={"env": "from the summariser"},
+        overrides={"env": "from the operator"},
+    )
+    said = build_input("API lỗi", ApiIssueParams, room=room)
+
+    assert "from the operator" in said
+    assert "from the summariser" not in said
+    assert "from base" not in said
+
+
+def test_the_extractor_itself_looks_the_room_up_from_the_channel_it_is_given():
+    """The guard the end-to-end test could not be: that one's stub built the
+    prompt itself, so `Extractor.run`'s own lookup — store plus `channel_id`
+    to room to prompt — had no test at all, and a mutation that made the
+    extractor ignore its store passed the whole suite.
+
+    This is the point of the ticket, so it is asserted at the seam that does
+    it rather than beside it."""
+    from friday.memory.channel_context import ChannelContext
+
+    seen: list[str] = []
+
+    class _Store:
+        def context(self, channel_id):
+            return (
+                ChannelContext(
+                    channel_id=channel_id,
+                    base={},
+                    derived={},
+                    overrides={"test.apero": "staging"},
+                )
+                if channel_id == "watched"
+                else None
+            )
+
+    class StubResult:
+        final_output = '{"environment": "staging"}'
+
+    class StubHarness:
+        tool_turns = 0
+        last_error = None
+
+        async def run(self, prompt, *, context=None, extra_turns=0,
+                      task_id=None, node=None):
+            seen.append(prompt)
+            return StubResult()
+
+    @dataclass
+    class Fields:
+        environment: Optional[str] = None
+
+    ext = build_extractor(
+        params_cls=Fields,
+        harness=StubHarness(),  # type: ignore[arg-type]
+        name="stub",
+        context=_Store(),
+    )
+    _install("stub_room", ext)
+    try:
+        asyncio.run(extract("stub_room", "API lỗi", channel_id="watched"))
+        asyncio.run(extract("stub_room", "API lỗi", channel_id="somewhere-else"))
+    finally:
+        registered().pop("stub_room", None)
+
+    with_room, without = seen
+    assert "staging" in with_room, "the extractor did not read its own store"
+    assert "[channel" in with_room
+    assert "staging" not in without, "a room leaked into another channel"
+    assert "[channel" not in without
+
+
+def test_a_layer_the_operator_did_not_override_still_reaches_the_prompt():
+    """All three layers, merged. Asserting only that overrides *win* left a
+    mutation passing that dropped `base` and `derived` entirely — the
+    summariser's own output would have reached nobody, which is the half of
+    the context layer ticket 06 exists to fill."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+    from friday.memory.channel_context import ChannelContext
+
+    said = build_input(
+        "API lỗi",
+        ApiIssueParams,
+        room=ChannelContext(
+            channel_id="watched",
+            base={"company": "apero"},
+            derived={"busiest": "the reelme team"},
+            overrides={"test.apero": "staging"},
+        ),
+    )
+
+    assert "apero" in said, "the shared base layer never reached the prompt"
+    assert "the reelme team" in said, "the summariser's own layer was dropped"
+    assert "staging" in said

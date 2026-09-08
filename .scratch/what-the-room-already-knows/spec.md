@@ -235,16 +235,24 @@ own boundary.** Stored plain and escaped once at the section seam: the existing
 channel context unescapes before storing for this reason, and the existing
 summariser had to be taught it.
 
-**The section is length-framed rather than delimiter-guarded.** The weaker
-version of this decision was to collapse newlines before escaping, on the
-grounds that escaping leaves newlines alone and a summary could otherwise forge
-a second key line inside the section describing the room. Collapsing newlines
-closes one route. A frame that carries its own length closes every route,
-because content cannot forge a boundary it has to count. Prior art is Hermes,
-which frames plugin-contributed prompt sections with a character count and
-accepts a restored section only when re-rendering it is byte-identical. This
-board adopts the same shape for any section built from stored, machine-written
-text.
+**A stored section defends two delimiters, and it takes two defences.** The
+outer one is the section's own label: content that can open a line can write a
+label, so content is indented and cannot. The inner one is the `key: value`
+format, and indentation does nothing for it — a stored newline puts a forged
+fact at the same indentation as a real one — so values are flattened before
+escaping, which is what `_one_line` has always been for one section over.
+
+**Corrected on ticket 01, having been wrong here first.** This decision
+originally asked for a length-prefixed frame instead of flattening, on Hermes'
+precedent, and claimed a count "closes every route, because content cannot
+forge a boundary it has to count". Two things were wrong with that. Hermes'
+count is load bearing because something there re-renders a restored section
+and accepts it only on a byte match; nothing here restores anything, so there
+was nothing to compare a count against and it was a number no code read and no
+instruction mentioned. And a frame round the outside was never going to defend
+a format on the inside. Ticket 01 shipped the count, both of its reviews called
+it decoration, and the hole it was supposed to have closed was still open —
+found by rendering a summariser-written value with a newline in it.
 
 **The summary has an explicit cap.** A summary without one is the thing it
 exists to prevent, and the cap is the only reason a summary is cheaper than the
@@ -275,8 +283,12 @@ every preference is either voice or a constraint, and a value that cannot be
 told apart from its neighbours is a value a model will choose at random.
 
 **D15 — Scope is two levels, and both already exist.** The shared base context
-file is the global level: operator-authored, trusted, and for that reason the
-one layer that is not escaped. The channel is the other. There is no project,
+file is the global level: operator-authored, and the one layer that does not
+get the per-value flatten-and-escape treatment the two untrusted layers get.
+(It said "the one layer that is not escaped", inheriting a claim
+`channel_base`'s own docstring had made since it was written; ticket 01 checked
+and it is escaped, like everything else the seam renders. What is different is
+the per-value handling, not the escaping.) The channel is the other. There is no project,
 user, or conversation scope. A project scope would cross the channel boundary,
 and that boundary exists because the rooms are different teams and a fact
 learned in one is a leak in the next. A fact true everywhere goes in the base
