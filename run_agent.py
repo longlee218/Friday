@@ -164,6 +164,8 @@ async def _run(stack: AsyncExitStack) -> None:
     runner = await TriageRunner.build(
         config,
         db=db,
+        # Every agent reaches skills now, not just the responder.
+        skills=skills,
         still_typing=inbox.still_typing,
         record=record_call,
         spent=db.spent_today,
@@ -184,7 +186,9 @@ async def _run(stack: AsyncExitStack) -> None:
     # `friday/extraction/`, not here.
     from friday.extraction import register_extractors
 
-    register_extractors(config, record=record_call, spent=db.spent_today)
+    register_extractors(
+        config, skills=skills, record=record_call, spent=db.spent_today
+    )
 
     # Register the workflow graphs. Same shape as the extractors above and for
     # the same reason: which task types have a graph is the graph module's

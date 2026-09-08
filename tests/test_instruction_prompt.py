@@ -155,10 +155,50 @@ def test_skills_section_skipped_when_no_catalogue():
     assert skill_system([]).render() == ""
 
 
-def test_skills_section_lists_each_skill_with_name_only():
-    out = skill_system(["fetch_skill", "list_skills"]).render()
-    assert "fetch_skill" in out
-    assert "list_skills" in out
+def test_skills_section_uses_deerflow_xml_blocks():
+    """DeerFlow format: each skill is one `<skill>` block with `<name>`,
+    `<description>`, `<location>`, `<allowed_tools>`. No numbered list, no
+    1./2./3. — a name written as `1. answer-in-vietnamese` would otherwise
+    be read as order. The SDK already describes the four skill tools via
+    function-calling schema, so this section is an index, not a manual.
+    """
+    from friday.agent.instruction_prompt import SkillMeta
+
+    meta = [
+        SkillMeta(
+            name="answer-in-vietnamese",
+            description="How the operator writes",
+            mutability="custom",
+            location="/skills/vn/SKILL.md",
+            allowed_tools=("fetch_skill",),
+        ),
+        SkillMeta(
+            name="trace-a-request",
+            description="Find log lines",
+            mutability="custom",
+            location="/skills/trace/SKILL.md",
+            allowed_tools=(),
+        ),
+    ]
+    out = skill_system(meta).render()
+    # Two skill blocks, one per skill.
+    assert out.count("<skill>") == 2
+    assert out.count("</skill>") == 2
+    # Each block carries the four fields the catalogue cannot afford to lose.
+    for tag in ("<name>", "<description>", "<location>", "<allowed_tools>"):
+        assert out.count(tag) == 2
+        assert out.count(f"</{tag[1:-1]}>") == 2
+    # The two skill names.
+    assert "<name>answer-in-vietnamese</name>" in out
+    assert "<name>trace-a-request</name>" in out
+    # No numbered prefix.
+    assert "1." not in out
+    assert "2." not in out
+    # No tool descriptions duplicated (SDK's job).
+    assert "Call fetch_skill" not in out
+    assert "Call search_skills" not in out
+    assert "Call describe_skill" not in out
+    assert "Call read_skill_file" not in out
 
 
 def test_task_section_renders_task_type_escaped():
@@ -390,7 +430,6 @@ def test_two_responder_inputs_differing_late_share_a_byte_identical_prefix():
     fixed = dict(
         now=datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc),
         stranger=True,
-        skills_catalogue=["trace-a-request: find the log lines"],
     )
     a = build_input(asking="q1", context=_events(["a", "b"]), **fixed)
     b = build_input(asking="q2", context=_events(["a", "b", "c", "d"]), **fixed)

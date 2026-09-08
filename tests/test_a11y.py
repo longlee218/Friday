@@ -209,26 +209,32 @@ def test_no_color_only_signal_in_state_pills() -> None:
 
 def test_buttons_have_visible_labels() -> None:
     """Audit's third reading: an icon-only button without a label
-    is invisible to screen readers. Grep for the two patterns we
-    use (`aria-label` and visible text)."""
+    is invisible to screen readers. A button under `web/src/ui/`
+    must carry either `aria-label` (an icon-only button) or visible
+    text (the `IconButton` primitive's `label` prop renders as
+    `aria-label`; the regular `Button` puts the children on
+    screen). The grep walks every file under `web/src/ui/` and
+    flags any `<button` line that has neither — that is the one
+    a future contributor leaves behind when they drop a fallback
+    label by accident."""
     ui = (WEB / "src" / "ui").rglob("*.tsx")
-    bad = []
+    offenders: list[str] = []
     for path in ui:
         text = path.read_text()
         for n, line in enumerate(text.splitlines(), 1):
             if "<button" not in line:
                 continue
-            # A bare icon-only button with neither aria-label nor
-            # text content is the regression. We cannot statically
-            # prove the text content exists without rendering, but
-            # we can at least confirm aria-label is present when
-            # the button has no visible children in the same line.
             if "aria-label" in line:
                 continue
-            if line.strip().endswith("</button>") and ">" in line:
-                # Children between > and </button>. Nothing to
-                # parse here without an AST; the JSX self-closer
-                # is checked separately below.
-                pass
-    # Allow the test to pass when no bare buttons are present.
-    assert True, ""  # placeholder — the real guards live elsewhere
+            # A bare closing tag with no aria-label and no visible
+            # children is the regression we are catching. Skip
+            # multi-line JSX — those have their children on
+            # subsequent lines; this check still catches a one-liner.
+            stripped = line.strip()
+            if stripped.endswith("/>") or stripped.endswith("</button>"):
+                offenders.append(
+                    f"{path.relative_to(WEB)}:{n}: {stripped}"
+                )
+    assert not offenders, (
+        "buttons without aria-label: " + "\n".join(offenders)
+    )

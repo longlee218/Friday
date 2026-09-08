@@ -54,13 +54,25 @@ class Triage:
         # call: the instructions are the stable prefix, and a list that
         # changed per call would cost the cache hit on everything after it.
         # A mark made now therefore takes effect at the next start.
+        from friday.agent.instruction_prompt import SkillMeta
+
+        skills_meta = None
+        if skills is not None and len(skills):
+            skills_meta = [
+                SkillMeta(
+                    name=s.name,
+                    description=s.description,
+                    mutability=s.mutability,
+                    location=str(skills.location_of(s.name)),
+                    allowed_tools=s.allowed_tools,
+                )
+                for s in skills.skills()
+            ]
         self._run = Harness(
             config=config,
             instructions=build_instructions(
                 examples,
-                skills_catalogue=(
-                    skills.catalogue() if skills is not None and len(skills) else None
-                ),
+                skills_meta=skills_meta,
             ),
             skills=skills,
             tools=TOOLS,

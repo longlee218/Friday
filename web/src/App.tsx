@@ -64,6 +64,10 @@ export function App() {
 
   // Keyboard shortcuts. The bindings table is also the
   // `<ShortcutOverlay>`'s display data — same source, no drift.
+  // `options` is memoised because `useKeyboard`'s effect depends
+  // on it; an inline object literal would re-install the listener
+  // on every render and drop any pending `g`-prefix state mid-way
+  // through a `g m` keystroke.
   const overlay = useShortcutOverlay();
   const bindings = useMemo<Binding[]>(
     () => [
@@ -76,7 +80,8 @@ export function App() {
     ],
     [go],
   );
-  useKeyboard(bindings, { onToggleOverlay: overlay.toggle });
+  const keyboardOptions = useMemo(() => ({ onToggleOverlay: overlay.toggle }), [overlay.toggle]);
+  useKeyboard(bindings, keyboardOptions);
 
   return (
     <ToastProvider>

@@ -181,7 +181,7 @@ What is actually on disk.
 | `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), remembering (`memory` — `memory_search`, `memory_add`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder; ticket 09's D9). A test asserts the list — all twelve, factories built rather than skipped — and forbids declaring one anywhere else |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
-| `web/` | The board's page, on `:8086`. A React + Vite SPA built to static files and served by `ops/api.py`'s app — one process, one container. It replaced `friday/board/`, 196 lines of f-string HTML and HTMX polling, which was deleted rather than ported: it rendered the same prompts and provider errors as the JSON API while running none of them through `redact.scrub`, which is the two-renderers failure this file already records once for escaping |
+| `web/` | The operator monitor, on `:8086`. A React + Vite SPA built to static files and served by `ops/api.py`'s app — one process, one container, no Node at runtime. The current shape is the monitor dashboard described in `.scratch/a-monitor-on-the-whole-path/spec.md`: a live feed driven by SSE (`/api/events`), running tasks, drill-down to the Flow screen, breadcrumbs, the Agent vs Reporter marker on Rooms rows. The dark palette and motion tokens live in `web/src/index.css` under `:root` — no component file carries a hex literal or an inline `style={{}}` (`tests/test_web_tokens.py` enforces this). Keyboard shortcuts (`g m`, `g b`, `g r`, `?`, `/`, `r`, `esc`) are wired in `web/src/keyboard.ts`; `?` opens the overlay. Replaced `friday/board/`, 196 lines of f-string HTML and HTMX polling, which was deleted rather than ported: it rendered the same prompts and provider errors as the JSON API while running none of them through `redact.scrub`, which is the two-renderers failure this file already records once for escaping |
 | `migrations/` | Alembic revisions |
 | `tests/` | Driven through two seams: a fake `Provider` and a scripted model transport |
 | `docs/` | `DESIGN.md`, `SPEC.md`, `agents/` |
@@ -466,6 +466,12 @@ not an implementation detail:
   message is a row; one loop delivers it. Approval is enforced as a predicate
   in the query that selects sendable rows, not as a check each caller must
   remember — see `_NEEDS_APPROVAL` in `friday/store/db.py`.
+- **SSE events come from the store rows the system already writes.**
+  `Database.record_model_call` and `record_tool_call` publish on the in-process
+  `EventBus` after the row is committed; the `/api/events` SSE endpoint
+  replays from the bus on reconnect (`Last-Event-ID`). One writer, one queue;
+  the monitor screen reads live. Out-of-band events (task state changes, future
+  outbound sends) extend the bus the same way.
 - **Nothing takes a dangerous action, so there is no second gate.** There
   was one: `apply_fix` was marked `needs_approval`, the run stopped holding
   its own state, and `Pool.decide_pending_action` resumed or declined it. It

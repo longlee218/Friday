@@ -316,15 +316,15 @@ def test_an_empty_library_gives_neither_the_tools_nor_the_sections(tmp_path):
     assert len(empty) == 0, "the fixture is the point of the test"
 
     responder = Responder(config=cfg, skills=empty)
-    text = build_input(asking="x", skills_catalogue=empty.catalogue())
+    text = build_input(asking="x")
 
     assert responder._run.agent.tools == []
-    for section in (
-        "skill_system",
-        "search_skills_system",
-        "describe_skill_system",
-        "read_skill_file_system",
-    ):
+    # The four skill tools used to be described in three separate sections
+    # (`search_skills_system`, `describe_skill_system`,
+    # `read_skill_file_system`). Those sections are gone — the SDK
+    # describes the tools via function-calling schema, so duplicating
+    # the description in the prompt is what rots first.
+    for section in ("skill_system", "<skill>"):
         assert f"<{section}>" not in text, section
 
 
@@ -343,12 +343,24 @@ def test_the_responder_without_skills_carries_no_tool():
 
 
 def test_the_catalogue_reaches_the_prompt_the_responder_builds(tmp_path):
-    from friday.agent.instruction_prompt import skill_system
+    """The DeerFlow `<skill>` block puts the catalogue in `<name>`, with
+    the description and location close enough that the model can decide
+    whether to fetch the body without re-reading the whole prompt."""
+    from friday.agent.instruction_prompt import SkillMeta, skill_system
 
-    rendered = skill_system(_library(tmp_path).catalogue()).render()
+    meta = [
+        SkillMeta(
+            name="trace-a-request",
+            description="find the log lines for one request",
+            mutability="custom",
+            location="/skills/trace/SKILL.md",
+            allowed_tools=(),
+        ),
+    ]
+    rendered = skill_system(meta).render()
 
-    assert "trace-a-request" in rendered
-    assert "fetch_skill" in rendered
+    assert "<name>trace-a-request</name>" in rendered
+    assert "<location>" in rendered
     # The body stays out. That is the whole economy of the thing.
     assert "Query the log store" not in rendered
 

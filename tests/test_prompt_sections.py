@@ -31,10 +31,7 @@ def test_a_section_with_nothing_in_it_contributes_nothing():
         ip.response_style([]),
         ip.thinking_style([]),
         ip.critical_reminder([]),
-        ip.skill_system([]),
-        ip.search_skills_system(available=False),
-        ip.describe_skill_system(available=False),
-        ip.read_skill_file_system(available=False),
+        ip.skill_system(None),
         ip.memory(),
         ip.memory_tool_system(available=False),
         ip.clarification_system(None),
@@ -43,13 +40,22 @@ def test_a_section_with_nothing_in_it_contributes_nothing():
 
 
 def test_every_section_wears_the_same_shape():
+    meta = [
+        ip.SkillMeta(
+            name="trace",
+            description="how to follow a request",
+            mutability="custom",
+            location="/skills/trace/SKILL.md",
+            allowed_tools=(),
+        ),
+    ]
     built = [
         ip.role("Friday", "an assistant", "you classify reports"),
         ip.soul("Careful."),
         ip.response_style(["Short."]),
         ip.thinking_style(["Read it."]),
         ip.critical_reminder(["Never invent."]),
-        ip.skill_system(["trace: how to follow a request"]),
+        ip.skill_system(meta),
         ip.memory(conversation_body="a: hi"),
         ip.memory_tool_system(),
         ip.clarification_system("hand_over"),
@@ -482,27 +488,6 @@ def test_only_a_prompt_whose_input_uses_the_markers_claims_them():
 # --- ticket 03: the three new tool sections --------------------------------
 
 
-def test_search_skills_system_describes_search_when_available():
-    rendered = ip.search_skills_system(available=True).render()
-
-    assert "<search_skills_system>" in rendered
-    assert "search_skills" in rendered
-
-
-def test_describe_skill_system_describes_describe_when_available():
-    rendered = ip.describe_skill_system(available=True).render()
-
-    assert "<describe_skill_system>" in rendered
-    assert "describe_skill" in rendered
-
-
-def test_read_skill_file_system_describes_read_when_available():
-    rendered = ip.read_skill_file_system(available=True).render()
-
-    assert "<read_skill_file_system>" in rendered
-    assert "read_skill_file" in rendered
-
-
 def test_the_responder_is_told_the_two_things_it_has_got_wrong():
     """It wrote "ok có correlationId rồi" against null params, and promised
     "để anh trace thử" in the same message. Both are in the job text; they are
@@ -666,73 +651,96 @@ def test_no_family_escapes_anything_twice():
         assert "&amp;amp;" not in text, family
 
 
-def test_the_responder_prompt_carries_the_three_new_sections():
-    """All three render when there is a catalogue to search. That the
-    responder is *handed* one is `test_skills.py`'s job — this is the
-    renderer, and building an agent here only to read a private attribute
-    off it tested neither thing."""
+def test_the_responder_prompt_carries_the_skill_section_in_deerflow_form():
+    """DeerFlow format: one `<skill>` block per installed skill, with name /
+    description / location / allowed_tools. No `1.` `2.` `3.` ordering,
+    no duplication of the four skill tools (the SDK describes them via
+    function-calling schema). A numbered list read as order and the order
+    the catalogue was loaded in is not the order the agent will need them.
+    """
+    from friday.agent.instruction_prompt import SkillMeta
+
     from friday.responder.prompt import build_instructions
 
-    # In the *instructions* since the catalogue moved there: it is read once
-    # at startup and does not change between calls, so it belongs in the
-    # stable half rather than being re-sent on every draft.
-    text = build_instructions(skills_catalogue=["demo: d"])
+    meta = [
+        SkillMeta(
+            name="trace-a-request",
+            description="Find log lines for one request",
+            mutability="custom",
+            location="/skills/trace/SKILL.md",
+            allowed_tools=(),
+        ),
+        SkillMeta(
+            name="answer-in-vietnamese",
+            description="How the operator writes",
+            mutability="custom",
+            location="/skills/vn/SKILL.md",
+            allowed_tools=("fetch_skill",),
+        ),
+    ]
+    text = build_instructions(skills_meta=meta)
 
-    assert "<search_skills_system>" in text
-    assert "<describe_skill_system>" in text
-    assert "<read_skill_file_system>" in text
-
-
-def test_no_catalogue_means_no_tool_sections_either():
-    """A section that describes a tool renders only if the tool is there —
-    the rule `clarification_system` and `memory_tool_system` already follow.
-    An agent told about a door that is not in the room goes looking for it."""
-    from friday.responder.prompt import build_instructions
-
-    text = build_instructions(skills_catalogue=None)
-
-    assert "<skill_system>" not in text
+    assert text.count("<skill>") == 2
+    for name in ("trace-a-request", "answer-in-vietnamese"):
+        assert f"<name>{name}</name>" in text
+    # The four skill tools must NOT be described in the prompt. The SDK
+    # already attaches them via the function-calling schema.
     assert "<search_skills_system>" not in text
     assert "<describe_skill_system>" not in text
     assert "<read_skill_file_system>" not in text
+    assert "Call fetch_skill" not in text
+    assert "Call search_skills" not in text
+
+
+def test_no_catalogue_means_no_skill_section_either():
+    """No catalogue -> no `<skill>` block. An agent told about a door that
+    is not in the room goes looking for it — and `Harness(skills=None)` is
+    the only way to get a no-skill agent anyway."""
+    from friday.agent.instruction_prompt import SkillMeta
+
+    from friday.responder.prompt import build_instructions
+
+    assert "<skill_system>" not in build_instructions()
+    assert "<skill_system>" not in build_instructions(skills_meta=[])
+    assert "<skill_system>" not in build_instructions(skills_meta=None)
 
 
 def test_the_catalogue_is_not_re_sent_on_every_call():
-    """This used to check that the *prefix* of two per-call inputs matched
-    through `</skill_system>`, because the catalogue lived in `build_input`
-    and a stable prefix was the best available guarantee.
-
-    It is a stronger one now. The catalogue is in the instructions, which do
-    not vary between calls at all — so the cached prefix is the whole stable
-    half rather than however much of the per-call input happened to agree.
-    What this asserts is the thing that made it possible: the per-call input
-    no longer carries the catalogue.
+    """The catalogue is in the instructions, which do not vary between
+    calls at all — so the cached prefix is the whole stable half rather
+    than however much of the per-call input happened to agree. What this
+    asserts is the thing that made it possible: the per-call input no
+    longer carries the catalogue.
     """
     from datetime import datetime, timezone
 
+    from friday.agent.instruction_prompt import SkillMeta
     from friday.responder.prompt import build_input, build_instructions
 
-    catalogue = ["trace-a-request: find the log lines"]
+    meta = [
+        SkillMeta(
+            name="trace-a-request",
+            description="find the log lines for one request",
+            mutability="custom",
+            location="/skills/trace/SKILL.md",
+            allowed_tools=(),
+        ),
+    ]
+
     fixed = dict(
         now=datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc),
         stranger=True,
-        skills_catalogue=catalogue,
     )
 
     a = build_input(asking="q1", context=[], **fixed)
     b = build_input(asking="q2", context=[], **fixed)
 
-    for section in (
-        "<skill_system>",
-        "<search_skills_system>",
-        "<describe_skill_system>",
-        "<read_skill_file_system>",
-    ):
+    for section in ("<skill_system>", "<skill>"):
         assert section not in a, f"{section} is still re-sent on every call"
 
     # And the instructions carry them, once, identically.
-    told = build_instructions(skills_catalogue=catalogue)
-    assert told == build_instructions(skills_catalogue=catalogue)
+    told = build_instructions(skills_meta=meta)
+    assert told == build_instructions(skills_meta=meta)
     assert "trace-a-request" in told
 
     # The per-call input still differs only where it should.

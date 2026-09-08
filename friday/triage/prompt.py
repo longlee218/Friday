@@ -24,18 +24,16 @@ from collections.abc import Sequence
 
 from friday.agent.instruction_prompt import (
     assemble,
-    describe_skill_system,
     clarification_system,
     conversation,
     critical_reminder,
     few_shot,
     job,
-    read_skill_file_system,
     role,
-    search_skills_system,
     skill_system,
     thinking_style,
     trust_boundary,
+    SkillMeta,
 )
 from friday.domain.models import InboundEvent
 
@@ -74,7 +72,7 @@ INSTRUCTIONS = JOB
 
 def build_instructions(
     examples: Sequence[tuple[str, str]] = (),
-    skills_catalogue: list[str] | None = None,
+    skills_meta: Sequence[SkillMeta] | None = None,
 ) -> str:
     """Who it is, the job, how to think, what it was shown, what not to get
     wrong — in that order, because the order is how much each part moves.
@@ -93,10 +91,7 @@ def build_instructions(
         # "call exactly one tool" and means the classifying one; a skill is
         # something it may read on the way, and the turn for it comes from
         # the harness rather than from the correction budget.
-        skill_system(skills_catalogue),
-        search_skills_system(bool(skills_catalogue)),
-        describe_skill_system(bool(skills_catalogue)),
-        read_skill_file_system(bool(skills_catalogue)),
+        skill_system(skills_meta),
         # Only classifications the operator marked *right*. An example
         # nobody looked at teaches the classifier its own habits, and the
         # drift has no floor because every generation is drawn from the last

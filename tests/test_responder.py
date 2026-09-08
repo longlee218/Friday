@@ -278,14 +278,25 @@ def test_the_skill_catalogue_is_in_the_instructions_not_the_per_call_input():
     same argument that puts triage's few-shot examples in instructions rather
     than sending them again on every classification.
     """
+    from friday.agent.instruction_prompt import SkillMeta
     from friday.responder.prompt import build_input, build_instructions
 
-    catalogue = ["trace-a-request: follow one request through the logs"]
+    meta = [
+        SkillMeta(
+            name="trace-a-request",
+            description="follow one request through the logs",
+            mutability="custom",
+            location="/skills/trace/SKILL.md",
+            allowed_tools=(),
+        ),
+    ]
 
-    told = build_instructions(skills_catalogue=catalogue)
-    per_call = build_input(asking="which environment?", skills_catalogue=catalogue)
+    told = build_instructions(skills_meta=meta)
+    per_call = build_input(asking="which environment?")
 
-    assert "trace-a-request" in told, "the catalogue is not in the instructions"
+    assert "<name>trace-a-request</name>" in told, (
+        "the catalogue is not in the instructions"
+    )
     assert "trace-a-request" not in per_call, (
         "the catalogue is still being re-sent on every call"
     )

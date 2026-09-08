@@ -773,9 +773,13 @@ details > summary:hover {
   padding-left: calc(var(--card-padding) - 2px);
 }
 
-.thread .msg.is_own .who .msg-marker {
-  /* Markers stay visible even when the author block collapses —
-     they are a different thing from the name. */
+.thread .msg.is_own .who .msg-marker,
+.thread .msg.is_own .who .pill {
+  /* Markers (audit #11) and the Agent pill (ticket 13) stay
+     visible even when the author block collapses — they are a
+     different thing from the name, and a row where the same
+     author sent three messages in a row needs to read as
+     "Agent, Agent, Agent", not "Agent, , ". */
   visibility: visible;
 }
 
