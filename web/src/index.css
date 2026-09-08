@@ -1018,3 +1018,78 @@ dialog > .body {
     transition: none !important;
   }
 }
+
+/* ----- monitor screen (ticket 04) ----- */
+
+.monitor {
+  display: grid;
+  gap: var(--grid-gap);
+  align-content: start;
+}
+
+.monitor-grid {
+  display: grid;
+  gap: var(--grid-gap);
+  grid-template-columns: 3fr 2fr;
+}
+
+@media (max-width: 1279px) {
+  .monitor-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.feed .feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.feed .feed-row {
+  display: grid;
+  grid-template-columns: 70px 1fr auto auto auto;
+  gap: var(--grid-gap);
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.feed .feed-row:first-child {
+  border-top: none;
+}
+
+.feed .feed-row .verb {
+  color: var(--ink-faint);
+}
+
+.feed .feed-row .latency {
+  min-width: 56px;
+  text-align: right;
+}
+
+.feed .footer {
+  margin-top: var(--grid-gap);
+}
+
+.tasks .task-list {
+  display: grid;
+  gap: var(--grid-gap);
+}
+
+.task-card .room {
+  margin: 6px 0;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
+}
+
+.monitor-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--grid-gap);
+  align-items: center;
+  padding: var(--card-padding);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}

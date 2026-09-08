@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { BoardScreen } from "./screens/BoardScreen";
 import { FlowScreen } from "./screens/FlowScreen";
+import { MonitorScreen } from "./screens/MonitorScreen";
 import { RoomsScreen } from "./screens/RoomsScreen";
 import { ToastProvider } from "./ui";
 
@@ -31,7 +32,8 @@ export function useRoute(): [string, (to: string) => void] {
 //: for. It is what a timestamp does now: click when a message was sent and
 //: you get what happened because of it.
 const TABS = [
-  { path: "/", label: "Board" },
+  { path: "/", label: "Monitor" },
+  { path: "/board", label: "Board" },
   { path: "/rooms", label: "Rooms" },
 ];
 
@@ -39,7 +41,9 @@ export function App() {
   const [path, go] = useRoute();
   // `/flow/...` is reachable and linkable but is not a tab: it is where a
   // timestamp takes you, not a place to start.
-  const section = ["/rooms", "/flow"].find((p) => path.startsWith(p)) ?? "/";
+  const section = ["/board", "/rooms", "/flow"].find((p) =>
+    p === "/" ? path === "/" : path.startsWith(p),
+  ) ?? "/";
 
   const openFlow = (provider: string, id: string) => go(`/flow/${provider}/${id}`);
 
@@ -72,7 +76,8 @@ export function App() {
               per route change, well below the threshold of
               "expensive enough to memo". */}
           <div key={section} className="fade-enter">
-            {section === "/" && <BoardScreen onOpenFlow={openFlow} />}
+            {section === "/" && <MonitorScreen />}
+            {section === "/board" && <BoardScreen onOpenFlow={openFlow} />}
             {section === "/rooms" && <RoomsScreen onOpenFlow={openFlow} />}
             {section === "/flow" && <FlowScreen path={path} onOpenFlow={openFlow} />}
           </div>

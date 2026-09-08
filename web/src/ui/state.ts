@@ -18,3 +18,30 @@ export const DEMANDS_ATTENTION = new Set(["needs_human", "review"]);
  *  the ones above an amber one, the rest nothing — so which column a card
  *  sits in survives being screenshotted out of its board. */
 export const SETTLED = new Set(["done", "handled_by_operator"]);
+
+/** Map a state name (the same vocabulary the Flow screen uses —
+ *  done, failed, retrying, waiting, ok) to a Pill tone. `undefined`
+ *  when the state is unknown, so the screen renders the pill with
+ *  no decoration rather than inventing one.
+ *
+ *  The Monitor screen reads this for every event and every running
+ *  task. The Flow screen has the same map in `flowState.ts`,
+ *  separate because the Flow test is a Python mirror and this one
+ *  is plain TypeScript. If a third screen needs it, lift to a
+ *  single source. */
+export function toneFromState(
+  state: string,
+): "good" | "warn" | "bad" | undefined {
+  switch (state) {
+    case "done":
+    case "ok":
+      return "good";
+    case "retrying":
+    case "waiting":
+      return "warn";
+    case "failed":
+      return "bad";
+    default:
+      return undefined;
+  }
+}

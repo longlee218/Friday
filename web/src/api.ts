@@ -10,6 +10,7 @@ import type {
   ChannelContext,
   Flow,
   Memory,
+  MonitorSnapshot,
   Room,
   Spend,
   TaskCalls,
@@ -39,6 +40,7 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 
 export const api = {
   board: () => get<Board>("/api/board"),
+  monitor: () => get<MonitorSnapshot>("/api/monitor"),
   spend: () => get<Spend>("/api/spend"),
   taskCalls: (id: number) => get<TaskCalls>(`/api/tasks/${id}/calls`),
   conversations: () => get<Room[]>("/api/conversations"),

@@ -82,6 +82,17 @@ class Task:
     confidence: float
     params: dict[str, Any] = field(default_factory=dict)
     created_at: datetime | None = None
+    #: Most recent activity on this task — the latest model_call or
+    #: tool_call that ran for it. `None` when nothing has run yet
+    #: (an empty plan). The Monitor screen reads this to show "5s
+    #: ago", "2m ago"; the BoardScreen reads it to sort cards
+    #: newest-first within a column.
+    last_activity_at: datetime | None = None
+    #: Number of agent attempts. `0` for tasks that never had a
+    #: model call. The Monitor screen renders this as a small
+    #: badge so a stuck task is distinguishable from a finished
+    #: one at a glance.
+    attempts: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -477,3 +488,59 @@ class MessageFlow:
     model_calls: list[ModelCall]
     tool_calls: list[ToolCall]
     outbound: list[Outbound]
+
+
+@dataclass(frozen=True, slots=True)
+class MonitorEvent:
+    """A line on the Monitor screen's live feed.
+
+    Today the only two event sources are model calls and tool calls;
+    the union is open and the screen reads `kind` off `type`. The
+    `id` is monotonic within the feed so the React reconciler
+    never re-mounts a row it already mounted.
+
+    `state` is the same vocabulary the Flow screen uses — done,
+    failed, retrying, ok — so the audit's "same word everywhere"
+    rule is one place, not many.
+    """
+
+    id: int
+    type: str  # "model_call" | "tool_call"
+    occurred_at: datetime
+    agent: str
+    tool: str | None = None
+    latency_ms: int | None = None
+    state: str = "done"
+
+
+@dataclass(frozen=True, slots=True)
+class RunningTask:
+    """A task that is still being worked in.
+
+    The Monitor screen's right-hand column renders one card per
+    running task. `last_tool` is the operator's hint about what
+    the agent is doing right now — a name, not a status; the
+    status is `state` on the parent Task.
+    """
+
+    id: int
+    type: str
+    state: str
+    room: str
+    last_activity_at: datetime | None
+    last_tool: str | None
+    attempts: int
+
+
+@dataclass(frozen=True, slots=True)
+class MonitorSnapshot:
+    """One snapshot of the Monitor screen. The page asks for this
+    on mount, then SSE (ticket 05) takes over from there."""
+
+    status: str  # "connected" | "disconnected"
+    events: list[MonitorEvent]
+    running_tasks: list[RunningTask]
+    messages: int
+    untriaged: int
+    last_message_at: datetime | None
+    spend_today: int

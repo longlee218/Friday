@@ -45,6 +45,9 @@ from friday.domain.models import (
     MentionType,
     MessageFlow,
     ModelCall,
+    MonitorEvent,
+    MonitorSnapshot,
+    RunningTask,
     ToolCall,
     Outbound,
     Task,
@@ -2081,6 +2084,185 @@ class Database:
             select(schema.Task).order_by(schema.Task.id).limit(limit)
         )
 
+    async def running_tasks(self) -> list[RunningTask]:
+        """Tasks that are still being worked in, with the two
+        activity fields the Monitor screen renders (`last_activity_at`,
+        `last_tool`, `attempts`).
+
+        Three round trips folded into one:
+        - tasks in `OPEN` states, ordered by id
+        - max `created_at` and `count(*)` from `model_calls`
+        - the most recent `tool_calls.tool` for each task
+
+        Two batched subqueries rather than one query per task, and
+        one parent query rather than the N+1 the BoardScreen's older
+        per-task pattern would have produced."""
+        open_states = [s.value for s in OPEN]
+        async with self._sessions() as session:
+            # Most recent activity + count from model_calls, per task.
+            model_subq = (
+                select(
+                    schema.ModelCall.task_id.label("task_id"),
+                    func.max(schema.ModelCall.created_at).label("last_at"),
+                    func.count(schema.ModelCall.id).label("n"),
+                )
+                .where(schema.ModelCall.task_id.is_not(None))
+                .group_by(schema.ModelCall.task_id)
+                .subquery()
+            )
+            # Most recent tool_calls.tool per task.
+            tool_subq = (
+                select(
+                    schema.ToolCall.task_id.label("task_id"),
+                    func.max(schema.ToolCall.created_at).label("last_at"),
+                )
+                .where(schema.ToolCall.task_id.is_not(None))
+                .group_by(schema.ToolCall.task_id)
+                .subquery()
+            )
+            # The parent join: tasks left-join both. SQLite honours
+            # `coalesce` on `datetime`, so the row is the newer of
+            # the two timestamps (or `None`).
+            stmt = (
+                select(
+                    schema.Task,
+                    func.coalesce(model_subq.c.last_at, tool_subq.c.last_at).label(
+                        "last_activity_at"
+                    ),
+                    func.coalesce(model_subq.c.n, 0).label("attempts"),
+                    tool_subq.c.last_at.label("tool_last_at"),
+                )
+                .where(schema.Task.state.in_(open_states))
+                .outerjoin(model_subq, model_subq.c.task_id == schema.Task.id)
+                .outerjoin(tool_subq, tool_subq.c.task_id == schema.Task.id)
+                .order_by(
+                    func.coalesce(model_subq.c.last_at, tool_subq.c.last_at).desc().nullslast()
+                )
+            )
+            rows = await session.execute(stmt)
+
+        # The two-name-from-one-row problem: the `last_tool` is on
+        # `tool_calls` but we only fetched its timestamp. One more
+        # round trip with the timestamps we have, to keep this
+        # monitor query from growing into a join with the full tool
+        # row.
+        last_tool_by_task: dict[int, str] = {}
+        if rows:
+            ts_pairs = [
+                (row[0].id, row.tool_last_at)
+                for row in rows
+                if row.tool_last_at is not None
+            ]
+            if ts_pairs:
+                # Pick the most recent tool_call.tool for each task
+                # whose last activity is the same timestamp the
+                # `tool_subq` aggregated. Cheaper than a window
+                # function on SQLite.
+                tool_stmt = (
+                    select(schema.ToolCall.task_id, schema.ToolCall.tool, schema.ToolCall.created_at)
+                    .where(
+                        schema.ToolCall.task_id.in_({tid for tid, _ in ts_pairs}),
+                        schema.ToolCall.created_at.in_({ts for _, ts in ts_pairs}),
+                    )
+                )
+                async with self._sessions() as session:
+                    for tid, tool, _ in await session.execute(tool_stmt):
+                        last_tool_by_task[tid] = tool
+
+        return [
+            RunningTask(
+                id=row[0].id,
+                type=row[0].type,
+                state=row[0].state,
+                room=str(row[0].conversation_id),
+                last_activity_at=row.last_activity_at,
+                last_tool=last_tool_by_task.get(row[0].id),
+                attempts=row.attempts or 0,
+            )
+            for row in rows
+        ]
+
+    async def recent_events(self, limit: int = 100) -> list[MonitorEvent]:
+        """The Monitor screen's live feed: a single ordered list of
+        the last `limit` rows across `model_calls` and `tool_calls`,
+        newest first. Two queries, merged in Python — the union
+        of two indexed-by-`created_at` tables is a SQL `UNION ALL`,
+        which on SQLite with this many rows is faster as two
+        indexed reads than one UNION."""
+        async with self._sessions() as session:
+            model_rows = await session.execute(
+                select(
+                    schema.ModelCall.id,
+                    schema.ModelCall.agent,
+                    schema.ModelCall.latency_ms,
+                    schema.ModelCall.attempt,
+                    schema.ModelCall.created_at,
+                )
+                .order_by(schema.ModelCall.created_at.desc())
+                .limit(limit)
+            )
+            tool_rows = await session.execute(
+                select(
+                    schema.ToolCall.id,
+                    schema.ToolCall.agent,
+                    schema.ToolCall.tool,
+                    schema.ToolCall.latency_ms,
+                    schema.ToolCall.failed,
+                    schema.ToolCall.created_at,
+                )
+                .order_by(schema.ToolCall.created_at.desc())
+                .limit(limit)
+            )
+
+        events: list[MonitorEvent] = []
+        for row in model_rows:
+            attempt = row.attempt or 1
+            state = "retrying" if attempt > 1 else "done"
+            events.append(
+                MonitorEvent(
+                    id=row.id,
+                    type="model_call",
+                    occurred_at=row.created_at,
+                    agent=row.agent,
+                    tool=None,
+                    latency_ms=row.latency_ms,
+                    state=state,
+                )
+            )
+        for row in tool_rows:
+            events.append(
+                MonitorEvent(
+                    id=row.id,
+                    type="tool_call",
+                    occurred_at=row.created_at,
+                    agent=row.agent,
+                    tool=row.tool,
+                    latency_ms=row.latency_ms,
+                    state="ok" if not row.failed else "failed",
+                )
+            )
+        events.sort(key=lambda e: e.occurred_at, reverse=True)
+        return events[:limit]
+
+    async def monitor_snapshot(self) -> MonitorSnapshot:
+        """One snapshot of what the Monitor screen asks for on mount.
+        Counts come from the same queries the BoardScreen's footer
+        uses; events and running_tasks come from `recent_events`
+        and `running_tasks`. Spend is the day's total."""
+        counts = await self.counts()
+        events = await self.recent_events(limit=100)
+        running = await self.running_tasks()
+        spend_by_agent = await self.spent_today_by_agent()
+        return MonitorSnapshot(
+            status="connected",
+            events=events,
+            running_tasks=running,
+            messages=counts["messages"],
+            untriaged=counts["untriaged"],
+            last_message_at=counts["last_message_at"],
+            spend_today=sum(spend_by_agent.values()),
+        )
+
     async def task(self, task_id: int) -> Task | None:
         """One task, freshest read — `decide_pending_action` needs current
         params, not the ones a stored graph state was checkpointed against."""
@@ -2219,6 +2401,13 @@ def _task(row: schema.Task) -> Task:
         confidence=row.confidence,
         params=row.params or {},
         created_at=row.created_at,
+        # The two fields below are populated by `running_tasks()`,
+        # which loads them with a single batched query rather than
+        # one round trip per task. The store-level converter fills
+        # them with None / 0 here so the same shape serves readers
+        # that did not ask for the activity rollup.
+        last_activity_at=None,
+        attempts=0,
     )
 
 

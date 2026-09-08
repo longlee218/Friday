@@ -17,5 +17,5 @@ export { Spinner } from "./Spinner";
 export { Tag } from "./Tag";
 export { ToastProvider, useToast } from "./Toast";
 export type { Toast } from "./Toast";
-export { DEMANDS_ATTENTION, SETTLED, STATE_LABEL } from "./state";
+export { DEMANDS_ATTENTION, SETTLED, STATE_LABEL, toneFromState } from "./state";
 export { ago, room, roomName, shortTime } from "./format";

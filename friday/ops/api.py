@@ -125,6 +125,32 @@ def build_api(
             }
         )
 
+    @api.get("/api/monitor")
+    async def monitor() -> dict:
+        """The Monitor screen's initial snapshot. SSE (ticket 05) takes
+        over from here — the page asks once on mount, then subscribes
+        to the event stream.
+
+        One round trip rather than four: events, running tasks, the
+        three counters and the day's spend are all answers the page
+        asks in the same breath. A page that rendered five spinners
+        for five endpoints is a page that took five round trips to
+        look like one."""
+        snap = await db.monitor_snapshot()
+        return _clean(
+            {
+                "status": snap.status,
+                "events": [_monitor_event(e) for e in snap.events],
+                "running_tasks": [_running_task(t) for t in snap.running_tasks],
+                "counts": {
+                    "messages": snap.messages,
+                    "untriaged": snap.untriaged,
+                    "last_message_at": snap.last_message_at,
+                    "spend_today": snap.spend_today,
+                },
+            }
+        )
+
     @api.get("/api/messages")
     async def messages(
         limit: int = Query(50, ge=1, le=MAX_PAGE),
@@ -607,6 +633,15 @@ def _task(task: Task) -> dict:
         "confidence": task.confidence,
         "params": task.params,
         "created_at": task.created_at,
+        # The Monitor screen reads these two. `_task()` is the
+        # converter for any task that has not been enriched with
+        # activity data; `running_tasks()` writes the same shape
+        # with both fields filled, and the contract test asserts
+        # the keys agree. `None` and `0` are the placeholders for
+        # the non-Monitor path (Board, Flow, etc.) which never
+        # reads them.
+        "last_activity_at": task.last_activity_at,
+        "attempts": task.attempts,
     }
 
 
@@ -704,3 +739,27 @@ def bind(host: str, port: int) -> socket.socket:
         ) from None
     sock.listen()
     return sock
+
+
+def _monitor_event(e) -> dict:
+    return {
+        "id": e.id,
+        "type": e.type,
+        "occurred_at": e.occurred_at,
+        "agent": e.agent,
+        "tool": e.tool,
+        "latency_ms": e.latency_ms,
+        "state": e.state,
+    }
+
+
+def _running_task(t) -> dict:
+    return {
+        "id": t.id,
+        "type": t.type,
+        "state": t.state,
+        "room": t.room,
+        "last_activity_at": t.last_activity_at,
+        "last_tool": t.last_tool,
+        "attempts": t.attempts,
+    }

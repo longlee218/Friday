@@ -44,6 +44,16 @@ export interface Task {
   confidence: number;
   params: Record<string, unknown>;
   created_at: string | null;
+  /** Last activity timestamp. The Monitor screen reads this for
+   * "last spoke at"; the BoardScreen reads it to sort cards
+   * newest-first within a column. The store populates it from the
+   * latest model_call or tool_call on the same task. */
+  last_activity_at: string | null;
+  /** Number of agent attempts that ran while working on this task.
+   * `0` for tasks that never had a model call (an empty plan); the
+   * Monitor screen renders this as a small badge so a stuck task is
+   * distinguishable from a finished one at a glance. */
+  attempts: number;
 }
 
 export interface Outbound {
@@ -195,4 +205,68 @@ export interface Memory {
   updated_at: string;
   deleted_at: string | null;
   deleted_by: string | null;
+}
+
+/** A line on the Monitor screen's live feed.
+ *
+ *  The feed is a single ordered list of "something happened". Today
+ *  that is a model call or a tool call; SSE (ticket 05) will append
+ *  more kinds. The discriminator is `type`, and the screen reads
+ *  `kind` off it. The union is open: a future `type: "task_opened"`
+ *  arrives, the screen renders it, the type does not have to be
+ *  closed here.
+ */
+export interface MonitorEvent {
+  /** Monotonic id within the feed — used as the React `key` so an
+   * appended event never re-uses a row's id and the React reconciler
+   * never re-mounts a row it already mounted. */
+  id: number;
+  /** One of `"model_call"` or `"tool_call"`. New kinds (e.g. a future
+   * `"task_state_changed"`) extend the union without changing the
+   * wire shape. */
+  type: "model_call" | "tool_call";
+  /** ISO 8601 timestamp. The screen sorts on it. */
+  occurred_at: string;
+  /** What happened, in the operator's vocabulary. A model call is
+   *  `agent`; a tool call is `tool`. The screen renders the same
+   *  shape for both: an actor name, then a one-line description,
+   *  then a latency. The fields differ, the rendering does not. */
+  agent: string;
+  tool: string | null;
+  latency_ms: number | null;
+  /** Did the call succeed, fail, or hang? Same enum the Flow
+   *  screen uses — the audit's "same word everywhere" rule. */
+  state: "done" | "failed" | "retrying" | "ok";
+}
+
+/** A running task — not finished, not handed off. The Monitor
+ *  screen's right-hand column shows one card per running task;
+ *  the operator's two questions at a glance are "is anything
+ *  stuck" and "what is it doing". */
+export interface RunningTask {
+  id: number;
+  type: string;
+  state: string;
+  /** Display name of the room the task belongs to, not the
+   *  channel id. The store resolves the conversation. */
+  room: string;
+  /** Most recent activity timestamp — "5s ago", "2m ago". */
+  last_activity_at: string | null;
+  /** What the agent did most recently. */
+  last_tool: string | null;
+  attempts: number;
+}
+
+/** One snapshot of the Monitor screen. The page asks for this on
+ *  mount, then subscribes to SSE for live updates (ticket 05). */
+export interface MonitorSnapshot {
+  status: "connected" | "disconnected";
+  events: MonitorEvent[];
+  running_tasks: RunningTask[];
+  counts: {
+    messages: number;
+    untriaged: number;
+    last_message_at: string | null;
+    spend_today: number;
+  };
 }

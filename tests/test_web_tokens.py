@@ -374,3 +374,48 @@ def test_skeleton_renders_a_real_element_not_a_text_placeholder() -> None:
         "Skeleton renders a Loading… text — that is exactly what "
         "ticket 03 replaces"
     )
+
+
+def test_monitor_screen_has_aria_log_and_memo_on_task_card() -> None:
+    """The Monitor screen's two audit asks:
+    - audit #1: feed uses `role="log"` and `aria-live="polite"` so a
+      screen reader announces new events without interrupting.
+    - audit #4: TaskCard is React.memo'd so SSE bursts do not
+      re-render cards that did not change."""
+    src = (SRC / "screens" / "MonitorScreen.tsx").read_text(encoding="utf-8")
+    assert 'role="log"' in src, 'MonitorScreen feed has no role="log"'
+    assert 'aria-live="polite"' in src, "MonitorScreen feed has no aria-live"
+    # `memo(` (with the open paren) is the exact shape the audit
+    # asked for; a bare `memo` reference would be a wrapper without
+    # application.
+    import re
+    assert re.search(r"\bmemo\s*\(", src), (
+        "TaskCard is not React.memo'd — the audit asked for the wrap"
+    )
+    assert re.search(r"memo\s*\(\s*function TaskCard", src), (
+        "memo is not applied to the TaskCard component specifically"
+    )
+
+
+def test_monitor_routes_at_root() -> None:
+    """`/` is the Monitor screen — the operator's front door. A
+    regression that leaves `/` on Board is the audit's failure."""
+    app = (SRC / "App.tsx").read_text(encoding="utf-8")
+    assert 'section === "/" && <MonitorScreen />' in app
+    # The topbar's first tab is the front door, in the same order
+    # the spec called for: Monitor, Board, Rooms.
+    assert "label: \"Monitor\"" in app
+    # The old first tab is no longer the first tab.
+    assert 'label: "Board"' in app
+
+
+def test_monitor_polling_does_not_exist() -> None:
+    """Ticket 04 takes the snapshot once on mount and renders; SSE
+    (ticket 05) is what updates it. A regression that adds polling
+    back is the SSE ticket's failure: two readers of the same data
+    with different cadences drift, exactly the bug polling was
+    meant to avoid."""
+    src = (SRC / "screens" / "MonitorScreen.tsx").read_text(encoding="utf-8")
+    assert "setInterval" not in src, (
+        "MonitorScreen polls — ticket 05 owns the live updates"
+    )
