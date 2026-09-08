@@ -60,9 +60,20 @@ export function App() {
         </nav>
       </header>
       <main>
-        {section === "/" && <BoardScreen onOpenFlow={openFlow} />}
-        {section === "/rooms" && <RoomsScreen onOpenFlow={openFlow} />}
-        {section === "/flow" && <FlowScreen path={path} onOpenFlow={openFlow} />}
+        {/* `key={section}` remounts on route change so the `fade-enter`
+            keyframe runs every time. The DOM node is replaced, the
+            animation starts from `opacity: 0`, and `prefers-reduced-
+            motion: reduce` collapses the duration to 0 — the new
+            screen appears instantly, which is what the audit
+            asked for in note #1 (motion that respects the user's
+            own setting). The cost of the remount is one element
+            per route change, well below the threshold of
+            "expensive enough to memo". */}
+        <div key={section} className="fade-enter">
+          {section === "/" && <BoardScreen onOpenFlow={openFlow} />}
+          {section === "/rooms" && <RoomsScreen onOpenFlow={openFlow} />}
+          {section === "/flow" && <FlowScreen path={path} onOpenFlow={openFlow} />}
+        </div>
       </main>
     </div>
   );

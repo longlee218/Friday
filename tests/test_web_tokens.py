@@ -267,3 +267,64 @@ def test_the_screen_no_longer_shows_the_implicit_attempt_pill() -> None:
         "CallCard still renders an attempt pill — the state pill "
         "already carries retrying"
     )
+
+
+def test_three_named_motions_with_enter_slower_than_exit() -> None:
+    """The motion system has three named motions (fade, slide, scale),
+    and every one of them runs its exit faster than its enter. The
+    audit's rule: enter is always slower than exit, so a closing
+    feels like a closing rather than a pause.
+    """
+    import re
+    css = (SRC / "index.css").read_text(encoding="utf-8")
+
+    # Each motion class pair (enter + exit) must be defined.
+    for motion in ("fade", "slide", "scale"):
+        enter = f".{motion}-enter"
+        exit_ = f".{motion}-exit"
+        assert enter in css, f"missing {enter} class"
+        assert exit_ in css, f"missing {exit_} class"
+
+    # Enter durations are --d-slow or --d-med (240ms / 180ms); exit
+    # durations are --d-med or --d-fast (180ms / 120ms). Picking up
+    # the variables instead of literal ms means a redesign of the
+    # motion system is one file; the test still pins the relationship.
+    enter_dur = re.findall(r"\.(?:fade|slide|scale)-enter\s*\{[^}]*var\(--d-(slow|med|fast)\)", css)
+    exit_dur = re.findall(r"\.(?:fade|slide|scale)-exit\s*\{[^}]*var\(--d-(slow|med|fast)\)", css)
+    ordering = {"fast": 0, "med": 1, "slow": 2}
+    assert len(enter_dur) == 3, f"expected 3 enter classes, got {enter_dur}"
+    assert len(exit_dur) == 3, f"expected 3 exit classes, got {exit_dur}"
+    for e, x in zip(enter_dur, exit_dur):
+        e_dur = ordering[e] if isinstance(e, str) else ordering[e[0]]
+        x_dur = ordering[x] if isinstance(x, str) else ordering[x[0]]
+        assert e_dur > x_dur, (
+            f"{e!r} enter must be slower than {x!r} exit, "
+            f"but the durations are equal or reversed"
+        )
+
+
+def test_motion_respects_prefers_reduced_motion() -> None:
+    """Reduced-motion users get every duration collapsed to 0 and
+    every transform animation replaced by an opacity fade. The rule
+    is the audit's note #1 — the screen must not move for someone
+    who asked it not to."""
+    css = (SRC / "index.css").read_text(encoding="utf-8")
+    block = re.search(r"@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{(.*?)\}\s*\}", css, re.DOTALL)
+    assert block, "no @media (prefers-reduced-motion: reduce) block"
+    body = block.group(1)
+    assert "--d-fast: 0ms" in body
+    assert "--d-med: 0ms" in body
+    assert "--d-slow: 0ms" in body
+    assert "animation: none" in body
+    assert "transition: none" in body
+
+
+def test_route_transition_uses_fade_enter() -> None:
+    """`<App>` remounts the screen content on every route change,
+    keyed on the section, with the `fade-enter` class so the motion
+    system's fade keyframe runs. A regression that drops the key or
+    the class makes route changes snap, which is the failure the
+    operator named ("không mượt")."""
+    app = (SRC / "App.tsx").read_text(encoding="utf-8")
+    assert "key={section}" in app, "App does not remount on route change"
+    assert "fade-enter" in app, "App does not apply the fade-enter motion"

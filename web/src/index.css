@@ -574,6 +574,58 @@ details > summary:hover {
   to   { transform: translateX(0);    opacity: 1; }
 }
 
+/* ----- motion system (ticket 02) -------------------------------------------
+ *
+ *  Three named motions, one job each — `fade` for route transitions,
+ *  `slide` for panels and toasts, `scale` for dialogs and popovers.
+ *  The audit's rule: enter is always slower than exit, so the screen
+ *  feels like it is leaving as well as arriving. Durations read from
+ *  `--d-fast`, `--d-med`, `--d-slow` so a redesign touches one file.
+ *
+ *  Apply via `data-enter` / `data-exit` on whatever element changes.
+ *  CSS owns the timing; the React side just flips the attribute.
+ *
+ *  Only `opacity` and `transform` animate — `width`, `height`, `top`,
+ *  `left` would force a reflow on every frame and the screen would
+ *  not feel "mượt" the way the operator asked.
+ */
+
+.fade-enter {
+  animation: motion-fade var(--d-slow) var(--ease) both;
+}
+.fade-exit {
+  animation: motion-fade var(--d-med) var(--ease) reverse both;
+}
+
+.slide-enter {
+  animation: motion-slide var(--d-slow) var(--ease) both;
+}
+.slide-exit {
+  animation: motion-slide var(--d-med) var(--ease) reverse both;
+}
+
+.scale-enter {
+  animation: motion-scale var(--d-med) var(--ease) both;
+}
+.scale-exit {
+  animation: motion-scale var(--d-fast) var(--ease) reverse both;
+}
+
+@keyframes motion-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes motion-slide {
+  from { transform: translateX(8px); opacity: 0; }
+  to   { transform: translateX(0);   opacity: 1; }
+}
+
+@keyframes motion-scale {
+  from { transform: scale(0.96); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
 .toast button.action {
   background: none;
   border: 1px solid var(--accent);
