@@ -419,3 +419,7 @@ def test_monitor_polling_does_not_exist() -> None:
     assert "setInterval" not in src, (
         "MonitorScreen polls — ticket 05 owns the live updates"
     )
+    assert "useEventStream" in src, (
+        "MonitorScreen is not subscribed to SSE — ticket 05's whole "
+        "reason to exist is the EventStream subscription"
+    )

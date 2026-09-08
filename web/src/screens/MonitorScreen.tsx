@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useCallback, useState } from "react";
 
 import { api } from "../api";
 import type {
@@ -7,6 +7,7 @@ import type {
   RunningTask,
 } from "../api-types";
 import { useAsync } from "../useAsync";
+import { useEventStream } from "../useEventStream";
 import {
   Pill,
   Skeleton,
@@ -48,17 +49,43 @@ const VIRTUALIZE_THRESHOLD = 200;
 
 export function MonitorScreen() {
   const snap = useAsync(() => api.monitor(), []);
+  const [liveEvents, setLiveEvents] = useState<MonitorEvent[]>([]);
+
+  // Append a server event to the live feed. The snapshot we
+  // fetched on mount already has its own events; SSE events come
+  // after, and the wire carries an id so the *render* order can
+  // match the on-disk order rather than the arrival order (a
+  // replay that arrives late does not jump above a fresh event).
+  const onEvent = useCallback((ev: { id: number; type: string; occurred_at: string; payload: Record<string, unknown> }) => {
+    // Translate the wire shape into the shape the screen renders.
+    // Only model_call and tool_call are wired today; future event
+    // types extend the union in `api-types.ts` and the dispatcher
+    // here, the screen renders whatever comes out the other side.
+    const rendered = renderServerEvent(ev);
+    if (!rendered) return;
+    setLiveEvents((prev) => {
+      const next = [...prev, rendered];
+      // Cap the live buffer at the same threshold the snapshot
+      // uses. Beyond that, the page is asked to refresh — SSE is
+      // for the live tail, not for an unbounded backlog.
+      return next.length > 200 ? next.slice(-200) : next;
+    });
+  }, []);
+
+  const { connected: sseConnected } = useEventStream("/api/events", onEvent);
+
+  const events = snap.value ? [...snap.value.events, ...liveEvents] : liveEvents;
 
   return (
     <div className="monitor">
       <header className="row wrap between">
         <Pill
-          tone={snap.value?.status === "connected" ? "good" : "warn"}
-          label={snap.value?.status ?? "loading"}
+          tone={sseConnected ? "good" : "warn"}
+          label={sseConnected ? "live" : "polling"}
         />
         {snap.value && (
           <span className="faint mono">
-            {snap.value.events.length} events · {snap.value.running_tasks.length} running
+            {events.length} events · {snap.value.running_tasks.length} running
           </span>
         )}
         <button onClick={snap.reload}>Refresh</button>
@@ -81,7 +108,7 @@ export function MonitorScreen() {
         </div>
       ) : (
         <div className="monitor-grid">
-          <Feed events={snap.value.events} />
+          <Feed events={events} />
           <Tasks tasks={snap.value.running_tasks} />
         </div>
       )}
@@ -89,6 +116,36 @@ export function MonitorScreen() {
       {snap.value && <Footer snap={snap.value} />}
     </div>
   );
+}
+
+function renderServerEvent(
+  ev: { id: number; type: string; occurred_at: string; payload: Record<string, unknown> },
+): MonitorEvent | null {
+  if (ev.type !== "model_call" && ev.type !== "tool_call") {
+    return null;
+  }
+  const p = ev.payload;
+  if (ev.type === "model_call") {
+    const attempt = typeof p.attempt === "number" ? p.attempt : 1;
+    return {
+      id: typeof p.row_id === "number" ? p.row_id : ev.id,
+      type: "model_call",
+      occurred_at: ev.occurred_at,
+      agent: typeof p.agent === "string" ? p.agent : "unknown",
+      tool: null,
+      latency_ms: typeof p.latency_ms === "number" ? p.latency_ms : null,
+      state: attempt > 1 ? "retrying" : "done",
+    };
+  }
+  return {
+    id: typeof p.row_id === "number" ? p.row_id : ev.id,
+    type: "tool_call",
+    occurred_at: ev.occurred_at,
+    agent: typeof p.agent === "string" ? p.agent : "unknown",
+    tool: typeof p.tool === "string" ? p.tool : null,
+    latency_ms: typeof p.latency_ms === "number" ? p.latency_ms : null,
+    state: p.failed ? "failed" : "ok",
+  };
 }
 
 function Feed({ events }: { events: MonitorEvent[] }) {

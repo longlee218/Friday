@@ -615,11 +615,40 @@ class Database:
         values.setdefault("created_at", _now())
         async with self._sessions.begin() as session:
             session.add(schema.ModelCall(**values))
+        # Publish on the bus so the SSE stream sees the event the
+        # moment the row is written. The payload carries the row
+        # id and the agent the screen renders; the SSE endpoint
+        # serialises it as JSON. The store does not wait for the
+        # bus — `publish` is sync and never blocks — so a slow
+        # subscriber cannot stall a model call.
+        from friday.ops.events import get_bus
+        get_bus().publish(
+            type_="model_call",
+            payload={
+                "row_id": values.get("id"),
+                "agent": values.get("agent"),
+                "task_id": values.get("task_id"),
+                "latency_ms": values.get("latency_ms"),
+                "attempt": values.get("attempt") or 1,
+            },
+        )
 
     async def record_tool_call(self, **values) -> None:
         values.setdefault("created_at", _now())
         async with self._sessions.begin() as session:
             session.add(schema.ToolCall(**values))
+        from friday.ops.events import get_bus
+        get_bus().publish(
+            type_="tool_call",
+            payload={
+                "row_id": values.get("id"),
+                "agent": values.get("agent"),
+                "tool": values.get("tool"),
+                "task_id": values.get("task_id"),
+                "failed": values.get("failed", False),
+                "latency_ms": values.get("latency_ms"),
+            },
+        )
 
     async def tools_for_tasks(self, task_ids) -> dict[int, list[ToolCall]]:
         """What each of these tasks reached for, oldest first within a task.

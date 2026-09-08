@@ -26,6 +26,7 @@ argument about writes, and there is now a write.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import socket
 import pathlib
@@ -33,7 +34,8 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException, Path, Query
+from fastapi import Body, FastAPI, HTTPException, Path, Query, Request
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -150,6 +152,67 @@ def build_api(
                 },
             }
         )
+
+    @api.get("/api/events")
+    async def events(request: Request) -> StreamingResponse:
+        """Server-sent events. The Monitor screen subscribes here
+        after the initial snapshot; this stream is what keeps the
+        feed and the running-tasks panel live.
+
+        `Last-Event-ID` is the standard SSE reconnect header. The
+        bus replays every event since the last id the client saw;
+        a reconnect after the browser's default 3s outage picks up
+        where it left off without a polling round trip."""
+        from friday.ops.events import get_bus
+
+        bus = get_bus()
+        # `last_event_id` arrives as a string; absent means "no
+        # events missed". `int(...)` on "" raises — guard it.
+        last_seen_raw = request.headers.get("Last-Event-ID", "")
+        try:
+            last_seen = int(last_seen_raw) if last_seen_raw else 0
+        except ValueError:
+            last_seen = 0
+
+        queue, replay = await bus.subscribe()
+
+        async def stream():
+            try:
+                # Replay first — events after `last_seen`, in order.
+                for event in replay:
+                    if event.id > last_seen:
+                        yield _clean(_format_sse(event))
+                # Then live events until the client disconnects.
+                while True:
+                    if await request.is_disconnected():
+                        return
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        # A keep-alive comment every 15 seconds. SSE
+                        # proxies and load balancers close idle
+                        # connections; a comment costs one byte
+                        # and tells them the stream is still alive.
+                        yield ": keepalive\n\n"
+                        continue
+                    yield _clean(_format_sse(event))
+            finally:
+                await bus.unsubscribe(queue)
+
+        return _clean(StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                # Disable proxy buffering so events reach the
+                # browser the moment the bus publishes them. A
+                # proxy that buffers holds them until the next
+                # flush and the screen lags for the flush
+                # interval.
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        ))
 
     @api.get("/api/messages")
     async def messages(
@@ -665,9 +728,12 @@ def _clean(value: Any) -> Any:
 
     Applied to the whole response rather than to the fields thought to be
     risky, because the field nobody thought about is the one that leaks.
-    """
-    if isinstance(value, str):
-        return scrub(value)
+    `bytes` is the SSE wire form: the payload string is JSON that the
+    browser parses, so it carries the same risk and goes through the
+    same scrub."""
+    if isinstance(value, (str, bytes)):
+        scrubbed = scrub(value.decode("utf-8") if isinstance(value, bytes) else value)
+        return scrubbed.encode("utf-8") if isinstance(value, bytes) else scrubbed
     if isinstance(value, dict):
         return {k: _clean(v) for k, v in value.items()}
     if isinstance(value, list):
@@ -763,3 +829,33 @@ def _running_task(t) -> dict:
         "last_tool": t.last_tool,
         "attempts": t.attempts,
     }
+
+
+def _format_sse(event) -> bytes:
+    """One SSE frame: id, event, data, blank line.
+
+    The wire format is fixed by the SSE spec (text/event-stream).
+    `data` is JSON — the browser's EventSource parses it once.
+    `event` is the type; the client hook dispatches on it. A blank
+    line terminates the frame — that is what flushes the browser's
+    parser.
+
+    `_clean` runs every string through `scrub` on the way out. The
+    store publishes an event whose payload is the row's own
+    fields (agent, tool, task id) — none of them carries a token
+    — but the rule applies to every string regardless, so the
+    guard against future event types that do carry one is in
+    place."""
+    import json as _json
+    scrubbed = _clean(event.payload)
+    payload = {
+        "id": event.id,
+        "type": event.type,
+        "occurred_at": event.occurred_at.isoformat(),
+        "payload": scrubbed,
+    }
+    return (
+        f"id: {event.id}\n"
+        f"event: {event.type}\n"
+        f"data: {_json.dumps(payload)}\n\n"
+    ).encode("utf-8")
