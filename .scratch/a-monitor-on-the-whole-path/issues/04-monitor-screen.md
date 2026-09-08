@@ -38,7 +38,7 @@ of the throughput numbers.
 
 **Decisions:** D1, D6.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `Database.monitor_snapshot()` returns a `MonitorSnapshot`
       domain object with `status`, `events`, `running_tasks`, the

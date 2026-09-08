@@ -28,7 +28,7 @@ title — the audit's "the operator can always see *why*".
 
 **Decisions:** D1, D6.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `web/src/ui/Breadcrumb.tsx` exports a `<Breadcrumb>` primitive
       and a `BreadcrumbItem` type. The trail collapses anything

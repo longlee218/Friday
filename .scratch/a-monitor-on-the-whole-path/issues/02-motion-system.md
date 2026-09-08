@@ -27,7 +27,7 @@ opacity-only fade.
 
 **Decisions:** D2.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Three motion classes are defined in `web/src/index.css`:
       `fade-enter`, `slide-enter`, `scale-enter` (and matching

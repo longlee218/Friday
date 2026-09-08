@@ -40,7 +40,7 @@ the bus is the cache for the hot path, not the source of truth.
 
 **Decisions:** D5.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `friday/ops/events.py` defines `EventBus` (publish,
       subscribe, unsubscribe), `Event` (id, type, occurred_at,

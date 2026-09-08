@@ -29,7 +29,7 @@ the literal `Loading…` text is gone.
 
 **Decisions:** D2, D3.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `Skeleton`, `Spinner`, `Toast` exported from
       `web/src/ui/`. `Skeleton` takes `width` and `height` as

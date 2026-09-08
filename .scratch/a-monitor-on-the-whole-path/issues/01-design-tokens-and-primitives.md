@@ -21,7 +21,7 @@ palette is in it — guarding against accidental palette swaps.
 
 **Decisions:** D3, D4.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `:root` declares the operator-confirmed dark palette:
       `--bg-0`, `--bg-1`, `--bg-2`, `--line`, `--ink`, `--ink-faint`,

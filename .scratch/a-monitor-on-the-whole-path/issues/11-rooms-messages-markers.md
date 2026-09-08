@@ -44,7 +44,7 @@ is).
 2026-09-08 to distinguish task from enrichment in the Rooms
 view.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `messages.source_message_id` migration adds a nullable
       column and an index. `MemoryScope.message_id` is a new

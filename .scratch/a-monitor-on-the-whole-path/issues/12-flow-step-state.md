@@ -48,7 +48,7 @@ tool name.
 đang không hiển thị được cái nào là tool call, cái nào là loop
 lần 1, lần 2".
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `web/src/flowState.ts` is a pure module exporting
       `toolState(call)` (`ok` / `failed`) and `turnState(call,
