@@ -4,6 +4,7 @@ import { api } from "../api";
 import type { Flow } from "../api-types";
 import { useAsync } from "../useAsync";
 import { CallCard, Pill, ToolCard, shortTime } from "../ui";
+import { toolState, turnState } from "../flowState";
 
 /** Board ticket 07 — what happened to this message.
  *
@@ -199,9 +200,11 @@ function Path({ provider, id }: { provider: string; id: string }) {
                     />
                   )}
                 </div>
-                {turn.call && <CallCard call={turn.call} />}
+                {turn.call && (
+                  <CallCard call={turn.call} state={turnState(turn.call, turn.tools, it)} />
+                )}
                 {turn.tools.map((t, j) => (
-                  <ToolCard key={`t${j}`} call={t} />
+                  <ToolCard key={`t${j}`} call={t} state={toolState(t)} />
                 ))}
               </div>
             ))}

@@ -1,18 +1,21 @@
 import type { ModelCall, ToolCall } from "../api-types";
 import { Pill } from "./Pill";
+import { toneFor, type State } from "../flowState";
 
-export function CallCard({ call }: { call: ModelCall }) {
+export function CallCard({ call, state }: { call: ModelCall; state: State }) {
+  const t = toneFor(state);
   return (
     <article className="detail">
       <header className="row wrap">
         <strong>{call.agent}</strong>
         <span className="faint mono">{call.model}</span>
         {call.node && <Pill label={call.node} />}
+        {/* The state pill is the answer to the operator's question
+            "what was this step doing". Colour is decoration; the word
+            is the truth — the audit's rule for every status. */}
+        <Pill tone={t.tone} label={t.label} title={`turn state: ${t.label}`} />
         {call.latency_ms != null && <Pill label={`${call.latency_ms}ms`} />}
         <Pill label={`${call.input_tokens}→${call.output_tokens} tok`} />
-        {/* A retry is the cheapest early sign a provider is struggling, so
-            it is visible without opening anything. */}
-        {call.attempt > 1 && <Pill tone="warn" label={`attempt ${call.attempt}`} />}
       </header>
       <details>
         <summary>Prompt</summary>
@@ -27,17 +30,14 @@ export function CallCard({ call }: { call: ModelCall }) {
   );
 }
 
-export function ToolCard({ call }: { call: ToolCall }) {
+export function ToolCard({ call, state }: { call: ToolCall; state: State }) {
+  const t = toneFor(state);
   return (
     <article className="detail">
       <header className="row wrap">
         <strong>{call.tool}</strong>
         <span className="faint mono">{call.agent}</span>
-        {/* `failed` carries its own word. A tool failure is turned into an
-            ordinary-looking message for the model, so this flag is the only
-            thing that distinguishes it from an answer — and colour alone
-            would hide that from anyone who cannot separate red from grey. */}
-        <Pill tone={call.failed ? "bad" : "good"} label={call.failed ? "failed" : "ok"} />
+        <Pill tone={t.tone} label={t.label} title={`tool state: ${t.label}`} />
         {call.latency_ms != null && <Pill label={`${call.latency_ms}ms`} />}
       </header>
       <details>

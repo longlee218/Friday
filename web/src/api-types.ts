@@ -60,6 +60,9 @@ export interface Outbound {
 }
 
 export interface ModelCall {
+  /** Database id. Used by the Flow screen to order this turn against
+   * the outbound rows that may have followed it (ticket 12). */
+  id: number;
   agent: string;
   model: string;
   system_prompt: string;
@@ -72,6 +75,7 @@ export interface ModelCall {
   node: string | null;
   latency_ms: number | null;
   attempt: number;
+  /** When the call was made. Wire-side ISO 8601. */
   created_at: string;
 }
 

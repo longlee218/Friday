@@ -413,6 +413,13 @@ class ModelCall:
     #: so a run rate-limited once leaves two rows, each with its own prompt
     #: and its own cost, rather than one row claiming to be two.
     attempt: int = 1
+    #: Database id. Read off the schema row at the store boundary so
+    #: the wire can use it as a stable ordering key (e.g. for
+    #: comparing a turn to the outbound rows that followed it). Not
+    #: in the original dataclass because no caller used it; the
+    #: Flow screen now needs it (ticket 12) to answer "did this turn
+    #: produce the operator's pending question".
+    id: int | None = None
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

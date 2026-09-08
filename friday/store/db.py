@@ -2134,6 +2134,7 @@ def _model_call(row: schema.ModelCall) -> ModelCall:
     whichever of them somebody remembered.
     """
     return ModelCall(
+        id=row.id,
         agent=row.agent,
         model=row.model,
         system_prompt=row.system_prompt,

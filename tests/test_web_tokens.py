@@ -233,3 +233,37 @@ def test_the_rooms_row_has_no_whole_row_click_handler() -> None:
             "the row has a click handler — the timestamp is the only "
             "thing that should open the flow"
         )
+
+
+def test_flowscreen_renders_a_state_pill_per_turn_and_per_tool() -> None:
+    """The state derivation lives in `flowState.ts`; the screen reads
+    it for each turn and each tool and renders a pill. A regression
+    that drops the pill — or that drops the `state` prop on
+    CallCard / ToolCard — makes the operator's two questions ("is
+    this turn done", "did this tool succeed") unanswerable again.
+    The pill's label comes from `toneFor(state).label`, so the check
+    is on the wiring rather than on a literal string in the
+    component file."""
+    fs = (SRC / "screens" / "FlowScreen.tsx").read_text(encoding="utf-8")
+    cards = (SRC / "ui" / "cards.tsx").read_text(encoding="utf-8")
+
+    assert "turnState(" in fs, "FlowScreen no longer calls turnState"
+    assert "toolState(" in fs, "FlowScreen no longer calls toolState"
+
+    # CallCard and ToolCard both take a `state` prop and render it
+    # through toneFor.
+    assert "state: State" in cards, "CallCard/ToolCard lost the state prop"
+    assert "toneFor(state)" in cards, (
+        "CallCard/ToolCard no longer derive label/tone from the state prop"
+    )
+
+
+def test_the_screen_no_longer_shows_the_implicit_attempt_pill() -> None:
+    """Ticket 12 folded the `attempt > 1` warn pill into the new
+    state pill. Showing both is saying the same thing twice on one
+    row — a regression is two pills in the same header."""
+    cards = (SRC / "ui" / "cards.tsx").read_text(encoding="utf-8")
+    assert "attempt ${call.attempt}" not in cards, (
+        "CallCard still renders an attempt pill — the state pill "
+        "already carries retrying"
+    )
