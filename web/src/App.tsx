@@ -1,10 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { BoardScreen } from "./screens/BoardScreen";
 import { FlowScreen } from "./screens/FlowScreen";
 import { MonitorScreen } from "./screens/MonitorScreen";
 import { RoomsScreen } from "./screens/RoomsScreen";
-import { ToastProvider } from "./ui";
+import {
+  ShortcutOverlay,
+  ToastProvider,
+} from "./ui";
+import { useKeyboard, useShortcutOverlay, type Binding } from "./keyboard";
 
 /** Real paths, not a hash — the server answers any unknown path with
  *  `index.html` (see `_mount_page`), so a flow can be linked to and reloaded.
@@ -21,6 +25,17 @@ export function useRoute(): [string, (to: string) => void] {
     setPath(to);
   };
   return [path, go];
+}
+
+/** Module-level navigate. The hook above owns the React-side
+ *  state; this is the imperative shim for components that have a
+ *  click but no hook in scope (a feed row that lives inside a
+ *  memo'd list). The setPath is skipped — a screen that does
+ *  not re-read path on every render would miss the route change,
+ *  but every screen here does. */
+export function navigate(to: string): void {
+  window.history.pushState({}, "", to);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 //: Two, because there are two questions: what is outstanding, and what was
@@ -46,6 +61,22 @@ export function App() {
   ) ?? "/";
 
   const openFlow = (provider: string, id: string) => go(`/flow/${provider}/${id}`);
+
+  // Keyboard shortcuts. The bindings table is also the
+  // `<ShortcutOverlay>`'s display data — same source, no drift.
+  const overlay = useShortcutOverlay();
+  const bindings = useMemo<Binding[]>(
+    () => [
+      { id: "monitor", label: "Monitor", prefix: { prefix: "g", key: "m" }, run: () => go("/") },
+      { id: "board", label: "Board", prefix: { prefix: "g", key: "b" }, run: () => go("/board") },
+      { id: "rooms", label: "Rooms", prefix: { prefix: "g", key: "r" }, run: () => go("/rooms") },
+      { id: "reload", label: "Reload this screen", key: "r", run: () => window.location.reload() },
+      // `?`, `/`, `esc` are shell-owned and read by `installKeyboard`
+      // directly; the overlay lists them through `overlayRows()`.
+    ],
+    [go],
+  );
+  useKeyboard(bindings, { onToggleOverlay: overlay.toggle });
 
   return (
     <ToastProvider>
@@ -83,6 +114,11 @@ export function App() {
           </div>
         </main>
       </div>
+      <ShortcutOverlay
+        bindings={bindings}
+        open={overlay.open}
+        onClose={overlay.close}
+      />
     </ToastProvider>
   );
 }

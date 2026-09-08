@@ -16,6 +16,7 @@ export { Input } from "./Input";
 export { Pill } from "./Pill";
 export { Skeleton } from "./Skeleton";
 export { Spinner } from "./Spinner";
+export { ShortcutOverlay } from "./ShortcutOverlay";
 export { Tag } from "./Tag";
 export { ToastProvider, useToast } from "./Toast";
 export type { Toast } from "./Toast";

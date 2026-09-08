@@ -492,3 +492,63 @@ def test_flowscreen_handles_the_call_anchor() -> None:
     assert "hash" in src or "location.hash" in src or "useEffect" in src, (
         "FlowScreen does not read the URL hash"
     )
+
+
+def test_keyboard_shortcuts_module_exposes_the_expected_api() -> None:
+    """The keyboard module exposes a single source of truth: bindings
+    are declared as data, dispatched by `installKeyboard`, and
+    rendered by `<ShortcutOverlay>` from the same array. A regression
+    that splits the data into two places (one for dispatch, one for
+    display) is the audit's "two renderers drift" failure waiting
+    to happen."""
+    src = (SRC / "keyboard.ts").read_text(encoding="utf-8")
+    for sym in ("installKeyboard", "useKeyboard", "overlayRows", "useShortcutOverlay"):
+        assert f"export function {sym}" in src or f"export const {sym}" in src, (
+            f"keyboard.ts no longer exports {sym}"
+        )
+    assert "isTypingTarget" in src, (
+        "the typing-target guard is gone — shortcuts would fire while typing"
+    )
+
+
+def test_app_uses_keyboard_and_renders_the_overlay() -> None:
+    """`?` opens the overlay, `esc` closes it. The shell owns both.
+    A regression that drops the binding leaves the operator with no
+    way to read the table on the page."""
+    src = (SRC / "App.tsx").read_text(encoding="utf-8")
+    # A bare `useKeyboard` reference is not enough — the screen must
+    # actually install the listener. The `useKeyboard(` call site
+    # inside the function body is what the guard pins.
+    import re
+    assert re.search(r"^\s*useKeyboard\(", src, re.MULTILINE), (
+        "App does not install keyboard shortcuts — the operator has "
+        "no `?` overlay trigger"
+    )
+    assert "useShortcutOverlay" in src, "App does not own the overlay state"
+    assert "<ShortcutOverlay" in src, "App does not render the overlay"
+
+
+def test_focus_ring_token_survives_a_redesign() -> None:
+    """The audit's first rule: focus is visible. The CSS already
+    declares `:focus-visible { outline: 2px solid var(--accent); }`,
+    and the guard pins it so a future redesign cannot silently drop
+    it."""
+    css = (SRC / "index.css").read_text(encoding="utf-8")
+    assert ":focus-visible" in css, (
+        "index.css lost its :focus-visible rule — keyboard navigation "
+        "would lose its ring"
+    )
+    assert "var(--accent)" in css, (
+        "focus-visible no longer uses the accent token"
+    )
+
+
+def test_shortcut_overlay_renders_keys_in_kbd_tags() -> None:
+    """The overlay's rows are `<kbd>{keys}</kbd>` + label. Screen
+    readers can announce keys; CSS can style them. A regression
+    that renders `<span>{keys}</span>` instead breaks both."""
+    src = (SRC / "ui" / "ShortcutOverlay.tsx").read_text(encoding="utf-8")
+    assert "<kbd>" in src, (
+        "ShortcutOverlay does not render keys inside <kbd> — the "
+        "shortcut table loses its semantics"
+    )

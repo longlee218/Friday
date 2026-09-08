@@ -1131,3 +1131,35 @@ dialog > .body {
   color: var(--ink);
   padding: 1px 4px;
 }
+
+/* ----- keyboard shortcut overlay ----- */
+
+.shortcuts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text);
+}
+
+.shortcuts td {
+  padding: 6px var(--grid-gap);
+  border-bottom: 1px solid var(--line);
+}
+
+.shortcuts td:first-child {
+  width: 120px;
+  white-space: nowrap;
+}
+
+.shortcuts tr:last-child td {
+  border-bottom: none;
+}
+
+.shortcuts kbd {
+  font-family: var(--font-data);
+  font-size: var(--text-sm);
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--ink);
+}
