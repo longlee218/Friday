@@ -39,6 +39,7 @@ from friday.store import schema
 from friday.domain.conversation import ConversationId
 from friday.domain.states import OutboundState
 from friday.domain.models import (
+    ExtractionMark,
     Memory,
     MemoryScope,
     InboundEvent,
@@ -1724,6 +1725,59 @@ class Database:
                 .where(schema.Task.id == task_id)
                 .values(state=str(state))
             )
+
+    async def extraction_mark(self, task_id: int) -> ExtractionMark | None:
+        """What node 0 last extracted for this task, and from what.
+
+        `None` means nothing has been extracted for it yet: the first pass, or
+        a pass whose extraction produced nothing worth remembering.
+
+        **Nothing deletes a mark, and that is deliberate rather than missing.**
+        A mark is keyed on a task and task ids are never reused, so a mark for
+        a finished task is dead weight bounded by the number of tasks — not the
+        "an approved patch outlived the task it belonged to" failure this repo
+        has already shipped once, because a mark cannot be acted on: its only
+        reader asks for one task by id, and a reopened task's mark is still
+        true, since the same text still yields the same answer. If these ever
+        need pruning it is the same job as `keep_model_calls_days`, not a
+        cascade.
+        """
+        async with self._sessions() as session:
+            row = await session.get(schema.ExtractionMark, task_id)
+            if row is None:
+                return None
+            return ExtractionMark(
+                fingerprint=row.fingerprint,
+                params=dict(row.params or {}),
+                asked_about=tuple(row.clarify_fields or ()),
+                because=row.clarify_because,
+            )
+
+    async def mark_extraction(self, task_id: int, mark: ExtractionMark) -> None:
+        """Record what the extraction was made from and what it came to.
+
+        Upserted, because there is one current answer per task: a history of
+        superseded fingerprints would be a log with no reader.
+
+        The mark carries its own copy of what the extractor produced, which is
+        what makes it safe for `set_task_params` to be a separate write: a
+        crash between the two leaves a mark whose replay fills the same values
+        again, rather than a mark pointing at values nobody stored. An earlier
+        version of this docstring claimed the two were one call. They are not.
+        """
+        values = dict(
+            fingerprint=mark.fingerprint,
+            params=mark.params,
+            clarify_fields=list(mark.asked_about),
+            clarify_because=mark.because,
+        )
+        async with self._sessions.begin() as session:
+            existing = await session.get(schema.ExtractionMark, task_id)
+            if existing is None:
+                session.add(schema.ExtractionMark(task_id=task_id, **values))
+                return
+            for field_name, value in values.items():
+                setattr(existing, field_name, value)
 
     async def set_task_params(self, task_id: int, params: dict) -> None:
         await self._set_task(task_id, params=params)

@@ -549,3 +549,59 @@ class MonitorSnapshot:
     untriaged: int
     last_message_at: datetime | None
     spend_today: int
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionMark:
+    """What node 0's last extraction was made from, and what it came to.
+
+    Node 0 is excluded from the checkpoint and re-executes on every pass, which
+    is correct — a reporter who sends the curl three seconds later has to be
+    read. What was not correct is calling a model when nothing arrived: one
+    task in the recorded data has two extractor calls whose prompts share a
+    sha256, seven and a half hours apart, because the task sat pending across a
+    restart and every pass paid again.
+
+    **The fingerprint is over the extractor's per-call input**: the reporter's
+    text, and the field schema it is asked to fill. Both, because both vary —
+    the text when somebody says something, the schema when a field is added or
+    its meaning reworded, and either changes the prompt.
+
+    The task's parameters are *not* in it. They never reach the extractor's
+    prompt, so fingerprinting them — which is what ticket 04 asked for — would
+    pay again for a change the extractor cannot see. A parameter change still
+    changes what node 0 concludes, because the replayed question is re-filtered
+    against the parameters as they are now.
+
+    Per-call input, not the whole prompt: the extractor's `instructions` carry
+    the skill catalogue and the job text, which change on a restart rather than
+    per task, and a new skill is not new information about this report.
+
+    `params` and the clarification are kept so a skipped call is *equivalent*
+    to the call, not merely cheaper: the same fill is applied and the same
+    question is asked. Without the question a skip would turn an `Ask` the
+    extractor raised into "everything needed is here" on the next pass, because
+    the fields it asks about are usually the optional ones no structural rule
+    challenges.
+
+    Here rather than beside the node, for the reason `MemoryScope` is here: it
+    is part of `Database`'s signature as well, and a store may not import from
+    the packages above it.
+    """
+
+    fingerprint: str
+    #: What the extractor produced, as a plain mapping — the params class it
+    #: belongs to is the task's type, which the reader already knows.
+    params: dict[str, Any] = field(default_factory=dict)
+    #: The fields the extractor asked about, and why. Empty means it asked
+    #: nothing, which is a different thing from having asked about nothing.
+    #:
+    #: `asked_about` rather than `fields`, which is what it was: this sits two
+    #: lines from `params` and is read in a module that imports `fields` from
+    #: `dataclasses` and calls it on a params class on the next line.
+    #:
+    #: Flattened rather than holding the `Clarify` it came from, because that
+    #: type lives in `friday/extraction/` and this one is read by the store —
+    #: `friday/domain/` may not import upward. Reassembled by its one reader.
+    asked_about: tuple[str, ...] = ()
+    because: str | None = None

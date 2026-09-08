@@ -311,3 +311,201 @@ async def test_a_refused_extractor_hands_over_instead_of_asking(monkeypatch):
 
     assert isinstance(action, HandOver)
     assert "tokens today" in action.reason
+
+
+# --- node 0 pays once for one set of facts (ticket 04) --------------------
+
+
+async def _reported(db, *, text="@Lee API lỗi rồi a ơi"):
+    """A task with the reporter's message linked to it, which is what
+    `original_text_for` reads and therefore what makes extraction run at all.
+    """
+    from conftest import make_event
+    from tests.test_pool import _said, make_task
+
+    task = await make_task(db)
+    await _said(db, "m1", text, secs=0, mention=True)
+    await db.mark_triaged(
+        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+    )
+    return task
+
+
+class _CountingExtractor:
+    """Stands in for the model. Returns the same answer every time, which is
+    the point: the same facts must not be paid for twice."""
+
+    def __init__(self, params, clarify=None):
+        self.params, self.clarify, self.texts = params, clarify, []
+
+    async def run(self, text, *, task_id=None, node=None):
+        self.texts.append(text)
+        return self.params, self.clarify
+
+
+async def test_node_0_pays_once_when_nothing_has_changed(db):
+    """One task in the recorded data has two extractor calls of 1,790 input
+    tokens whose prompts are byte-identical — same sha256, seven and a half
+    hours apart. Node 0 is excluded from the checkpoint and re-executes on
+    every pass, which is correct, because it must see a message that arrived
+    since the last one. What it must not do is call a model when nothing did.
+    """
+    from friday.dag.prepare import prepare_node
+    from tests.test_extraction import _install
+
+    extractor = _CountingExtractor(ApiIssueParams(summary="checkout 500"))
+    _install("api_issue", extractor)
+    task = await _reported(db)
+    node = prepare_node("api_issue", ApiIssueParams)
+
+    first = await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+    second = await node.run(
+        DAGState.empty(), DAGDeps(task=await db.task(task.id), db=db)
+    )
+
+    assert len(extractor.texts) == 1, (
+        f"extracted {len(extractor.texts)} times for one unchanged task"
+    )
+    assert second == first, "the second pass reached a different conclusion"
+
+
+async def test_a_new_message_is_paid_for(db):
+    """The reason node 0 re-runs at all. A reporter who sends the curl three
+    seconds later must be read, so a changed transcript has to reach the
+    model even though the parameters have not moved."""
+    from friday.dag.prepare import prepare_node
+    from tests.test_extraction import _install
+    from tests.test_pool import _said
+
+    extractor = _CountingExtractor(ApiIssueParams(summary="checkout 500"))
+    _install("api_issue", extractor)
+    task = await _reported(db)
+    node = prepare_node("api_issue", ApiIssueParams)
+
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+    await _said(db, "m2", "curl -X POST /pay trả 500, trên production", secs=3)
+    await node.run(DAGState.empty(), DAGDeps(task=await db.task(task.id), db=db))
+
+    assert len(extractor.texts) == 2, "a new message did not reach the extractor"
+    assert "curl -X POST" in extractor.texts[-1]
+
+
+async def test_a_question_the_extractor_raised_survives_the_skipped_call(db):
+    """The subtle half. `Ask` here can come from the extractor's own
+    `ask_clarification` rather than from a structural rule — `environment` is
+    optional, so validation has nothing to say about it. Skipping the call
+    without remembering what it asked would turn that `Ask` into "everything
+    needed is here" on the very next pass, and hand the task over instead."""
+    from friday.dag.prepare import prepare_node
+    from friday.extraction import Clarify
+    from tests.test_extraction import _install
+
+    # A correlationId that validates, so `_problems` is empty and the
+    # extractor's own question is the only thing that can produce an `Ask`.
+    # Without it the `_traceable` rule fires first and both passes return the
+    # same code-written question — which is how the first version of this test
+    # passed with the replay deleted.
+    extractor = _CountingExtractor(
+        ApiIssueParams(
+            summary="service down",
+            correlation_id="3f7a1e22-8b44-4c31-9d0e-77a2c6b51e90",
+        ),
+        clarify=Clarify(("environment",), "the URL says test, which is not an env"),
+    )
+    _install("api_issue", extractor)
+    task = await _reported(db)
+    node = prepare_node("api_issue", ApiIssueParams)
+
+    first = await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+    second = await node.run(
+        DAGState.empty(), DAGDeps(task=await db.task(task.id), db=db)
+    )
+
+    assert isinstance(first, Ask), f"expected the extractor's question, got {first!r}"
+    assert "environment" in first.text or "which environment" in first.text
+    assert len(extractor.texts) == 1
+    assert isinstance(second, Ask), (
+        f"the remembered question was lost — the graph moved on with {second!r}"
+    )
+    assert second == first
+
+
+def test_the_fingerprint_covers_the_field_schema_not_only_the_text():
+    """The extractor's prompt is the field schema and the text. Fingerprinting
+    the text alone would mean a task already marked is never read again under a
+    reworded field — the schema changed, the prompt changed, and nothing said
+    so."""
+    from friday.dag.prepare import _fingerprint
+
+    assert _fingerprint(ApiIssueParams, "API lỗi") != _fingerprint(
+        AccessRequestParams, "API lỗi"
+    )
+    assert _fingerprint(ApiIssueParams, "API lỗi") == _fingerprint(
+        ApiIssueParams, "API lỗi"
+    ), "the same schema and the same text must be the same fingerprint"
+
+
+async def test_a_parameter_change_the_extractor_cannot_see_is_not_paid_for(db):
+    """**A deliberate deviation from ticket 04's own criterion**, which asked
+    for the task's parameters to count toward "has anything changed".
+
+    They cannot. The extractor's input is `build_input(text, params_cls)` — the
+    field schema and what the reporter wrote. Parameters never reach it, so a
+    parameter that moved is not a reason to pay for the same answer again. The
+    fill is replayed from the mark, so the outcome is the same either way."""
+    from friday.dag.prepare import prepare_node
+    from tests.test_extraction import _install
+
+    extractor = _CountingExtractor(ApiIssueParams(summary="checkout 500"))
+    _install("api_issue", extractor)
+    task = await _reported(db)
+    node = prepare_node("api_issue", ApiIssueParams)
+
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+    # `summary` blanked and `environment` set: two parameter changes the
+    # extractor cannot see. Blanking is what makes the replay observable —
+    # `_fill` only fills blanks, so a mark that remembered nothing would leave
+    # it blank while a mark that remembered the extraction puts it back.
+    await db.set_task_params(
+        task.id,
+        {**(await db.task(task.id)).params, "summary": "", "environment": "staging"},
+    )
+    await node.run(DAGState.empty(), DAGDeps(task=await db.task(task.id), db=db))
+    after = (await db.task(task.id)).params
+
+    assert len(extractor.texts) == 1, "paid again for a change it cannot see"
+    assert after["environment"] == "staging", "the parameter change was lost"
+    assert after["summary"] == "checkout 500", (
+        "the remembered extraction was not replayed into the blanked field"
+    )
+
+
+async def test_a_call_that_produced_nothing_is_not_remembered_as_an_answer(db):
+    """`(None, None)` is not "the model found nothing" — a model that finds
+    nothing still returns a `Params` with every field absent. It is the harness
+    having swallowed a provider error into `last_error`, or output that missed
+    the schema. Marking that would turn one 502 into a task that is never read
+    again, against this repo's own "a hiccup is retried here and nowhere else".
+
+    Found by review, not by the tests written with the feature."""
+    from friday.dag.prepare import prepare_node
+    from tests.test_extraction import _install
+
+    class _Failing:
+        def __init__(self):
+            self.calls = 0
+
+        async def run(self, text, *, task_id=None, node=None):
+            self.calls += 1
+            return None, None
+
+    extractor = _Failing()
+    _install("api_issue", extractor)
+    task = await _reported(db)
+    node = prepare_node("api_issue", ApiIssueParams)
+
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+    await node.run(DAGState.empty(), DAGDeps(task=await db.task(task.id), db=db))
+
+    assert extractor.calls == 2, "a failed call was remembered as an answer"
+    assert await db.extraction_mark(task.id) is None, "marked an empty extraction"

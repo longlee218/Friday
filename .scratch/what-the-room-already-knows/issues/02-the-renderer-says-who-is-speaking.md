@@ -63,3 +63,24 @@ and `docstring_style` matches the `docs` prefix) and
 `test_buttons_have_visible_labels`. Neither is this board's, and neither was
 touched. They do block the repo's own "the whole suite passes" rule for every
 ticket after this one, so they want their own fix.
+
+**The classifier evaluation has not been run, and this ticket is not fully
+verified without it.** Raised by the Standards review: `conversation()` is
+consumed by triage's prompt module, so this change is "upstream of
+`friday/triage/prompt.py`" and CLAUDE.md's fourth verification rule applies —
+`uv run python -m evals.run_triage_eval` against `evals/triage.jsonl`, with
+accuracy, the confusion matrix and the threshold table reported alongside. That
+run calls the configured provider and costs money, so it is the operator's
+decision to spend, not something to do quietly. Ticket 03 changes the same
+prompt and needs the same run; doing them in one sitting measures two variables
+at once, which is the reason 03 blocks 09.
+
+**Two later corrections, both from review, recorded here because they are this
+ticket's code:** deduplication now keys on `(provider,
+provider_message_id)` — the documented identity of an inbound message — rather
+than the id alone; and the legend now explains the continuation indent, which
+was the only thing separating a forged line from a real one and was left for
+the model to guess at. `is_own` is also now documented at the mark as knowing
+only one of this system's two identities: a message the *bot* posted renders
+unmarked, and closing that means the inbox folding `Database.we_sent` into the
+stored row, which is a change to what is stored rather than to how it is shown.

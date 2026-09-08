@@ -101,6 +101,37 @@ rules reject is challenged with the code template regardless of what was
 asked instead, and a field the model names that turns out already filled is
 not asked about again.
 
+## Extraction mark
+
+What node 0's last **Extraction** for a task was made from, and what it came
+to. One row per task, rewritten whenever the reporter says something new.
+
+Node 0 re-executes on every pass, and that is deliberate — it is excluded from
+the checkpoint because a reporter who sends the curl three seconds later has to
+be read. What it must not do is call a model when nothing arrived. One task in
+the recorded data has two extractor calls of 1,790 input tokens whose prompts
+share a sha256, seven and a half hours apart: it sat pending across a restart,
+and every pass paid again.
+
+The fingerprint is over **the reporter's text and the field schema, and nothing
+else**, because that is the whole of what the extractor is shown. The task's
+parameters never reach its prompt, so a parameter that moved is not a reason to
+pay for the same answer again. The schema is in there rather than assumed
+fixed: adding a field, or rewording what one means, changes the prompt, and a
+task already marked would otherwise never be read again under the new one.
+
+A mark stands in for the call, so it records the outcome and not merely the
+input: the extracted values, so the same fill happens, and the question the
+extractor asked, so the same question is asked. Without the question a skip
+would turn an `Ask` into "everything needed is here" on the next pass — the
+fields an extractor asks about are usually the optional ones no structural rule
+challenges.
+
+Distinct from the **Graph**'s own checkpoint, which is also one row per task. A
+checkpoint holds what nodes *returned* and is discarded when the task's
+parameters change; a mark holds what node 0 was *given*, and outlives a
+parameter change on purpose.
+
 ## Pool
 
 The loop. Pulls pending tasks and hosts their graphs — nothing about *what*

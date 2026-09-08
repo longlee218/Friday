@@ -14,18 +14,27 @@ staying behind an import.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import hashlib
+import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, fields
-from typing import get_args, get_type_hints
+from typing import Any, get_args, get_type_hints
 
 from friday.dag.engine import DAGDeps, DAGState, Node
 from friday.agent.harness import Refused
 from friday.domain.actions import Action, Ask, HandOver
-from friday.domain.models import MODEL_AUTHORED, Params
+from friday.domain.models import MODEL_AUTHORED, ExtractionMark, Params
 from friday.domain.validation import Problem, validate
 from friday.extraction import Clarify, extract as _extract
 
 __all__ = ["plan_by_required_parameters", "prepare", "prepare_node", "prepared_ok"]
+
+log = logging.getLogger(__name__)
+
+#: How `prepare` obtains an extraction. Named because two things implement it:
+#: the extraction package's own entry point, and the remembering wrapper node 0
+#: puts round it.
+_Extract = Callable[..., Awaitable[tuple["Params | None", "Clarify | None"]]]
 
 #: Field names that read badly as a question. Anything absent falls back to the
 #: field name, which is usually fine — "the project", "the permission".
@@ -66,7 +75,12 @@ def prepare_node(
         known = params_cls(**deps.task.params)
         text = await deps.db.original_text_for(deps.task.id)
         filled, problem = await prepare(
-            task_type, known, text=text, task_id=deps.task.id, node="prepare"
+            task_type,
+            known,
+            text=text,
+            extract=_remembering(deps.db, deps.task.id, params_cls),
+            task_id=deps.task.id,
+            node="prepare",
         )
 
         merged = {**deps.task.params, **asdict(filled)}
@@ -90,6 +104,16 @@ async def prepare(
     params: Params,
     *,
     text: str | None = None,
+    #: How the extraction is obtained. Injected so node 0 can hand in one that
+    #: remembers, without this function growing a second path — there is one
+    #: place a `Refused` becomes a hand-over and one place a fill happens, and
+    #: both stay here whether the answer came from a model or from a mark.
+    #:
+    #: `None` rather than `_extract` as the default, and resolved at the call:
+    #: a default argument binds once at definition, so naming the function here
+    #: would have quietly outlived every `monkeypatch.setattr(prepare,
+    #: "_extract", ...)` in the suite — two tests went red saying so.
+    extract: _Extract | None = None,
     #: Whose work this is, for the row the extractor's call becomes. Node 0
     #: is the only step that knows both, and the extractor is the only agent
     #: it runs — so this is where the two meet.
@@ -117,7 +141,7 @@ async def prepare(
     clarify: Clarify | None = None
     if text is not None:
         try:
-            extracted, clarify = await _extract(
+            extracted, clarify = await (extract or _extract)(
                 task_type, text, task_id=task_id, node=node
             )
         except Refused as refusal:
@@ -139,6 +163,99 @@ async def prepare(
             return params, Ask(_question_from_clarify(Clarify(still_missing, clarify.because)))
 
     return params, None
+
+
+def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
+    """`extract`, but it does not pay twice for one set of facts.
+
+    Node 0 re-executes on every pass — it is excluded from the checkpoint on
+    purpose, because a reporter who sends the curl three seconds later has to
+    be read. What it must not do is call a model when nothing arrived. One task
+    in the recorded data has two extractor calls of 1,790 input tokens whose
+    prompts share a sha256, seven and a half hours apart: it sat pending across
+    a restart, and every pass paid again.
+
+    **A hit returns the same answer the call would have**, not merely nothing.
+    The extracted values are replayed so the same fill happens, and the
+    clarification is replayed so the same question is asked — without it a skip
+    would turn an `Ask` the extractor raised into "everything needed is here"
+    on the next pass, because the fields it asks about are usually the optional
+    ones no structural rule challenges.
+
+    Wrapped around the seam rather than folded into `prepare`, so a `Refused`
+    is still handled in exactly one place and a mark is never written for a
+    call that did not happen.
+    """
+
+    async def extract(task_type: str, text: str, *, task_id=None, node=None):
+        digest = _fingerprint(params_cls, text)
+        mark = await db.extraction_mark(task_id)
+        if mark is not None and mark.fingerprint == digest:
+            log.info(
+                "task %s: nothing new to read, reusing the last extraction",
+                task_id,
+            )
+            return (
+                params_cls(**mark.params) if mark.params else None,
+                Clarify(mark.asked_about, mark.because) if mark.asked_about else None,
+            )
+        extracted, clarify = await _extract(
+            task_type, text, task_id=task_id, node=node
+        )
+        if extracted is None and clarify is None:
+            # Nothing to remember, so nothing is written — and the next pass
+            # calls again. `(None, None)` is not "the model found nothing":
+            # a model that finds nothing still returns a `Params` with every
+            # field absent. It is the harness having swallowed a provider
+            # error into `last_error`, or output that missed the schema.
+            # Marking that would turn one 502 into a task that is never read
+            # again, which is the opposite of "a hiccup is retried here".
+            #
+            # `Refused` never reaches this line — it propagates to `prepare`,
+            # which hands over — so a ceiling does not write a mark either.
+            log.info("task %s: nothing extracted, not marking", task_id)
+            return extracted, clarify
+        await db.mark_extraction(
+            task_id,
+            ExtractionMark(
+                fingerprint=digest,
+                params=asdict(extracted) if extracted is not None else {},
+                asked_about=clarify.fields if clarify is not None else (),
+                because=clarify.because if clarify is not None else None,
+            ),
+        )
+        return extracted, clarify
+
+    return extract
+
+
+def _fingerprint(params_cls: type[Params], text: str) -> str:
+    """What the extractor is about to be shown, reduced to one string.
+
+    **The reporter's text and the field schema** — the two things the
+    extractor's *per-call input* is built from, and the two things that vary.
+    The schema is in here rather than assumed fixed per type: adding a field,
+    or rewording what one means, changes the prompt, and a task already marked
+    would otherwise never be read again under the new one.
+
+    The task's parameters are not in it. They never reach the extractor's
+    prompt. Ticket 04 asked for them to count toward "has anything changed";
+    they cannot, because paying again for a change the extractor cannot see
+    buys the same answer twice.
+
+    Per-call input, not the whole prompt: `instructions` also carry the job
+    text and the skill catalogue. Those change on a restart, not per task, and
+    a newly installed skill is not new information about this report — so a
+    mark survives one, deliberately.
+
+    Reconstructed from the two inputs rather than calling `build_input`, which
+    would be the per-call prompt exactly: a module outside the extraction
+    family may not reach into that family's prompt module.
+    """
+    schema = "\n".join(
+        f"{f.name}:{(f.metadata or {}).get('doc', '')}" for f in fields(params_cls)
+    )
+    return hashlib.sha256(f"{schema}\n\n{text}".encode()).hexdigest()
 
 
 def plan_by_required_parameters(task_type: str, params: Params) -> Action:

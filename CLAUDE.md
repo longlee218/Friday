@@ -729,7 +729,7 @@ The five canonical roles, unchanged (`needs-triage`, `needs-info`, `ready-for-ag
 ### Domain docs
 
 Single-context: **`CONTEXT.md`** at the repo root holds the domain vocabulary —
-22 terms as of this file's own count (`grep -c "^## " CONTEXT.md`, not
+24 terms as of this file's own count (`grep -c "^## " CONTEXT.md`, not
 retyped by hand here for that reason), from Message and Conversation through
 Task, Triage, Extraction, Graph, Tool server, Harness and Memory to Outbox,
 Approval, Provider and Sweep. Read it before naming anything, and add the

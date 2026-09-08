@@ -982,3 +982,20 @@ def _marked(line: str) -> str:
     """
     head, _, _ = line.partition("]")
     return "this account" in head.lower()
+
+
+def test_two_providers_can_share_a_message_id():
+    """Deduplication is keyed on `(provider, provider_message_id)`, which is
+    the documented identity of an inbound message — the id alone is unique
+    only within one provider. Keying on the id would silently swallow a real
+    message the day a second provider exists."""
+    from conftest import make_event
+    from friday.agent.instruction_prompt import conversation
+
+    body = conversation([
+        make_event(provider="discord", message_id="7", text="from discord"),
+        make_event(provider="slack", message_id="7", text="from slack"),
+    ]).render()
+
+    assert "from discord" in body
+    assert "from slack" in body, "a second provider's message was swallowed"

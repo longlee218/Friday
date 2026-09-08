@@ -310,6 +310,38 @@ class Memory(Base):
     deleted_by: Mapped[str | None] = mapped_column(default=None)
 
 
+class ExtractionMark(Base):
+    """What node 0's last extraction for a task was made from, and what it came
+    to. One row per task, rewritten whenever the reporter says something new.
+
+    Keyed on `task_id` rather than given its own id: there is exactly one
+    current answer per task, and a history of superseded fingerprints would be
+    a log nobody reads.
+
+    Not part of `dag_state`, though that is also one row per task. Node 0's
+    result is deliberately excluded from the checkpoint — only its output
+    decides whether the rest of what was checkpointed is still worth keeping —
+    so writing this from inside node 0 would put back exactly what that
+    exclusion takes out. This is a memo of node 0's *input*, which is a
+    different thing with a different lifetime.
+    """
+
+    __tablename__ = "extraction_marks"
+
+    task_id: Mapped[int] = mapped_column(primary_key=True)
+    #: Over the reporter's text and the field schema — the two things that
+    #: make up the extractor's per-call input. The task's parameters never
+    #: reach its prompt, so they are not in here. See `_fingerprint`.
+    fingerprint: Mapped[str]
+    #: The extractor's own output, so a skipped call applies the same fill
+    #: rather than only saving the money.
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    #: The fields it asked about. An empty list means it asked nothing, which
+    #: is a different thing from a null nobody wrote.
+    clarify_fields: Mapped[list] = mapped_column(JSON, default=list)
+    clarify_because: Mapped[str | None] = mapped_column(default=None)
+
+
 class ToolCall(Base):
     """One thing an agent reached for, and what came back.
 

@@ -187,18 +187,22 @@ def conversation(events: list[InboundEvent], *, quoted: bool = False) -> Section
     # rather than at that caller is the same choice as the one joiner: this is
     # the only place a message becomes a line, so it is the only place that can
     # promise "once each" for every caller.
-    seen: set[str] = set()
+    # Keyed on `(provider, provider_message_id)`, which is the documented
+    # identity of an inbound message — the id alone is only unique within a
+    # provider, and a transcript is not guaranteed to be from one.
+    seen: set[tuple[str, str]] = set()
     lines: list[str] = []
     for m in events:
-        if m.provider_message_id in seen:
+        identity = (m.provider, m.provider_message_id)
+        if identity in seen:
             continue
-        seen.add(m.provider_message_id)
+        seen.add(identity)
         lines.append(_said(m))
     # Said, rather than left to be inferred from the timestamps: a list with
     # no stated order is one the model has to guess at, and the guess decides
     # which message answers which. Oldest first is what `relevant_messages`
     # and `turn_from` both produce.
-    header = "Oldest first, times in UTC."
+    header = f"Oldest first, times in UTC. {_LINES_MEAN}"
     # The mark is explained only when a marked line exists, which is this
     # module's own rule about describing a door that is not in the room.
     if any(m.is_own for m in events):
@@ -214,6 +218,14 @@ _OURS_MEANS = (
     "other line is somebody else's."
 )
 
+#: The indent is the only thing that separates a forged line from a real one,
+#: so it is said out loud for the same reason the mark is: an unexplained
+#: convention is one the model has to guess at.
+_LINES_MEAN = (
+    "Each message starts with a bracket; an indented line continues the "
+    "message above it."
+)
+
 #: Inside the bracket, beside the clock, for the reason the clock is there.
 _OURS = " | this account"
 
@@ -227,6 +239,14 @@ def _said(m: InboundEvent) -> str:
     "vẫn còn lỗi" could be a minute or a week after the report it follows, and
     it matters more since `max_message_age`, which can judge a turn too old to
     answer using a fact the agent reading that turn could not see.
+
+    **The mark is `is_own`, which knows one of this system's two identities.**
+    It is decided on the user gateway as `author.id == me.id`, so a message the
+    *bot* posted reads as a stranger's and renders unmarked. "Is this ours?" is
+    `Database.we_sent`, and a renderer has no store — closing that gap means
+    the inbox folding `we_sent` into the row, which is a change to what is
+    stored and not to how it is shown. Unmarked-when-ours is the safe
+    direction: it understates what this system said rather than overstating it.
 
     **Who sent it is the other thing only this system knows.** `author_name`
     was the whole signal, and in a room where the operator is also the reporter
