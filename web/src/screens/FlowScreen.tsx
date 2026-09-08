@@ -1,9 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api } from "../api";
 import type { Flow } from "../api-types";
 import { useAsync } from "../useAsync";
-import { CallCard, Pill, Skeleton, ToolCard, shortTime } from "../ui";
+import {
+  Breadcrumb,
+  CallCard,
+  Pill,
+  Skeleton,
+  ToolCard,
+  shortTime,
+} from "../ui";
 import { toolState, turnState } from "../flowState";
 
 /** Board ticket 07 — what happened to this message.
@@ -82,11 +89,46 @@ function Path({ provider, id }: { provider: string; id: string }) {
     );
   }
 
+  // The Monitor screen's drill-down lands on
+  // `/flow/{provider}/{id}#call-{call_id}` so the operator can
+  // share a specific turn. Read the hash on mount, scroll the
+  // matching card into view, focus it so a screen reader reads
+  // the title, fall back to no-op when the hash is missing or
+  // refers to an id the flow does not carry.
+  useEffect(() => {
+    if (!flow.value) return;
+    const hash = window.location.hash;
+    const match = hash.match(/^#call-(\d+)$/);
+    if (!match) return;
+    const id = match[1];
+    const el = document.getElementById(`call-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (el instanceof HTMLElement) {
+      el.tabIndex = -1;
+      el.focus({ preventScroll: true });
+    }
+  }, [flow.value]);
+
   const it: Flow = flow.value;
   const held = reasonHeld(it);
 
   return (
     <>
+      {/* Breadcrumb: monitor › task › flow. The Monitor screen's
+          drill-down lands here, and the deep-link is what makes
+          `/flow/{provider}/{id}#call-{call_id}` a share-the-
+          investigation URL. The trail collapses at four items. */}
+      <Breadcrumb
+        items={[
+          { label: "Monitor", href: "/" },
+          {
+            label: it.task ? `task #${it.task.id}` : "task",
+            href: "/",
+          },
+          { label: "flow", current: true },
+        ]}
+      />
       <section className="card">
         <div className="row wrap">
           <h1>{it.message.author_name}</h1>
@@ -209,7 +251,9 @@ function Path({ provider, id }: { provider: string; id: string }) {
                   )}
                 </div>
                 {turn.call && (
-                  <CallCard call={turn.call} state={turnState(turn.call, turn.tools, it)} />
+                  <div id={`call-${turn.call.id}`}>
+                    <CallCard call={turn.call} state={turnState(turn.call, turn.tools, it)} />
+                  </div>
                 )}
                 {turn.tools.map((t, j) => (
                   <ToolCard key={`t${j}`} call={t} state={toolState(t)} />

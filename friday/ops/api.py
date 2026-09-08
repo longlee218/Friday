@@ -825,6 +825,7 @@ def _running_task(t) -> dict:
         "type": t.type,
         "state": t.state,
         "room": t.room,
+        "message_id": t.message_id,
         "last_activity_at": t.last_activity_at,
         "last_tool": t.last_tool,
         "attempts": t.attempts,

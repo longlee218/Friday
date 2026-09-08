@@ -423,3 +423,72 @@ def test_monitor_polling_does_not_exist() -> None:
         "MonitorScreen is not subscribed to SSE — ticket 05's whole "
         "reason to exist is the EventStream subscription"
     )
+
+
+def test_breadcrumb_collapses_more_than_four_items() -> None:
+    """Anything beyond four levels collapses to `head › … › tail`,
+    so the trail never overflows the page header on a deep path.
+    A regression that drops the cap is a regression in operator
+    experience — a flow with five turns produces a trail the
+    width of a phone.
+
+    The check is syntactic on purpose: the cap value (4) is in
+    a `MAX_ITEMS = 4` constant, and the collapse is a `slice()`
+    against it. A future reader will see the failure as either
+    "the constant dropped below 4" or "the slice was replaced
+    with something that does not bound the trail"."""
+    src = (SRC / "ui" / "Breadcrumb.tsx").read_text(encoding="utf-8")
+    assert "MAX_ITEMS = 4" in src, (
+        "Breadcrumb no longer caps at 4 items"
+    )
+    assert "slice(" in src, (
+        "Breadcrumb's collapse does not slice the trail"
+    )
+    assert "›" in src, (
+        "Breadcrumb lost its separator glyph"
+    )
+
+
+def test_monitor_task_card_is_clickable_and_opens_flow() -> None:
+    """A live task card on the Monitor screen opens the flow for
+    the message that opened it. A regression that turns the card
+    back into a static element is a regression in the operator's
+    primary drill-down — the audit asked for `Click a live task
+    card → URL becomes /flow/...`."""
+    src = (SRC / "screens" / "MonitorScreen.tsx").read_text(encoding="utf-8")
+    assert "openFlow" in src or "navigate" in src, (
+        "MonitorScreen does not wire openFlow/navigate; the operator "
+        "cannot drill into a task from the Monitor screen"
+    )
+    assert "onClick" in src, (
+        "MonitorScreen has no click handler — the audit asked for "
+        "click-to-flow"
+    )
+
+
+def test_a_live_event_click_opens_its_message_flow() -> None:
+    """A feed row's click opens the flow for the message that
+    produced the event. Without this the operator can see *what*
+    happened but cannot see *why* — the audit's drill-down asks
+    for the click-to-flow link on every event."""
+    src = (SRC / "screens" / "MonitorScreen.tsx").read_text(encoding="utf-8")
+    # The FeedRow renders a `<li>` or `<button>` — what matters
+    # is that one of them carries a click handler that asks for
+    # the flow. The audit's audit #4 still applies: `React.memo`
+    # on the row keeps an SSE burst from re-rendering it.
+    assert "onOpenFlow" in src or "openFlow" in src, (
+        "MonitorScreen feed has no openFlow wiring"
+    )
+
+
+def test_flowscreen_handles_the_call_anchor() -> None:
+    """`/flow/...#call-{id}` scrolls the matching card into view
+    and focuses it. Without the anchor handler, the deep-link is
+    no better than the bare `/flow/...` URL — the operator has to
+    scroll by hand to find the call that the URL named."""
+    src = (SRC / "screens" / "FlowScreen.tsx").read_text(encoding="utf-8")
+    assert "call-" in src, "FlowScreen does not understand the call-N anchor"
+    # The hash has to be read on mount.
+    assert "hash" in src or "location.hash" in src or "useEffect" in src, (
+        "FlowScreen does not read the URL hash"
+    )

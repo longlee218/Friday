@@ -622,14 +622,22 @@ class Database:
         # bus — `publish` is sync and never blocks — so a slow
         # subscriber cannot stall a model call.
         from friday.ops.events import get_bus
+        task_id = values.get("task_id")
+        message_id: str | None = None
+        if task_id is not None:
+            src = await self.source_message_of_task(int(task_id))
+            if src is not None:
+                provider, mid = src
+                message_id = f"{provider}:{mid}"
         get_bus().publish(
             type_="model_call",
             payload={
                 "row_id": values.get("id"),
                 "agent": values.get("agent"),
-                "task_id": values.get("task_id"),
+                "task_id": task_id,
                 "latency_ms": values.get("latency_ms"),
                 "attempt": values.get("attempt") or 1,
+                "message_id": message_id,
             },
         )
 
@@ -638,17 +646,49 @@ class Database:
         async with self._sessions.begin() as session:
             session.add(schema.ToolCall(**values))
         from friday.ops.events import get_bus
+        task_id = values.get("task_id")
+        message_id: str | None = None
+        if task_id is not None:
+            src = await self.source_message_of_task(int(task_id))
+            if src is not None:
+                provider, mid = src
+                message_id = f"{provider}:{mid}"
         get_bus().publish(
             type_="tool_call",
             payload={
                 "row_id": values.get("id"),
                 "agent": values.get("agent"),
                 "tool": values.get("tool"),
-                "task_id": values.get("task_id"),
+                "task_id": task_id,
                 "failed": values.get("failed", False),
                 "latency_ms": values.get("latency_ms"),
+                "message_id": message_id,
             },
         )
+
+    async def source_message_of_task(self, task_id: int) -> tuple[str, str] | None:
+        """`provider, provider_message_id` of the message that opened
+        `task_id`. The SSE payload carries the row id of the call
+        or tool, not the message; this lookup is what gives the
+        Monitor screen the deep-link to the originating flow page.
+
+        Returns `None` for tasks that pre-date the messages
+        table having a `task_id` column, or for tasks that have
+        no message attached (a manually-seeded plan)."""
+        async with self._sessions() as session:
+            result = await session.execute(
+                select(
+                    schema.Message.provider,
+                    schema.Message.provider_message_id,
+                )
+                .where(schema.Message.task_id == task_id)
+                .order_by(schema.Message.created_at)
+                .limit(1)
+            )
+            row = result.first()
+            if row is None:
+                return None
+            return row[0], row[1]
 
     async def tools_for_tasks(self, task_ids) -> dict[int, list[ToolCall]]:
         """What each of these tasks reached for, oldest first within a task.
@@ -2152,6 +2192,20 @@ class Database:
             # The parent join: tasks left-join both. SQLite honours
             # `coalesce` on `datetime`, so the row is the newer of
             # the two timestamps (or `None`).
+            # The `messages` subquery finds the message that opened
+            # the task — the operator's drill-down from the Monitor
+            # screen to the Flow screen needs the source message id,
+            # not the conversation id. One round trip, no per-task
+            # lookup.
+            message_subq = (
+                select(
+                    schema.Message.task_id.label("task_id"),
+                    schema.Message.provider.label("provider"),
+                    schema.Message.provider_message_id.label("provider_message_id"),
+                )
+                .order_by(schema.Message.created_at.asc())
+                .subquery()
+            )
             stmt = (
                 select(
                     schema.Task,
@@ -2160,10 +2214,16 @@ class Database:
                     ),
                     func.coalesce(model_subq.c.n, 0).label("attempts"),
                     tool_subq.c.last_at.label("tool_last_at"),
+                    message_subq.c.provider.label("msg_provider"),
+                    message_subq.c.provider_message_id.label("msg_id"),
                 )
                 .where(schema.Task.state.in_(open_states))
                 .outerjoin(model_subq, model_subq.c.task_id == schema.Task.id)
                 .outerjoin(tool_subq, tool_subq.c.task_id == schema.Task.id)
+                .outerjoin(
+                    message_subq,
+                    message_subq.c.task_id == schema.Task.id,
+                )
                 .order_by(
                     func.coalesce(model_subq.c.last_at, tool_subq.c.last_at).desc().nullslast()
                 )
@@ -2204,6 +2264,15 @@ class Database:
                 type=row[0].type,
                 state=row[0].state,
                 room=str(row[0].conversation_id),
+                # `provider:provider_message_id` is the shape `/flow/`
+                # accepts. The Monitor screen reads this verbatim to
+                # build the deep-link; the wire shape is the URL
+                # shape by design.
+                message_id=(
+                    f"{row.msg_provider}:{row.msg_id}"
+                    if row.msg_provider and row.msg_id
+                    else None
+                ),
                 last_activity_at=row.last_activity_at,
                 last_tool=last_tool_by_task.get(row[0].id),
                 attempts=row.attempts or 0,

@@ -8,6 +8,7 @@ import type {
 } from "../api-types";
 import { useAsync } from "../useAsync";
 import { useEventStream } from "../useEventStream";
+import { navigate } from "../router";
 import {
   Pill,
   Skeleton,
@@ -76,6 +77,15 @@ export function MonitorScreen() {
 
   const events = snap.value ? [...snap.value.events, ...liveEvents] : liveEvents;
 
+  // Drill-down: a click on a task or an event opens the flow for
+  // the message that produced it. The Monitor screen does not own
+  // the routing — that lives in App — so the helper here just
+  // calls `navigate(/flow/{message_id})` and the topbar re-renders
+  // when the path changes.
+  const openFlow = useCallback((messageId: string) => {
+    navigate(`/flow/${messageId}`);
+  }, []);
+
   return (
     <div className="monitor">
       <header className="row wrap between">
@@ -108,8 +118,8 @@ export function MonitorScreen() {
         </div>
       ) : (
         <div className="monitor-grid">
-          <Feed events={events} />
-          <Tasks tasks={snap.value.running_tasks} />
+          <Feed events={events} onOpen={openFlow} />
+          <Tasks tasks={snap.value.running_tasks} onOpen={openFlow} />
         </div>
       )}
 
@@ -135,6 +145,7 @@ function renderServerEvent(
       tool: null,
       latency_ms: typeof p.latency_ms === "number" ? p.latency_ms : null,
       state: attempt > 1 ? "retrying" : "done",
+      message_id: typeof p.message_id === "string" ? p.message_id : null,
     };
   }
   return {
@@ -145,10 +156,17 @@ function renderServerEvent(
     tool: typeof p.tool === "string" ? p.tool : null,
     latency_ms: typeof p.latency_ms === "number" ? p.latency_ms : null,
     state: p.failed ? "failed" : "ok",
+    message_id: typeof p.message_id === "string" ? p.message_id : null,
   };
 }
 
-function Feed({ events }: { events: MonitorEvent[] }) {
+function Feed({
+  events,
+  onOpen,
+}: {
+  events: MonitorEvent[];
+  onOpen: (messageId: string) => void;
+}) {
   if (events.length === 0) {
     return (
       <section className="card">
@@ -174,7 +192,7 @@ function Feed({ events }: { events: MonitorEvent[] }) {
       </header>
       <ol className="feed-list">
         {(virtualize ? visible.slice(-VIRTUALIZE_THRESHOLD) : visible).map((e) => (
-          <FeedRow key={`${e.type}:${e.id}`} event={e} />
+          <FeedRow key={`${e.type}:${e.id}`} event={e} onOpen={onOpen} />
         ))}
       </ol>
       {virtualize && (
@@ -186,7 +204,13 @@ function Feed({ events }: { events: MonitorEvent[] }) {
   );
 }
 
-function FeedRow({ event }: { event: MonitorEvent }) {
+function FeedRow({
+  event,
+  onOpen,
+}: {
+  event: MonitorEvent;
+  onOpen: (messageId: string) => void;
+}) {
   const tone = toneFromState(event.state);
   const verb =
     event.type === "model_call"
@@ -194,8 +218,29 @@ function FeedRow({ event }: { event: MonitorEvent }) {
         ? `read ${event.tool}`
         : "decided"
       : `used ${event.tool ?? "tool"}`;
+  // Drill-down: the event carries its own `message_id` on the
+  // SSE wire (the bus publisher looks it up from the source row).
+  // The snapshot endpoint does not yet; a row without one is a
+  // passive span.
+  const messageId = event.message_id;
+  const open = messageId ? () => onOpen(messageId) : undefined;
   return (
-    <li className="feed-row">
+    <li
+      className="feed-row"
+      role={open ? "button" : undefined}
+      tabIndex={open ? 0 : undefined}
+      onClick={open}
+      onKeyDown={
+        open
+          ? (ev) => {
+              if (ev.key === "Enter" || ev.key === " ") {
+                ev.preventDefault();
+                open?.();
+              }
+            }
+          : undefined
+      }
+    >
       <span className="when mono">{shortTime(event.occurred_at)}</span>
       <span className="who">{event.agent}</span>
       <span className="verb mono">{verb}</span>
@@ -207,10 +252,33 @@ function FeedRow({ event }: { event: MonitorEvent }) {
   );
 }
 
-const TaskCard = memo(function TaskCard({ task }: { task: RunningTask }) {
+const TaskCard = memo(function TaskCard({
+  task,
+  onOpen,
+}: {
+  task: RunningTask;
+  onOpen: (messageId: string) => void;
+}) {
   const tone = toneFromState(task.state);
+  const open = task.message_id ? () => onOpen(task.message_id!) : undefined;
   return (
-    <article className="card task-card">
+    <article
+      className="card task-card"
+      role={open ? "button" : undefined}
+      tabIndex={open ? 0 : undefined}
+      onClick={open}
+      onKeyDown={
+        open
+          ? (ev) => {
+              if (ev.key === "Enter" || ev.key === " ") {
+                ev.preventDefault();
+                open();
+              }
+            }
+          : undefined
+      }
+      title={task.message_id ? "Open the flow for this task" : undefined}
+    >
       <header className="row wrap between">
         <span className="who">
           <strong>#{task.id}</strong>
@@ -230,7 +298,13 @@ const TaskCard = memo(function TaskCard({ task }: { task: RunningTask }) {
   );
 });
 
-function Tasks({ tasks }: { tasks: RunningTask[] }) {
+function Tasks({
+  tasks,
+  onOpen,
+}: {
+  tasks: RunningTask[];
+  onOpen: (messageId: string) => void;
+}) {
   return (
     <section className="card tasks">
       <header>
@@ -242,7 +316,7 @@ function Tasks({ tasks }: { tasks: RunningTask[] }) {
       ) : (
         <div className="task-list">
           {tasks.map((t) => (
-            <TaskCard key={t.id} task={t} />
+            <TaskCard key={t.id} task={t} onOpen={onOpen} />
           ))}
         </div>
       )}

@@ -527,9 +527,14 @@ class RunningTask:
     type: str
     state: str
     room: str
-    last_activity_at: datetime | None
-    last_tool: str | None
-    attempts: int
+    #: The message that opened this task — `provider:provider_message_id`.
+    #: `None` when no message could be linked (a manually-seeded task).
+    #: The Monitor screen reads this to build the deep-link to the
+    #: flow page.
+    message_id: str | None = None
+    last_activity_at: datetime | None = None
+    last_tool: str | None = None
+    attempts: int = 0
 
 
 @dataclass(frozen=True, slots=True)

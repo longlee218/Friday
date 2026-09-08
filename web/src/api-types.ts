@@ -237,6 +237,13 @@ export interface MonitorEvent {
   /** Did the call succeed, fail, or hang? Same enum the Flow
    *  screen uses — the audit's "same word everywhere" rule. */
   state: "done" | "failed" | "retrying" | "ok";
+  /** `provider:provider_message_id` of the message that opened
+   * the task this event belongs to. The Monitor screen reads
+   * this to drill into the flow when the operator clicks a
+   * row; without it, the click does nothing. `null` for snapshot
+   * events whose lookup is not yet wired on that path — the row
+   * stays a passive span in that case. */
+  message_id: string | null;
 }
 
 /** A running task — not finished, not handed off. The Monitor
@@ -250,6 +257,12 @@ export interface RunningTask {
   /** Display name of the room the task belongs to, not the
    *  channel id. The store resolves the conversation. */
   room: string;
+  /** The message that opened this task — `provider:message_id`.
+   *  The Monitor screen reads this to drill into the flow when
+   *  the operator clicks a card; without it, the link from the
+   *  Monitor screen back to the originating message would need
+   *  a second round trip. */
+  message_id: string | null;
   /** Most recent activity timestamp — "5s ago", "2m ago". */
   last_activity_at: string | null;
   /** What the agent did most recently. */

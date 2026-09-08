@@ -1093,3 +1093,41 @@ dialog > .body {
   border: 1px solid var(--line);
   border-radius: 8px;
 }
+
+/* ----- breadcrumb ----- */
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+}
+
+.breadcrumb .crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.breadcrumb .sep {
+  color: var(--ink-mute);
+}
+
+.breadcrumb a {
+  color: var(--ink-faint);
+  text-decoration: none;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.breadcrumb a:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+.breadcrumb .crumb-current {
+  color: var(--ink);
+  padding: 1px 4px;
+}
