@@ -552,3 +552,42 @@ def test_shortcut_overlay_renders_keys_in_kbd_tags() -> None:
         "ShortcutOverlay does not render keys inside <kbd> — the "
         "shortcut table loses its semantics"
     )
+
+
+def test_rooms_agent_marker_is_visible_not_just_text() -> None:
+    """Ticket 13: agent messages have an "Agent" pill, not the old
+    `(us)` text node. The pill carries a screen-reader label and
+    the row has a left-border accent + low-saturation wash — three
+    signals together (label + colour + border) so colour-blindness
+    and screenshots do not lose the marker."""
+    src = (SRC / "screens" / "RoomsScreen.tsx").read_text(encoding="utf-8")
+    assert '"(us)"' not in src, (
+        "RoomsScreen still renders the `(us)` text node — the audit "
+        "asked for a Pill, not parenthetical text"
+    )
+    assert 'label="Agent"' in src, (
+        "RoomsScreen does not render an Agent pill — the audit's "
+        "rule needs both label and colour"
+    )
+    css = (SRC / "index.css").read_text(encoding="utf-8")
+    assert ".thread .msg.is_own" in css, (
+        "no .msg.is_own rule in index.css — agent rows have no visual "
+        "distinction from reporter rows"
+    )
+    # The accent border lives inside the `.thread .msg.is_own` block,
+    # not anywhere in the file. A regression that drops the border
+    # while leaving the rule in place is the one this pin catches.
+    import re
+    block_match = re.search(
+        r"\.thread\s+\.msg\.is_own\s*\{([^}]*)\}",
+        css,
+        re.DOTALL,
+    )
+    assert block_match is not None, (
+        ".thread .msg.is_own block has no closing brace — the "
+        "rule is broken"
+    )
+    assert "border-left" in block_match.group(1), (
+        "agent row's left-border accent is gone — the audit's "
+        "'visible at a glance' rule is not met"
+    )

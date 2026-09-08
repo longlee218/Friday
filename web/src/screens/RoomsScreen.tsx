@@ -160,7 +160,12 @@ function RoomDetail({
             >
               <span className="who" title={m.author_name}>
                 {m.author_name}
-                {m.is_own && <span className="faint"> (us)</span>}
+                {m.is_own && (
+                  <Pill
+                    label="Agent"
+                    title="Sent by the watched account on the operator's behalf"
+                  />
+                )}
                 {/* Two glyphs the operator scans the room by. The colour
                     is decoration — the labels are the truth, and they are
                     the only thing the screen reader reads. Glyph + label

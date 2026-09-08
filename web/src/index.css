@@ -762,6 +762,23 @@ details > summary:hover {
   border-top: 1px solid var(--line);
 }
 
+/* Agent row — ticket 13. The watched account sent this message;
+ * the operator reads the screen as a quick "who is talking to
+ * me". A left border + low-saturation wash + label make it visible
+ * at a glance, in colour-blindness and screenshots alike.
+ * The label survives greyscale; the colour is decoration. */
+.thread .msg.is_own {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-1));
+  border-left: 2px solid var(--accent);
+  padding-left: calc(var(--card-padding) - 2px);
+}
+
+.thread .msg.is_own .who .msg-marker {
+  /* Markers stay visible even when the author block collapses —
+     they are a different thing from the name. */
+  visibility: visible;
+}
+
 .thread .msg:hover {
   background: var(--bg-2);
 }
