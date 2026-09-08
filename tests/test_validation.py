@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import pytest
@@ -86,7 +86,7 @@ def test_one_of_passes_when_any_named_field_has_a_value():
     class WithTwo:
         a: Optional[str] = None
         b: Optional[str] = None
-        _RULES = {"_a_or_b": OneOf(fields=("a", "b"))}
+        _RULES = {"_a_or_b": OneOf(fields=("a", "b"), ask="a or b")}
 
     assert validate(WithTwo(a="x", b=None)) == []
     assert validate(WithTwo(a=None, b="y")) == []
@@ -97,7 +97,23 @@ def test_one_of_with_empty_fields_raises_at_construction():
     """Constructing a rule that always reports is a bug. Catch it early."""
 
     with pytest.raises(ValueError, match="at least one field"):
-        OneOf(fields=())
+        OneOf(fields=(), ask="a or b")
+
+
+def test_one_of_without_a_phrase_cannot_be_constructed():
+    """A rule that can report has to know how to ask, and it is the one thing
+    that cannot fall back to field metadata: it reports under a sentinel, so
+    there is no field to read a phrase off.
+
+    Two shapes because there are two mistakes. Omitting it is the
+    constructor's own `TypeError`; a blank one is refused with a message that
+    says why a rule in particular has nowhere to fall back to."""
+
+    with pytest.raises(TypeError, match="ask"):
+        OneOf(fields=("a", "b"))  # type: ignore[call-arg]
+
+    with pytest.raises(ValueError, match="`ask`"):
+        OneOf(fields=("a", "b"), ask="   ")
 
 
 def test_one_of_treats_blank_strings_as_missing():
@@ -107,7 +123,7 @@ def test_one_of_treats_blank_strings_as_missing():
     class WithTwo:
         a: Optional[str] = None
         b: Optional[str] = None
-        _RULES = {"_a_or_b": OneOf(fields=("a", "b"))}
+        _RULES = {"_a_or_b": OneOf(fields=("a", "b"), ask="a or b")}
 
     assert len(validate(WithTwo(a="", b="   "))) == 1
 
@@ -184,9 +200,10 @@ def test_an_api_issue_with_nothing_to_trace_on_is_not_usable():
     path to discover it could do nothing."""
     problems = _problems(ApiIssueParams(summary="API lỗi nè"))
 
+    params = ApiIssueParams(summary="API lỗi nè")
     assert [p.field for p in problems] == ["_traceable"]
-    assert "correlationId" in _question(problems)
-    assert "curl" in _question(problems)
+    assert "correlationId" in _question(params, problems)
+    assert "curl" in _question(params, problems)
 
 
 def test_either_a_correlation_id_or_a_curl_is_enough():
@@ -199,19 +216,31 @@ def test_either_a_correlation_id_or_a_curl_is_enough():
 
 
 def test_question_uses_natural_language_for_known_fields():
-    q = _question([Problem(field="correlation_id"), Problem(field="environment")])
+    q = _question(
+        ApiIssueParams(summary="s"),
+        [Problem(field="correlation_id"), Problem(field="environment")],
+    )
     assert "correlationId" in q
     assert "environment" in q
     assert q.startswith("Could you")
 
 
-def test_question_falls_back_to_field_name():
-    q = _question([Problem(field="widget")])
-    assert "the widget" in q
+def test_a_field_with_no_phrase_is_refused_rather_than_guessed_at():
+    """This replaces `test_question_falls_back_to_field_name`, which asserted
+    the behaviour ticket 13 deleted. The fallback turned the field name into a
+    sentence — "the widget", "the retry after" — which reads acceptably often
+    enough that `project` went the life of its type with no phrase and nothing
+    said so. A reporter asked for "the retry after" is a worse outcome than a
+    loud failure in front of whoever added the field."""
+    with pytest.raises(ValueError, match="how to ask"):
+        _question(ApiIssueParams(summary="s"), [Problem(field="widget")])
 
 
 def test_question_includes_validation_message_when_it_carries_information():
-    q = _question([Problem(field="correlation_id", message="must be one of: 1, 2")])
+    q = _question(
+        ApiIssueParams(summary="s"),
+        [Problem(field="correlation_id", message="must be one of: 1, 2")],
+    )
     assert "1, 2" in q
 
 
@@ -263,7 +292,7 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
 
     @dataclass
     class StrictParams:
-        cid: str
+        cid: str = field(default="", metadata={"ask": "the correlationId"})
         _RULES = {"cid": Matches(r"^[a-f0-9-]{36}$", name="uuid")}
 
     PARAMS["strict_test_type"] = StrictParams
@@ -279,3 +308,76 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
         assert "uuid" in str(action.text)
     finally:
         PARAMS.pop("strict_test_type", None)
+
+
+# --- how to ask lives beside the field (ticket 13) -----------------------
+
+
+def _asks() -> dict[tuple[str, str], str]:
+    """Every question this system can ask, keyed by `(type, subject)`.
+
+    **Keyed per type, not per field name.** A name shared by two classes would
+    otherwise collapse into one entry, and a class missing a phrase would hide
+    behind a class that has one.
+
+    **Every subject `asked_as` can be handed**, which is wider than the askable
+    fields: `validate` reports under any `_RULES` key, whether or not it starts
+    with an underscore and whether or not it names a field the model may ask
+    about. A rule on `summary` would reach the resolver even though nothing
+    offers `summary` to the model.
+
+    Resolved by **calling the real resolver**, not by re-reading metadata the
+    way it does. A copy of the lookup would keep passing if the metadata key
+    were renamed, which is the drift this whole ticket is about.
+    """
+    from friday.domain.models import PARAMS, askable_fields
+    from friday.domain.validation import asked_as
+
+    found: dict[tuple[str, str], str] = {}
+    for cls in dict.fromkeys(PARAMS.values()):
+        subjects = set(askable_fields(cls)) | set(getattr(cls, "_RULES", {}))
+        for subject in subjects:
+            try:
+                found[(cls.__name__, subject)] = asked_as(cls, subject)
+            except ValueError:
+                found[(cls.__name__, subject)] = ""
+    return found
+
+
+def test_every_askable_field_says_how_to_ask_about_it():
+    """The sibling of `test_every_extraction_field_tells_the_model_what_it
+    _means`, and the guard `_ASKED_AS` never had. A dict far from the fields it
+    names drifts silently: `project` was askable with no entry for as long as
+    the type existed, and the fallback made it read acceptably enough that
+    nothing said so."""
+    unaskable = [name for name, phrase in _asks().items() if not phrase.strip()]
+
+    assert unaskable == [], f"askable with no way to ask about it: {unaskable}"
+
+
+def test_the_questions_this_system_can_ask_are_written_down():
+    """"What can it ask?" has to be answerable, and after ticket 13 it is not
+    answerable by reading one dict any more.
+
+    So it is answerable here, the way "what can the agents do?" is answered by
+    `tests/test_tools.py`: a list asserted, not a module that collects things
+    to be read. The **phrases** and not only the subjects, because a phrase
+    that moved is a question that changed, and moving them was the whole
+    change. Adding a field or a rule turns this red, which is the point — a
+    new question is a new thing a reporter is asked, and that is worth a line
+    in a diff.
+
+    The split this feeds — which of these name something that must survive
+    translation — is asserted where the rule that needs it lives, in
+    `tests/test_responder_check.py`.
+    """
+    assert _asks() == {
+        ("ApiIssueParams", "environment"): "which environment you're on",
+        ("ApiIssueParams", "correlation_id"): "the correlationId",
+        ("ApiIssueParams", "curl"): "the curl you used",
+        ("ApiIssueParams", "_traceable"): "the correlationId, or the curl you used",
+        ("AccessRequestParams", "project"): "which project you need access to",
+        ("AccessRequestParams", "permission"): "what access you need",
+        ("DocQuestionParams", "question"): "what you would like to know",
+        ("DocQuestionParams", "doc_ref"): "which document you mean",
+    }

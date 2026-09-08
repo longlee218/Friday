@@ -24,7 +24,7 @@ from friday.dag.engine import DAGDeps, DAGState, Node
 from friday.agent.harness import Refused
 from friday.domain.actions import Action, Ask, HandOver
 from friday.domain.models import MODEL_AUTHORED, ExtractionMark, Params
-from friday.domain.validation import Problem, validate
+from friday.domain.validation import Problem, asked_as, validate
 from friday.extraction import Clarify, extract as _extract
 
 __all__ = ["plan_by_required_parameters", "prepare", "prepare_node", "prepared_ok"]
@@ -35,22 +35,6 @@ log = logging.getLogger(__name__)
 #: the extraction package's own entry point, and the remembering wrapper node 0
 #: puts round it.
 _Extract = Callable[..., Awaitable[tuple["Params | None", "Clarify | None"]]]
-
-#: Field names that read badly as a question. Anything absent falls back to the
-#: field name, which is usually fine — "the project", "the permission".
-_ASKED_AS = {
-    "environment": "which environment you're on",
-    "correlation_id": "the correlationId",
-    "curl": "the curl you used",
-    #: The cross-field rule's sentinel. Either field answers it, so the
-    #: phrasing names both — asking for "the correlation_id or curl" would be
-    #: reading a rule out loud instead of asking a question.
-    "_traceable": "the correlationId, or the curl you used",
-    "question": "what you would like to know",
-    "permission": "what access you need",
-    "doc_ref": "which document you mean",
-}
-
 
 def prepare_node(
     task_type: str,
@@ -155,12 +139,16 @@ async def prepare(
 
     problems = _problems(params)
     if problems:
-        return params, Ask(_question(problems))
+        return params, Ask(_question(params, problems))
 
     if clarify is not None:
         still_missing = tuple(f for f in clarify.fields if not getattr(params, f, None))
         if still_missing:
-            return params, Ask(_question_from_clarify(Clarify(still_missing, clarify.because)))
+            return params, Ask(
+                _question_from_clarify(
+                    params, Clarify(still_missing, clarify.because)
+                )
+            )
 
     return params, None
 
@@ -279,7 +267,7 @@ def plan_by_required_parameters(task_type: str, params: Params) -> Action:
             f"{task_type}: everything needed is here, and there is "
             f"no investigation past this point — over to you"
         )
-    return Ask(_question(problems))
+    return Ask(_question(params, problems))
 
 
 def _problems(params: Params) -> list[Problem]:
@@ -350,7 +338,7 @@ def _missing(params: Params) -> list[Problem]:
     ]
 
 
-def _question(problems: list[Problem]) -> str:
+def _question(params: Params, problems: list[Problem]) -> str:
     """Render the joined problems as one operator-facing question.
 
     The field name drives which natural-language form to use; the message is
@@ -371,17 +359,17 @@ def _question(problems: list[Problem]) -> str:
         seen[problem.field] = problem.message
     parts: list[str] = []
     for field, message in seen.items():
-        asked_as = _ASKED_AS.get(field, f"the {field.replace('_', ' ')}")
-        parts.append(f"{asked_as} ({message})" if message else asked_as)
+        phrase = asked_as(params, field)
+        parts.append(f"{phrase} ({message})" if message else phrase)
     return "Could you tell me " + " and ".join(parts) + "?"
 
 
-def _question_from_clarify(clarify: Clarify) -> str:
+def _question_from_clarify(params: Params, clarify: Clarify) -> str:
     """Render a `Clarify` the same shape `_question` renders `Problem`s —
     content for the Responder to write from, not a sentence to send verbatim.
     Every reporter-facing Ask goes through the Responder before it is ever
     sent; this only has to say what needs asking.
     """
-    parts = [_ASKED_AS.get(f, f"the {f.replace('_', ' ')}") for f in clarify.fields]
+    parts = [asked_as(params, f) for f in clarify.fields]
     question = "Could you tell me " + " and ".join(parts) + "?"
     return f"{question} ({clarify.because})" if clarify.because else question

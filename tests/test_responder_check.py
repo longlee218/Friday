@@ -171,10 +171,12 @@ def test_a_template_with_nothing_untranslatable_binds_only_the_other_rules():
     """The honest limit, written down so nobody reads the docs as a stronger
     promise than the code makes.
 
-    Four of the seven questions this system asks name nothing that has to
+    Five of the eight questions this system asks name nothing that has to
     survive translation — "what access you need", "which document you mean".
     For those there is no way to tell a faithful Vietnamese rewording from a
     different question, so this rule says nothing and the other four carry it.
+
+    The split is asserted below rather than only stated here.
     """
     assert rejected(
         "hoàn toàn không liên quan gì cả", asking="Could you tell me what access you need?"
@@ -183,3 +185,30 @@ def test_a_template_with_nothing_untranslatable_binds_only_the_other_rules():
         "hoàn toàn không liên quan, xem https://x/y",
         asking="Could you tell me what access you need?",
     ) is not None
+
+
+def test_which_questions_this_rule_binds_is_derived_not_counted():
+    """The split the docstring above states, applied by `_KEPT` itself.
+
+    It read "four of the seven" until ticket 13, and that was **wrong when it
+    was written**: `project` was asked too, through a fallback that turned its
+    field name into a sentence, so this system asked eight questions while the
+    documentation said seven and nothing noticed. Deriving membership from the
+    same pattern the rule matches on is what stops the prose drifting from the
+    code a second time.
+
+    The eight questions themselves are pinned in
+    `tests/test_validation.py::test_the_questions_this_system_can_ask_are_written_down`;
+    this asserts only which of them this rule binds.
+    """
+    from friday.responder.check import _KEPT
+    from tests.test_validation import _asks
+
+    asks = _asks()
+    binds = sorted(subject for (_, subject), phrase in asks.items() if _KEPT.search(phrase))
+
+    assert binds == ["_traceable", "correlation_id", "curl"], (
+        "which questions must survive translation has changed — the docstring "
+        "above and CLAUDE.md both state this split"
+    )
+    assert len(asks) == 8, "the number of questions changed; CLAUDE.md states it"

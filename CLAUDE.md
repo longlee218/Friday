@@ -454,14 +454,36 @@ not an implementation detail:
 
   **One of the five rules binds only some questions, and saying so is part of
   the rule.** A draft must still name what the template named *where the
-  template names something untranslatable* — `correlationId`, `curl`. Four of
-  the seven questions this system asks name nothing of the kind ("what access
+  template names something untranslatable* — `correlationId`, `curl`. Five of
+  the eight questions this system asks name nothing of the kind ("what access
   you need", "which document you mean"), and for those there is no way to tell
   a faithful Vietnamese rewording from a different question. The other four
   rules carry those. A test says this out loud, so the paragraph cannot
-  quietly become a stronger promise than the code makes. Blunt on purpose: a false refusal sends a plainer
-  question, a false acceptance sends the operator's colleagues something the
-  operator did not say.
+  quietly become a stronger promise than the code makes. Blunt on purpose: a
+  false refusal sends a plainer question, a false acceptance sends the
+  operator's colleagues something the operator did not say.
+
+  **This paragraph said "four of the seven" until ticket 13, and it was wrong
+  when it was written.** `project` was asked too — through a fallback that
+  turned its field name into a sentence — so this system asked eight questions
+  while this file said seven, and nothing noticed, because "the project" reads
+  well enough that a missing phrase looks like a written one. The count is the
+  documentation drifting from the code in the file that warns about exactly
+  that, which is the reason it is now asserted rather than only stated:
+  `test_which_questions_this_rule_binds_is_derived_not_counted` applies
+  `friday/responder/check.py`'s own pattern to the phrases and pins the total.
+
+  **How to ask about a field lives on the field**, in `ask` metadata beside the
+  `doc` that tells the extractor what the field means — one string per reader,
+  both where the field is, which is the arrangement `doc`'s own comment exists
+  to explain the need for. A cross-field rule carries its own phrase, because
+  its subject is a sentinel and not a field; `OneOf` holds that argument and
+  the reversal behind it, and is the only place it is written out. Resolving a
+  phrase is `friday/domain/validation.py`'s `asked_as`, beside the engine whose
+  `_RULES` it reads — a resolver in `friday/dag/` made a second module walk
+  that dict. There is no fallback: a subject with no phrase raises, which the
+  author sees as a red test and the operator would see as a hand-over carrying
+  the reason.
 - **Nothing is sent by the caller that decided to send it.** An outbound
   message is a row; one loop delivers it. Approval is enforced as a predicate
   in the query that selects sendable rows, not as a check each caller must

@@ -149,6 +149,19 @@ class ApiIssueParams:
     #: removing them then, instead of moving them here, left the extractor
     #: reading a schema of "summary: summary". Same place as the field, so a
     #: field and its meaning cannot drift apart again.
+    #:
+    #: `ask` is how to ask a *person* about it — the same field, a different
+    #: reader, so a different string. `doc` addresses a model about
+    #: recognising a value ("null if none is named"); `ask` is the phrase the
+    #: responder writes a question from, and what a reporter eventually reads
+    #: is the responder's wording of it, never this text verbatim.
+    #:
+    #: It lived in a dict in the node that renders the question until ticket
+    #: 13 — the arrangement the paragraph above exists to describe the failure
+    #: of — and had already drifted: `project` was askable with no entry, and a
+    #: fallback made it read acceptably enough that nothing said so. Every
+    #: askable field carries one now (`askable_fields` below), and a test says
+    #: so. `OneOf` holds the argument for where a *rule*'s phrase lives.
     summary: str = field(
         default="",
         metadata={
@@ -160,7 +173,8 @@ class ApiIssueParams:
         default=None,
         metadata={
             "doc": "Which environment they named: production, staging or dev. "
-            "'prod' is production, 'stg' is staging. null if none is named."
+            "'prod' is production, 'stg' is staging. null if none is named.",
+            "ask": "which environment you're on",
         },
     )
     correlation_id: str | None = field(
@@ -168,7 +182,8 @@ class ApiIssueParams:
         metadata={
             "doc": "The correlation id, trace id, request id or x-request-id "
             "in what they wrote, copied exactly — it is matched by machine. "
-            "Usually shaped like a uuid. null if absent."
+            "Usually shaped like a uuid. null if absent.",
+            "ask": "the correlationId",
         },
     )
     curl: str | None = field(
@@ -176,7 +191,8 @@ class ApiIssueParams:
         metadata={
             "doc": "The curl command or raw request they included, verbatim "
             "with its line breaks — somebody will paste it into a terminal. "
-            "null if absent."
+            "null if absent.",
+            "ask": "the curl you used",
         },
     )
 
@@ -200,7 +216,10 @@ class ApiIssueParams:
             r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",
             name="uuid",
         ),
-        "_traceable": OneOf(fields=("correlation_id", "curl")),
+        "_traceable": OneOf(
+            fields=("correlation_id", "curl"),
+            ask="the correlationId, or the curl you used",
+        ),
     }
 
 
@@ -212,14 +231,16 @@ class AccessRequestParams:
         default="",
         metadata={
             "doc": "The project, repository or system they want access to, "
-            "named as they named it. Empty if they did not say."
+            "named as they named it. Empty if they did not say.",
+            "ask": "which project you need access to",
         },
     )
     permission: str = field(
         default="",
         metadata={
             "doc": "What kind of access: read, write, admin, or their own "
-            "words for it. Empty if they did not say."
+            "words for it. Empty if they did not say.",
+            "ask": "what access you need",
         },
     )
     summary: str = field(
@@ -239,14 +260,16 @@ class DocQuestionParams:
         default="",
         metadata={
             "doc": "What they want to know, kept close to their own phrasing "
-            "— rewording a question changes it."
+            "— rewording a question changes it.",
+            "ask": "what you would like to know",
         },
     )
     doc_ref: str | None = field(
         default=None,
         metadata={
             "doc": "The document, spec or page they referred to, if they "
-            "named one. null if none."
+            "named one. null if none.",
+            "ask": "which document you mean",
         },
     )
 
@@ -269,6 +292,27 @@ PARAMS: dict[str, type] = {
 #: Written by the model about the message, not supplied by the person who
 #: sent it. Asking someone for a summary of their own message is nonsense.
 MODEL_AUTHORED = frozenset({"summary"})
+
+
+def askable_fields(params_cls: type) -> tuple[str, ...]:
+    """The fields of one type a reporter can be asked about.
+
+    One definition, because two disagreed. `ask_for_fields` built the model's
+    closed enum from `__dataclass_fields__`, and ticket 13's guard checked
+    `dataclasses.fields()` — the same set today and not the same set in
+    general: `__dataclass_fields__` keeps `ClassVar` and `InitVar` entries as
+    pseudo-fields, so annotating `_RULES` as a `ClassVar` would have offered
+    the model `_RULES` as a field to ask about while the guard skipped it.
+    Whatever askable means, the tool and the guard now mean the same thing.
+
+    `dataclasses.fields()` is the filter that drops the pseudo-fields, and
+    `MODEL_AUTHORED` drops what the model writes rather than reads.
+    """
+    from dataclasses import fields as _dataclass_fields
+
+    return tuple(
+        f.name for f in _dataclass_fields(params_cls) if f.name not in MODEL_AUTHORED
+    )
 
 
 @dataclass(frozen=True, slots=True)

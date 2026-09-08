@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Literal
 
 from friday.agent.harness import ToolContext, tool
-from friday.domain.models import MODEL_AUTHORED, Params
+from friday.domain.models import Params, askable_fields
 from friday.extraction.clarify import Clarify, FieldsCapture
 
 __all__ = ["ask_for_fields_tool"]
@@ -26,11 +26,13 @@ __all__ = ["ask_for_fields_tool"]
 
 def ask_for_fields_tool(params_cls: type[Params]):
     """Build `ask_for_fields` for one type: a closed enum of that type's
-    own *askable* fields — everything but what the model itself writes (see
-    `MODEL_AUTHORED` in `friday.domain.models`). One function because every
-    type needs the identical shape, differing only in which fields it may name.
+    own *askable* fields — see `askable_fields` in `friday.domain.models`,
+    which is also what the guard on "every askable field says how to ask about
+    it" reads, so the enum and that guard cannot mean different things. One
+    function because every type needs the identical shape, differing only in
+    which fields it may name.
     """
-    askable = tuple(f for f in params_cls.__dataclass_fields__ if f not in MODEL_AUTHORED)
+    askable = askable_fields(params_cls)
     FieldName = Literal[askable]
 
     def ask_for_fields(
