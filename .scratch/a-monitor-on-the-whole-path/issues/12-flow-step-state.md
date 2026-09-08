@@ -2,31 +2,35 @@
 
 **What to build:**
 
-The Flow screen today renders one card per model call, with the agent
-name, model, latency, and a few pills (tokens, attempt). What the
-operator cannot tell from the screen is **what each step is doing
-right now**: every card looks the same, and a "stuck" call looks
-indistinguishable from a "succeeded" one until it is over.
+The Flow screen today renders one card per model call, with the
+agent name, model, latency, and a few pills (tokens, attempt).
+What the operator cannot tell from the screen is **what each step
+is doing right now**: every card looks the same, and a "stuck"
+call looks indistinguishable from a "succeeded" one until it is
+over.
 
-Ticket 12 makes state explicit. Each step — every turn (a model call
-and the tools it reached for) and every tool call on its own — carries
-a state the screen renders next to the agent or tool name.
+Ticket 12 makes state explicit. Each step — every turn (a model
+call and the tools it reached for) and every tool call on its
+own — carries a state the screen renders next to the agent or
+tool name.
 
 **State per step, derived from what is already stored:**
 
 - A **turn** is `done` when every model call and every tool it
   reached for succeeded; `failed` when any of them did; `retrying`
-  when the call's `attempt > 1`; `waiting` when the call ended in a
-  handover (`Ask`/`HandOver`).
-- A **tool call** is `ok` when `failed = false`; `failed` when it is.
-  The wire already carries both, the screen just did not render them.
+  when the call's `attempt > 1`; `waiting` when the call ended
+  in a handover (`Ask`/`HandOver`).
+- A **tool call** is `ok` when `failed = false`; `failed` when it
+  is. The wire already carries both, the screen just did not
+  render them.
 
 **Frontend:**
 
-- `FlowScreen.tsx` reads `state` off each turn and each tool call and
-  renders a small pill (`Pill` with tone `good` / `warn` / `bad`)
-  alongside the agent or tool name. The state word, not the colour,
-  is the truth — colour is decoration, the audit's rule.
+- `FlowScreen.tsx` reads `state` off each turn and each tool call
+  and renders a small pill (`Pill` with tone `good` / `warn` /
+  `bad`) alongside the agent or tool name. The state word, not
+  the colour, is the truth — colour is decoration, the audit's
+  rule.
 - The state pill replaces the existing generic "attempt > 1" warn
   pill on a model call, which was the only state the page carried
   before. That signal is folded into the per-step state.
@@ -36,11 +40,36 @@ a state the screen renders next to the agent or tool name.
 - A unit test on the state-derivation function (pure, no React):
   the four turn states and the two tool states return from the
   function with the right values for the right inputs.
-- Two grep guards in `test_web_tokens.py`: the Flow screen renders
-  a state pill per turn and per tool, and the previously-implicit
-  attempt pill is gone.
+- Two grep guards in `test_web_tokens.py`: the Flow screen
+  renders a state pill per turn and per tool, and the
+  previously-implicit attempt pill is gone.
 
-**Decisions:** the operator's call on 2026-09-08 that "trên UI đang
-không hiển thị được cái nào là tool call, cái nào là loop lần 1, lần 2".
+**Decisions:** the operator's call on 2026-09-08 that "trên UI
+đang không hiển thị được cái nào là tool call, cái nào là loop
+lần 1, lần 2".
 
 **Status:** ready-for-agent
+
+- [ ] `web/src/flowState.ts` is a pure module exporting
+      `toolState(call)` (`ok` / `failed`) and `turnState(call,
+      tools, flow)` (`done` / `failed` / `retrying` / `waiting`).
+      The order is load-bearing — failure beats retry, retry
+      beats waiting, waiting beats done.
+- [ ] `FlowScreen.tsx` passes `state` to `CallCard` and
+      `ToolCard`. Both cards render a `<Pill tone={tone}
+      label={label}>` next to the agent or tool name.
+- [ ] The state pill replaces the `attempt > 1` warn pill on
+      `CallCard`. A turn that retried shows "retrying" once;
+      showing both is the regression.
+- [ ] `tests/test_flow_state.py` is a Python mirror of the TS
+      state rules with 13 cases covering both kinds and every
+      precedence edge. The mirror is pinned against the TS source
+      so a TS edit that does not land here is a regression the
+      build catches.
+- [ ] `tests/test_web_tokens.py` mutation-tested: dropping the
+      state prop from `CallCard`/`ToolCard`, or restoring the
+      attempt pill, flips a guard red.
+- [ ] `tests/test_web_contract.py` continues to pass — the new
+      state field rides the existing `ModelCall` and `ToolCall`
+      wire shapes; the contract test reads the actual converters
+      and confirms the keys it emits.
