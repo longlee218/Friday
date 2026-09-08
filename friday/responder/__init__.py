@@ -131,18 +131,28 @@ class Responder:
         #: The skill tools' turns come from the harness, which is the only
         #: thing that knows whether it wired them.
         self._tool_turns = 2 * len(tools)
+        # The catalogue goes in the stable half now, so it is built here
+        # rather than on every call. Same fact as the tools below. Built
+        # from the same library the harness is about to wire tools from,
+        # so the catalogue in the prompt and the tools in the agent
+        # cannot describe different skills.
+        from friday.agent.instruction_prompt import SkillMeta
+
+        skills_meta = None
+        if skills is not None and len(skills):
+            skills_meta = [
+                SkillMeta(
+                    name=s.name,
+                    description=s.description,
+                    mutability=s.mutability,
+                    location=str(skills.location_of(s.name)),
+                    allowed_tools=s.allowed_tools,
+                )
+                for s in skills.skills()
+            ]
         self._run = Harness(
             config=config,
-            # The catalogue goes in the stable half now, so it is built here
-            # rather than on every call. Same fact as the tools below.
-            # Built from the same library the harness is about to wire tools
-            # from, so the catalogue in the prompt and the tools in the agent
-            # cannot describe different skills.
-            instructions=build_instructions(
-                skills_catalogue=(
-                    skills.catalogue() if skills is not None and len(skills) else None
-                )
-            ),
+            instructions=build_instructions(skills_meta=skills_meta),
             skills=skills,
             model=model,
             tools=tools,
@@ -167,6 +177,12 @@ class Responder:
         context: Sequence[InboundEvent] = (),
         tone: Sequence[InboundEvent] = (),
         task_id: int | None = None,
+        #: The message that produced this task, when one is in scope (ticket
+        #: 11). Stored on any memory the responder writes during this
+        #: draft, so the Rooms screen can mark the source row with an
+        #: enrichment glyph. `None` is the ordinary case when the call
+        #: did not come from a message.
+        message_id: str | None = None,
     ) -> Draft | None:
         """Write what `asking` says, in the operator's voice.
 
@@ -192,9 +208,6 @@ class Responder:
             params=params,
             room=room,
             stranger=stranger,
-            skills_catalogue=(
-                self._skills.catalogue() if self._skills is not None else None
-            ),
             has_memory=self._has_memory,
             tone=tone,
             context=context,
@@ -204,7 +217,12 @@ class Responder:
         # "unavailable" rather than crashing, but the ordinary case is that
         # a real task always has a channel.
         scope = (
-            MemoryScope(channel_id=channel_id, task_id=task_id, agent="responder")
+            MemoryScope(
+                channel_id=channel_id,
+                task_id=task_id,
+                agent="responder",
+                message_id=message_id,
+            )
             if self._has_memory and channel_id is not None
             else None
         )

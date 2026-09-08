@@ -103,7 +103,8 @@ class StubResponder:
         self.strangers: list[bool] = []
 
     async def draft(self, *, asking, params=None, channel_id=None,
-                    stranger=False, context=(), tone=(), task_id=None):
+                    stranger=False, context=(), tone=(), task_id=None,
+                    message_id=None):
         self.strangers.append(stranger)
         from friday.responder import Draft
 

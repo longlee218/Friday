@@ -718,6 +718,29 @@ details > summary:hover {
   visibility: hidden;
 }
 
+/* Markers ride in the author's column, on a second line under the name
+   when both task and memory apply. Colour is decoration; the label is
+   the truth. Glyph + label is the audit's rule for state that is not
+   knowable by colour alone. */
+.who .msg-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.thread .msg.same-author .who .msg-marker {
+  /* Markers stay visible even when the author block collapses — they
+     are a different thing from the name. */
+  visibility: visible;
+}
+
 .contents {
   display: contents;
 }

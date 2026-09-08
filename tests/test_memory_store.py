@@ -18,6 +18,9 @@ from friday.domain.models import MemoryScope
 
 ROOM = MemoryScope(channel_id="c1", task_id=7, agent="responder")
 OTHER_ROOM = MemoryScope(channel_id="c2", task_id=None, agent="responder")
+ROOM_WITH_SOURCE = MemoryScope(
+    channel_id="c1", task_id=7, agent="responder", message_id="9001"
+)
 
 
 async def test_a_memory_is_written_and_found_by_search(db):
@@ -245,3 +248,19 @@ async def test_memory_search_requires_a_limit_rather_than_defaulting_to_one(db):
 
     with pytest.raises(TypeError):
         await db.memory_search(ROOM, "anything")
+
+
+async def test_memory_add_records_the_source_message_id(db):
+    """`MemoryScope.message_id` is the link the Rooms screen joins on to
+    mark the source row with an enrichment glyph. The store records it
+    on the row; a `None` source leaves the column `None`, and a non-`None`
+    source comes back out."""
+    written = await db.memory_add(ROOM_WITH_SOURCE, "they said this in the room")
+
+    assert written.source_message_id == "9001"
+
+    # The `None` case still works — a tool that did not name a source
+    # message leaves the column `None`, and the join on the Rooms screen
+    # does not produce a marker for that row.
+    without = await db.memory_add(ROOM, "no source")
+    assert without.source_message_id is None

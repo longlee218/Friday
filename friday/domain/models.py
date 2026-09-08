@@ -42,6 +42,15 @@ class InboundEvent:
     #: three structural signals a relevant-context filter reads — the other two
     #: are `mention_type` and `is_own` itself.
     reply_to: str | None = None
+    #: Set by the store when the message opened a task (ticket 11).
+    #: `None` is the ordinary case; a value means the operator's Rooms
+    #: screen should mark this message with a task glyph.
+    task_id: int | None = None
+    #: Set by the store when an agent wrote a memory while processing this
+    #: message (ticket 11). The Rooms screen marks these with an
+    #: enrichment glyph so the operator can find what the agent decided
+    #: was worth remembering.
+    is_enrichment: bool = False
     #: Code the message carried, verbatim: a curl, a stack trace, a payload.
     #: Already inside `text` too — this is the same content addressable as
     #: itself, for anything that wants the code without the prose around it.
@@ -277,9 +286,13 @@ class Memory:
     channel_id: str
     agent: str
     text: str
-    task_id: int | None
     created_at: datetime
     updated_at: datetime
+    #: The message that produced this memory, when one is in scope.
+    #: Nullable because the older memories were written before this link
+    #: existed. The Rooms screen joins on it to mark the source row.
+    source_message_id: str | None = None
+    task_id: int | None = None
     deleted_at: datetime | None = None
     deleted_by: str | None = None
 
@@ -302,14 +315,15 @@ class MemoryScope:
     room is invisible in another. Not a nicety: this system's rooms are
     different teams, and a fact learned in one is a leak in the next.
 
-    `task_id` and `agent` are provenance. They are never searched on; they are
-    what lets the operator's board answer "who wrote this, and while doing
-    what" about a line the agent is now acting on. **Both are required, and
-    `task_id` is nullable rather than optional** — a run that belongs to no
-    task says so by passing `None`, which is a different statement from
-    forgetting to pass it. They had defaults, under a docstring that said
-    every field was runtime-supplied; a default is how provenance goes missing
-    without anybody deciding it should.
+    `task_id`, `agent`, and `message_id` are provenance. They are never
+    searched on; they are what lets the operator's board answer "who wrote
+    this, and while doing what" about a line the agent is now acting on.
+    `task_id` is nullable rather than optional — a run that belongs to no
+    task says so by passing `None`. `message_id` is the message that produced
+    this memory, when one is in scope (the responder usually sets it from
+    the message it is drafting a reply to); a tool without a source message
+    leaves it `None`. A default would let provenance go missing without
+    anybody deciding it should.
 
     **This is the run's context object, not a closure variable**, and the
     distinction is the difference between working and being silently wrong. An
@@ -324,6 +338,14 @@ class MemoryScope:
     channel_id: str
     task_id: int | None
     agent: str
+    #: The message that produced this memory, when one is in scope (ticket
+    #: 11). The responder sets it from the message it is currently
+    #: drafting a reply to; tools without a source message (the responder
+    #: re-reading its own context, say) leave it `None`, and the store
+    #: keeps it `None`. The Rooms screen joins `memories.source_message_id`
+    #: against `messages.provider_message_id` to mark the row that
+    #: produced the memory.
+    message_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

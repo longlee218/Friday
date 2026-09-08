@@ -193,3 +193,43 @@ def test_every_primitive_is_also_a_file() -> None:
 @pytest.fixture(scope="module")
 def tokens_text() -> str:
     return _read(SRC / "index.css")
+
+
+def test_roomsscreen_renders_both_markers() -> None:
+    """Pin the operator-visible shape: the Rooms screen renders a marker
+    when `is_task` is true, and another when `is_enrichment` is true.
+    A future "simplification" that drops either glyph — or that flips
+    the predicate — would make the board's two questions ("which row
+    opened a task", "which row produced a memory") unanswerable at a
+    glance, and no test would catch it.
+
+    The check is syntactic on purpose: a real render test would need a
+    React renderer in the suite, and that is the second renderer that
+    drifts."""
+    src = (SRC / "screens" / "RoomsScreen.tsx").read_text(encoding="utf-8")
+    assert "m.is_task" in src, "RoomsScreen no longer reads is_task"
+    assert "m.is_enrichment" in src, "RoomsScreen no longer reads is_enrichment"
+    # Each marker has a text label, not just a glyph — colour + label,
+    # never colour alone.
+    assert "Opened a task" in src, "task marker has no screen-reader label"
+    assert "Source of a memory" in src, "enrichment marker has no screen-reader label"
+
+
+def test_the_rooms_row_has_no_whole_row_click_handler() -> None:
+    """The operator's call: clicking a row should not open the flow —
+    only the timestamp should. A regression that re-introduces a row
+    click would put a card-shaped target back into the screen, which
+    is exactly the affordance the audit asked to remove."""
+    src = (SRC / "screens" / "RoomsScreen.tsx").read_text(encoding="utf-8")
+    # The whole-row div had `onClick=` historically; the timestamp
+    # button has `onClick=` to open the flow. The row must not.
+    import re
+
+    row_block = re.search(r'<div\s+className=\{[^}]*"msg"[^}]*\}>', src)
+    if row_block:
+        # The "msg" class row must not carry an onClick.
+        after = src[row_block.end():src.find("</div>", row_block.end())]
+        assert "onClick" not in after, (
+            "the row has a click handler — the timestamp is the only "
+            "thing that should open the flow"
+        )

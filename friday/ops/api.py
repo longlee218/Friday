@@ -561,6 +561,14 @@ def _mount_context(api: FastAPI, store: Any) -> None:
 
 
 def _message(message: InboundEvent, call) -> dict:
+    """The wire shape of one message.
+
+    `is_task` and `is_enrichment` ride on the same payload as the message
+    itself: the store populates both fields on `InboundEvent` (the task
+    link from the messages table, the enrichment link from a join
+    against `memories.source_message_id`), so the screen does not need a
+    second round trip to render its markers.
+    """
     return {
         "provider": message.provider,
         "provider_message_id": message.provider_message_id,
@@ -570,6 +578,12 @@ def _message(message: InboundEvent, call) -> dict:
         "created_at": message.created_at,
         "mention_type": message.mention_type,
         "is_own": message.is_own,
+        # Markers for the Rooms screen. `is_task` says "this message
+        # opened a task"; `is_enrichment` says "an agent wrote a memory
+        # while processing this message". Both render as glyphs on the
+        # message row.
+        "is_task": message.task_id is not None,
+        "is_enrichment": message.is_enrichment,
         # A summary only. The prompt is a separate request, on purpose.
         "model_call": (
             {

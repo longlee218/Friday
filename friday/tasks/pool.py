@@ -325,6 +325,12 @@ class Pool:
             stranger=await self._stranger(task),
             context=await self._db.relevant_messages(task.conversation),
             tone=await self._db.tone_examples(limit=self._tone_examples),
+            # The message that opened this task. A memory written while
+            # the responder is drafting will carry it through
+            # `MemoryScope.message_id` to the row, and the Rooms screen
+            # will join on it. Without this, every enrichment marker on
+            # the screen is wrong.
+            message_id=await self._db.source_message_of(task.id),
         )
         if draft is None:
             return template

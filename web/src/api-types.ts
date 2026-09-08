@@ -22,6 +22,10 @@ export interface Message {
   created_at: string | null;
   mention_type: string | null;
   is_own: boolean;
+  /** This message opened a task. Marked on the Rooms row with a task glyph. */
+  is_task: boolean;
+  /** An agent wrote a memory while processing this message. Marked with an enrichment glyph. */
+  is_enrichment: boolean;
   model_call: ModelCallSummary | null;
 }
 

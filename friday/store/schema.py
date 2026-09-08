@@ -298,6 +298,12 @@ class Memory(Base):
     agent: Mapped[str]
     text: Mapped[str]
     task_id: Mapped[int | None] = mapped_column(index=True)
+    #: The message that produced this memory. Set by memory_add from the
+    #: MemoryScope.message_id field; the Rooms screen joins on it to
+    #: mark the source row with an enrichment glyph. Nullable because
+    #: older rows were written before this link existed, and a
+    #: backfill is a guess the operator would have to audit by hand.
+    source_message_id: Mapped[str | None] = mapped_column(index=True)
     created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
     updated_at: Mapped[datetime] = mapped_column(IsoDateTime)
     deleted_at: Mapped[datetime | None] = mapped_column(IsoDateTime, default=None)

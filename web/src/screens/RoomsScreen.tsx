@@ -150,6 +150,30 @@ function RoomDetail({
               <span className="who" title={m.author_name}>
                 {m.author_name}
                 {m.is_own && <span className="faint"> (us)</span>}
+                {/* Two glyphs the operator scans the room by. The colour
+                    is decoration — the labels are the truth, and they are
+                    the only thing the screen reader reads. Glyph + label
+                    is the rule everywhere else on this page. They live
+                    in the author's column so they line up with the
+                    name and stay a glance away from the text. */}
+                {m.is_task && (
+                  <span
+                    className="msg-marker"
+                    aria-label="Opened a task"
+                    title="This message opened a task"
+                  >
+                    ✓ task
+                  </span>
+                )}
+                {m.is_enrichment && (
+                  <span
+                    className="msg-marker"
+                    aria-label="Source of a memory"
+                    title="An agent wrote a memory while processing this message"
+                  >
+                    ✎ memory
+                  </span>
+                )}
               </span>
               <span className="said">{m.text}</span>
               <span className="when">

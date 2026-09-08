@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
@@ -358,8 +359,27 @@ class Database:
             ]
 
     async def _events(self, query) -> list[InboundEvent]:
+        """Run a `messages` query and return `InboundEvent`s with the two
+        room-marker fields populated (`task_id` from the row itself,
+        `is_enrichment` from a left join against `memories.source_message_id`).
+
+        One query for both. A right join would lose messages with no
+        memory; a left join with the right `IS NOT NULL` filter in the
+        `WHERE` is what makes "messages, plus a yes/no on memory" a
+        single round trip.
+        """
+        enriched = query.add_columns(
+            schema.Memory.source_message_id.is_not(None).label("is_enrichment")
+        ).outerjoin(
+            schema.Memory,
+            schema.Memory.source_message_id == schema.Message.provider_message_id,
+        )
         async with self._sessions() as session:
-            return [_event(row) for row in await session.scalars(query)]
+            rows = await session.execute(enriched)
+            return [
+                replace(_event(row[0]), is_enrichment=row.is_enrichment)
+                for row in rows
+            ]
 
     async def rooms(self) -> list[dict]:
         """Every conversation this system has seen, for the left-hand list.
@@ -953,6 +973,9 @@ class Database:
                 agent=scope.agent,
                 text=text[: self.TEXT_CHARS],
                 task_id=scope.task_id,
+                # The message that produced this memory, when the caller
+                # supplies one. The Rooms screen joins on it.
+                source_message_id=scope.message_id,
                 created_at=now,
                 updated_at=now,
             )
@@ -1375,6 +1398,24 @@ class Database:
                 )
             ).first()
         return (row[0], row[1]) if row else None
+
+    async def source_message_of(self, task_id: int) -> str | None:
+        """The message that opened this task — its `provider_message_id`.
+
+        The Rooms screen marks this row with the task glyph; the responder
+        uses it as the `message_id` on the `MemoryScope` it hands the
+        memory tools, so a memory written while processing this task
+        carries the link back to the source message. `None` when the
+        task has no message attached (a manually-seeded task, or a
+        follow-up where the linkage was lost in a backfill).
+        """
+        async with self._sessions() as session:
+            return await session.scalar(
+                select(schema.Message.provider_message_id)
+                .where(schema.Message.task_id == task_id)
+                .order_by(schema.Message.created_at)
+                .limit(1)
+            )
 
     async def last_said_by_reporter(self, task_id: int) -> str | None:
         """The most recent thing the reporter said *into this task's thread* —
@@ -2077,6 +2118,7 @@ def _memory(row: schema.Memory) -> Memory:
         agent=row.agent,
         text=row.text,
         task_id=row.task_id,
+        source_message_id=row.source_message_id,
         created_at=row.created_at,
         updated_at=row.updated_at,
         deleted_at=row.deleted_at,
@@ -2143,6 +2185,12 @@ def _event(row: schema.Message) -> InboundEvent:
         mention_type=MentionType(row.mention_type) if row.mention_type else None,
         is_own=row.is_own,
         reply_to=row.reply_to,
+        task_id=row.task_id,
+        # `is_enrichment` requires a join against `memories`; the cheap path
+        # is the `_events` helper, which loads it once per row rather than
+        # N+1. Rows that the helper did not enrich leave the field False
+        # — the API renders the same shape regardless.
+        is_enrichment=False,
     )
 
 
