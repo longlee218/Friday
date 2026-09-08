@@ -16,12 +16,14 @@ one is wrong, raise it rather than quietly building something else.
 Work is broken into tickets under `.scratch/discord-mention-triage/issues/`,
 derived from `docs/SPEC.md`. Tickets 01–17 and 23–27 and 29–33 are done; 07
 was superseded and reopened as 28, and 28 is now retired in favour of 32 and
-33. **Open: 18–20 only** — the board's own repo and its UI. They are
-`ready-for-agent`, not "deferred by choice" as this line said until 2026-09-06;
-that framing was editorial and neither ticket says it. 18 is superseded in part
-by `.scratch/a-window-on-the-whole-path/`, which keeps its React+Vite decision
-and reverses its separate-repo one (D2 there); 19 (Liquid Glass) and 20 (SSE)
-stay open and untouched. 34–45 are done. All of them came out of watching real threads rather than
+33. **Open: 18 only** — ticket 19 (Liquid Glass) was retired in favour
+of `.scratch/a-monitor-on-the-whole-path/`, a 13-ticket board that
+redoes the UI as a real-time operator monitor dashboard (Monitor
+front door, SSE updates, drill-down paths, motion + skeleton + toast,
+axe-core + Lighthouse gates). Ticket 20 (SSE) landed in ticket 05
+of that board. Ticket 18 stays `ready-for-agent` — the React+Vite
+decision still holds; nothing in the new board reverses it. 34–45 are
+done. All of them came out of watching real threads rather than
 reading code: the reporter replied and nothing could hear the answer, sent the
 details in a second message and nothing read it, asked what a correlationId is
 and nothing could explain, and the operator answered by hand while the agent

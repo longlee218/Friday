@@ -1,4 +1,13 @@
-# 19: Liquid Glass, on the chrome only
+# 19: Liquid Glass, on the chrome only — RETIRED
+
+> Retired 2026-09-08 in favour of
+> [`.scratch/a-monitor-on-the-whole-path/`](../a-monitor-on-the-whole-path/spec.md).
+> Liquid Glass is an aesthetic for chrome that does not carry
+> information. The operator dashboard that replaced this work
+> is data-dense, motion-driven, and dark — colour is decoration
+> and tokens, not translucent panels. The new direction is the
+> one the operator signed off on after the redesign that asked
+> "what does the operator need to see right now".
 
 **What to build:** The board gets the Liquid Glass visual language — on its frame.
 The parts that carry information stay opaque and legible, and the failure list stays
@@ -6,7 +15,7 @@ the loudest thing on the page.
 
 **Blocked by:** 18
 
-**Status:** ready-for-agent
+**Status:** retired
 
 The restriction is not taste, it is the page's job. This board exists to make a
 failure obvious, and translucency makes contrast a function of whatever happens to
