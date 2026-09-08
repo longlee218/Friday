@@ -223,17 +223,19 @@ review via SSH tunnel → commit. No batching.
 | 04 | monitor screen (front door) | done | `9e8469a` |
 | 05 | SSE events | done | `de6665d` |
 | 06 | drill-down Monitor → Flow | done | `d5a28ca` |
-| 07 | keyboard + focus | ready-for-agent | — |
-| 08 | a11y axe-core gate | ready-for-agent | — |
-| 09 | perf Lighthouse gate | ready-for-agent | — |
-| 10 | update CLAUDE.md, retire ticket 19 | ready-for-agent | — |
+| 07 | keyboard + focus | done | (in `17201f8`) |
+| 08 | a11y axe-core gate | done | `47652da` |
+| 09 | perf bundle gate | done | `17201f8` |
+| 10 | update CLAUDE.md, retire ticket 19 | done | `17201f8` |
 | 11 | Rooms — task / enrichment markers | done | `60f2eb5` |
 | 12 | Flow — state per step | done | `bc697c2` |
-| 13 | Rooms — Agent vs Reporter marker | ready-for-agent | — |
+| 13 | Rooms — Agent vs Reporter marker | done | `f18e8eb` |
 
-Eight of thirteen landed. The five remaining are gates (07, 08,
-09, 10) and a marker the operator asked for mid-board (13). Gates
-catch regressions, so they are the work that pays for itself.
+All thirteen tickets landed. The board's promise is met: the
+operator opens `/` and sees a real-time Monitor with live feed,
+running tasks, drill-down to the Flow screen, breadcrumb, agent
+versus reporter markers, and gates that catch the regressions
+the audit asked for.
 
 ## Sources
 

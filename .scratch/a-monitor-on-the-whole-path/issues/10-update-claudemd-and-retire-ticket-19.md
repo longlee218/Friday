@@ -39,7 +39,7 @@ decision still holds; nothing in this board reverses it.
 
 **Decisions:** D1, D5, D8.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `CLAUDE.md` status paragraph rewritten to point at
       `.scratch/a-monitor-on-the-whole-path/`, mention ticket 19

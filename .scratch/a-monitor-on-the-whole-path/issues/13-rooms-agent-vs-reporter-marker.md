@@ -30,7 +30,7 @@ to me*, and the operator is the only agent-coloured party.
 
 **Decisions:** D2 (audit #2).
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `web/src/screens/RoomsScreen.tsx` renders the agent
       message row with `is_own === true` carrying: a left border

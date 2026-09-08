@@ -24,7 +24,7 @@ axe-core covers all five; the test does not invent project rules.
 
 **Decisions:** D5, audit notes #1, #2, #3, #6.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `tests/test_a11y.py` builds `web/dist` once (via
       `npm run build`), serves it through the same FastAPI app

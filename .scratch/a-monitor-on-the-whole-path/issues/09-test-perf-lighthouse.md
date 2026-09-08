@@ -27,7 +27,7 @@ unconditionally; Lighthouse only runs if the bundle passes.
 
 **Decisions:** D5, audit notes #4, #5.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `tests/test_bundle.py` reads `web/dist/assets/*.js` after
       `npm run build` and fails if any single file exceeds 100KB

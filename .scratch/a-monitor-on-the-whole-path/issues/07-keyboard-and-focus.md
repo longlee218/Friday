@@ -26,7 +26,7 @@ the audit called for as the operator's natural habit.
 
 **Decisions:** D1.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `web/src/keyboard.ts` registers the bindings on `window` and
       exposes a hook for the screen that wants to handle `r` (the
