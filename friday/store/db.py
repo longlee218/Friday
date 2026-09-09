@@ -86,6 +86,11 @@ OUTBOUND_SENT_MANUALLY = OutboundState.SENT_MANUALLY
 #: reasoning lives.
 _NEEDS_APPROVAL = ("reply",)
 
+#: The one kind that is a question to a reporter. Data here for the same
+#: reason `_NEEDS_APPROVAL` is: it is a `WHERE` clause, and importing
+#: `friday.outbox.Kind` would put the store below a module that reads it.
+_ASK = "ask_for_details"
+
 
 def _engine(path: str):
     """One engine per process. In-memory needs `StaticPool`: without it every
@@ -1533,6 +1538,70 @@ class Database:
                 .limit(1)
             )
         return latest.text if latest is not None else None
+
+    async def unanswered_questions(self, task_id: int) -> tuple[str, ...]:
+        """What this task asked the reporter and has not been answered.
+
+        **Derived, never summarised.** No model is involved and none should be:
+        this is a query over what was actually sent and what came back, so it
+        cannot be wrong in an interesting way. It is the cheapest real context
+        on its board and the only one with no token cost at all.
+
+        The failure it exists for is recorded: the system asked for an
+        environment, the reporter did not answer, and nothing knew it was
+        waiting — so the next pass was free to ask again, and the extractor's
+        prompt said nothing about a question already outstanding.
+
+        **Only a sent request for details counts.** A queued one has not been
+        asked, so waiting for an answer to it would be waiting for an answer
+        to something nobody has seen; a reply or a proposal we sent is not
+        something a reporter owes an answer to.
+
+        **Answered means a reply after the asking**, and both halves matter. A
+        reply names what it is about, which is the rule `last_said_by_reporter`
+        uses and the rule used here; and "after" is what keeps two asks with
+        one answer between them from both looking answered. Ordered oldest
+        first, so a reader sees them in the order they were asked.
+        """
+        who = await self.reporter_of(task_id)
+        async with self._sessions() as session:
+            asks = list(
+                await session.scalars(
+                    select(schema.Outbound)
+                    .where(
+                        schema.Outbound.task_id == task_id,
+                        schema.Outbound.kind == _ASK,
+                        schema.Outbound.sent_at.is_not(None),
+                    )
+                    .order_by(schema.Outbound.sent_at)
+                )
+            )
+            if not asks or who is None:
+                return tuple(a.text for a in asks) if asks else ()
+            author_id, _ = who
+            ours = select(schema.Outbound.sent_message_id).where(
+                schema.Outbound.task_id == task_id,
+                schema.Outbound.sent_message_id.is_not(None),
+            )
+            linked = select(schema.Message.provider_message_id).where(
+                schema.Message.task_id == task_id
+            )
+            answers = list(
+                await session.scalars(
+                    select(schema.Message.created_at).where(
+                        schema.Message.author_id == author_id,
+                        or_(
+                            schema.Message.reply_to.in_(ours),
+                            schema.Message.reply_to.in_(linked),
+                        ),
+                    )
+                )
+            )
+        return tuple(
+            ask.text
+            for ask in asks
+            if not any(when > ask.sent_at for when in answers)
+        )
 
     async def has_exchanged_with(self, author_id: str) -> bool:
         """Whether the operator and this person have ever replied to each other.

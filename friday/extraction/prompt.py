@@ -32,6 +32,7 @@ from friday.agent.instruction_prompt import (
     critical_reminder,
     job,
     memory,
+    outstanding_questions,
     role,
     room_facts,
     thinking_style,
@@ -97,7 +98,9 @@ def build_instructions(
     )
 
 
-def build_input(text: str, params_cls: type[Params], *, room=None) -> str:
+def build_input(
+    text: str, params_cls: type[Params], *, room=None, asked=()
+) -> str:
     """The field schema, what the room is known to be, then the reporter's
     words — in that order, and the order is the cache.
 
@@ -119,6 +122,14 @@ def build_input(text: str, params_cls: type[Params], *, room=None) -> str:
     speaking rather than the one it reads as its own operator — text that
     arrives in one call's input cannot rewrite the prompt of every later call.
 
+    **`asked` is what this task has already asked the reporter and not had
+    answered** — derived from the outbox, with no model involved, so it cannot
+    be wrong in an interesting way. It goes in `memory`'s conversation slot
+    because that is what the slot is: this exchange, where the room's facts are
+    the channel. The failure it exists for is recorded — the system asked for
+    an environment, nobody answered, and the next pass was free to ask again
+    because nothing in the prompt said a question was outstanding.
+
     A room with nothing written about it renders no section at all, so the
     prompt of an unconfigured install is byte-identical to what it was before
     this existed. A test says so, because "close enough" would still cost
@@ -136,6 +147,11 @@ def build_input(text: str, params_cls: type[Params], *, room=None) -> str:
     schema = "\n".join(schema_lines) or "(no fields)"
     return (
         f"Fields:\n{schema}\n\n"
-        + assemble(memory(channel_body=room_facts(room)))
+        + assemble(
+            memory(
+                conversation_body=outstanding_questions(asked),
+                channel_body=room_facts(room),
+            )
+        )
         + f"What they said:\n{user_input(text)}"
     )

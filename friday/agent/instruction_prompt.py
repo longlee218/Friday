@@ -944,6 +944,32 @@ def _render_pairs(
     return "\n".join(lines)
 
 
+def outstanding_questions(asked: Sequence[str]) -> str:
+    """What this exchange has asked and not had answered, for `memory`'s
+    conversation slot — plain, one per line.
+
+    Not a `Section`, for the reason `room_facts` and `memory_lines` are not:
+    a value handed to a builder, whose shape the builder owns.
+
+    Flattened per question for the reason `room_facts` is: this is a
+    line-oriented body inside a framed part, and the frame's indent stops
+    content opening a *label* while doing nothing about the format inside.
+    A question is one line here whatever newlines it was stored with.
+
+    Numbered rather than bulleted, because an agent told "you already asked
+    two things" and shown two lines can tell whether it is about to ask a
+    third or the same one again.
+    """
+    lines = [_one_line(q) for q in asked if q and q.strip()]
+    if not lines:
+        return ""
+    asked_lines = "\n".join(f"{n}. {q}" for n, q in enumerate(lines, 1))
+    return (
+        "already asked and not yet answered — do not ask these again:\n"
+        + asked_lines
+    )
+
+
 def room_facts(ctx: "ChannelContext | None") -> str:
     """What this room is known to be, for `memory`'s channel slot — plain,
     flattened, and labelled with where each fact came from.

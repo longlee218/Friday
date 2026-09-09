@@ -250,3 +250,156 @@ async def test_an_ask_is_not_held_back_by_a_newer_message(db):
     await outbox(db, sender).run_once()
 
     assert [t for _, t, _ in sender.sent] == ["which environment?"]
+
+
+# --- what we asked and have not been answered (ticket 05) ----------------
+
+
+async def _asked(db, task, text, *, sent_message_id):
+    """Queue a request for details and mark it sent, the way the outbox loop
+    does — a queued question has not been asked yet, so only a sent one can be
+    unanswered."""
+    row = await db.queue_outbound(
+        task_id=task.id,
+        conversation=task.conversation,
+        kind="ask_for_details",
+        sender="discord_user",
+        text=text,
+    )
+    await db.mark_outbound_sent(row.id, sent_message_id=sent_message_id)
+    return row
+
+
+async def _replied(db, task, message_id, text, *, to, at=None):
+    """The reporter answering something we sent, at a time after we sent it.
+
+    Its own helper rather than `tests/test_pool._said`, for a reason worth
+    saying: that one stamps messages relative to a fixed date in the past
+    while `mark_outbound_sent` stamps `sent_at` from the real clock, so a
+    reply built with it always predates the question it answers. "Answered"
+    is a question of ordering, so the ordering has to be constructible.
+    """
+    from datetime import datetime, timezone
+
+    from friday.domain.models import InboundEvent
+
+    await db.record_message(
+        InboundEvent(
+            provider="fake",
+            provider_message_id=message_id,
+            channel_id="watched",
+            thread_id=None,
+            author_id="u-reporter",
+            author_name="dana",
+            text=text,
+            created_at=at or datetime.now(timezone.utc),
+            mention_type=None,
+            reply_to=to,
+        )
+    )
+
+
+async def _opened_by(db, task, message_id="m1"):
+    """Link an opening message to the task, so the store can tell who the
+    reporter is."""
+    from conftest import make_event
+    from tests.test_pool import _said
+
+    await _said(db, message_id, "@Lee API lỗi", secs=0, mention=True)
+    await db.mark_triaged(
+        make_event(message_id=message_id), task.id, decision={"type": "api_issue"}
+    )
+
+
+async def test_a_conversation_that_asked_nothing_has_nothing_outstanding(db):
+    from tests.test_pool import make_task
+
+    task = await make_task(db)
+
+    assert await db.unanswered_questions(task.id) == ()
+
+
+async def test_a_question_nobody_answered_is_outstanding(db):
+    """The recorded failure: the system asked for an environment, the reporter
+    did not answer, and nothing in the system knew it was waiting — so the
+    next pass was free to ask again."""
+    from tests.test_pool import make_task
+
+    task = await make_task(db)
+    await _opened_by(db, task)
+    await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
+
+    assert await db.unanswered_questions(task.id) == ("em gửi anh curl với",)
+
+
+async def test_a_question_the_reporter_answered_stops_being_outstanding(db):
+    """Answered means the reporter replied to what we asked, after we asked
+    it. A reply names what it is about; that is the rule everything else here
+    uses and it is the rule used here."""
+    from tests.test_pool import make_task
+
+    task = await make_task(db)
+    await _opened_by(db, task)
+    await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
+    await _replied(db, task, "m2", "curl -X GET /pay", to="out-1")
+
+    assert await db.unanswered_questions(task.id) == ()
+
+
+async def test_a_second_question_after_an_answer_is_outstanding_again(db):
+    """Two asks, one answer in between. The reply answers what was asked
+    before it and says nothing about what was asked after."""
+    from tests.test_pool import make_task
+
+    task = await make_task(db)
+    await _opened_by(db, task)
+    # Real waits, because "answered" is a question of ordering and two rows
+    # marked sent in the same breath are microseconds apart. A reply has to
+    # land between them, so the two moments have to be separable.
+    import asyncio
+
+    await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
+    await asyncio.sleep(0.05)
+    await _replied(db, task, "m2", "curl -X GET /pay", to="out-1")
+    await asyncio.sleep(0.05)
+    await _asked(db, task, "còn environment nào em?", sent_message_id="out-2")
+
+    assert await db.unanswered_questions(task.id) == ("còn environment nào em?",)
+
+
+async def test_our_own_other_messages_are_not_questions(db):
+    """Only a request for details is a question. A reply we sent, or an alert
+    about the system, is not something a reporter owes an answer to."""
+    from tests.test_pool import make_task
+
+    task = await make_task(db)
+    await _opened_by(db, task)
+    for kind in ("reply", "proposal"):
+        row = await db.queue_outbound(
+            task_id=task.id,
+            conversation=task.conversation,
+            kind=kind,
+            sender="discord_user",
+            text=f"a {kind}",
+        )
+        await db.mark_outbound_sent(row.id, sent_message_id=f"out-{kind}")
+
+    assert await db.unanswered_questions(task.id) == ()
+
+
+async def test_a_question_still_queued_is_not_yet_a_question(db):
+    """It has not been asked. Counting it would have the system waiting for an
+    answer to something nobody has seen."""
+    from tests.test_pool import make_task
+
+    task = await make_task(db)
+    await _opened_by(db, task)
+    await db.queue_outbound(
+        task_id=task.id,
+        conversation=task.conversation,
+        kind="ask_for_details",
+        sender="discord_user",
+        text="not sent yet",
+    )
+
+    assert await db.unanswered_questions(task.id) == ()

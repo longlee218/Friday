@@ -77,29 +77,51 @@ class Extractor:
         params_cls: type[Params],
         name: str,
         context=None,
+        db=None,
     ) -> None:
         self._harness = harness
         self._params_cls = params_cls
         self.name = name
+        #: Where what-we-already-asked is read from. Held for the lifetime of
+        #: the process like `context`, and read per call — the same split, and
+        #: the reason there is no fifth parameter threading down from node 0.
+        self._db = db
         #: Where the rooms' own facts live. `None` means no channel has a
         #: context file, which is a fresh install — the prompt is then
         #: byte-identical to what it was before rooms reached this agent.
         self._context = context
 
-    def would_ask(self, text: str, *, channel_id: str | None = None) -> str:
+    async def would_ask(
+        self,
+        text: str,
+        *,
+        channel_id: str | None = None,
+        task_id: int | None = None,
+    ) -> str:
         """The per-call input this would send, without sending it.
 
         One method so `run` and `input_fingerprint` cannot disagree about what
         the prompt is — which is exactly how the mark came to be stale: two
         places described the same prompt and only one of them learned about the
         room.
+
+        Async since ticket 05: one of the prompt's inputs is a query. Which
+        also settles a question that could have been got wrong — the
+        outstanding questions are now inside the fingerprint, so the moment
+        the reporter answers one, the prompt changes and the extraction runs
+        again rather than replaying an answer taken before they spoke.
         """
         room = (
             self._context.context(channel_id)
             if self._context is not None and channel_id is not None
             else None
         )
-        return build_input(text, self._params_cls, room=room)
+        asked = (
+            await self._db.unanswered_questions(task_id)
+            if self._db is not None and task_id is not None
+            else ()
+        )
+        return build_input(text, self._params_cls, room=room, asked=asked)
 
     async def run(
         self,
@@ -131,7 +153,7 @@ class Extractor:
         """
         capture = FieldsCapture()
         result = await self._harness.run(
-            self.would_ask(text, channel_id=channel_id),
+            await self.would_ask(text, channel_id=channel_id, task_id=task_id),
             context=capture,
             extra_turns=1,
             task_id=task_id,
@@ -174,7 +196,12 @@ class Extractor:
 
 
 def build_extractor(
-    *, params_cls: type[Params], harness: Harness, name: str, context=None
+    *,
+    params_cls: type[Params],
+    harness: Harness,
+    name: str,
+    context=None,
+    db=None,
 ) -> Extractor:
     """Wire a Harness to a Params class under a name.
 
@@ -189,7 +216,7 @@ def build_extractor(
     misconfigured system fails to start rather than producing a wrong answer.
     """
     return Extractor(
-        harness=harness, params_cls=params_cls, name=name, context=context
+        harness=harness, params_cls=params_cls, name=name, context=context, db=db
     )
 
 
@@ -226,8 +253,12 @@ async def extract(
 
 
 
-def input_fingerprint(
-    task_type: str, text: str, *, channel_id: str | None = None
+async def input_fingerprint(
+    task_type: str,
+    text: str,
+    *,
+    channel_id: str | None = None,
+    task_id: int | None = None,
 ) -> str:
     """One string standing for everything this extractor is about to be shown.
 
@@ -253,7 +284,8 @@ def input_fingerprint(
     ext = _EXTRACTORS.get(task_type)
     if ext is None:
         return ""
-    return hashlib.sha256(ext.would_ask(text, channel_id=channel_id).encode()).hexdigest()
+    said = await ext.would_ask(text, channel_id=channel_id, task_id=task_id)
+    return hashlib.sha256(said.encode()).hexdigest()
 
 
 def register(
@@ -272,6 +304,8 @@ def register(
     #: per call, the same split the responder uses: a store lives as long as
     #: the process, a room lasts one call.
     context=None,
+    #: The store, for what this task has already asked and not had answered.
+    db=None,
 ) -> None:
     """Register one task type's extractor from configuration.
 
@@ -308,6 +342,7 @@ def register(
         ]
     _EXTRACTORS[task_type] = build_extractor(
         context=context,
+        db=db,
         params_cls=params_cls,
         harness=Harness(
             config=config,
@@ -432,7 +467,13 @@ EXTRACTS = {
 
 
 def register_extractors(
-    config: Config, *, skills=None, record=None, spent=None, context=None
+    config: Config,
+    *,
+    skills=None,
+    record=None,
+    spent=None,
+    context=None,
+    db=None,
 ) -> None:
     """Wire every extractor the configuration declares.
 
@@ -479,4 +520,5 @@ def register_extractors(
             record=record,
             spent=spent,
             context=context,
+            db=db,
         )

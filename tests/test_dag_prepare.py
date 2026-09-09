@@ -347,7 +347,7 @@ class _StandsForAnExtractor:
 
     _room = None
 
-    def would_ask(self, text, *, channel_id=None):
+    async def would_ask(self, text, *, channel_id=None, task_id=None):
         from friday.extraction.prompt import build_input
 
         return build_input(text, ApiIssueParams, room=self._room)
@@ -452,7 +452,7 @@ async def test_a_question_the_extractor_raised_survives_the_skipped_call(db):
     assert second == first
 
 
-def test_the_fingerprint_is_the_prompt_so_every_input_counts():
+async def test_the_fingerprint_is_the_prompt_so_every_input_counts():
     """It used to rebuild the two inputs node 0 knew about, and a review found
     what that costs: ticket 01 gave the prompt a third input — the room — the
     rebuild could not see, so an operator who wrote down what a room is got a
@@ -475,16 +475,16 @@ def test_the_fingerprint_is_the_prompt_so_every_input_counts():
 
     _install("fp_probe", _Bare())
     try:
-        text_a = input_fingerprint("fp_probe", "API lỗi")
-        text_b = input_fingerprint("fp_probe", "API vẫn lỗi")
+        text_a = await input_fingerprint("fp_probe", "API lỗi")
+        text_b = await input_fingerprint("fp_probe", "API vẫn lỗi")
         _install("fp_probe", _WithRoom())
-        with_room = input_fingerprint("fp_probe", "API lỗi")
+        with_room = await input_fingerprint("fp_probe", "API lỗi")
     finally:
         registered().pop("fp_probe", None)
 
     assert text_a != text_b, "the reporter's words do not move the fingerprint"
     assert with_room != text_a, "the room does not move the fingerprint"
-    assert input_fingerprint("no_such_type", "x") == "", (
+    assert await input_fingerprint("no_such_type", "x") == "", (
         "an unregistered type should have nothing to remember"
     )
 
@@ -584,13 +584,13 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
     seen: list[str] = []
 
     class _ReadsTheRoom(_StandsForAnExtractor):
-        def would_ask(self, text, *, channel_id=None):
+        async def would_ask(self, text, *, channel_id=None, task_id=None):
             from friday.extraction.prompt import build_input
 
             return build_input(text, ApiIssueParams, room=store.context(channel_id))
 
         async def run(self, text, *, channel_id=None, task_id=None, node=None):
-            said = self.would_ask(text, channel_id=channel_id)
+            said = await self.would_ask(text, channel_id=channel_id)
             seen.append(said)
             # Asserted on the *value* and on the section, never on
             # `test.apero`: the reporter's own message says `test.apero`, so
@@ -646,13 +646,13 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     asked: list[str] = []
 
     class _Watching(_StandsForAnExtractor):
-        def would_ask(self, text, *, channel_id=None):
+        async def would_ask(self, text, *, channel_id=None, task_id=None):
             from friday.extraction.prompt import build_input
 
             return build_input(text, ApiIssueParams, room=store.context(channel_id))
 
         async def run(self, text, *, channel_id=None, task_id=None, node=None):
-            asked.append(self.would_ask(text, channel_id=channel_id))
+            asked.append(await self.would_ask(text, channel_id=channel_id))
             return ApiIssueParams(summary="service down"), None
 
     _install("api_issue", _Watching())

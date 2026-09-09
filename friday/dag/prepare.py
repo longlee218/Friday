@@ -198,7 +198,9 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
         # and ticket 01 gave the prompt a third input it could not see — so an
         # operator who wrote down what a room is got a task that never read
         # it, because the fingerprint had not changed.
-        digest = input_fingerprint(task_type, text, channel_id=channel_id)
+        digest = await input_fingerprint(
+            task_type, text, channel_id=channel_id, task_id=task_id
+        )
         mark = await db.extraction_mark(task_id)
         if mark is not None and mark.fingerprint == digest:
             log.info(

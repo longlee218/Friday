@@ -599,3 +599,136 @@ def test_a_layer_the_operator_did_not_override_still_reaches_the_prompt():
     assert "apero" in said, "the shared base layer never reached the prompt"
     assert "the reelme team" in said, "the summariser's own layer was dropped"
     assert "staging" in said
+
+
+# --- what we already asked (ticket 05) -----------------------------------
+
+
+def test_outstanding_questions_reach_the_conversation_slot_not_the_channel():
+    """`memory()`'s two slots are the two halves of "what do I already know?"
+    — this room, and this exchange. Ticket 01 filled the channel slot with the
+    room's facts; a question this task already asked is about the exchange."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+
+    said = build_input(
+        "API lỗi", ApiIssueParams, asked=("em gửi anh curl với",)
+    )
+
+    assert "[conversation" in said
+    assert "em gửi anh curl với" in said
+    assert "[channel" not in said
+
+
+def test_a_task_that_asked_nothing_renders_no_such_content():
+    """Absent contributes nothing, not an empty heading — and the prompt of a
+    task nobody has asked anything stays what it was."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+
+    assert build_input("API lỗi", ApiIssueParams, asked=()) == build_input(
+        "API lỗi", ApiIssueParams
+    )
+
+
+def test_the_room_and_the_outstanding_questions_are_both_labelled():
+    """Both slots at once, each still saying which is which — the property
+    `memory()` was written for and the reason it is one section."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+    from friday.memory.channel_context import ChannelContext
+
+    said = build_input(
+        "API lỗi",
+        ApiIssueParams,
+        room=ChannelContext(
+            channel_id="watched", base={}, derived={}, overrides={"test.apero": "staging"}
+        ),
+        asked=("còn environment nào em?",),
+    )
+
+    assert "[conversation" in said and "[channel" in said
+    assert said.index("[conversation") < said.index("[channel"), (
+        "the section's own order changed"
+    )
+
+
+async def test_the_extractor_itself_reads_what_it_already_asked(db):
+    """The guard the prompt-level tests cannot be. Ticket 01 shipped with the
+    equivalent hole: its end-to-end double built the prompt itself, so
+    `Extractor`'s own lookup had no test and a mutation that made it ignore
+    its store passed the suite. Asserted at the seam that does the lookup."""
+    from friday.domain.models import ApiIssueParams
+    from tests.test_outbox import _asked, _opened_by
+    from tests.test_pool import make_task
+
+    task = await make_task(db)
+    await _opened_by(db, task)
+    await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
+
+    seen: list[str] = []
+
+    class StubResult:
+        final_output = '{"environment": null}'
+
+    class StubHarness:
+        tool_turns = 0
+        last_error = None
+
+        async def run(self, prompt, *, context=None, extra_turns=0,
+                      task_id=None, node=None):
+            seen.append(prompt)
+            return StubResult()
+
+    ext = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=StubHarness(),  # type: ignore[arg-type]
+        name="stub",
+        db=db,
+    )
+    _install("asked_probe", ext)
+    try:
+        await extract("asked_probe", "API lỗi", task_id=task.id)
+        await extract("asked_probe", "API lỗi")
+    finally:
+        registered().pop("asked_probe", None)
+
+    with_task, without = seen
+    assert "em gửi anh curl với" in with_task, (
+        "the extractor did not read what it had already asked"
+    )
+    assert "[conversation" in with_task
+    assert "em gửi anh curl với" not in without, (
+        "a question leaked into a call about no task"
+    )
+
+
+async def test_the_outstanding_questions_cost_no_model_call(db):
+    """Derived, not summarised. The whole value of this input is that it is a
+    query over what was actually sent, so it cannot be wrong in an interesting
+    way — and it must not quietly become the fourth agent in the pipeline."""
+    from friday.domain.models import ApiIssueParams
+    from tests.test_outbox import _asked, _opened_by
+    from tests.test_pool import make_task
+
+    task = await make_task(db)
+    await _opened_by(db, task)
+    await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
+
+    class _Exploding:
+        tool_turns = 0
+        last_error = None
+
+        async def run(self, *a, **k):  # pragma: no cover - must not be reached
+            raise AssertionError("a model was called to work out what we asked")
+
+    ext = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=_Exploding(),  # type: ignore[arg-type]
+        name="stub",
+        db=db,
+    )
+
+    said = await ext.would_ask("API lỗi", task_id=task.id)
+
+    assert "em gửi anh curl với" in said
