@@ -114,7 +114,7 @@ async def test_the_summariser_records(spy):
     from friday.memory.channel_context import ContextRebuilder
 
     rebuilder = ContextRebuilder.build(
-        _config(summary=CONFIG, summary_share=0.0),
+        _config(summary=CONFIG),
         store=_Store(),
         db=_LoudChannel(),
         record=SINK,
@@ -129,7 +129,7 @@ async def test_the_summariser_records(spy):
 # --- the least that lets each builder run ------------------------------------
 
 
-def _config(*, summary_share: float = 0.5, **agents):
+def _config(**agents):
     from types import SimpleNamespace
 
     return SimpleNamespace(
@@ -138,7 +138,7 @@ def _config(*, summary_share: float = 0.5, **agents):
         sensitive_words=(),
         ingest=SimpleNamespace(turn_seconds=0),
         workflows=SimpleNamespace(use_responder=True),
-        context=SimpleNamespace(summary_share=summary_share),
+        context=SimpleNamespace(summary_max_chars=6000),
     )
 
 

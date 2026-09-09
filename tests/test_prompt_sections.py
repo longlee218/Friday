@@ -1124,3 +1124,55 @@ def test_a_stored_question_cannot_forge_a_second_numbered_entry():
 
     assert len(numbered) == 1, f"a stored newline wrote a second question: {numbered!r}"
     assert "mật khẩu" in numbered[0], "the forged half should stay part of the one line"
+
+
+def test_room_facts_renders_a_structured_summarys_list_fields():
+    """`room_facts` reads `ctx.derived`, and ticket 06 put a nested dict with
+    list-valued fields there (`facts`, `decisions`, `constraints`) — a shape
+    `_render_pairs` had never been asked to render. Before the fix, `pair()`
+    handed a list straight to `transform`, and `_one_line` called `.split()`
+    on it, which a list does not have. Mutation testing found this had no
+    test: removing the list-join left every other assertion in this file
+    green, because none of them put a list inside a nested dict value."""
+    from friday.memory.channel_context import ChannelContext
+
+    room = ChannelContext(
+        channel_id="c",
+        base={},
+        derived={
+            "summary": {
+                "topic": "the reelme wrapper api",
+                "facts": ["test.apero is staging", "reelme v2 is production"],
+                "decisions": ["traces are looked up by x-request-id"],
+            }
+        },
+        overrides={},
+    )
+
+    body = ip.room_facts(room)  # must not raise
+
+    assert "test.apero is staging; reelme v2 is production" in body
+    assert "traces are looked up by x-request-id" in body
+
+
+def test_channel_derived_renders_a_structured_summarys_list_fields():
+    """The same crash risk, through the other renderer that shares
+    `_render_pairs` — the responder's own prompt reads `channel_derived`
+    directly rather than through `memory`."""
+    from friday.memory.channel_context import ChannelContext
+
+    ctx = ChannelContext(
+        channel_id="c",
+        base={},
+        derived={
+            "summary": {
+                "topic": "the reelme wrapper api",
+                "constraints": ["never paste a token into the channel"],
+            }
+        },
+        overrides={},
+    )
+
+    rendered = ip.channel_derived(ctx).render()  # must not raise
+
+    assert "never paste a token into the channel" in rendered

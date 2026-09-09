@@ -107,13 +107,17 @@ agents:
     # How many of your past replies to show it as tone examples.
     tone_examples: 8
 
-  # Summarises a channel once it has said more than a prompt can hold, so
-  # later prompts for that room read the summary instead of the transcript.
-  # Without this block the summary never happens and the derived section of
-  # every context file stays whatever was last written there — startup says so.
+  # Summarises a channel once it has said anything since its last summary,
+  # so later prompts for that room carry a few structured facts instead of a
+  # growing transcript. Without this block the summary never happens and the
+  # derived section of every context file stays whatever was last written
+  # there — startup says so.
   #
   # It runs on the heartbeat and asks each room whether it has said anything
-  # since the summary it already has, so a quiet channel costs nothing.
+  # since the summary it already has, so a quiet channel costs nothing. There
+  # is no other gate: a room that has said one thing gets a summary call for
+  # one thing, because the raw alternative — an unbounded transcript in the
+  # extractor's prompt — has already cost more than that once.
   # summary:
   #   api_key: ${TRIAGE_API_KEY}
   #   base_url: "https://api.minimax.io/v1"
@@ -314,9 +318,11 @@ context:
   # Agents are shown one line per skill and fetch the body only when they
   # decide to use it, which is what keeps a hundred skills affordable.
   skills_directory: skills
-  # What share of the model's context window a conversation has to reach
-  # before summarising it is cheaper than passing it raw.
-  summary_share: 0.5
+  # A ceiling refuses; it does not trim. A summary cut mid-field says
+  # something false about the room; the previous one standing is merely
+  # older. Measured on the stored, structured summary — the four fields the
+  # summariser is asked for, not the transcript it read.
+  summary_max_chars: 6000
 
 # ── What never reaches the model ───────────────────────────────────────────
 # A message containing any of these is not sent to the classifier. It becomes

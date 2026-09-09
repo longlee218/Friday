@@ -332,6 +332,37 @@ graph, so the multi-step thing here is the path through the process, not the
 Not to be confused with `Workflow`/`Graph`, which is what a task's own DAG does
 once it is running. A Flow contains one of those as a step.
 
+## Channel summary
+
+What a room's transcript has been reduced to: four fields — `topic`, `facts`,
+`decisions`, `constraints` — written by the summariser and read by every later
+agent that reads the room's context, not a paragraph of prose. Structured
+because free prose loses too much: "the reporter had a problem and we
+discussed it" is not context a later run can act on.
+
+Written when the room has said anything since its last summary, with no other
+gate: the fraction-of-a-context-window threshold this used to wait for made
+the summariser an emergency valve rather than a context-building step, and
+every room's derived context stayed `{}` because of it, alongside the
+mechanism being unconfigured. One message is enough to be worth a call now.
+
+**Capped, and a cap refuses rather than trims** — the same rule as
+`daily_token_budget`. A summary cut mid-field says something false about the
+room; the summary already on disk is merely older, and stands when a fresh one
+is refused. Measured on the stored, structured form, not the transcript that
+produced it.
+
+Bookkeeping — the first and last message it covers, and the shape it was
+written to — lives outside the summary itself, in `state`, because everything
+in `derived` is rendered into a room's prompts and a message id is not
+context. Distinct from an **Extraction mark**'s checkpoint in the same way that
+one is: this is what a room *is*, not what a task's own extraction was made
+from, and it outlives a task closing.
+
+A model that answers in prose rather than the four fields asked for still said
+something true about the room; that answer is kept as `topic` rather than
+discarded, because the alternative to an imperfect fact is no fact at all.
+
 ## Memory
 
 Something an agent chose to write down, scoped to one channel, reached through

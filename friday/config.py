@@ -96,8 +96,11 @@ class AgentConfig:
     settings: dict[str, Any] = field(default_factory=dict)
     max_turns: int = 1
     #: How much room this model has, in tokens. Providers vary, so this
-    #: cannot be hardcoded — it decides when a conversation has grown large
-    #: enough that summarising it costs less than passing it raw.
+    #: cannot be hardcoded. It gated the channel summariser's call until
+    #: ticket 06 removed that gate (a room is summarised once it has said
+    #: anything new, capped by `ContextConfig.summary_max_chars` rather than
+    #: triggered by this) — kept as a fact every agent config carries, with
+    #: no reader of its own left in this repo as of that ticket.
     context_window: int = 128_000
     #: How many times to call the provider for one run before giving up, and
     #: how long to wait after the first failure — doubling from there.
@@ -176,16 +179,24 @@ class OutboxConfig:
 
 @dataclass(frozen=True, slots=True)
 class ContextConfig:
-    """Where a channel's knowledge lives, and when it is worth summarising."""
+    """Where a channel's knowledge lives, and what a summary of it may cost."""
 
     directory: str = "context"
     #: Where the operator's skills live. One Markdown file per skill; adding
     #: one is adding a file, with no list to edit.
     skills_directory: str = "skills"
-    #: What share of the model's context window a conversation has to reach
-    #: before a summary is worth a model call. Below it, the raw messages are
-    #: cheaper than summarising them.
-    summary_share: float = 0.5
+    #: A ceiling refuses; it does not trim (ticket 06). A summary cut mid-field
+    #: says something false about the room; the previous one is merely older.
+    #: Measured on the stored, structured form — the same measure the room
+    #: sees, since `room_facts` renders `derived` as written.
+    #:
+    #: Replaces `summary_share`, which gated the *call* on a fraction of the
+    #: model's context window — the layer that made every room's derived
+    #: context stay `{}`, because a summary was never worth its own cost until
+    #: a room had said enough to make the raw transcript expensive. Ticket 06
+    #: removed that gate: a room is summarised once it has said anything new,
+    #: and this caps what the result may be, not whether the call happens.
+    summary_max_chars: int = 6000
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,8 +273,8 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             skills_directory=str(
                 (raw.get("context") or {}).get("skills_directory", "skills")
             ),
-            summary_share=float(
-                (raw.get("context") or {}).get("summary_share", 0.5)
+            summary_max_chars=int(
+                (raw.get("context") or {}).get("summary_max_chars", 6000)
             ),
         ),
         operator_id=int(raw.get("operator_id", 0)),

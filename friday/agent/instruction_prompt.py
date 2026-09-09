@@ -692,13 +692,16 @@ def memory(
     `memory_lines`, further down, closed exactly this the day it was written;
     this had nobody to close it for.
 
-    Two defences, and neither is enough alone. Content is indented, so nothing
-    stored can open a line — the same thing `_said` does for a transcript, and
-    the one that actually works against a line-oriented format. The label
-    carries its length, which is a boundary content would have to count itself
-    to forge; prior art is Hermes, which frames a plugin-contributed prompt
-    section with a character count and accepts a restored one only when
-    re-rendering it is byte-identical.
+    **One defence, not the two this docstring used to claim.** A length count
+    on the label was here too, on Hermes' precedent — removed by both reviews
+    of ticket 01, because nothing here re-renders and compares it the way
+    Hermes does, so it was a number no code read and no instruction
+    mentioned. This paragraph still claimed it after `_framed` (below) was
+    corrected; caught while ticket 06 gave this builder its second caller and
+    a reader checked the two docstrings against each other. What actually
+    holds: content is indented, so nothing stored can open a line — the same
+    thing `_said` does for a transcript, and the one defence that was ever
+    load-bearing here.
     """
     parts = []
     for label, body in (
@@ -925,8 +928,22 @@ def _render_pairs(
     already paid for once.
     """
 
+    def scalar(value: object) -> object:
+        # A list is not a scalar `transform` was ever asked to handle — every
+        # caller before ticket 06 fed this only strings and one-level dicts.
+        # The structured summary added fields (`facts`, `decisions`,
+        # `constraints`) whose value *is* a list, and passing one to
+        # `_one_line` broke on `.split()`, a method a list does not have.
+        # Joined on "; " before `transform` ever sees it, so a value with a
+        # `; ` in it and two facts joined by one are the same string either
+        # way — a smaller loss than the crash it replaces, and no worse than
+        # what one entry per line would have cost this format's guarantees.
+        if isinstance(value, list):
+            return "; ".join(str(item) for item in value)
+        return value
+
     def pair(key: object, value: object, indent: str = "") -> str:
-        return f"{indent}{transform(key)}: {transform(value)}"
+        return f"{indent}{transform(key)}: {transform(scalar(value))}"
 
     lines = []
     for k, v in sorted(d.items()):
