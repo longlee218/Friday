@@ -557,6 +557,36 @@ not an implementation detail:
   been quiet for `turn_seconds` and are not typing, or somebody else spoke.
   Turns are computed when read, never stored: when a message arrives it is not
   yet known whether the turn is over.
+- **Triage is shown the turn and the room's summary, not an unbounded
+  transcript** (ticket 09, reversing ticket 26). It used to receive every
+  message that had ever mentioned the operator in this conversation — no
+  limit, growing forever — chosen deliberately for prompt-prefix stability
+  and pinned by three tests. What that bought was real: an unbounded, never-
+  evicted window is stable at the front by construction. What it cost was a
+  hallucinated colleague, read out of a message *body* in a 24-line transcript
+  because nothing told the model who was speaking, and 2,552 characters of
+  transcript on the highest-volume path in the system to buy a guarantee a
+  much smaller mechanism gives for free.
+
+  The replacement is `friday/memory/channel_context.py`'s own structured
+  summary (ticket 06), read through `channel_derived` — the same section the
+  responder already reads — plus the turn itself, rendered as the messages it
+  actually is rather than pre-joined into one string. The three tests that
+  pinned the old guarantee stay exactly as they were: `db.relevant_messages`
+  is unchanged and still serves the responder (`Pool` reads it for the same
+  reason triage no longer does), so the property it proves is still real for
+  that caller. Three new tests prove the same *shape* of guarantee — a stable
+  prefix, measured, not assumed — for triage's new mechanism instead: the
+  summary section does not move as the room says more between rebuilds, two
+  different turns against the same summary share everything but the turn,
+  and the measured shared prefix between two calls — instructions and the
+  per-call input concatenated, which is a conservative proxy: the real wire
+  format carries more around them, identical between the two calls compared,
+  so the true ratio a provider sees is at least this — is over 90%.
+
+  Domain memory, task parameters and artifacts do not reach triage under this
+  design, on the same ground as before: it decides a label, not a value, and
+  those three are exactly what a value gets built from.
 - **The operator's own message ends the work — unless they tagged themselves.**
   Their messages are always kept, because them answering is what closes a
   task, and they create no work: the agent answering its own replies is a loop

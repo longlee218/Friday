@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -57,8 +57,18 @@ def _to_prediction(example: Example, outcome: TriageOutcome) -> Prediction:
 
 
 def _event(example: Example, index: int) -> InboundEvent:
-    """A message that exists only for this run — `channel_id="eval"` reaches
-    no configured whitelist and could not be confused with a real one."""
+    """The identity event — what `triage.decide`'s first argument is, for the
+    sensitive-word check and the `message_id` recording is correlated by.
+
+    Its own `text` is the whole turn joined, the way `TriageRunner._triage_one`
+    joins it before either check runs — a row with a real `turn` still needs
+    one string that carries everything said, and this is that string, not the
+    turn rendered as itself (that is `_turn`, below).
+
+    `channel_id="eval"` reaches no configured whitelist and could not be
+    confused with a real one.
+    """
+    joined = "\n".join(text for text, _ in example.turn) if example.turn else example.text
     return InboundEvent(
         provider="eval",
         provider_message_id=f"eval-{index}",
@@ -66,10 +76,37 @@ def _event(example: Example, index: int) -> InboundEvent:
         thread_id=None,
         author_id="eval-reporter",
         author_name="eval",
-        text=example.text,
+        text=joined,
         created_at=datetime.now(timezone.utc),
         mention_type=MentionType.DIRECT,
     )
+
+
+def _turn(example: Example, index: int) -> list[InboundEvent]:
+    """The turn's own messages, raw — one per `(text, is_own)` pair.
+
+    Empty for the sixteen rows that held one string before ticket 09:
+    `Triage.decide` falls back to rendering the identity event alone when
+    `turn` is empty, which is the exact shape those rows always exercised —
+    so passing this for every row, not only the new ones, changes nothing
+    for them and is what makes the new rows measure what triage is actually
+    shown rather than a second, parallel code path nothing else exercises.
+    """
+    return [
+        InboundEvent(
+            provider="eval",
+            provider_message_id=f"eval-{index}-{i}",
+            channel_id="eval",
+            thread_id=None,
+            author_id="eval-reporter",
+            author_name="eval",
+            text=text,
+            created_at=datetime.now(timezone.utc) + timedelta(seconds=i),
+            mention_type=MentionType.DIRECT,
+            is_own=is_own,
+        )
+        for i, (text, is_own) in enumerate(example.turn)
+    ]
 
 
 async def _build_triage(config: Config) -> Triage:
@@ -104,7 +141,7 @@ async def run(
         triage = await _build_triage(config or load_config())
     predictions = []
     for index, example in enumerate(load_jsonl(dataset_path)):
-        outcome = await triage.decide(_event(example, index))
+        outcome = await triage.decide(_event(example, index), turn=_turn(example, index))
         predictions.append(_to_prediction(example, outcome))
     return predictions
 

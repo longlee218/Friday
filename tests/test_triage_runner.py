@@ -22,8 +22,10 @@ class StubTriage:
         self._outcomes = list(outcomes)
         self.seen = []
 
-    async def decide(self, event, *, context=(), calls=None):
+    async def decide(self, event, *, turn=(), calls=None):
         self.seen.append(event)
+        self.turns_seen = getattr(self, "turns_seen", [])
+        self.turns_seen.append(turn)
         return self._outcomes.pop(0) if self._outcomes else NeedsHuman("no script")
 
 
@@ -131,15 +133,36 @@ async def test_a_message_of_a_different_type_gets_its_own_task(inbox, provider, 
     ]
 
 
-async def test_triage_reads_the_conversations_context(inbox, provider, db):
-    provider.emit_recent("watched", make_event(message_id="1", text="deploy went out"))
-    provider.emit(make_event(message_id="10"))
+async def test_triage_is_given_the_turn_not_the_unbounded_window(inbox, provider, db):
+    """Superseded `test_triage_reads_the_conversations_context`, whose only
+    assertion — `assert triage.seen` — never actually checked what triage was
+    shown, only that `decide` was called at all. Ticket 09 removed the thing
+    it was named for: `emit_recent`'s seeded message no longer reaches triage
+    through `db.relevant_messages` at all, because nothing here calls that
+    method for triage any more (the responder still does, via `Pool`).
+
+    What replaces it: `_triage_one` passes the *turn itself* — the raw
+    messages `turn_from` read, not the unbounded window and not a pre-joined
+    string — through to `Triage.decide` as `turn=`.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    earlier = datetime(2026, 8, 30, 11, 0, tzinfo=timezone.utc)
+    provider.emit_recent(
+        "watched", make_event(message_id="1", text="deploy went out", created_at=earlier)
+    )
+    provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
     triage = StubTriage(api_issue())
 
     await runner(db, triage).run_once()
 
-    assert triage.seen  # and it was given the conversation, see runner
+    assert [e.provider_message_id for e in triage.seen] == ["10"]
+    (turn,) = triage.turns_seen
+    assert [m.text for m in turn] == ["checkout is 500ing"]
+    assert "deploy went out" not in [m.text for m in turn], (
+        "a message from before this turn started leaked into it"
+    )
 
 
 async def test_a_follow_up_sends_the_task_back_to_be_re_planned(inbox, provider, db):

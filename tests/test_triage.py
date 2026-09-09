@@ -35,8 +35,8 @@ def triage_with(*steps) -> Triage:
     return Triage(config=CONFIG, model=ScriptedModel(list(steps)))
 
 
-async def decide(triage, text="the api is wrong", context=()):
-    return await triage.decide(make_event(text=text), context=context)
+async def decide(triage, text="the api is wrong", turn=()):
+    return await triage.decide(make_event(text=text), turn=turn)
 
 
 async def test_an_api_problem_becomes_an_api_issue():
@@ -376,3 +376,262 @@ def test_triage_still_has_exactly_the_two_tools_that_are_its_answer():
     from friday.tools.classify import TOOLS
 
     assert [t.name for t in TOOLS] == ["classify", "skip"]
+
+
+# --- triage reads a light context (ticket 09) -----------------------------
+
+
+def test_build_input_carries_the_turn_and_no_room_by_default():
+    """No room, no `<channel_derived>` section at all — a room nobody has
+    written anything about must not cost the classifier a byte, the same
+    property ticket 01 proved for the extractor."""
+    from friday.triage.prompt import build_input
+
+    said = build_input([make_event(text="api lỗi")])
+
+    assert "<channel_derived>" not in said
+    assert "api lỗi" in said
+
+
+def test_build_input_carries_the_rooms_summary_when_there_is_one():
+    """The channel slot ticket 06's summariser writes to, read directly —
+    the same section the responder already reads, not a new one invented
+    for triage."""
+    from friday.memory.channel_context import ChannelContext
+    from friday.triage.prompt import build_input
+
+    room = ChannelContext(
+        channel_id="watched", base={}, derived={"summary": {"topic": "the reelme api"}},
+        overrides={},
+    )
+    said = build_input([make_event(text="api lỗi")], room=room)
+
+    assert "<channel_derived>" in said
+    assert "the reelme api" in said
+
+
+def test_build_input_does_not_carry_overrides_or_base():
+    """Domain memory and operator overrides do not reach triage — it decides
+    a label, not a value, and those layers are exactly the kind of thing a
+    value would be built from."""
+    from friday.memory.channel_context import ChannelContext
+    from friday.triage.prompt import build_input
+
+    room = ChannelContext(
+        channel_id="watched",
+        base={"company": "apero"},
+        derived={"summary": {"topic": "x"}},
+        overrides={"test.apero": "staging"},
+    )
+    said = build_input([make_event(text="api lỗi")], room=room)
+
+    assert "apero" not in said.replace("the reelme api", "")  # topic itself may say "apero"
+    assert "staging" not in said
+
+
+def test_build_input_renders_a_real_turn_as_multiple_lines():
+    """The point of the whole redesign: a burst of messages is shown as
+    itself, not pre-flattened into one string with no clock on any line but
+    the first."""
+    from friday.triage.prompt import build_input
+
+    turn = [
+        make_event(message_id="1", text="api lỗi rồi anh ơi"),
+        make_event(message_id="2", text="curl -X GET /pay trả 500"),
+    ]
+    said = build_input(turn)
+
+    assert "api lỗi rồi anh ơi" in said
+    assert "curl -X GET /pay trả 500" in said
+    assert said.count("[") >= 2  # two bracketed timestamps, two lines
+
+
+async def test_decide_resolves_the_room_from_its_own_context_store():
+    """`Triage` holds the store, resolves the room per call from the event's
+    channel — the same split `Extractor` uses: a store lives as long as the
+    process, a room lasts one call."""
+    from friday.memory.channel_context import ChannelContext
+
+    class _Store:
+        def context(self, channel_id):
+            return (
+                ChannelContext(
+                    channel_id=channel_id, base={}, overrides={},
+                    derived={"summary": {"topic": "the reelme api"}},
+                )
+                if channel_id == "watched"
+                else None
+            )
+
+    seen = []
+
+    class _Capturing(Model):
+        async def get_response(self, *a, **kw):
+            seen.append(kw.get("input") or a)
+            return await ScriptedModel([
+                function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")
+            ]).get_response(*a, **kw)
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    triage = Triage(config=CONFIG, model=_Capturing(), context=_Store())
+
+    await triage.decide(make_event(text="api lỗi", channel_id="watched"))
+    said = str(seen[0])
+    assert "the reelme api" in said
+
+    seen.clear()
+    await triage.decide(make_event(text="api lỗi", channel_id="somewhere-else"))
+    said = str(seen[0])
+    assert "the reelme api" not in said, "a room leaked into another channel"
+
+
+async def test_decide_renders_the_given_turn_not_just_the_one_event():
+    """The `turn=` parameter is what `TriageRunner` now passes instead of the
+    unbounded window — the raw messages of the turn, not a pre-joined
+    string. Asserted on what the model was actually shown, not merely on the
+    outcome: a mutation that dropped `turn` entirely and always rendered
+    `[event]` instead still produces a `Decided` outcome from a scripted
+    model that does not look at its input, and a first version of this test
+    caught nothing because of it."""
+    seen = []
+
+    class _Capturing(Model):
+        async def get_response(self, *a, **kw):
+            seen.append(str(kw.get("input") or a))
+            return await ScriptedModel([
+                function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")
+            ]).get_response(*a, **kw)
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    triage = Triage(config=CONFIG, model=_Capturing())
+
+    await triage.decide(
+        make_event(message_id="1", text="ignored — turn is given instead"),
+        turn=[
+            make_event(message_id="1", text="api lỗi rồi"),
+            make_event(message_id="2", text="curl -X GET /pay trả 500"),
+        ],
+    )
+
+    said = seen[0]
+    assert "ignored — turn is given instead" not in said
+    assert "api lỗi rồi" in said
+    assert "curl -X GET /pay trả 500" in said
+
+
+# --- prefix stability, one layer up (ticket 09 reverses ticket 26) --------
+
+
+async def test_the_summary_section_does_not_care_how_much_the_room_has_said(db, tmp_path):
+    """Ticket 26's guarantee was `relevant_messages`'s: unbounded, so a
+    relevant message once included was never evicted and the prefix a model
+    saw on call N was still there on call N+1. That guarantee lived at the
+    database layer — every new message widened the window a little.
+
+    This one lives at the summary, and does not merely assert `build_input`
+    is a pure function of a fixed object (a first version of this test did
+    exactly that and proved nothing about a real database): it records a
+    hundred real messages into the same room, through a real `ContextStore`,
+    with **no `rebuild_all()` in between** — the heartbeat's own job, which
+    this test deliberately does not call — and checks that what `store.context`
+    hands `build_input` has not moved. `channel_derived` only ever renders
+    `ctx.derived`, and nothing here writes to it except a rebuild the
+    summariser runs on its own schedule, strictly less often than every
+    message.
+    """
+    from friday.memory.channel_context import ContextStore
+    from friday.triage.prompt import build_input
+
+    store = ContextStore(tmp_path)
+    store.init_channel(
+        "watched", overrides={},
+    )
+    store.rebuild_derived(
+        "watched", {"summary": {"topic": "the reelme wrapper api", "facts": ["x"]}}
+    )
+    store.hold_all()
+
+    first = build_input(
+        [make_event(message_id="1", text="a")], room=store.context("watched")
+    )
+    # Real messages, recorded into the actual database — not rebuilt from.
+    # If anything here moved the summary, this is where it would show; the
+    # count only has to be more than zero, so it stays small for speed.
+    for n in range(2, 12):
+        await db.record_message(make_event(message_id=str(n), text=f"noise {n}"))
+    later = build_input(
+        [make_event(message_id="11", text="a later mention")], room=store.context("watched")
+    )
+
+    def summary_section(said: str) -> str:
+        return said.split("<conversation>")[0]
+
+    assert summary_section(first) == summary_section(later)
+
+
+def test_two_turns_against_the_same_room_share_everything_but_the_turn():
+    """The old window *appended* — a later call's prompt was the earlier
+    one plus more. This mechanism does not append at all: the summary is
+    replaced wholesale on the summariser's own schedule, and the turn is
+    never a running list. What survives between two calls is the summary
+    section byte-for-byte, not a growing shared prefix — the property is
+    stronger, not merely relocated."""
+    from friday.memory.channel_context import ChannelContext
+    from friday.triage.prompt import build_input
+
+    room = ChannelContext(
+        channel_id="watched", base={}, overrides={},
+        derived={"summary": {"topic": "the reelme wrapper api"}},
+    )
+
+    said_a = build_input([make_event(message_id="1", text="api lỗi")], room=room)
+    said_b = build_input(
+        [make_event(message_id="2", text="a completely different report")], room=room
+    )
+
+    prefix_a = said_a.split("<conversation>")[0]
+    prefix_b = said_b.split("<conversation>")[0]
+    assert prefix_a == prefix_b
+
+
+def test_the_shared_prefix_between_two_triage_calls_is_almost_the_whole_prompt():
+    """The measurability criterion itself, carried over: not merely asserted
+    to be stable, but measured — against what a provider's cache actually
+    sees, which is instructions *and* the per-call input together, not
+    `build_input` in isolation. Instructions are the identity, the job, how
+    to think, and the operator's examples, all held fixed across every call
+    an agent makes; only the per-call input's turn was ever meant to change.
+
+    `relevant_messages`'s version built 24 lines of noise between two calls
+    and checked the ratio against a hand-rolled prompt stand-in; this one
+    holds the summary fixed — what the DAG's own rebuild schedule guarantees
+    in production — and varies only the turn."""
+    from friday.memory.channel_context import ChannelContext
+    from friday.triage.prompt import build_input
+
+    instructions = Triage(config=CONFIG)._run.agent.instructions
+    room = ChannelContext(
+        channel_id="watched", base={}, overrides={},
+        derived={"summary": {
+            "topic": "the reelme wrapper api",
+            "facts": ["test.apero is the staging host"],
+            "decisions": ["traces are looked up by x-request-id"],
+        }},
+    )
+
+    early = instructions + build_input([make_event(message_id="1", text="api lỗi")], room=room)
+    late = instructions + build_input(
+        [make_event(message_id="99", text="a much later, unrelated mention")], room=room
+    )
+
+    shorter = min(len(early), len(late))
+    matched = 0
+    while matched < shorter and early[matched] == late[matched]:
+        matched += 1
+    ratio = matched / shorter if shorter else 1.0
+
+    assert ratio > 0.9

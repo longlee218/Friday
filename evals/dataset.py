@@ -23,12 +23,18 @@ __all__ = ["Example", "build_frozen_set", "load_jsonl", "write_jsonl"]
 class Example:
     text: str
     expected: str
+    #: The turn as multiple messages, (text, is_own) pairs in order -- for a
+    #: row that needs to exercise something one line cannot: the ownership
+    #: mark, or a real multi-line render. Empty means `text` alone is the
+    #: whole turn, which is every row this set held before ticket 09 and
+    #: still the common case.
+    turn: tuple[tuple[str, bool], ...] = ()
 
 
 def build_frozen_set(
     *,
     confirmed: list[tuple[str, str]],
-    seed: Sequence[tuple[str, str]] = (),
+    seed: Sequence[tuple[str, str] | tuple[str, str, tuple]] = (),
     excluded: Sequence[tuple[str, str]] = (),
 ) -> list[Example]:
     """Confirmed verdicts plus a hand-written seed, minus whatever the live
@@ -41,14 +47,20 @@ def build_frozen_set(
     Deduplicated by text: the same report marked right twice, or present in
     both `confirmed` and `seed`, is one row rather than two — a duplicate
     would double its weight in the accuracy figure without saying it does.
+
+    A `seed` entry may be a richer `(text, expected, turn)` triple, when it
+    exists to exercise something a single string cannot. `confirmed` never
+    is — a stored, operator-marked classification has no notion of a `turn`,
+    only the text it read.
     """
     excluded_text = {text for text, _ in excluded}
-    seen: dict[str, str] = {}
-    for text, kind in [*confirmed, *seed]:
+    seen: dict[str, Example] = {}
+    for row in [*confirmed, *seed]:
+        text, kind, turn = row if len(row) == 3 else (*row, ())
         if text in excluded_text:
             continue
-        seen[text] = kind
-    return [Example(text=text, expected=kind) for text, kind in seen.items()]
+        seen[text] = Example(text=text, expected=kind, turn=turn)
+    return list(seen.values())
 
 
 def load_jsonl(path: Path) -> list[Example]:
@@ -58,16 +70,27 @@ def load_jsonl(path: Path) -> list[Example]:
         if not line:
             continue
         row = json.loads(line)
-        examples.append(Example(text=row["text"], expected=row["expected"]))
+        turn = tuple((text, is_own) for text, is_own in row.get("turn", ()))
+        examples.append(
+            Example(text=row["text"], expected=row["expected"], turn=turn)
+        )
     return examples
 
 
 def write_jsonl(path: Path, examples: list[Example]) -> None:
-    """`ensure_ascii=False`: this file is reviewed as a diff, and real
-    reports are bilingual, so an escaped `\\u1ebft` in place of `ế` would
-    make every Vietnamese example unreadable in review."""
-    lines = [
-        json.dumps({"text": e.text, "expected": e.expected}, ensure_ascii=False)
-        for e in examples
-    ]
-    path.write_text("\n".join(lines) + "\n" if lines else "")
+    """ensure_ascii=False: this file is reviewed as a diff, and real
+    reports are bilingual, so an escaped unicode entity in place of a real
+    character would make every Vietnamese example unreadable in review.
+
+    `turn` is omitted entirely when empty, not written as an empty list --
+    the sixteen rows that existed before ticket 09 are single strings, and
+    giving every one of them a key only two or three rows actually use would
+    touch every line in a diff for a feature most rows do not have.
+    """
+    rows = []
+    for e in examples:
+        row = {"text": e.text, "expected": e.expected}
+        if e.turn:
+            row["turn"] = [list(pair) for pair in e.turn]
+        rows.append(json.dumps(row, ensure_ascii=False))
+    path.write_text("\n".join(rows) + "\n" if rows else "")

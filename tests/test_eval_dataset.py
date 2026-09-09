@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 
+from pathlib import Path
+
 from evals.dataset import Example, build_frozen_set, load_jsonl, write_jsonl
 
 
@@ -83,3 +85,75 @@ def test_load_jsonl_skips_blank_lines(tmp_path):
     path.write_text('{"text": "a", "expected": "skip"}\n\n')
 
     assert load_jsonl(path) == [Example(text="a", expected="skip")]
+
+
+# --- a multi-message turn (ticket 09) --------------------------------------
+
+
+def test_a_plain_example_writes_no_turn_key_at_all():
+    """Sixteen existing rows are single strings and must stay that way on
+    disk — a `"turn": []` key on every line would touch every row in a diff
+    for a feature only two or three of them use."""
+    path = write_jsonl_to_tmp([Example(text="the api is down", expected="api_issue")])
+    assert json.loads(path.read_text().splitlines()[0]) == {
+        "text": "the api is down", "expected": "api_issue"
+    }
+
+
+def test_a_multi_message_example_round_trips_its_turn(tmp_path):
+    """The turn is (text, is_own) pairs, in order — the shape needed to
+    exercise the ownership mark and multi-line rendering, which the sixteen
+    single-string rows cannot."""
+    example = Example(
+        text="whatever the classifier is shown when there is no turn to give",
+        expected="api_issue",
+        turn=(
+            ("api lỗi rồi anh ơi", False),
+            ("correlationId nằm trong header x-request-id đó em", True),
+        ),
+    )
+    path = tmp_path / "triage.jsonl"
+
+    write_jsonl(path, [example])
+
+    assert load_jsonl(path) == [example]
+
+
+def write_jsonl_to_tmp(examples):
+    import tempfile
+    d = Path(tempfile.mkdtemp())
+    path = d / "triage.jsonl"
+    write_jsonl(path, examples)
+    return path
+
+
+def test_a_seed_row_can_carry_a_turn():
+    """A hand-written seed row may be a richer `(text, expected, turn)` triple
+    when it exists to exercise something a single string cannot; `confirmed`
+    verdicts never carry one — a stored classification has no such thing."""
+    frozen = build_frozen_set(
+        confirmed=[],
+        seed=[
+            (
+                "api lỗi rồi anh ơi",
+                "api_issue",
+                (("api lỗi rồi anh ơi", False), ("curl -X GET /pay trả 500", False)),
+            ),
+        ],
+    )
+
+    (example,) = frozen
+    assert example.turn == (
+        ("api lỗi rồi anh ơi", False), ("curl -X GET /pay trả 500", False),
+    )
+
+
+def test_a_plain_seed_row_still_works_alongside_a_turn_row():
+    frozen = build_frozen_set(
+        confirmed=[("the api is down", "api_issue")],
+        seed=[("anyone want lunch", "skip")],
+    )
+
+    assert {e.text: e.turn for e in frozen} == {
+        "the api is down": (), "anyone want lunch": (),
+    }

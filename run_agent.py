@@ -167,6 +167,7 @@ async def _run(stack: AsyncExitStack) -> None:
         still_typing=inbox.still_typing,
         record=record_call,
         spent=db.spent_today,
+        context=context_store,
     )
 
     # Connected here rather than by whoever uses them: a connection has a

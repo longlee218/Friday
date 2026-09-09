@@ -24,18 +24,18 @@ from collections.abc import Sequence
 
 from friday.agent.instruction_prompt import (
     assemble,
+    channel_derived,
     clarification_system,
     conversation,
     critical_reminder,
     few_shot,
     job,
     role,
-    skill_system,
     thinking_style,
     trust_boundary,
-    SkillMeta,
 )
 from friday.domain.models import InboundEvent
+from friday.memory.channel_context import ChannelContext
 
 __all__ = ["build_input", "build_instructions"]
 
@@ -70,16 +70,23 @@ REMINDERS = [
 INSTRUCTIONS = JOB
 
 
-def build_instructions(
-    examples: Sequence[tuple[str, str]] = (),
-    skills_meta: Sequence[SkillMeta] | None = None,
-) -> str:
+def build_instructions(examples: Sequence[tuple[str, str]] = ()) -> str:
     """Who it is, the job, how to think, what it was shown, what not to get
     wrong — in that order, because the order is how much each part moves.
 
     The examples are the only part that changes between installs, and they
     change at startup rather than per call, so they sit after everything
     stable and before the reminder that closes.
+
+    **No `skill_system` here, and there has not been one to call since
+    ticket 03.** This function used to accept `skills_meta` and render
+    `skill_system(skills_meta)` beside a comment claiming "triage gets skills
+    like every other agent now" — but `Triage.__init__` stopped accepting a
+    skill library that same ticket, so `skills_meta` was always `None` at the
+    one call site, and the comment described a world ticket 03 had already
+    ended. `skill_system(None)` renders nothing either way, so this was dead
+    rather than wrong in its output — found while this module was open for
+    ticket 09's own work, not a bug ticket 09 introduces.
     """
     return assemble(
         role("Friday", "a triage classifier", "you decide what a message is"),
@@ -87,11 +94,6 @@ def build_instructions(
         job(JOB),
         thinking_style(THINKING),
         clarification_system(None),
-        # Triage gets skills like every other agent now. Its own job says
-        # "call exactly one tool" and means the classifying one; a skill is
-        # something it may read on the way, and the turn for it comes from
-        # the harness rather than from the correction budget.
-        skill_system(skills_meta),
         # Only classifications the operator marked *right*. An example
         # nobody looked at teaches the classifier its own habits, and the
         # drift has no floor because every generation is drawn from the last
@@ -101,13 +103,32 @@ def build_instructions(
     )
 
 
-def build_input(events: Sequence[InboundEvent]) -> str:
-    """The turn, and nothing else: no identity, no date, no task section. The
-    whole output is which tool was called and a number, and none of those
-    would change it.
+def build_input(
+    turn: Sequence[InboundEvent], *, room: ChannelContext | None = None
+) -> str:
+    """The room's summary, then the turn — the light context ticket 09
+    replaced the unbounded relevance window with.
+
+    **The room, not the reporter's own words, is what changed here.** `turn`
+    is unchanged in shape from what this function always rendered — the
+    difference is what used to be concatenated in front of it: every message
+    that had ever mentioned the operator in this conversation, unbounded and
+    growing forever. That window is gone; what a classifier needs instead is
+    a fact about the room, not a transcript of it.
+
+    **`channel_derived`, not a section built for this.** It is the same
+    section the responder already reads, and it renders exactly
+    `ctx.derived["summary"]` — the four structured fields ticket 06 writes,
+    nothing else. `base` and `overrides` do not reach it, which is what keeps
+    domain facts and operator-written values out of triage's prompt: triage
+    decides a label, not a value, and those two layers are exactly the kind
+    of thing a value gets built from.
+
+    A room with nothing written about it renders no section at all, so an
+    unconfigured install's prompt is byte-identical to what it always was.
 
     Quoted through the section rather than wrapped round it; `_quoted` in the
     seam says why, and this prompt is one of the two that got it wrong until
     ticket 06.
     """
-    return assemble(conversation(list(events), quoted=True))
+    return assemble(channel_derived(room), conversation(list(turn), quoted=True))

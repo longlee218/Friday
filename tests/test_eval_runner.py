@@ -115,3 +115,56 @@ def _scripted_triage(*steps):
     from friday.triage import Triage
 
     return Triage(config=CONFIG, model=ScriptedModel(list(steps)))
+
+
+async def test_a_multi_message_row_reaches_triage_as_a_real_turn(tmp_path):
+    """The whole reason ticket 09 extended the dataset format: a row with a
+    `turn` must actually reach `Triage.decide` as multiple raw messages, not
+    a joined string — otherwise nothing here ever exercises the ownership
+    mark or a real multi-line render, which is exactly the gap ticket 09's
+    own criterion named."""
+    from agents.models.interface import Model
+
+    from evals.dataset import write_jsonl
+    from friday.triage import Triage
+
+    dataset = tmp_path / "triage.jsonl"
+    write_jsonl(
+        dataset,
+        [
+            Example(
+                text="whatever — a turn is given instead",
+                expected="api_issue",
+                turn=(
+                    ("api lỗi rồi anh ơi", False),
+                    ("correlationId nằm trong x-request-id đó em", True),
+                ),
+            ),
+        ],
+    )
+
+    seen_turns: list = []
+
+    class _Capturing(Model):
+        async def get_response(self, *a, **kw):
+            return await ScriptedModel([
+                function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")
+            ]).get_response(*a, **kw)
+
+        def stream_response(self, *a, **kw):
+            raise NotImplementedError
+
+    class _RecordingTriage(Triage):
+        async def decide(self, event, *, turn=()):
+            seen_turns.append(turn)
+            return await super().decide(event, turn=turn)
+
+    triage = _RecordingTriage(config=CONFIG, model=_Capturing())
+
+    await run(dataset_path=dataset, triage=triage)
+
+    (turn,) = seen_turns
+    assert [m.text for m in turn] == [
+        "api lỗi rồi anh ơi", "correlationId nằm trong x-request-id đó em",
+    ]
+    assert [m.is_own for m in turn] == [False, True]

@@ -58,7 +58,7 @@ def _record(outcome: TriageOutcome) -> dict:
 
 
 async def build_triage(
-    config, *, db: Database, record=None, spent=None
+    config, *, db: Database, record=None, spent=None, context=None
 ) -> Triage:
     """The real classifier, assembled the one place this is done.
 
@@ -107,6 +107,7 @@ async def build_triage(
         sensitive=sensitive,
         record=record,
         spent=spent,
+        context=context,
     )
 
 
@@ -120,6 +121,7 @@ class TriageRunner:
         still_typing=None,
         record=None,
         spent=None,
+        context=None,
     ) -> "TriageRunner":
         """Everything triage needs, read from configuration here.
 
@@ -140,7 +142,7 @@ class TriageRunner:
         return cls(
             db=db,
             triage=await build_triage(
-                config, db=db, record=record, spent=spent
+                config, db=db, record=record, spent=spent, context=context
             ),
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)
@@ -256,7 +258,7 @@ class TriageRunner:
             log.info("%s is %s — not sent to the model", event.provider_message_id, stale)
             return None
         said = replace(event, text="\n".join(m.text for m in turn if m.text))
-        outcome = await self._decide(said)
+        outcome = await self._decide(said, turn=turn)
         task = await self._apply(event, outcome)
         await self._db.mark_triaged(
             event, task.id if task else None, decision=_record(outcome)
@@ -317,17 +319,27 @@ class TriageRunner:
             return True
         return self._still_typing(last.conversation, last.author_id)
 
-    async def _decide(self, event: InboundEvent) -> TriageOutcome:
+    async def _decide(
+        self, event: InboundEvent, *, turn: list[InboundEvent]
+    ) -> TriageOutcome:
         """Decide.
 
         This used to drain a `calls` list and write each one to the store,
         which is why triage was the only agent whose prompts were ever kept:
-        every other caller of `Harness.run` forgot the list. The harness holds
+        every other agent's `Harness.run` forgot the list. The harness holds
         the sink now (D1) and writes them itself, correlated by the
         `message_id` `Triage.decide` passes it.
+
+        **This used to also fetch the unbounded relevance window here** —
+        `context = await self._db.relevant_messages(event.conversation)` —
+        every message that had ever mentioned the operator in this
+        conversation, unbounded and growing forever (ticket 26). Ticket 09
+        reverses that: `Triage` reads the room's own summary from the context
+        store it now holds, and `turn` — the raw messages `_triage_one` just
+        read from `turn_from`, before they were joined into `event`'s own
+        text — is what reaches the prompt instead of a transcript.
         """
-        context = await self._db.relevant_messages(event.conversation)
-        return await self._triage.decide(event, context=context)
+        return await self._triage.decide(event, turn=turn)
 
     async def _apply(
         self, event: InboundEvent, outcome: TriageOutcome

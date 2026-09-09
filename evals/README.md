@@ -48,11 +48,21 @@ is that, built for ticket 06 on `.scratch/nothing-runs-unmeasured/`.
 
 ## What a run costs
 
-Measured against the shipped 16-row seed set, on `MiniMax-M3` (the
+Measured against the original 16-row seed set, on `MiniMax-M3` (the
 `triage` agent's configured model): **~15,000 input tokens, ~1,100 output
 tokens**, one call per row. Convert with your own provider's per-token
 price — this file states the token count because that number does not
 depend on which provider `config.yaml` points at; a dollar figure would.
+
+`SEED` is 18 rows as of ticket 09 (two rows carrying a multi-message `turn`,
+added to exercise what a single line cannot — see `CLAUDE.md`'s note on
+triage's light context). The token figures above predate that change and were
+not re-measured against the new set — `run_triage_eval.py` does not record
+per-call cost (`_build_triage` passes no `record=`/`spent=`), so the number
+above is the last one actually measured, not a guess scaled by row count.
+Re-measure directly if the estimate needs to be precise; do not multiply the
+old figure by 18/16 — the two new rows are each a multi-message turn, larger
+than the average of the sixteen they were measured against.
 
 Cost scales with the size of `triage.jsonl` and with how many few-shot
 examples `config.yaml`'s `triage: examples:` setting shows the model (the
