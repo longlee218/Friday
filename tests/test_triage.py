@@ -326,3 +326,53 @@ async def test_a_model_that_cannot_fix_its_own_call_becomes_a_persons_problem():
 
     assert isinstance(outcome, NeedsHuman)
     assert "triage failed" in outcome.reason
+
+
+# --- triage's prompt is classification and nothing else (ticket 03) ------
+
+
+def test_triage_carries_no_skill_catalogue_and_cannot_be_given_one():
+    """1,008 of triage's 2,272 system-prompt characters described four tools it
+    has never once fetched — 44% of the highest-volume prompt in the system —
+    and wiring those tools silently tripled its turn budget from 2 to 4.
+
+    **No test pinned this in either direction.** `grep` for skills across
+    `tests/test_triage*.py` and for `triage` across `tests/test_skills.py`
+    returned nothing: the catalogue arrived on 2026-09-07 and left on ticket 13
+    without a single assertion noticing either way.
+
+    Asserted as "cannot be given one" rather than "is not given one", because
+    a parameter that still exists is a parameter something can pass. That is
+    not hypothetical here: `evals/run_triage_eval.py` never passed `skills=`
+    while production always did, so for two days the regression net scored a
+    classifier that did not exist. Removing the parameter is what makes the
+    eval correct by construction rather than by remembering."""
+    import inspect
+
+    from friday.triage import INSTRUCTIONS, Triage
+    from friday.triage.runner import build_triage
+
+    # Asserted on what the `Harness` is actually handed, not on the module
+    # constant: `INSTRUCTIONS` is `build_instructions()` with no examples, and
+    # production builds a *different* string inside `Triage.__init__`. A
+    # mutation that appended a catalogue to the real call passed a first
+    # version of this test that checked the constant — the same "assert on a
+    # proxy" mistake this session has already made twice.
+    built = Triage(config=CONFIG)._run.agent.instructions
+
+    for where_from, text in (("the constant", INSTRUCTIONS), ("the agent", built)):
+        assert "<skill_system>" not in text, f"a catalogue reached {where_from}"
+        assert "answer-in-vietnamese" not in text, f"a skill reached {where_from}"
+
+    for where in (Triage.__init__, build_triage):
+        assert "skills" not in inspect.signature(where).parameters, (
+            f"{where.__qualname__} can still be handed a skill library"
+        )
+
+
+def test_triage_still_has_exactly_the_two_tools_that_are_its_answer():
+    """Removing the catalogue must not remove the answer. `classify` names
+    everything that opens work and `skip` names the absence of it."""
+    from friday.tools.classify import TOOLS
+
+    assert [t.name for t in TOOLS] == ["classify", "skip"]

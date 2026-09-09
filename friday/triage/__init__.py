@@ -38,10 +38,6 @@ class Triage:
         model=None,
         examples: Sequence[tuple[str, str]] = (),
         sensitive: Sensitive | None = None,
-        #: The skill library, if this install has one. Triage gets it like
-        #: every other agent now (the operator's call, 2026-09-07) — the
-        #: harness wires the four tools and grants the turn they need.
-        skills=None,
         record=None,
         spent=None,
     ) -> None:
@@ -54,27 +50,9 @@ class Triage:
         # call: the instructions are the stable prefix, and a list that
         # changed per call would cost the cache hit on everything after it.
         # A mark made now therefore takes effect at the next start.
-        from friday.agent.instruction_prompt import SkillMeta
-
-        skills_meta = None
-        if skills is not None and len(skills):
-            skills_meta = [
-                SkillMeta(
-                    name=s.name,
-                    description=s.description,
-                    mutability=s.mutability,
-                    location=str(skills.location_of(s.name)),
-                    allowed_tools=s.allowed_tools,
-                )
-                for s in skills.skills()
-            ]
         self._run = Harness(
             config=config,
-            instructions=build_instructions(
-                examples,
-                skills_meta=skills_meta,
-            ),
-            skills=skills,
+            instructions=build_instructions(examples),
             tools=TOOLS,
             model=model,
             record=record,

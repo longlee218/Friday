@@ -164,8 +164,6 @@ async def _run(stack: AsyncExitStack) -> None:
     runner = await TriageRunner.build(
         config,
         db=db,
-        # Every agent reaches skills now, not just the responder.
-        skills=skills,
         still_typing=inbox.still_typing,
         record=record_call,
         spent=db.spent_today,

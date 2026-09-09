@@ -28,6 +28,14 @@ prompt and a hallucinated colleague. The tests move up a layer rather than out.
       that asked, by the id lookup that already does it and not by prompt
       context
 - [ ] Triage's tool schema is unchanged: no project, no topics, no entities
+- [ ] **The frozen set gains rows this ticket can actually be measured by**,
+      before the evaluation is run. As shipped it holds 16 single-message rows
+      with no newlines and no `is_own`, and `run_triage_eval` passes no
+      `context=` — so it exercises neither a window, nor deduplication, nor
+      the ownership mark, nor the line-forgery defence. Ticket 02's run
+      returned the recorded baseline to the digit for exactly that reason.
+      A ticket that changes what triage is shown, measured by a set that
+      shows it one line, is measured by nothing
 - [ ] The evaluation is run against the frozen set, and accuracy, the confusion
       matrix and the threshold table are reported alongside the change
 - [ ] Guards deleted once and watched go red

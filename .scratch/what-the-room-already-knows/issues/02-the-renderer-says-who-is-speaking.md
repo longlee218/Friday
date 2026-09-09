@@ -84,3 +84,42 @@ the model to guess at. `is_own` is also now documented at the mark as knowing
 only one of this system's two identities: a message the *bot* posted renders
 unmarked, and closing that means the inbox folding `Database.we_sent` into the
 stored row, which is a change to what is stored rather than to how it is shown.
+
+### Eval
+
+**Eval baseline, run 2026-09-09 against MiniMax-M3, after tickets 01/02/04/13
+and before ticket 03.**
+
+```
+16 examples, accuracy 93.8%
+
+confusion (rows: expected, columns: predicted)
+                access_request  api_issue  doc_question  needs_human  skip
+access_request  4               0          0             0            0
+api_issue       0               4          0             0            0
+doc_question    0               0          3             1            0
+needs_human     0               0          0             0            0
+skip            0               0          0             0            4
+
+confidence below threshold -> escalated to a human:
+  0.5: 1/16   0.6: 1/16   0.7: 1/16   0.8: 1/16   0.9: 2/16
+```
+
+Identical to the baseline recorded on
+`.scratch/nothing-runs-unmeasured/issues/06-*`: 93.8%, one `doc_question`
+landing as `needs_human`, same cell. Four tickets moved the classifier not at
+all.
+
+**And this eval barely touches what ticket 02 changed, which is worth writing
+down rather than hiding behind the number.** `evals/run_triage_eval.py` calls
+`triage.decide(event)` with no `context=`, so the prompt holds exactly one
+message; the 16 seed rows contain no newlines; and `_event` does not set
+`is_own`. So of ticket 02's four changes — deduplication, the ownership mark,
+the line-forgery defence, and the window — this set exercises none. What it
+confirms is that the single-message path did not regress, which is the path it
+measures. The multi-message path, where the hallucination that started this
+board happened, is unmeasured.
+
+That is ticket 09's problem to fix, not this one's: 09 is the ticket that
+changes the window, and running this set against it would produce the same
+number and say nothing new. Recorded there.

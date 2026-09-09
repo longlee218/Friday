@@ -58,7 +58,7 @@ def _record(outcome: TriageOutcome) -> dict:
 
 
 async def build_triage(
-    config, *, db: Database, skills=None, record=None, spent=None
+    config, *, db: Database, record=None, spent=None
 ) -> Triage:
     """The real classifier, assembled the one place this is done.
 
@@ -105,7 +105,6 @@ async def build_triage(
         config=settings,
         examples=examples,
         sensitive=sensitive,
-        skills=skills,
         record=record,
         spent=spent,
     )
@@ -118,7 +117,6 @@ class TriageRunner:
         config,
         *,
         db: Database,
-        skills=None,
         still_typing=None,
         record=None,
         spent=None,
@@ -142,7 +140,7 @@ class TriageRunner:
         return cls(
             db=db,
             triage=await build_triage(
-                config, db=db, skills=skills, record=record, spent=spent
+                config, db=db, record=record, spent=spent
             ),
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)
