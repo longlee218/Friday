@@ -194,12 +194,21 @@ export interface Room {
 
 /** Something an agent chose to write down about a room. `deleted_at` is set
  *  rather than the row removed, so the operator can see what was forgotten
- *  and who forgot it. */
+ *  and who forgot it.
+ *
+ *  `kind` is one of `fact` / `constraint` / `finding` / `decision` / `voice`
+ *  — who reads a row follows from this. `status` is `active` or
+ *  `superseded`; a superseded row's `superseded_by` names the row that
+ *  replaced it, and the row itself survives so the board can show what it
+ *  used to say and when (`updated_at`). */
 export interface Memory {
   id: string;
   channel_id: string;
   agent: string;
   text: string;
+  kind: string;
+  status: string;
+  superseded_by: string | null;
   task_id: number | null;
   created_at: string;
   updated_at: string;

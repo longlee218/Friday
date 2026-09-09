@@ -121,7 +121,19 @@ class Extractor:
             if self._db is not None and task_id is not None
             else ()
         )
-        return build_input(text, self._params_cls, room=room, asked=asked)
+        # Board `what-the-room-already-knows`, ticket 10: the four domain
+        # kinds an agent has written down about this room's facts, alongside
+        # what the operator wrote by hand into `room`. `channel_id is None`
+        # is the same "no room to ask about" case `room` above already
+        # guards.
+        memories = (
+            await self._db.domain_memories(channel_id)
+            if self._db is not None and channel_id is not None
+            else ()
+        )
+        return build_input(
+            text, self._params_cls, room=room, asked=asked, memories=memories
+        )
 
     async def run(
         self,

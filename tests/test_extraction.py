@@ -703,6 +703,49 @@ async def test_the_extractor_itself_reads_what_it_already_asked(db):
     )
 
 
+async def test_the_extractor_itself_reads_domain_kind_memories(db):
+    """Board `what-the-room-already-knows`, ticket 10: the extractor reads
+    the four domain kinds (D14) through `db.domain_memories`, the same seam
+    `test_the_extractor_itself_reads_what_it_already_asked` proved for
+    outstanding questions — asserted at the lookup, not through a stub that
+    would pass whether or not `Extractor` actually reached its store."""
+    from friday.domain.models import ApiIssueParams, MemoryKind, MemoryScope
+
+    await db.memory_add(
+        MemoryScope(channel_id="watched", task_id=None, agent="responder"),
+        "test.apero is staging",
+        kind=MemoryKind.FACT,
+    )
+
+    ext = build_extractor(params_cls=ApiIssueParams, harness=None, name="stub", db=db)  # type: ignore[arg-type]
+
+    with_room = await ext.would_ask("API lỗi", channel_id="watched")
+    without_channel = await ext.would_ask("API lỗi")
+
+    assert "test.apero is staging" in with_room
+    assert "fact:" in with_room
+    assert "test.apero is staging" not in without_channel, (
+        "a room leaked into a call about no channel"
+    )
+
+
+async def test_voice_kind_memories_do_not_reach_the_extractor(db):
+    """`VOICE` is the responder's alone (D14) — however it got written, it
+    must not surface in the extractor's prompt."""
+    from friday.domain.models import ApiIssueParams, MemoryKind, MemoryScope
+
+    scope = MemoryScope(channel_id="watched", task_id=None, agent="responder")
+    await db.memory_add(scope, "test.apero is staging", kind=MemoryKind.FACT)
+    await db.memory_add(scope, "they like short replies", kind=MemoryKind.VOICE)
+
+    ext = build_extractor(params_cls=ApiIssueParams, harness=None, name="stub", db=db)  # type: ignore[arg-type]
+
+    said = await ext.would_ask("API lỗi", channel_id="watched")
+
+    assert "test.apero is staging" in said
+    assert "they like short replies" not in said
+
+
 async def test_the_outstanding_questions_cost_no_model_call(db):
     """Derived, not summarised. The whole value of this input is that it is a
     query over what was actually sent, so it cannot be wrong in an interesting

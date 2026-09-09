@@ -39,9 +39,12 @@ from friday.store import schema
 from friday.domain.conversation import ConversationId
 from friday.domain.states import OutboundState
 from friday.domain.models import (
+    DOMAIN_KINDS,
     ExtractionMark,
     Memory,
+    MemoryKind,
     MemoryScope,
+    MemoryStatus,
     InboundEvent,
     MentionType,
     MessageFlow,
@@ -982,10 +985,17 @@ class Database:
     TEXT_CHARS = 500
 
     async def memory_search(
-        self, scope: MemoryScope, query: str, *, limit: int
+        self, scope: MemoryScope, query: str, *, kind: str, limit: int
     ) -> list[Memory]:
-        """Every match in this channel, newest first — not ranked by how well
-        it matches, only by when it was written.
+        """Every active match of this kind in this channel, newest first —
+        not ranked by how well it matches, only by when it was written.
+
+        `kind` is required, the same reasoning `limit` already got: the only
+        caller (`friday/tools/memory.py`, scoped to the responder) always
+        knows which kind it means — `MemoryKind.VOICE` — and a default here
+        would let a second caller agree with that by coincidence rather than
+        by saying so. Only `ACTIVE` rows match (D16): a superseded or deleted
+        row is for the operator's own view, never a model's.
 
         `query` is matched the way `SkillLibrary.search` matches one of its
         ranks — every word has to appear somewhere in the text — but this
@@ -1008,6 +1018,8 @@ class Database:
                 .where(
                     schema.Memory.channel_id == scope.channel_id,
                     schema.Memory.deleted_at.is_(None),
+                    schema.Memory.status == MemoryStatus.ACTIVE,
+                    schema.Memory.kind == kind,
                 )
                 .order_by(schema.Memory.created_at.desc())
             )
@@ -1018,12 +1030,49 @@ class Database:
             ]
             return [_memory(row) for row in matched[:limit]]
 
-    async def memory_add(self, scope: MemoryScope, text: str) -> Memory | None:
+    async def domain_memories(self, channel_id: str) -> list[Memory]:
+        """This channel's active domain-kind memories — fact, constraint,
+        finding, decision — newest first, for the extractor's per-call input
+        (D14, D21). `voice` never reaches here; that kind is the responder's
+        alone.
+
+        Not scoped by agent the way `memory_search` is, and takes no query:
+        the extractor has no memory tools of its own (D21) and reads by
+        injection, so there is no per-call search to filter by — only "what
+        does this room's memory currently claim". Bounded the same way every
+        other memory reader here is, by `MEMORY_PER_CHANNEL` on the write
+        side rather than a limit here.
+        """
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                select(schema.Memory)
+                .where(
+                    schema.Memory.channel_id == channel_id,
+                    schema.Memory.deleted_at.is_(None),
+                    schema.Memory.status == MemoryStatus.ACTIVE,
+                    schema.Memory.kind.in_([k.value for k in DOMAIN_KINDS]),
+                )
+                .order_by(schema.Memory.created_at.desc())
+            )
+            return [_memory(row) for row in rows]
+
+    async def memory_add(
+        self, scope: MemoryScope, text: str, *, kind: str = MemoryKind.VOICE
+    ) -> Memory | None:
         """Write a new memory, or refuse if the channel is already full.
+
+        `kind` defaults to `MemoryKind.VOICE` because the only wired producer
+        today is the responder (`friday/tools/memory.py`), which writes
+        nothing else — unlike `memory_search`'s `kind`, a default here names
+        the one thing every caller before this ticket already meant, rather
+        than standing in for a caller that forgot to say.
 
         `None` means the channel is at `MEMORY_PER_CHANNEL` — the caller
         (`friday/tools/memory.py`) turns that into a message the model can
-        act on, the same way it turns a wrong-scope id into one.
+        act on, the same way it turns a wrong-scope id into one. The count
+        only considers active memories: a superseded or deleted row already
+        freed its slot, the same rule `test_deleting_a_memory_frees_its_slot`
+        pins for deletion.
 
         The count and the insert are not one atomic check-and-set: two calls
         for the same channel racing between the `await` on the count and the
@@ -1040,6 +1089,7 @@ class Database:
                 select(func.count()).select_from(schema.Memory).where(
                     schema.Memory.channel_id == scope.channel_id,
                     schema.Memory.deleted_at.is_(None),
+                    schema.Memory.status == MemoryStatus.ACTIVE,
                 )
             )
             if (count or 0) >= self.MEMORY_PER_CHANNEL:
@@ -1050,6 +1100,7 @@ class Database:
                 channel_id=scope.channel_id,
                 agent=scope.agent,
                 text=text[: self.TEXT_CHARS],
+                kind=kind,
                 task_id=scope.task_id,
                 # The message that produced this memory, when the caller
                 # supplies one. The Rooms screen joins on it.
@@ -1064,9 +1115,14 @@ class Database:
     async def memory_update(
         self, scope: MemoryScope, memory_id: str, text: str
     ) -> Memory | None:
-        """Replace a memory's text in place, or `None` if this scope has no
-        such (live) memory by this id — wrong channel, never existed, and
-        already deleted all read the same, on purpose."""
+        """Correct a memory's wording in place — the same claim, said
+        better — or `None` if this scope has no such (live, active) memory by
+        this id: wrong channel, never existed, already deleted, and already
+        superseded all read the same, on purpose.
+
+        Distinct from `memory_supersede` (D16): this never changes what the
+        memory claims, only how it is worded, so it never touches `kind`,
+        `status` or `superseded_by`."""
         async with self._sessions.begin() as session:
             row = await self._live_memory(session, scope, memory_id)
             if row is None:
@@ -1076,10 +1132,56 @@ class Database:
             await session.flush()
             return _memory(row)
 
+    async def memory_supersede(
+        self, scope: MemoryScope, memory_id: str, text: str
+    ) -> Memory | None:
+        """Replace what a memory claims, rather than correcting how it is
+        worded (D16) — the operation `memory_update` deliberately is not.
+
+        The old row is marked `SUPERSEDED` and points `superseded_by` at a
+        freshly written row carrying the new claim, under the same `kind` so
+        a reader that already trusts that kind's shape keeps trusting it. The
+        old row's text is untouched: the board can still show what it used to
+        say, and `updated_at` says when it changed.
+
+        `None` for the same three reasons `memory_update` returns it — wrong
+        channel, never existed, already deleted — plus a fourth: a row that
+        is already superseded cannot be superseded again through this id.
+        "The current one" is the row it points at, so supersede that one
+        instead.
+
+        Never refused for the channel's cap: an active row becomes inactive
+        and a new active row is written in the same call, so the channel's
+        active count does not move.
+        """
+        async with self._sessions.begin() as session:
+            old = await self._live_memory(session, scope, memory_id)
+            if old is None:
+                return None
+            now = _now()
+            new_row = schema.Memory(
+                id=_memory_id(),
+                channel_id=scope.channel_id,
+                agent=scope.agent,
+                text=text[: self.TEXT_CHARS],
+                kind=old.kind,
+                task_id=scope.task_id,
+                source_message_id=scope.message_id,
+                created_at=now,
+                updated_at=now,
+                status=MemoryStatus.ACTIVE,
+            )
+            old.status = MemoryStatus.SUPERSEDED
+            old.superseded_by = new_row.id
+            old.updated_at = now
+            session.add(new_row)
+            await session.flush()
+            return _memory(new_row)
+
     async def memory_delete(self, scope: MemoryScope, memory_id: str) -> bool:
         """Soft-delete: the row survives with who removed it and when, so an
         operator can see what a line said after it is gone. `False` for the
-        same three cases `memory_update` treats alike."""
+        same cases `memory_update` treats alike."""
         async with self._sessions.begin() as session:
             row = await self._live_memory(session, scope, memory_id)
             if row is None:
@@ -1111,14 +1213,17 @@ class Database:
             return [_memory(row) for row in rows]
 
     async def _live_memory(self, session, scope: MemoryScope, memory_id: str):
-        """The row, if it exists, belongs to this scope, and is not deleted —
-        the one query `memory_update` and `memory_delete` share, so the three
-        reasons an id can fail to resolve cannot drift apart between them."""
+        """The row, if it exists, belongs to this scope, is not deleted, and
+        is still active — the one query `memory_update`, `memory_supersede`
+        and `memory_delete` share, so the reasons an id can fail to resolve
+        cannot drift apart between them. A superseded row is frozen history
+        (D16): correct or retract the row that replaced it, not this one."""
         return await session.scalar(
             select(schema.Memory).where(
                 schema.Memory.id == memory_id,
                 schema.Memory.channel_id == scope.channel_id,
                 schema.Memory.deleted_at.is_(None),
+                schema.Memory.status == MemoryStatus.ACTIVE,
             )
         )
 
@@ -2520,12 +2625,15 @@ def _memory(row: schema.Memory) -> Memory:
         channel_id=row.channel_id,
         agent=row.agent,
         text=row.text,
+        kind=row.kind,
         task_id=row.task_id,
         source_message_id=row.source_message_id,
         created_at=row.created_at,
         updated_at=row.updated_at,
         deleted_at=row.deleted_at,
         deleted_by=row.deleted_by,
+        status=row.status,
+        superseded_by=row.superseded_by,
     )
 
 

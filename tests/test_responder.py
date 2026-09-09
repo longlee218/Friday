@@ -166,7 +166,7 @@ async def test_a_responder_given_a_store_can_reach_its_own_memory():
     seen = {}
 
     class Store:
-        async def memory_search(self, scope, query, limit):
+        async def memory_search(self, scope, query, kind, limit):
             seen["scope"] = scope
             return []
 
@@ -205,7 +205,7 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
     not a production caller `harness.py`'s own rule is about.
     """
     class Store:
-        async def memory_search(self, scope, query, limit):
+        async def memory_search(self, scope, query, kind, limit):
             return []
 
     without_calls, without_sink = collecting()
@@ -253,7 +253,7 @@ def test_a_responder_with_memory_is_built_with_the_matching_context_type(monkeyp
     monkeypatch.setattr(responder_module, "Harness", Spy)
 
     class Store:
-        async def memory_search(self, scope, query, limit):
+        async def memory_search(self, scope, query, kind, limit):
             return []
 
     from friday.domain.models import MemoryScope

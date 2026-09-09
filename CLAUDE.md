@@ -723,8 +723,26 @@ not an implementation detail:
   rather than on the first tool output (see the stop-when note on
   `friday/agent/harness.py`), which is the same rule that means a
   `fetch_skill` does not terminate the run before the model classifies.
-  Whether an extractor or the summariser should get memory tools is
-  undecided and left that way — nothing here argues either side yet.
+  Whether the summariser should get memory tools is still undecided; the
+  extractor's own case is answered below, and by injection rather than a
+  tool.
+
+  **A memory carries a `kind`, and the reader follows from it, not from a
+  second field** (`.scratch/what-the-room-already-knows/`, ticket 10). Five
+  values — `fact`, `constraint`, `finding`, `decision`, `voice` — and
+  `reader_for(kind)` is the one function that decides who reads a row, so
+  nothing has to keep a second column in agreement with it. The responder's
+  four tools are unchanged and write and search only `voice`; the extractor
+  has no memory tools of its own — the same reasoning that keeps it off
+  triage does not apply here, but its turn budget is one call plus one retry
+  and a tool-result round trip would spend it on searching — so the four
+  domain kinds reach it by **injection**, through the memory section's
+  existing channel slot, alongside the room facts the operator wrote by
+  hand. A memory also carries a `status` and a `superseded_by`: correcting
+  its wording (`memory_update`) leaves it in place, replacing what it claims
+  (`memory_supersede`, new) marks it superseded and points at what replaced
+  it, and every reader that serves a model reads active rows only — a
+  superseded or deleted one stays visible to the operator and nowhere else.
 
 ## Conventions
 

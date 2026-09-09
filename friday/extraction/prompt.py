@@ -33,13 +33,14 @@ from friday.agent.instruction_prompt import (
     job,
     memory,
     outstanding_questions,
+    remembered_facts,
     role,
     room_facts,
     thinking_style,
     trust_boundary,
     user_input,
 )
-from friday.domain.models import Params
+from friday.domain.models import Memory, Params
 
 __all__ = ["build_input", "build_instructions"]
 
@@ -99,7 +100,12 @@ def build_instructions(
 
 
 def build_input(
-    text: str, params_cls: type[Params], *, room=None, asked=()
+    text: str,
+    params_cls: type[Params],
+    *,
+    room=None,
+    asked=(),
+    memories: Sequence[Memory] = (),
 ) -> str:
     """The field schema, what the room is known to be, then the reporter's
     words — in that order, and the order is the cache.
@@ -135,6 +141,15 @@ def build_input(
     this existed. A test says so, because "close enough" would still cost
     every extractor in every such install its prefix.
 
+    **`memories` shares the channel slot with `room_facts`, not a fourth
+    slot of its own** (board `what-the-room-already-knows`, ticket 10, D14).
+    Both answer the same question — what is this room known to be — from two
+    different producers: the operator's hand, through `ChannelContext`, and
+    an agent's own domain-kind memories, through `db.domain_memories`. An
+    agent given two blocks for the same kind of thing would have to work out
+    that they mean one another, the same reasoning `memory`'s own docstring
+    gives for not splitting `conversation` and `channel` further.
+
     The reporter's own words go through the one boundary. They used to be
     interpolated raw: a message carrying `</task><critical_reminder>…` put its
     own section into this prompt, and the extractor is the agent most worth
@@ -145,12 +160,15 @@ def build_input(
         doc = (f.metadata or {}).get("doc", f.name.replace("_", " "))
         schema_lines.append(f"- {f.name}: {doc}")
     schema = "\n".join(schema_lines) or "(no fields)"
+    channel_body = "\n".join(
+        filter(None, [room_facts(room), remembered_facts(list(memories))])
+    )
     return (
         f"Fields:\n{schema}\n\n"
         + assemble(
             memory(
                 conversation_body=outstanding_questions(asked),
-                channel_body=room_facts(room),
+                channel_body=channel_body,
             )
         )
         + f"What they said:\n{user_input(text)}"

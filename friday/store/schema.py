@@ -297,6 +297,10 @@ class Memory(Base):
     channel_id: Mapped[str] = mapped_column(index=True)
     agent: Mapped[str]
     text: Mapped[str]
+    #: `friday.domain.models.MemoryKind` as a string, the way `Task.state`
+    #: stores `TaskState`. Who reads a row is a function of this value
+    #: (`reader_for`), never a second column.
+    kind: Mapped[str]
     task_id: Mapped[int | None] = mapped_column(index=True)
     #: The message that produced this memory. Set by memory_add from the
     #: MemoryScope.message_id field; the Rooms screen joins on it to
@@ -308,6 +312,12 @@ class Memory(Base):
     updated_at: Mapped[datetime] = mapped_column(IsoDateTime)
     deleted_at: Mapped[datetime | None] = mapped_column(IsoDateTime, default=None)
     deleted_by: Mapped[str | None] = mapped_column(default=None)
+    #: `MemoryKind`'s lifecycle (D16): `"active"` unless a later memory
+    #: replaced this one's claim, in which case `"superseded"` and
+    #: `superseded_by` names the row that replaced it. The migration backs
+    #: this with a server default of `"active"` for any pre-existing row.
+    status: Mapped[str] = mapped_column(default="active")
+    superseded_by: Mapped[str | None] = mapped_column(default=None)
 
 
 class ExtractionMark(Base):

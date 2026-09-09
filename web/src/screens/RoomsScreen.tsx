@@ -288,13 +288,18 @@ function MemoryPanel({ channelId }: { channelId: string }) {
       <p className="faint">
         What an agent chose to remember about this room, newest first. Read
         only: these are the agent's, written and removed through its own
-        tools. A removed one stays visible, with who removed it.
+        tools. A removed one stays visible, with who removed it — so does a
+        superseded one, with what it used to say and when it changed.
       </p>
       {held.value.map((m: Memory) => (
         <article key={m.id} className="detail">
           <header className="row wrap">
             <span className="mono faint">{m.id}</span>
+            <Pill label={m.kind} />
             <Pill label={m.agent} />
+            {m.status === "superseded" && (
+              <Pill tone="bad" label="superseded" />
+            )}
             {m.deleted_at && <Pill tone="bad" label="forgotten" />}
             <span className="count auto">
               {ago(m.created_at)}
@@ -302,12 +307,22 @@ function MemoryPanel({ channelId }: { channelId: string }) {
           </header>
           <p
             className="said"
-            style={m.deleted_at ? { textDecoration: "line-through" } : undefined}
+            style={
+              m.deleted_at || m.status === "superseded"
+                ? { textDecoration: "line-through" }
+                : undefined
+            }
           >
             {m.text}
           </p>
           {m.deleted_at && (
             <p className="faint mono">removed by {m.deleted_by ?? "—"}</p>
+          )}
+          {m.status === "superseded" && (
+            <p className="faint mono">
+              superseded {ago(m.updated_at)}
+              {m.superseded_by ? ` by ${m.superseded_by}` : ""}
+            </p>
           )}
         </article>
       ))}

@@ -1047,6 +1047,28 @@ def room_facts(ctx: "ChannelContext | None") -> str:
     return "\n".join(blocks)
 
 
+def remembered_facts(memories) -> str:
+    """What an agent has separately written down about this room's domain —
+    fact, constraint, finding, decision — for `memory`'s channel slot,
+    alongside `room_facts`. Board `what-the-room-already-knows`, ticket 10's
+    D14: the reader of a memory follows from its `kind`, and this is the
+    extractor's half — `voice`-kind memories never reach here.
+
+    Only active rows reach this function; the caller (`db.domain_memories`)
+    already filtered to `MemoryStatus.ACTIVE` — every reader that serves a
+    model reads only active memories (D16). A superseded or deleted row stays
+    visible on the board and invisible to every prompt.
+
+    Plain and flattened, for the same reason `room_facts` is: `memory`
+    escapes what it is given, and a stored newline must not be able to open a
+    second `key: value` line at the same indentation as a real one.
+    """
+    if not memories:
+        return ""
+    lines = "\n".join(f"  {_one_line(m.kind)}: {_one_line(m.text)}" for m in memories)
+    return f"remembered:\n{lines}"
+
+
 def _render_params(params: Params) -> str:
     """Render a frozen-slots Params dataclass as escaped JSON.
 

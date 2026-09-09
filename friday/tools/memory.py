@@ -54,7 +54,7 @@ import logging
 
 from friday.agent.harness import ToolContext, tool
 from friday.agent.instruction_prompt import memory_lines
-from friday.domain.models import MemoryScope
+from friday.domain.models import MemoryKind, MemoryScope
 
 __all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "MemoryScope", "memory_tools"]
 
@@ -145,7 +145,9 @@ def memory_tools(db):
             query: a phrase describing what you want to know, in the words you
                 would use to describe it — not an id, and not a question.
         """
-        found = await db.memory_search(_scope(ctx), query, limit=RESULTS)
+        found = await db.memory_search(
+            _scope(ctx), query, kind=MemoryKind.VOICE, limit=RESULTS
+        )
         log.info("memory searched: %r -> %d", query, len(found))
         return memory_lines(found)
 
@@ -170,7 +172,7 @@ def memory_tools(db):
         """
         scope = _scope(ctx)
         kept = _bounded(text)
-        written = await db.memory_add(scope, kept)
+        written = await db.memory_add(scope, kept, kind=MemoryKind.VOICE)
         if written is None:
             # The store's own cap, not a failure — see `Database.MEMORY_PER_CHANNEL`.
             # Nothing is evicted to make room, so the model has to make room

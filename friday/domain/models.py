@@ -315,6 +315,59 @@ def askable_fields(params_cls: type) -> tuple[str, ...]:
     )
 
 
+class MemoryKind(StrEnum):
+    """What kind of thing a memory is (board `what-the-room-already-knows`,
+    D14). Five values, closed: the four the extractor reads because they are
+    about the room's domain, and one the responder reads because it is about
+    how the room is spoken to.
+
+    **The reader is a function of the kind, not a second column** — see
+    `reader_for`. `preference` was considered and rejected: in this domain
+    every preference is either `VOICE` or `CONSTRAINT`, and a value that
+    cannot be told apart from its neighbours is one a model will place at
+    random.
+    """
+
+    FACT = "fact"
+    CONSTRAINT = "constraint"
+    FINDING = "finding"
+    DECISION = "decision"
+    VOICE = "voice"
+
+
+def reader_for(kind: str) -> str:
+    """Which agent reads a memory of this kind — `"extractor"` or
+    `"responder"`. Derived from `kind` rather than stored beside it, so
+    nothing has to keep two fields in agreement (D14). Raises on a kind
+    outside the closed set in `MemoryKind`, the same way a wrong `TaskState`
+    string would."""
+    return "responder" if MemoryKind(kind) is MemoryKind.VOICE else "extractor"
+
+
+#: The four kinds the extractor reads. `VOICE` is the responder's alone.
+#: **Derived from `reader_for`, not a second enumeration beside it** — a
+#: `MemoryKind` this misses only if `reader_for` itself would misroute it,
+#: rather than a hand-kept list that could drift from what `reader_for`
+#: actually decides (found in code review: an earlier version of this line
+#: listed the four kinds by hand, which is exactly the "two fields that have
+#: to agree" D14 exists to rule out).
+DOMAIN_KINDS = frozenset(k for k in MemoryKind if reader_for(k) == "extractor")
+
+
+class MemoryStatus(StrEnum):
+    """Whether a memory is still current (D16).
+
+    `ACTIVE` is a memory in force. `SUPERSEDED` is one a later memory
+    replaced — the row survives with `superseded_by` naming its replacement,
+    the same way `deleted_at`/`deleted_by` keep a retracted memory visible
+    rather than gone. Every reader that serves a model reads `ACTIVE` rows
+    only; a superseded or deleted one is for the operator's own view.
+    """
+
+    ACTIVE = "active"
+    SUPERSEDED = "superseded"
+
+
 @dataclass(frozen=True, slots=True)
 class Memory:
     """Something an agent chose to remember, scoped to one channel.
@@ -329,6 +382,12 @@ class Memory:
     `id` is opaque and sparse rather than sequential, so a model that invents
     one fails instead of landing on a neighbouring row.
 
+    `kind` decides who reads this row (`reader_for`, D14). `status` and
+    `superseded_by` are D16's lifecycle: correcting a memory's wording
+    (`memory_update`) leaves it `ACTIVE` in place; replacing what it claims
+    (`memory_supersede`) marks it `SUPERSEDED` and points `superseded_by` at
+    the row that replaced it, rather than losing the old claim outright.
+
     `deleted_at`/`deleted_by` make a deletion visible rather than final: the
     row survives, so an operator asking "what did this used to say, and who
     took it out" has an answer. `memory_search`, `memory_update` and
@@ -341,6 +400,7 @@ class Memory:
     channel_id: str
     agent: str
     text: str
+    kind: str
     created_at: datetime
     updated_at: datetime
     #: The message that produced this memory, when one is in scope.
@@ -350,6 +410,8 @@ class Memory:
     task_id: int | None = None
     deleted_at: datetime | None = None
     deleted_by: str | None = None
+    status: str = MemoryStatus.ACTIVE
+    superseded_by: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
