@@ -39,6 +39,7 @@ from friday.store import schema
 from friday.domain.conversation import ConversationId
 from friday.domain.states import OutboundState
 from friday.domain.models import (
+    Artifact,
     DOMAIN_KINDS,
     ExtractionMark,
     Memory,
@@ -56,6 +57,7 @@ from friday.domain.models import (
     Outbound,
     Task,
 )
+from friday.text.transform import redact
 from friday.ops.redact import scrub
 from friday.domain.states import OPEN, IllegalTransition, TaskState, may_move
 
@@ -169,7 +171,113 @@ class Database:
         )
         async with self._sessions.begin() as session:
             result = await session.execute(statement.on_conflict_do_nothing())
-            return result.rowcount == 1
+            inserted = result.rowcount == 1
+        # Split *after* the insert lands, and only on the insert that
+        # actually happened: `record_message` is called from two delivery
+        # paths on the same key (CLAUDE.md's dedup rule), and creating an
+        # artifact on a conflicting, already-recorded call would write it
+        # twice for one message.
+        if inserted and event.code:
+            await self._record_artifacts(event)
+        return inserted
+
+    async def _record_artifacts(self, event: InboundEvent) -> None:
+        """Split verbatim material out of a newly recorded message into its
+        own artifacts, and store a redacted rendering of its text alongside
+        it — the summariser's own read, and the reader `record_message`
+        never re-runs this on (D8's "the reader of an artifact may not
+        itself produce one": this runs once, from the message that produced
+        `event.code`, never from an artifact's own `content`).
+
+        `event.text` already carries this message's code back in place —
+        `friday.providers.discord.normalise` calls `transform` once and
+        restores it — so redacting it here re-splits already-restored text
+        rather than the original raw message. That re-split agrees with the
+        first one for every case this ticket's own tests exercise, but it is
+        not a proof: content whose own body contains a literal triple
+        backtick can make `transform`'s non-greedy fence match end sooner
+        the second time than the first, changing the span count `redact`
+        finds. Rather than let that surface as an uncaught `ValueError` with
+        the message row already committed — which is the failure this
+        method degrades away from, not one it can rule out by construction
+        — a mismatch here is caught, logged, and left as if the message had
+        carried no code at all: no artifacts, `redacted_text` stays `NULL`,
+        every reader falls back to `text`. The one reader that matters,
+        `relevant_messages_in_channel`, then shows this one message's code
+        to the summariser exactly as it would have before this ticket —
+        which is a known, narrow gap, not silent corruption of a different
+        message's redaction.
+        """
+        now = _now()
+        ids_and_descriptions = [
+            (_artifact_id(), _describe_artifact(body)) for body in event.code
+        ]
+        refs = [f"[artifact {aid}: {desc}]" for aid, desc in ids_and_descriptions]
+        try:
+            redacted_text = redact(event.text, refs)
+        except ValueError:
+            log.warning(
+                "%s/%s: code split differently on re-read — no artifact "
+                "recorded, the summariser will see this message's raw text",
+                event.provider, event.provider_message_id,
+            )
+            return
+        rows = [
+            schema.Artifact(
+                id=artifact_id,
+                channel_id=event.channel_id,
+                provider=event.provider,
+                source_message_id=event.provider_message_id,
+                content=body,
+                description=description,
+                # Microseconds apart, not all at `now`: several spans from
+                # one message would otherwise tie on `created_at`, and
+                # `artifacts_for_message`'s ordering — the same order
+                # `event.code` already lists them in — would depend on
+                # SQLite breaking the tie by insertion order, which nothing
+                # here asks for or checks.
+                created_at=now + timedelta(microseconds=i),
+            )
+            for i, (body, (artifact_id, description)) in enumerate(
+                zip(event.code, ids_and_descriptions)
+            )
+        ]
+        # Between this write and `record_message`'s own — never atomic with
+        # it, since the artifacts do not exist until this message's insert
+        # is known to have landed (see the comment at the call site) — a
+        # process crash leaves `redacted_text` `NULL` for this one message,
+        # the same fallback as the `ValueError` case above. Accepted for the
+        # same reason: narrow, self-limiting to one message, and the
+        # alternative (one transaction spanning both) would mean generating
+        # artifact ids before knowing the insert will not conflict.
+        async with self._sessions.begin() as session:
+            session.add_all(rows)
+            await session.execute(
+                update(schema.Message)
+                .where(
+                    schema.Message.provider == event.provider,
+                    schema.Message.provider_message_id
+                    == event.provider_message_id,
+                )
+                .values(redacted_text=redacted_text)
+            )
+
+    async def artifacts_for_message(
+        self, provider: str, provider_message_id: str
+    ) -> list[Artifact]:
+        """Every artifact one message produced, in the order they were
+        written — which is `event.code`'s own order, since that is the only
+        thing `_record_artifacts` ever iterates."""
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                select(schema.Artifact)
+                .where(
+                    schema.Artifact.provider == provider,
+                    schema.Artifact.source_message_id == provider_message_id,
+                )
+                .order_by(schema.Artifact.created_at)
+            )
+            return [_artifact(row) for row in rows]
 
     async def messages(
         self, conversation: ConversationId | None = None, *, limit: int | None = None
@@ -220,13 +328,34 @@ class Database:
         A channel-level summary needs everything under the channel, threads
         included, which is what `channel_id` — a separate column every message
         under it shares — gives directly.
+
+        **The only caller that reads `redacted_text` in preference to `text`**
+        (board `what-the-room-already-knows`, ticket 07, D8) — this feeds the
+        summariser, the one build that must never see an artifact's content.
+        A message with nothing split out of it, or recorded before this
+        column existed, has `redacted_text is None`; falling back to `text`
+        there is not a special case, it is what an unaffected row already is.
         """
-        return await self._events(
-            self._relevant(
-                schema.Message.provider == provider,
-                schema.Message.channel_id == channel_id,
-            ).order_by(*_OLDEST_FIRST)
+        scope = (
+            schema.Message.provider == provider,
+            schema.Message.channel_id == channel_id,
         )
+        events = await self._events(self._relevant(*scope).order_by(*_OLDEST_FIRST))
+        async with self._sessions() as session:
+            redacted = dict(
+                (
+                    await session.execute(
+                        select(
+                            schema.Message.provider_message_id,
+                            schema.Message.redacted_text,
+                        ).where(*scope)
+                    )
+                ).all()
+            )
+        return [
+            replace(e, text=redacted.get(e.provider_message_id) or e.text)
+            for e in events
+        ]
 
     def _relevant(self, *scope):
         own = select(schema.Message.provider_message_id).where(
@@ -2634,6 +2763,53 @@ def _memory(row: schema.Memory) -> Memory:
         deleted_by=row.deleted_by,
         status=row.status,
         superseded_by=row.superseded_by,
+    )
+
+
+def _artifact_id() -> str:
+    """Opaque and sparse, the same reasoning `_memory_id` documents: a build
+    that inlines an artifact by id must fail on an invented one rather than
+    resolving to somebody else's."""
+    return f"a{secrets.token_hex(6)}"
+
+
+#: Cheap, deterministic shape-sniffing — no model, and deliberately never a
+#: substring of `content` itself. A one-line `curl` is common enough that
+#: "the first N characters" *is* the whole artifact for anything short,
+#: which is exactly the leak D8 exists to close: a summariser reading a
+#: description that quotes the correlationId it must never see is reading
+#: the correlationId. `SQL_KEYWORDS` first because `SELECT` also starts a
+#: plausible shell word; `TRACEBACK` is Python's own literal banner.
+_SQL_KEYWORDS = ("select ", "insert ", "update ", "delete ", "create table")
+
+
+def _describe_artifact(content: str) -> str:
+    """One line, for a build that must not see the rest: what kind of thing
+    this is and how big it is — never a copy, however short, of what it
+    actually says. Not a summary — no model runs here."""
+    lower = content.strip().lower()
+    if lower.startswith("curl "):
+        kind = "a curl"
+    elif "traceback (most recent call last)" in lower:
+        kind = "a stack trace"
+    elif lower.startswith(_SQL_KEYWORDS):
+        kind = "SQL"
+    else:
+        kind = "code"
+    lines = content.count("\n") + 1
+    plural = "" if lines == 1 else "s"
+    return f"{kind}, {lines} line{plural}, {len(content)} chars"
+
+
+def _artifact(row: schema.Artifact) -> Artifact:
+    return Artifact(
+        id=row.id,
+        channel_id=row.channel_id,
+        provider=row.provider,
+        source_message_id=row.source_message_id,
+        content=row.content,
+        description=row.description,
+        created_at=row.created_at,
     )
 
 

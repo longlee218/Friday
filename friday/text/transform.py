@@ -21,9 +21,10 @@ with a different reason — pay talk must not reach a third-party API at all.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-__all__ = ["Attachment", "Cleaned", "render_attachments", "transform"]
+__all__ = ["Attachment", "Cleaned", "redact", "render_attachments", "transform"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,13 +86,64 @@ _CUSTOM_EMOJI = re.compile(r"<a?:\w+:\d+>")
 
 
 def transform(raw: str | None) -> Cleaned:
-    """Split the code out, clean what is left.
+    """Split the code out, clean what is left, put the code back.
 
     Order matters and is the point of the module. Cleaning first would strip a
     `→` out of a stack trace and collapse the newlines of a curl.
     """
-    if not raw:
+    cleaned, code, fenced = _split(raw)
+    if cleaned is None:
         return Cleaned(text="")
+
+    def restore(match: re.Match) -> str:
+        index = int(match.group(1))
+        body = code[index]
+        return f"\n```\n{body}\n```\n" if fenced[index] else f"`{body}`"
+
+    text = re.sub(r"\x00(\d+)\x00", restore, cleaned)
+    return Cleaned(text=text.strip(), code=tuple(code))
+
+
+def redact(raw: str | None, refs: Sequence[str]) -> str:
+    """The same split `transform` does, put back with `refs` standing in for
+    the code rather than the code itself — one entry per span, in the order
+    `transform(raw).code` would list them.
+
+    Board `what-the-room-already-knows`, ticket 07 (D8): a build that must
+    never see verbatim material — the summariser — gets this instead of
+    `transform(raw).text`. `raw` may already be a message run through
+    `transform` once (code fenced/backticked back into place) rather than
+    the original text; splitting either yields the same spans, since the
+    prose around them was already idempotent under `_clean` and the fenced
+    or backtick form is exactly what `transform`'s own `restore` produces.
+
+    This module still decides nothing and has no opinion on what a `ref`
+    should say — that is the caller's business (an id, a description,
+    whatever a build wants to show for material it will not inline).
+    """
+    cleaned, code, fenced = _split(raw)
+    if cleaned is None:
+        return ""
+    if len(refs) != len(code):
+        raise ValueError(
+            f"redact() got {len(refs)} refs for {len(code)} code spans — "
+            "one ref per span, in order, or the wrong material is being "
+            "pointed at"
+        )
+
+    def restore(match: re.Match) -> str:
+        return refs[int(match.group(1))]
+
+    text = re.sub(r"\x00(\d+)\x00", restore, cleaned)
+    return text.strip()
+
+
+def _split(raw: str | None) -> tuple[str | None, list[str], list[bool]]:
+    """Prose (with a `\\x00N\\x00` placeholder for each code span), the code
+    itself, and whether each span was fenced — the one split `transform` and
+    `redact` both restore differently from."""
+    if not raw:
+        return None, [], []
 
     code: list[str] = []
     fenced: list[bool] = []
@@ -103,22 +155,15 @@ def transform(raw: str | None) -> Cleaned:
                 return " "
             code.append(body)
             fenced.append(was_fenced)
-            # A placeholder no cleaning rule touches, restored below. Held out
-            # rather than removed: the code is part of what was said.
+            # A placeholder no cleaning rule touches, restored by the
+            # caller. Held out rather than removed: the code is part of
+            # what was said.
             return f"\x00{len(code) - 1}\x00"
 
         return held
 
     held = _INLINE.sub(take(False), _FENCED.sub(take(True), raw))
-    cleaned = _clean(held)
-
-    def restore(match: re.Match) -> str:
-        index = int(match.group(1))
-        body = code[index]
-        return f"\n```\n{body}\n```\n" if fenced[index] else f"`{body}`"
-
-    text = re.sub(r"\x00(\d+)\x00", restore, cleaned)
-    return Cleaned(text=text.strip(), code=tuple(code))
+    return _clean(held), code, fenced
 
 
 def _clean(text: str) -> str:

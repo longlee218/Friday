@@ -415,6 +415,35 @@ class Memory:
 
 
 @dataclass(frozen=True, slots=True)
+class Artifact:
+    """Verbatim material a message carried — code, a stack trace, SQL, a log,
+    a `curl` — stored whole and pointed at rather than paraphrased (board
+    `what-the-room-already-knows`, ticket 07, D8).
+
+    `content` is exactly what `friday.text.transform.transform` lifted out
+    of the message that produced it, untouched since. A build that needs it
+    back gets `content` byte for byte; a build that must never see it — the
+    summariser — gets `id` and `description` only, through
+    `friday.text.transform.redact`.
+
+    `id` is opaque and sparse, the same reasoning as `Memory.id`: a model
+    that invents one fails rather than landing on somebody else's artifact.
+
+    No `deleted_at`, unlike `Memory` — nothing writes an artifact except the
+    store itself, at the moment a message that carries code is first
+    recorded, so there is no agent decision to take back.
+    """
+
+    id: str
+    channel_id: str
+    provider: str
+    source_message_id: str
+    content: str
+    description: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryScope:
     """Where a memory belongs and who wrote it. Runtime-supplied, every field.
 

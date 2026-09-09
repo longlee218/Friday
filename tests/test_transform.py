@@ -8,7 +8,7 @@ looking for.
 
 from __future__ import annotations
 
-from friday.text.transform import Attachment, render_attachments, transform
+from friday.text.transform import Attachment, redact, render_attachments, transform
 
 
 # --- code survives exactly ---------------------------------------------------
@@ -216,3 +216,62 @@ def test_the_provider_names_the_attachments():
 
     assert event.attachments[0].filename == "error.png"
     assert "[attached: error.png (image/png)]" in event.text
+
+
+# --- redact (ticket 07: verbatim material becomes an artifact) --------------
+
+
+def test_redact_swaps_the_code_for_the_given_ref():
+    raw = "lỗi rồi anh ơi\n```bash\ncurl -X GET /pay\n```\ntrên prod nhé"
+
+    said = redact(raw, ["[artifact a1: a curl]"])
+
+    assert "curl -X GET /pay" not in said
+    assert "[artifact a1: a curl]" in said
+    assert "trên prod nhé" in said
+
+
+def test_redact_takes_one_ref_per_span_in_order():
+    """Fenced blocks are matched before inline spans (`_FENCED` then
+    `_INLINE` — the module's own comment on why), so `code`'s order is
+    fenced-then-inline, not left-to-right through the raw text. Two spans of
+    the same kind avoid that reordering and pin the property `redact` and
+    `transform` actually share: same kind, same document order."""
+    raw = "```curl -X GET /pay``` rồi ```curl -X POST /refund```"
+
+    said = redact(raw, ["[artifact a1: get]", "[artifact a2: post]"])
+
+    assert "[artifact a1: get]" in said
+    assert "[artifact a2: post]" in said
+    assert said.index("[artifact a1") < said.index("[artifact a2")
+
+
+def test_redact_refuses_the_wrong_number_of_refs():
+    import pytest
+
+    raw = "```curl -X GET /pay```"
+
+    with pytest.raises(ValueError):
+        redact(raw, [])
+    with pytest.raises(ValueError):
+        redact(raw, ["one", "too many"])
+
+
+def test_redact_of_nothing_is_nothing():
+    assert redact(None, []) == ""
+    assert redact("", []) == ""
+
+
+def test_redact_of_prose_with_no_code_needs_no_refs():
+    assert redact("không có code gì cả", []) == "không có code gì cả"
+
+
+def test_transform_and_redact_split_the_same_raw_text_the_same_way():
+    """`redact` must find exactly the spans `transform` would — otherwise a
+    caller building refs from `transform(raw).code` hands `redact` the wrong
+    count for the same `raw`."""
+    raw = "`id` và ```curl -X GET /pay```"
+
+    cleaned = transform(raw)
+
+    assert redact(raw, ["ref"] * len(cleaned.code))  # does not raise

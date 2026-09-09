@@ -90,6 +90,16 @@ class Message(Base):
     decision_type: Mapped[str | None]
     decision_confidence: Mapped[float | None]
     decision_params: Mapped[dict | None] = mapped_column(JSON)
+    #: `text`, with each verbatim span this message carried (a curl, a stack
+    #: trace) swapped for a reference to the `Artifact` it became — never
+    #: the content itself (board `what-the-room-already-knows`, ticket 07,
+    #: D8). Written once, at record time, by whichever code split the
+    #: message; `None` for a message with no code to split, or one recorded
+    #: before this column existed. `relevant_messages_in_channel` — the
+    #: summariser's own read, and its only caller — reads this in
+    #: preference to `text`; every other reader keeps reading `text` or
+    #: `original_text` unchanged.
+    redacted_text: Mapped[str | None] = mapped_column(default=None)
 
 
 class Task(Base):
@@ -318,6 +328,29 @@ class Memory(Base):
     #: this with a server default of `"active"` for any pre-existing row.
     status: Mapped[str] = mapped_column(default="active")
     superseded_by: Mapped[str | None] = mapped_column(default=None)
+
+
+class Artifact(Base):
+    """Verbatim material a message carried — code, a stack trace, a curl —
+    stored whole (board `what-the-room-already-knows`, ticket 07, D8).
+
+    Written once, by the store, at the moment the message that carried it is
+    first recorded; nothing else writes one. No `deleted_at`: there is no
+    agent decision to take back the way there is for a `Memory`.
+    """
+
+    __tablename__ = "artifacts"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    channel_id: Mapped[str] = mapped_column(index=True)
+    provider: Mapped[str]
+    #: The message it was split out of. Indexed, not a foreign key — this
+    #: codebase declares none (see `task_id` on `Memory`) — because nothing
+    #: here queries by it yet; kept for the operator to trace one back.
+    source_message_id: Mapped[str] = mapped_column(index=True)
+    content: Mapped[str]
+    description: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
 
 
 class ExtractionMark(Base):

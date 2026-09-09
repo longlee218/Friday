@@ -695,6 +695,30 @@ not an implementation detail:
 - **Silence is not approval.** Only a classification the operator marked
   *right* becomes a few-shot example, and only a classifiable type at that. An
   unmarked classification is one nobody read.
+- **Verbatim material is stored whole and pointed at, never paraphrased**
+  (`.scratch/what-the-room-already-knows/`, ticket 07, D8). Code, a stack
+  trace, a `curl` — anything `friday/text/transform.py`'s `transform` splits
+  out of a message's prose — becomes its own `Artifact` row, `content`
+  untouched. What a build gets instead depends on which build: the
+  summariser reads `Database.relevant_messages_in_channel`, which
+  substitutes `messages.redacted_text` for `text` — each span replaced by
+  `[artifact id: description]`, computed once at record time by
+  `friday.text.transform.redact`. Node 0's own read,
+  `Database.original_text_for`, is untouched and still returns a task's
+  material whole; so is every other reader of `text` — triage, the
+  responder's tone examples, the Rooms screen. **The description is built
+  from shape and size, never from the content's own bytes** — kind
+  (curl / stack trace / SQL / code) plus line and character counts. A `curl`
+  is usually one line, and "the first N characters" of a one-line artifact
+  *is* the artifact, which is exactly the leak this rule exists to close
+  since the description is what the summariser is shown; found by mutation,
+  not written correctly the first time. `redact` re-splits already-restored
+  text rather than the original message, which a code review found no
+  proof always agrees with the first split (though a targeted and a
+  20,000-trial random search found no disagreement either) — a message
+  where it does not is recorded with no artifact and no redaction rather
+  than left half-written or crashing the ingest path, the same fallback a
+  message with no code at all already has.
 - **Agents write their own long-term memory now, and read it back** (ticket
   09's D9, reversing what this file said until 2026-09-06: *"Agents never
   write long-term memory directly. `remember()` writes to a staging tier that
