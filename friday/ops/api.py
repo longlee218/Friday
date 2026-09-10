@@ -322,6 +322,26 @@ def build_api(
             }
         )
 
+    @api.get("/api/tasks/{task_id}/compaction")
+    async def task_compaction(task_id: int = Path(...)) -> dict:
+        """Whether node 0's own budget-based truncation has stopped trying
+        for this task (board `what-the-room-already-knows`, ticket 08, D6).
+
+        A log warning fires each time a compaction turns out ineffective,
+        which is the one party this route is not for. This is the operator's
+        own view of the same fact — a task with `ineffective_count` above
+        zero is one whose own transcript truncation cannot help, and one
+        that has reached `on_cooldown` is one node 0 has stopped re-checking
+        on every pass.
+        """
+        count = await db.compaction_ineffective_count(task_id)
+        return _clean(
+            {
+                "ineffective_count": count,
+                "on_cooldown": count >= db.COMPACTION_COOLDOWN_AFTER,
+            }
+        )
+
     @api.get("/api/model-calls")
     async def recent_model_calls(
         uncorrelated: bool = False,

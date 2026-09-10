@@ -397,6 +397,50 @@ def test_the_doc_reaches_the_extractors_prompt():
     assert "- summary: summary" not in prompt
 
 
+# --- known drops an already-filled field from the schema (ticket 08, D8) ---
+
+
+def test_a_field_already_known_drops_out_of_the_schema():
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+
+    known = ApiIssueParams(environment="production")
+
+    prompt = build_input("API lỗi", ApiIssueParams, known=known)
+
+    assert "- environment:" not in prompt
+    assert "- summary:" in prompt, "a still-blank field must stay in the schema"
+
+
+def test_known_left_unset_shows_every_field_exactly_as_before():
+    """The default, and every call site before this ticket — a room with no
+    context file already gets this guarantee for `room_facts`; `known`
+    unset is the same promise for the schema half."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+
+    with_known_none = build_input("API lỗi", ApiIssueParams)
+    with_known_absent = build_input("API lỗi", ApiIssueParams, known=None)
+
+    assert with_known_none == with_known_absent
+    assert "- environment:" in with_known_none
+    assert "- correlation_id:" in with_known_none
+
+
+def test_an_empty_string_field_is_not_treated_as_known():
+    """`_fill`'s own rule — an empty string is not a value someone supplied —
+    applies here too: a field the model once wrote `""` for is still blank
+    and still worth asking the schema to name."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.prompt import build_input
+
+    known = ApiIssueParams(environment="")
+
+    prompt = build_input("API lỗi", ApiIssueParams, known=known)
+
+    assert "- environment:" in prompt
+
+
 async def test_a_model_that_could_not_answer_is_not_a_refusal():
     """The two look identical from here — no result either way — and they are
     told apart by which of them we caused. A model that failed is worth asking

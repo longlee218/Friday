@@ -323,6 +323,13 @@ context:
   # older. Measured on the stored, structured summary — the four fields the
   # summariser is asked for, not the transcript it read.
   summary_max_chars: 6000
+  # Node 0's own budget for a task's transcript, in *estimated* tokens —
+  # characters divided by four, because the configured provider has no
+  # tokenizer. Unset (the default) means no compaction at all: the
+  # measurement runs from the first day, and this is a number to set once a
+  # normal task's cost is known, the same doctrine `daily_token_budget`
+  # follows. Board `what-the-room-already-knows`, ticket 08.
+  # extraction_budget_tokens: 2000
 
 # ── What never reaches the model ───────────────────────────────────────────
 # A message containing any of these is not sent to the classifier. It becomes

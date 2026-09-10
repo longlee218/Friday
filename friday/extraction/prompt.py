@@ -106,6 +106,7 @@ def build_input(
     room=None,
     asked=(),
     memories: Sequence[Memory] = (),
+    known: Params | None = None,
 ) -> str:
     """The field schema, what the room is known to be, then the reporter's
     words — in that order, and the order is the cache.
@@ -113,6 +114,16 @@ def build_input(
     Each field's meaning is its `doc` metadata on the params class — the field
     and its meaning live on the same line there, so they cannot drift apart.
     This renders them; it does not define them.
+
+    **`known` drops an already-filled field from the schema** (board
+    `what-the-room-already-knows`, ticket 08, D8: "a field the parameter
+    schema names is compacted into the task's parameters, because the
+    extractor has already copied it verbatim and the store already persists
+    it"). `_fill` already refuses to let a later pass *overwrite* a filled
+    field; this is the other half — not asking about it again, so a task
+    with three of four fields answered pays for one line of schema and not
+    four, on every pass a busy room causes. `None` (the default, and every
+    call site before this ticket) shows every field, unchanged.
 
     **The room goes between them, not first.** Stable-first, and which is
     stabler is not a judgement call: one `Harness` per task type serves every
@@ -157,6 +168,12 @@ def build_input(
     """
     schema_lines = []
     for f in params_cls.__dataclass_fields__.values():  # type: ignore[attr-defined]
+        # Truthy, not merely non-`None` — the same rule `_fill` already
+        # applies (`dag/prepare.py::_fill`'s own "an empty string is not a
+        # value someone supplied"). A field a model once wrote `""` for is
+        # still blank and still worth asking the schema to name.
+        if known is not None and getattr(known, f.name, None):
+            continue
         doc = (f.metadata or {}).get("doc", f.name.replace("_", " "))
         schema_lines.append(f"- {f.name}: {doc}")
     schema = "\n".join(schema_lines) or "(no fields)"

@@ -97,6 +97,7 @@ class Extractor:
         *,
         channel_id: str | None = None,
         task_id: int | None = None,
+        known: Params | None = None,
     ) -> str:
         """The per-call input this would send, without sending it.
 
@@ -110,6 +111,13 @@ class Extractor:
         outstanding questions are now inside the fingerprint, so the moment
         the reporter answers one, the prompt changes and the extraction runs
         again rather than replaying an answer taken before they spoke.
+
+        `known` — the task's current parameters, ticket 08's D8 — is passed
+        straight through to `build_input`, which drops an already-filled
+        field from the schema. Reaching the fingerprint through here is what
+        keeps it honest: a field getting filled shrinks the schema, which
+        changes the prompt, which is exactly what `input_fingerprint` must
+        see move.
         """
         room = (
             self._context.context(channel_id)
@@ -132,7 +140,12 @@ class Extractor:
             else ()
         )
         return build_input(
-            text, self._params_cls, room=room, asked=asked, memories=memories
+            text,
+            self._params_cls,
+            room=room,
+            asked=asked,
+            memories=memories,
+            known=known,
         )
 
     async def run(
@@ -142,6 +155,7 @@ class Extractor:
         channel_id: str | None = None,
         task_id: int | None = None,
         node: str | None = None,
+        known: Params | None = None,
     ) -> tuple[Params | None, Clarify | None]:
         """Ask the model to fill the fields. `(None, None)` if the call failed.
 
@@ -165,7 +179,9 @@ class Extractor:
         """
         capture = FieldsCapture()
         result = await self._harness.run(
-            await self.would_ask(text, channel_id=channel_id, task_id=task_id),
+            await self.would_ask(
+                text, channel_id=channel_id, task_id=task_id, known=known
+            ),
             context=capture,
             extra_turns=1,
             task_id=task_id,
@@ -244,6 +260,7 @@ async def extract(
     channel_id: str | None = None,
     task_id: int | None = None,
     node: str | None = None,
+    known: Params | None = None,
 ) -> tuple[Params | None, Clarify | None]:
     """Run the extractor registered for `task_type` over `text`.
 
@@ -253,12 +270,15 @@ async def extract(
     hallucinated fields". The `Clarify`, if any, is independent of whether
     the params came back — the model may have called the tool and still
     written nothing usable, or the reverse.
+
+    `known` is passed straight through to `Extractor.run` (ticket 08, D8):
+    the fields it already has drop out of the schema the model is shown.
     """
     ext = _EXTRACTORS.get(task_type)
     if ext is None:
         return None, None
     return await ext.run(
-        text, channel_id=channel_id, task_id=task_id, node=node
+        text, channel_id=channel_id, task_id=task_id, node=node, known=known
     )
 
 
@@ -271,6 +291,7 @@ async def input_fingerprint(
     *,
     channel_id: str | None = None,
     task_id: int | None = None,
+    known: Params | None = None,
 ) -> str:
     """One string standing for everything this extractor is about to be shown.
 
@@ -290,13 +311,21 @@ async def input_fingerprint(
 
     Returns the empty string for an unregistered type, which is what `extract`
     answers for one too — a caller with no extractor has nothing to remember.
+
+    **A fifth input, ticket 08's D8: `known`.** The same reasoning as the
+    third — a field getting filled shrinks the schema `would_ask` renders,
+    so the fingerprint has to see that move too, or a task whose reporter
+    just answered the last open field would replay a stale mark built
+    against the wider schema.
     """
     import hashlib
 
     ext = _EXTRACTORS.get(task_type)
     if ext is None:
         return ""
-    said = await ext.would_ask(text, channel_id=channel_id, task_id=task_id)
+    said = await ext.would_ask(
+        text, channel_id=channel_id, task_id=task_id, known=known
+    )
     return hashlib.sha256(said.encode()).hexdigest()
 
 

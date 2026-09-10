@@ -197,6 +197,15 @@ class ContextConfig:
     #: removed that gate: a room is summarised once it has said anything new,
     #: and this caps what the result may be, not whether the call happens.
     summary_max_chars: int = 6000
+    #: Node 0's own budget, in *estimated* tokens — characters divided by
+    #: four (D5): the configured provider is MiniMax, for which there is no
+    #: tokenizer, and a tokenizer for a different vendor would be
+    #: confidently wrong rather than roughly right. `None` means no
+    #: compaction at all (D7), the same doctrine `AgentConfig.
+    #: daily_token_budget` follows: the measurement runs from the first day
+    #: and the ceiling is something the operator sets once a normal task's
+    #: cost is known. Board `what-the-room-already-knows`, ticket 08.
+    extraction_budget_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,6 +284,10 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             ),
             summary_max_chars=int(
                 (raw.get("context") or {}).get("summary_max_chars", 6000)
+            ),
+            extraction_budget_tokens=_positive_or_none(
+                (raw.get("context") or {}).get("extraction_budget_tokens"),
+                "context.extraction_budget_tokens",
             ),
         ),
         operator_id=int(raw.get("operator_id", 0)),
@@ -368,6 +381,28 @@ def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
             options=spec,  # whatever is left is step-specific
         )
     return agents
+
+
+def _positive_or_none(value: Any, name: str) -> int | None:
+    """`None` unset, a positive int given — never anything in between.
+
+    Board `what-the-room-already-knows`, ticket 08, D6: "a budget clause
+    that cannot be evaluated fails loudly; it is never dropped" — the
+    failure shape that emptied five context mechanisms in this repo was a
+    bad value tolerated at run time rather than refused where the operator
+    is looking. Zero and negative are exactly as unevaluable as a budget can
+    be, so they raise here rather than reaching `original_text_for` as a
+    ceiling that refuses every message on every task, silently.
+    """
+    if value is None:
+        return None
+    parsed = int(value)
+    if parsed <= 0:
+        raise ConfigError(
+            f"{name} must be a positive number of estimated tokens, or unset "
+            f"for no compaction — got {parsed}"
+        )
+    return parsed
 
 
 def _mention_type(value: str) -> MentionType:

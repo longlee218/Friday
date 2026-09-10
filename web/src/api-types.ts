@@ -181,6 +181,18 @@ export interface TaskCalls {
   spent: number;
 }
 
+/** Whether node 0's own budget-based truncation has stopped trying for one
+ *  task (ticket 08 of `what-the-room-already-knows`). A task whose
+ *  `ineffective_count` is above zero has a transcript truncation cannot
+ *  bring under its configured budget; `on_cooldown` once that has happened
+ *  twice, at which point node 0 stops re-checking on every pass. Zero and
+ *  `false` for a task nothing has ever recorded against, and for every
+ *  install with no budget configured at all. */
+export interface TaskCompaction {
+  ineffective_count: number;
+  on_cooldown: boolean;
+}
+
 /** A room in the left-hand list. `name` is the operator's own label and
  *  `null` when they have not given one — which the list renders as the
  *  channel, not as an empty string. */

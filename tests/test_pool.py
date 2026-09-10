@@ -559,6 +559,111 @@ async def test_nothing_said_before_the_report_is_dragged_in(db):
     assert "hôm qua deploy" not in (await db.original_text_for(task.id) or "")
 
 
+# --- ticket 08: the build respects a budget ---------------------------------
+
+
+async def test_an_unset_budget_changes_nothing(db):
+    """D7: the default, and the behaviour every install had before this
+    ticket — bounded by the message count alone."""
+    task = await make_task(db)
+    await _said(db, "m1", "@Lee API lỗi rồi a ơi", secs=0, mention=True)
+    await db.mark_triaged(
+        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+    )
+    await _said(db, "m2", "curl -X POST /pay trả 500, trên production", secs=3)
+
+    with_budget = await db.original_text_for(task.id, budget_tokens=None)
+    without_budget = await db.original_text_for(task.id)
+
+    assert with_budget == without_budget
+    assert "curl -X POST /pay" in with_budget
+
+
+async def test_the_message_count_cap_still_binds_with_a_generous_budget(db):
+    """D6: the count is a *secondary* cap, not a removed one — a pathological
+    room with far more than `limit` messages must not grow the build past
+    it, however large the budget is or whether one is configured at all."""
+    task = await make_task(db)
+    await _said(db, "m1", "@Lee API lỗi rồi a ơi", secs=0, mention=True)
+    await db.mark_triaged(
+        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+    )
+    for n in range(2, 30):
+        await _said(db, f"m{n}", f"chi tiết số {n}", secs=n)
+
+    said = await db.original_text_for(task.id, limit=20, budget_tokens=1_000_000)
+
+    assert said.count("chi tiết số") == 19, (
+        "a huge budget must not undo the message-count cap"
+    )
+
+
+async def test_over_budget_the_oldest_messages_are_dropped_first(db):
+    """D6: the budget is primary, the count secondary — and dropping starts
+    from the oldest end, because an answer to a question just asked is the
+    newest message and the one a follow-up pass cannot afford to lose."""
+    task = await make_task(db)
+    await _said(db, "m1", "@Lee " + ("API lỗi rồi. " * 40), secs=0, mention=True)
+    await db.mark_triaged(
+        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+    )
+    await _said(db, "m2", "correlationId là abcdef01-2345-6789-abcd-ef0123456789", secs=3)
+
+    said = await db.original_text_for(task.id, budget_tokens=20)
+
+    assert "API lỗi rồi" not in said, "the oldest message should have been dropped"
+    assert "abcdef01-2345-6789-abcd-ef0123456789" in said, (
+        "the newest message must survive the drop"
+    )
+
+
+async def test_a_budget_the_transcript_already_fits_changes_nothing(db):
+    task = await make_task(db)
+    await _said(db, "m1", "@Lee API lỗi rồi", secs=0, mention=True)
+    await db.mark_triaged(
+        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+    )
+
+    said = await db.original_text_for(task.id, budget_tokens=10_000)
+
+    assert "API lỗi rồi" in said
+
+
+async def test_the_newest_message_survives_even_alone_over_budget(db):
+    """A single message larger than the whole budget is not something
+    dropping older messages can fix — it is returned whole regardless, never
+    emptied. `record_ineffective_compaction` is what makes this visible,
+    not a truncated or missing answer."""
+    task = await make_task(db)
+    huge = "@Lee " + ("API lỗi rồi rất là dài. " * 200)
+    await _said(db, "m1", huge, secs=0, mention=True)
+    await db.mark_triaged(
+        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+    )
+
+    said = await db.original_text_for(task.id, budget_tokens=5)
+
+    assert "API lỗi rồi" in said
+
+
+async def test_ineffective_compactions_are_counted_and_trip_the_cooldown(db):
+    task = await make_task(db)
+
+    first = await db.record_ineffective_compaction(task.id)
+    assert first == 1
+    assert await db.compaction_on_cooldown(task.id) is False
+
+    second = await db.record_ineffective_compaction(task.id)
+    assert second == 2
+    assert await db.compaction_on_cooldown(task.id) is True
+
+
+async def test_a_task_with_no_ineffective_compaction_is_not_on_cooldown(db):
+    task = await make_task(db)
+
+    assert await db.compaction_on_cooldown(task.id) is False
+
+
 # --- ticket 37: the operator's own message ends the work ---------------------
 
 

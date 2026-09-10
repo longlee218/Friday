@@ -87,3 +87,37 @@ def test_no_duration_at_all_is_a_real_answer():
     from friday.config import duration
 
     assert duration(None, key="max_message_age") is None
+
+
+# --- extraction_budget_tokens (ticket 08: the build respects a budget) -----
+
+
+def test_an_unset_extraction_budget_means_no_compaction(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(SAMPLE)
+
+    config = load_config(path)
+
+    assert config.context.extraction_budget_tokens is None
+
+
+def test_the_extraction_budget_is_read_from_configuration(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(SAMPLE + "\ncontext:\n  extraction_budget_tokens: 500\n")
+
+    config = load_config(path)
+
+    assert config.context.extraction_budget_tokens == 500
+
+
+@pytest.mark.parametrize("bad", [0, -1, -500])
+def test_a_budget_that_cannot_be_a_budget_is_refused_at_load(tmp_path, bad):
+    """D6: "a budget clause that cannot be evaluated fails loudly; it is
+    never dropped" — the failure shape that emptied five context mechanisms
+    in this repo was a bad value tolerated at run time. Zero or negative
+    reaches nobody's transcript before the operator is told at startup."""
+    path = tmp_path / "config.yaml"
+    path.write_text(SAMPLE + f"\ncontext:\n  extraction_budget_tokens: {bad}\n")
+
+    with pytest.raises(ConfigError, match="extraction_budget_tokens"):
+        load_config(path)

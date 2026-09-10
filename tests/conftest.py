@@ -144,7 +144,13 @@ def workflow_graphs():
 
     from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS, EDGE_ROUTER, register_dags
 
-    register_dags(SimpleNamespace(agents={}), servers={})
+    register_dags(
+        SimpleNamespace(
+            agents={},
+            context=SimpleNamespace(extraction_budget_tokens=None),
+        ),
+        servers={},
+    )
     try:
         yield
     finally:

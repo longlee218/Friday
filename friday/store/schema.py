@@ -373,8 +373,10 @@ class ExtractionMark(Base):
 
     task_id: Mapped[int] = mapped_column(primary_key=True)
     #: Over the reporter's text and the field schema — the two things that
-    #: make up the extractor's per-call input. The task's parameters never
-    #: reach its prompt, so they are not in here. See `_fingerprint`.
+    #: make up the extractor's per-call input. The task's parameters shape
+    #: the schema half indirectly since ticket 08's D8 (an already-filled
+    #: field drops out of it), so a fill moves this too. See
+    #: `input_fingerprint`.
     fingerprint: Mapped[str]
     #: The extractor's own output, so a skipped call applies the same fill
     #: rather than only saving the money.
@@ -383,6 +385,25 @@ class ExtractionMark(Base):
     #: is a different thing from a null nobody wrote.
     clarify_fields: Mapped[list] = mapped_column(JSON, default=list)
     clarify_because: Mapped[str | None] = mapped_column(default=None)
+
+
+class CompactionState(Base):
+    """Whether node 0's own budget-based truncation is still worth trying
+    for one task (board `what-the-room-already-knows`, ticket 08, D6).
+
+    One row per task, created on the first pass that truncates and still
+    ends up over budget. Two such passes and `Database.
+    compaction_on_cooldown` starts answering `True`: the condition becomes
+    visible to the operator (a warning names the task) rather than a check
+    repeated on every pass for a build truncation cannot bring under budget
+    — a single message larger than the budget, which dropping older
+    messages can never fix.
+    """
+
+    __tablename__ = "compaction_state"
+
+    task_id: Mapped[int] = mapped_column(primary_key=True)
+    ineffective_count: Mapped[int] = mapped_column(default=0)
 
 
 class ToolCall(Base):

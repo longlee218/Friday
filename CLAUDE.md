@@ -704,9 +704,13 @@ not an implementation detail:
   substitutes `messages.redacted_text` for `text` — each span replaced by
   `[artifact id: description]`, computed once at record time by
   `friday.text.transform.redact`. Node 0's own read,
-  `Database.original_text_for`, is untouched and still returns a task's
-  material whole; so is every other reader of `text` — triage, the
-  responder's tone examples, the Rooms screen. **The description is built
+  `Database.original_text_for`, was untouched by this ticket and still
+  returns a task's material whole; so is every other reader of `text` —
+  triage, the responder's tone examples, the Rooms screen. (Ticket 08 later
+  gave `original_text_for` a budget of its own — see below — but that trims
+  by dropping whole messages, never by paraphrasing or truncating one, so
+  every message it does keep is still exactly what was typed.) **The
+  description is built
   from shape and size, never from the content's own bytes** — kind
   (curl / stack trace / SQL / code) plus line and character counts. A `curl`
   is usually one line, and "the first N characters" of a one-line artifact
@@ -767,6 +771,50 @@ not an implementation detail:
   (`memory_supersede`, new) marks it superseded and points at what replaced
   it, and every reader that serves a model reads active rows only — a
   superseded or deleted one stays visible to the operator and nowhere else.
+- **Node 0's own build respects a budget, and the budget is primary; a
+  message count is secondary** (`.scratch/what-the-room-already-knows/`,
+  ticket 08, D5-D7). `config.yaml`'s `context.extraction_budget_tokens` is
+  an *estimate* — characters divided by four, since the configured provider
+  has no tokenizer — and unset means no compaction at all, the same
+  doctrine `daily_token_budget` follows. `Database.original_text_for` still
+  caps at `limit` messages first (unchanged), then, over budget, drops the
+  *oldest* of those, never the newest — a reporter's answer to a question
+  just asked is always the newest message and the one a follow-up pass
+  cannot afford to lose. A bad configured value (zero, negative) raises at
+  load, not at run time: the failure shape that emptied five context
+  mechanisms in this repo was a value tolerated silently until it mattered.
+
+  **Compaction here drops whole messages; it does not summarise them.** D8
+  also asks for a model to compact prose that does not fit a budget — this
+  ticket's own scope call, made explicit rather than assumed, is that node
+  0's transcript compacts by truncation alone: a model call here would cost
+  real money on every task that exceeds its budget, for a mechanism this
+  board otherwise keeps free of rolling, per-pass summarisation on purpose
+  (D24's concern, arrived at from this side too — a model call that reruns
+  on every pass rewrites the prompt prefix and breaks the provider's
+  cache). A single message larger than the budget is therefore something
+  truncation cannot fix by definition, not a bug in it.
+
+  **Two such passes and node 0 stops trying, visibly.**
+  `Database.compaction_on_cooldown` — backed by a small `compaction_state`
+  table, `ineffective_count` per task — answers `True` once truncating has
+  failed to bring a task's build under budget twice; a warning names the
+  task each time, and a task on cooldown is read exactly as if no budget
+  were configured, rather than repeating a check that cannot succeed. A log
+  line is not the operator's own view of it, so `/api/tasks/{id}/compaction`
+  is the second half — code review's own finding, not the ticket's original
+  scope.
+
+  **A field already in the task's own parameters drops out of the schema
+  the extractor is shown**, the other half of D8's three-way split (a
+  schema field is "compacted into the task's parameters" because the
+  extractor already copied it there). `Extractor.would_ask`'s `known`
+  reaches `build_input`, which skips a field once `known` has anything
+  truthy for it — empty string does not count, the same rule `_fill`
+  already applies. This is a fifth input to `input_fingerprint`: a field
+  getting filled shrinks the schema, which is a real prompt change the
+  digest has to see move, corrected in the same ticket in
+  `ExtractionMark`'s own docstring, which had claimed the opposite.
 
 ## Conventions
 

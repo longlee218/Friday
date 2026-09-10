@@ -365,3 +365,23 @@ async def test_a_tasks_tool_calls_are_reachable_beside_its_prompts(client, db):
     assert [c["agent"] for c in calls["model_calls"]] == ["extractor"]
     assert [t["tool"] for t in calls["tool_calls"]] == ["ask_for_fields"]
     assert calls["spent"] == 5
+
+
+async def test_a_stuck_tasks_compaction_state_is_reachable(client, db):
+    """Ticket 08 of `what-the-room-already-knows`: a log warning names a
+    task whose own transcript truncation could not bring it under budget,
+    but a log is not the operator's own view of it — this route is."""
+    task = await db.create_task(
+        conversation=WATCHED, type="api_issue", state=TaskState.PENDING,
+        confidence=0.9, params={},
+    )
+
+    fresh = client.get(f"/api/tasks/{task.id}/compaction").json()
+    assert set(fresh) == declared("TaskCompaction")
+    assert fresh == {"ineffective_count": 0, "on_cooldown": False}
+
+    await db.record_ineffective_compaction(task.id)
+    await db.record_ineffective_compaction(task.id)
+
+    stuck = client.get(f"/api/tasks/{task.id}/compaction").json()
+    assert stuck == {"ineffective_count": 2, "on_cooldown": True}

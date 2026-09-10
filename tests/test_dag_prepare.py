@@ -161,7 +161,7 @@ async def _prepare_with_clarify(params_obj, clarify, *, extracted=None, monkeypa
     import friday.dag.prepare as wf
 
     async def stub_extract(
-        task_type, text, *, channel_id=None, task_id=None, node=None
+        task_type, text, *, known=None, channel_id=None, task_id=None, node=None
     ):
         return extracted, clarify
 
@@ -301,7 +301,7 @@ async def test_a_refused_extractor_hands_over_instead_of_asking(monkeypatch):
     from friday.domain.models import ApiIssueParams
 
     async def refused(
-        task_type, text, *, channel_id=None, task_id=None, node=None
+        task_type, text, *, known=None, channel_id=None, task_id=None, node=None
     ):
         raise Refused("api_issue_extractor has spent 999 of its 10 tokens today")
 
@@ -347,7 +347,7 @@ class _StandsForAnExtractor:
 
     _room = None
 
-    async def would_ask(self, text, *, channel_id=None, task_id=None):
+    async def would_ask(self, text, *, channel_id=None, task_id=None, known=None):
         from friday.extraction.prompt import build_input
 
         return build_input(text, ApiIssueParams, room=self._room)
@@ -360,7 +360,7 @@ class _CountingExtractor(_StandsForAnExtractor):
     def __init__(self, params, clarify=None):
         self.params, self.clarify, self.texts = params, clarify, []
 
-    async def run(self, text, *, channel_id=None, task_id=None, node=None):
+    async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
         self.texts.append(text)
         return self.params, self.clarify
 
@@ -389,6 +389,41 @@ async def test_node_0_pays_once_when_nothing_has_changed(db):
         f"extracted {len(extractor.texts)} times for one unchanged task"
     )
     assert second == first, "the second pass reached a different conclusion"
+
+
+async def test_a_field_already_filled_drops_out_of_the_next_passs_schema(db):
+    """Board `what-the-room-already-knows`, ticket 08, D8: "a field the
+    parameter schema names is compacted into the task's parameters" — once
+    `environment` is filled, the next pass does not pay to be told about it
+    again, even though a new message keeps the fingerprint from replaying a
+    stale mark."""
+    from friday.dag.prepare import prepare_node
+    from tests.test_extraction import _install
+    from tests.test_pool import _said
+
+    seen: list[str] = []
+
+    class _RecordsWhatItWasShown(_StandsForAnExtractor):
+        async def would_ask(self, text, *, channel_id=None, task_id=None, known=None):
+            from friday.extraction.prompt import build_input
+
+            return build_input(text, ApiIssueParams, known=known)
+
+        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
+            seen.append(await self.would_ask(text, channel_id=channel_id, known=known))
+            return ApiIssueParams(environment="production"), None
+
+    _install("api_issue", _RecordsWhatItWasShown())
+    task = await _reported(db)
+    node = prepare_node("api_issue", ApiIssueParams)
+
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+    await _said(db, "m2", "curl -X POST /pay trả 500, trên production", secs=3)
+    await node.run(DAGState.empty(), DAGDeps(task=await db.task(task.id), db=db))
+
+    first, second = seen
+    assert "- environment:" in first, "the field was never offered in the first place"
+    assert "- environment:" not in second, "an already-filled field was shown again"
 
 
 async def test_a_new_message_is_paid_for(db):
@@ -489,6 +524,32 @@ async def test_the_fingerprint_is_the_prompt_so_every_input_counts():
     )
 
 
+async def test_known_moves_the_fingerprint_too():
+    """Ticket 08's D8, the fifth input: a field getting filled shrinks the
+    schema, which is a real change to the prompt — the fingerprint has to
+    move with it, or a stale mark from before the field was filled would
+    replay an answer built against a wider schema."""
+    from friday.extraction import input_fingerprint, registered
+    from tests.test_extraction import _install
+
+    class _UsesKnown(_StandsForAnExtractor):
+        async def would_ask(self, text, *, channel_id=None, task_id=None, known=None):
+            from friday.extraction.prompt import build_input
+
+            return build_input(text, ApiIssueParams, known=known)
+
+    _install("fp_probe", _UsesKnown())
+    try:
+        bare = await input_fingerprint("fp_probe", "API lỗi")
+        with_known = await input_fingerprint(
+            "fp_probe", "API lỗi", known=ApiIssueParams(environment="production")
+        )
+    finally:
+        registered().pop("fp_probe", None)
+
+    assert bare != with_known, "an already-filled field did not move the fingerprint"
+
+
 async def test_a_parameter_change_the_extractor_cannot_see_is_not_paid_for(db):
     """**A deliberate deviation from ticket 04's own criterion**, which asked
     for the task's parameters to count toward "has anything changed".
@@ -539,7 +600,7 @@ async def test_a_call_that_produced_nothing_is_not_remembered_as_an_answer(db):
         def __init__(self):
             self.calls = 0
 
-        async def run(self, text, *, channel_id=None, task_id=None, node=None):
+        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
             self.calls += 1
             return None, None
 
@@ -584,12 +645,12 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
     seen: list[str] = []
 
     class _ReadsTheRoom(_StandsForAnExtractor):
-        async def would_ask(self, text, *, channel_id=None, task_id=None):
+        async def would_ask(self, text, *, channel_id=None, task_id=None, known=None):
             from friday.extraction.prompt import build_input
 
             return build_input(text, ApiIssueParams, room=store.context(channel_id))
 
-        async def run(self, text, *, channel_id=None, task_id=None, node=None):
+        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
             said = await self.would_ask(text, channel_id=channel_id)
             seen.append(said)
             # Asserted on the *value* and on the section, never on
@@ -646,12 +707,12 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     asked: list[str] = []
 
     class _Watching(_StandsForAnExtractor):
-        async def would_ask(self, text, *, channel_id=None, task_id=None):
+        async def would_ask(self, text, *, channel_id=None, task_id=None, known=None):
             from friday.extraction.prompt import build_input
 
             return build_input(text, ApiIssueParams, room=store.context(channel_id))
 
-        async def run(self, text, *, channel_id=None, task_id=None, node=None):
+        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
             asked.append(await self.would_ask(text, channel_id=channel_id))
             return ApiIssueParams(summary="service down"), None
 
@@ -678,3 +739,92 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     assert len(asked) == 2, "the new fact never reached a model"
     assert "[channel" in asked[-1], "the model was called without the room"
     assert "test.apero" in asked[-1], "the fact itself never arrived"
+
+
+# --- ticket 08: the build respects a budget ---------------------------------
+
+
+async def test_prepare_node_truncates_the_build_to_the_configured_budget(db):
+    """The wiring end to end: `prepare_node(..., budget_tokens=...)` reaches
+    `original_text_for` through `deps.db`, not a rebuilt query — the same
+    seam `test_the_extractor_itself_looks_the_room_up_from_the_channel_it_is_given`
+    already proves for the room."""
+    from friday.dag.prepare import prepare_node
+    from tests.test_extraction import _install
+    from tests.test_pool import _said
+
+    seen: list[str] = []
+
+    class _RecordsTheText(_StandsForAnExtractor):
+        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
+            seen.append(text)
+            return ApiIssueParams(summary="checkout 500"), None
+
+    _install("api_issue", _RecordsTheText())
+    task = await _reported(db, text="@Lee " + ("API lỗi rồi. " * 40))
+    await _said(db, "m2", "correlationId là abcdef01-2345-6789-abcd-ef0123456789", secs=3)
+    node = prepare_node("api_issue", ApiIssueParams, budget_tokens=20)
+
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+
+    (text,) = seen
+    assert "API lỗi rồi" not in text, "the oldest message should have been dropped"
+    assert "abcdef01-2345-6789-abcd-ef0123456789" in text
+
+
+async def test_an_unconfigured_budget_reaches_prepare_node_as_no_compaction(db):
+    """`budget_tokens=None`, the default `prepare_node` and `build_simple_dag`
+    both carry unless `config.yaml` sets one — the exact behaviour every
+    install had before this ticket."""
+    from friday.dag.prepare import prepare_node
+    from tests.test_extraction import _install
+    from tests.test_pool import _said
+
+    seen: list[str] = []
+
+    class _RecordsTheText(_StandsForAnExtractor):
+        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
+            seen.append(text)
+            return ApiIssueParams(summary="checkout 500"), None
+
+    _install("api_issue", _RecordsTheText())
+    task = await _reported(db, text="@Lee " + ("API lỗi rồi. " * 40))
+    await _said(db, "m2", "correlationId là abcdef01-2345-6789-abcd-ef0123456789", secs=3)
+    node = prepare_node("api_issue", ApiIssueParams)
+
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+
+    (text,) = seen
+    assert "API lỗi rồi" in text, "nothing should be dropped with no budget configured"
+
+
+async def test_two_ineffective_compactions_stop_a_third_from_being_attempted(db):
+    """D6: a single message larger than the budget is not something dropping
+    older messages can fix. Two such passes and node 0 stops trying — the
+    third pass reads the full text, exactly as an unset budget would."""
+    from friday.dag.prepare import prepare_node
+    from tests.test_extraction import _install
+
+    class _AlwaysFillsSomething(_StandsForAnExtractor):
+        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
+            return ApiIssueParams(summary="checkout 500"), None
+
+    _install("api_issue", _AlwaysFillsSomething())
+    huge = "@Lee " + ("API lỗi rồi rất là dài. " * 200)
+    task = await _reported(db, text=huge)
+    node = prepare_node("api_issue", ApiIssueParams, budget_tokens=5)
+
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+    assert await db.compaction_ineffective_count(task.id) == 1
+    assert await db.compaction_on_cooldown(task.id) is False
+
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+    assert await db.compaction_ineffective_count(task.id) == 2
+    assert await db.compaction_on_cooldown(task.id) is True
+
+    # A third pass must not record a third ineffective compaction: once on
+    # cooldown, the budget is not even checked.
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+    assert await db.compaction_ineffective_count(task.id) == 2, (
+        "a pass on cooldown must not check the budget at all"
+    )

@@ -30,6 +30,7 @@ from friday.extraction import (
     extract as _extract,
     input_fingerprint,
 )
+from friday.store.db import estimated_tokens
 
 __all__ = ["plan_by_required_parameters", "prepare", "prepare_node", "prepared_ok"]
 
@@ -45,6 +46,7 @@ def prepare_node(
     params_cls: type[Params],
     *,
     on_ready: Callable[[Params], Params | Action] | None = None,
+    budget_tokens: int | None = None,
 ) -> Node:
     """Node 0: everything the reporter has said, filled in and checked.
 
@@ -57,11 +59,37 @@ def prepare_node(
     complete, valid set of parameters into its own answer. A type with an
     investigation past this node leaves it `None` and reads `state["prepare"]`
     itself instead.
+
+    `budget_tokens` — board `what-the-room-already-knows`, ticket 08, D5-D7
+    — is closed over rather than read from `deps`: one `Harness` per task
+    type already serves every conversation the same way, and this is the
+    same kind of per-type, not per-call, configuration. `None` (the
+    default, and `config.yaml`'s until an operator sets it) means no
+    compaction at all — `original_text_for`'s message-count cap, unchanged.
     """
 
     async def _prepare(state: DAGState, deps: DAGDeps) -> Params | Action:
         known = params_cls(**deps.task.params)
-        text = await deps.db.original_text_for(deps.task.id)
+        # A task already on cooldown (two ineffective compactions, D6) is
+        # read exactly as if no budget were configured — trying a third
+        # time cannot help a single message larger than the budget, and the
+        # point of the cooldown is that nothing keeps re-checking that.
+        on_cooldown = (
+            budget_tokens is not None
+            and await deps.db.compaction_on_cooldown(deps.task.id)
+        )
+        effective_budget = None if on_cooldown else budget_tokens
+        text = await deps.db.original_text_for(
+            deps.task.id, budget_tokens=effective_budget
+        )
+        if effective_budget is not None and text is not None:
+            if estimated_tokens(text) > effective_budget:
+                count = await deps.db.record_ineffective_compaction(deps.task.id)
+                log.warning(
+                    "task %s: compaction did not bring the build under budget "
+                    "(%d/%d estimated tokens, attempt %d)",
+                    deps.task.id, estimated_tokens(text), effective_budget, count,
+                )
         filled, problem = await prepare(
             task_type,
             known,
@@ -131,12 +159,18 @@ async def prepare(
     asked about instead. A model's question is honoured only once code has
     nothing to say and only for fields the fill actually left blank: asking
     again for something already answered is not a question this exists to ask.
+
+    **`params` is also what `extract` is told is already known** (board
+    `what-the-room-already-knows`, ticket 08, D8) — passed through as
+    `known=params`, before this call fills anything further, so the schema
+    the model is shown drops what this task's own store already has.
     """
     clarify: Clarify | None = None
     if text is not None:
         try:
             extracted, clarify = await (extract or _extract)(
-                task_type, text, channel_id=channel_id, task_id=task_id, node=node
+                task_type, text, known=params,
+                channel_id=channel_id, task_id=task_id, node=node,
             )
         except Refused as refusal:
             # A ceiling, not a failure. Falling through would leave the fields
@@ -191,15 +225,18 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
     """
 
     async def extract(
-        task_type: str, text: str, *, channel_id=None, task_id=None, node=None
+        task_type: str, text: str, *, known=None,
+        channel_id=None, task_id=None, node=None,
     ):
         # Asked of the extraction family rather than reconstructed here. The
         # reconstruction knew about the field schema and the reporter's text,
         # and ticket 01 gave the prompt a third input it could not see — so an
         # operator who wrote down what a room is got a task that never read
-        # it, because the fingerprint had not changed.
+        # it, because the fingerprint had not changed. `known` is ticket 08's
+        # fifth: a field getting filled shrinks the schema, which the digest
+        # must see move the same way.
         digest = await input_fingerprint(
-            task_type, text, channel_id=channel_id, task_id=task_id
+            task_type, text, known=known, channel_id=channel_id, task_id=task_id
         )
         mark = await db.extraction_mark(task_id)
         if mark is not None and mark.fingerprint == digest:
@@ -212,7 +249,8 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
                 Clarify(mark.asked_about, mark.because) if mark.asked_about else None,
             )
         extracted, clarify = await _extract(
-            task_type, text, channel_id=channel_id, task_id=task_id, node=node
+            task_type, text, known=known,
+            channel_id=channel_id, task_id=task_id, node=node,
         )
         if extracted is None and clarify is None:
             # Nothing to remember, so nothing is written — and the next pass

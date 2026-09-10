@@ -64,11 +64,17 @@ def dag_for(task_type: str) -> DAG | None:
 # --- the one-node graph, for a type with no investigation --------------------
 
 
-def build_simple_dag(task_type: str, params_cls: type[Params]) -> DAG:
+def build_simple_dag(
+    task_type: str, params_cls: type[Params], *, budget_tokens: int | None = None
+) -> DAG:
     """`prepare`, then ask for what is missing or hand the rest over — what
     every type without an investigation needs (D1). There is nothing here
     worth a second node yet; build one when there are steps worth skipping,
     not before.
+
+    `budget_tokens` — board `what-the-room-already-knows`, ticket 08 —
+    passes straight through to `prepare_node`, the same for every type:
+    node 0's budget is one number in `config.yaml`, not one per task type.
     """
     return DAG(
         name=task_type,
@@ -77,6 +83,7 @@ def build_simple_dag(task_type: str, params_cls: type[Params]) -> DAG:
                 task_type,
                 params_cls,
                 on_ready=lambda filled: plan_by_required_parameters(task_type, filled),
+                budget_tokens=budget_tokens,
             ),
         ),
     )
@@ -110,8 +117,12 @@ def register_dags(
     worth skipping and somebody has said what they are.
     """
     EDGE_ROUTER.clear()
+    budget_tokens = config.context.extraction_budget_tokens
     for task_type, params_cls in PARAMS.items():
-        register_dag(task_type, build_simple_dag(task_type, params_cls))
+        register_dag(
+            task_type,
+            build_simple_dag(task_type, params_cls, budget_tokens=budget_tokens),
+        )
 
     # No graph has a node agent any more — the one that did was `api_issue`'s
     # investigation, and it is gone. `DAG_DEPS_EXTRA` stays empty and the

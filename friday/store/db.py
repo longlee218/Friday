@@ -61,13 +61,25 @@ from friday.text.transform import redact
 from friday.ops.redact import scrub
 from friday.domain.states import OPEN, IllegalTransition, TaskState, may_move
 
-__all__ = ["Database"]
+__all__ = ["Database", "estimated_tokens"]
 
 log = logging.getLogger(__name__)
 
 #: The types the classifier can actually produce — one per tool it has.
 #: Anything else in `decision_type` is a state, not a classification.
 CLASSIFIABLE = ("api_issue", "access_request", "doc_question", "skip")
+
+
+def estimated_tokens(text: str) -> int:
+    """Characters divided by four (D5) — an estimate, and the name says so.
+
+    The configured provider is MiniMax, for which there is no tokenizer; a
+    tokenizer for a different vendor would be confidently wrong rather than
+    roughly right. Exported so `friday/dag/prepare.py` measures a budget's
+    outcome with the exact same arithmetic this module used to enforce it —
+    one formula, not two that could drift.
+    """
+    return len(text) // 4
 
 _OLDEST_FIRST = (schema.Message.created_at, schema.Message.provider_message_id)
 #: Ties break on the id cast as a number — two messages can share a timestamp,
@@ -2082,6 +2094,44 @@ class Database:
             for field_name, value in values.items():
                 setattr(existing, field_name, value)
 
+    #: Two ineffective compactions and node 0 stops attempting a third —
+    #: board `what-the-room-already-knows`, ticket 08, D6.
+    COMPACTION_COOLDOWN_AFTER = 2
+
+    async def record_ineffective_compaction(self, task_id: int) -> int:
+        """One more pass where truncating this task's transcript still left
+        it over budget. Returns the new count.
+
+        Upserted the same way `mark_extraction` is — one current count per
+        task, created on the first ineffective pass. Never reset: a task
+        whose single message is larger than the budget stays that size, so
+        there is no future pass on which trying again would help.
+        """
+        async with self._sessions.begin() as session:
+            existing = await session.get(schema.CompactionState, task_id)
+            if existing is None:
+                session.add(schema.CompactionState(task_id=task_id, ineffective_count=1))
+                return 1
+            existing.ineffective_count += 1
+            return existing.ineffective_count
+
+    async def compaction_on_cooldown(self, task_id: int) -> bool:
+        """Whether node 0 should stop attempting budget-based truncation for
+        this task — `COMPACTION_COOLDOWN_AFTER` ineffective passes reached.
+        `False` for a task nothing has recorded against, which is every task
+        before its first ineffective pass."""
+        return await self.compaction_ineffective_count(task_id) >= self.COMPACTION_COOLDOWN_AFTER
+
+    async def compaction_ineffective_count(self, task_id: int) -> int:
+        """How many passes in a row truncation has failed to help — `0` for a
+        task nothing has recorded against. The count `compaction_on_cooldown`
+        thresholds; kept as its own read so the operator's own view of a
+        stuck task (and this store's own tests) can say *how* stuck, not
+        only whether."""
+        async with self._sessions() as session:
+            row = await session.get(schema.CompactionState, task_id)
+            return row.ineffective_count if row is not None else 0
+
     async def set_task_params(self, task_id: int, params: dict) -> None:
         await self._set_task(task_id, params=params)
 
@@ -2158,7 +2208,9 @@ class Database:
                 if (fingerprint or "") == fingerprints[task_id]
             }
 
-    async def original_text_for(self, task_id: int, limit: int = 20) -> str | None:
+    async def original_text_for(
+        self, task_id: int, limit: int = 20, *, budget_tokens: int | None = None
+    ) -> str | None:
         """Everything the reporter has said about this task, oldest first.
 
         Not the messages *linked* to the task — the ones they wrote. Discord
@@ -2177,8 +2229,21 @@ class Database:
         both the reporter and the account, so "same author" would otherwise
         include our own questions.
 
-        Bounded, because a task that stays open in a busy channel would
-        otherwise grow its own prompt without limit.
+        `limit` bounds the query — a task that stays open in a busy channel
+        must not grow its own prompt without limit. Board
+        `what-the-room-already-knows`, ticket 08, D6: this stays a *secondary*
+        cap now. The primary trigger, when `budget_tokens` is given, is size —
+        a count alone cannot tell twenty short messages from twenty long ones.
+        Over budget, the oldest of the fetched messages are dropped first,
+        never the newest: an answer to a question just asked is the one thing
+        a follow-up pass cannot afford to lose, and it is always the newest.
+        At least one message always survives the drop, however large — a
+        single message this large is what `record_ineffective_compaction`
+        exists to make visible, not something this method silently empties.
+
+        `budget_tokens=None` — the default, and unset in `config.yaml` unless
+        the operator sets it — means no compaction at all (D7): exactly
+        today's behaviour, bounded by `limit` alone.
         """
         async with self._sessions() as session:
             opening = (
@@ -2211,7 +2276,13 @@ class Database:
                 .order_by(schema.Message.created_at)
                 .limit(limit)
             )
-            return "\n".join(text for text in said if text) or None
+            texts = [text for text in said if text]
+        if not texts:
+            return None
+        if budget_tokens is not None:
+            while len(texts) > 1 and estimated_tokens("\n".join(texts)) > budget_tokens:
+                texts = texts[1:]
+        return "\n".join(texts) or None
 
     # ---- what the operator said about a classification -------------------
 

@@ -702,11 +702,15 @@ class ExtractionMark:
     the text when somebody says something, the schema when a field is added or
     its meaning reworded, and either changes the prompt.
 
-    The task's parameters are *not* in it. They never reach the extractor's
-    prompt, so fingerprinting them — which is what ticket 04 asked for — would
-    pay again for a change the extractor cannot see. A parameter change still
-    changes what node 0 concludes, because the replayed question is re-filtered
-    against the parameters as they are now.
+    The task's parameters were not in it until ticket 08's D8: they now
+    shape the schema half indirectly — an already-filled field drops out of
+    what the model is shown (`friday/extraction/prompt.py::build_input`'s
+    `known`) — so a fill changes the prompt and has to change the digest the
+    same way ticket 01's room did. Before that, a parameter change still
+    changed what node 0 concluded even with a replayed answer, because the
+    replayed question was re-filtered against the parameters as they stood;
+    that re-filtering is unchanged, it is just no longer the only route by
+    which the parameters affect the outcome.
 
     Per-call input, not the whole prompt: the extractor's `instructions` carry
     the skill catalogue and the job text, which change on a restart rather than
