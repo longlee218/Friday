@@ -30,7 +30,7 @@ from friday.extraction import (
     extract as _extract,
     input_fingerprint,
 )
-from friday.store.db import estimated_tokens
+from friday.extraction.context import FullContext, build_full_context
 
 __all__ = ["plan_by_required_parameters", "prepare", "prepare_node", "prepared_ok"]
 
@@ -47,6 +47,13 @@ def prepare_node(
     *,
     on_ready: Callable[[Params], Params | Action] | None = None,
     budget_tokens: int | None = None,
+    #: Board `what-the-room-already-knows`, ticket 15: closed over like
+    #: `budget_tokens`, for the same reason — one context store serves
+    #: every conversation, and `build_full_context` is the only place this
+    #: node reaches it. `None` for an install with no channel context at
+    #: all, which reads exactly as it did before rooms reached the
+    #: extractor.
+    context_store: Any = None,
 ) -> Node:
     """Node 0: everything the reporter has said, filled in and checked.
 
@@ -70,32 +77,35 @@ def prepare_node(
 
     async def _prepare(state: DAGState, deps: DAGDeps) -> Params | Action:
         known = params_cls(**deps.task.params)
-        # A task already on cooldown (two ineffective compactions, D6) is
-        # read exactly as if no budget were configured — trying a third
-        # time cannot help a single message larger than the budget, and the
-        # point of the cooldown is that nothing keeps re-checking that.
-        on_cooldown = (
-            budget_tokens is not None
-            and await deps.db.compaction_on_cooldown(deps.task.id)
+        # Board `what-the-room-already-knows`, ticket 15, D26: one gather.
+        # `build_full_context` is the only place this node reads the
+        # transcript, the room, the domain memories, the open questions, or
+        # consults the cooldown — everything `Extractor.would_ask` used to
+        # fetch on its own, ticket 08's `known` included.
+        context = await build_full_context(
+            deps.db,
+            context_store,
+            channel_id=deps.task.conversation.channel_id,
+            task_id=deps.task.id,
+            known=known,
+            budget_tokens=budget_tokens,
         )
-        effective_budget = None if on_cooldown else budget_tokens
-        text = await deps.db.original_text_for(
-            deps.task.id, budget_tokens=effective_budget
-        )
-        if effective_budget is not None and text is not None:
-            if estimated_tokens(text) > effective_budget:
-                count = await deps.db.record_ineffective_compaction(deps.task.id)
-                log.warning(
-                    "task %s: compaction did not bring the build under budget "
-                    "(%d/%d estimated tokens, attempt %d)",
-                    deps.task.id, estimated_tokens(text), effective_budget, count,
-                )
+        # The one write on this path, and the reason the builder itself
+        # cannot make it (D6): a transcript still over budget after
+        # truncation is something dropping older messages could not fix,
+        # and node 0 — not the builder — is what turns that into a count a
+        # third pass will read back as "stop trying".
+        if context.transcript_over_budget:
+            count = await deps.db.record_ineffective_compaction(deps.task.id)
+            log.warning(
+                "task %s: compaction did not bring the build under budget "
+                "(attempt %d)", deps.task.id, count,
+            )
         filled, problem = await prepare(
             task_type,
             known,
-            text=text,
+            context=context,
             extract=_remembering(deps.db, deps.task.id, params_cls),
-            channel_id=deps.task.conversation.channel_id,
             task_id=deps.task.id,
             node="prepare",
         )
@@ -120,7 +130,12 @@ async def prepare(
     task_type: str,
     params: Params,
     *,
-    text: str | None = None,
+    #: Everything node 0 gathered for this pass (board
+    #: `what-the-room-already-knows`, ticket 15, D26) — `None` for a task
+    #: with no `FullContext` built at all, `context.transcript is None` for
+    #: one with nothing linked to it yet. Both mean the same thing here:
+    #: nothing to extract from, so code alone decides what is still missing.
+    context: FullContext | None = None,
     #: How the extraction is obtained. Injected so node 0 can hand in one that
     #: remembers, without this function growing a second path — there is one
     #: place a `Refused` becomes a hand-over and one place a fill happens, and
@@ -131,11 +146,6 @@ async def prepare(
     #: would have quietly outlived every `monkeypatch.setattr(prepare,
     #: "_extract", ...)` in the suite — two tests went red saying so.
     extract: _Extract | None = None,
-    #: Which room this is, so the extractor's prompt can carry what the room
-    #: is known to be. A string rather than the resolved context: the store
-    #: lives with the extractor, and threading a dict through here would put
-    #: this module in the business of reading channel files.
-    channel_id: str | None = None,
     #: Whose work this is, for the row the extractor's call becomes. Node 0
     #: is the only step that knows both, and the extractor is the only agent
     #: it runs — so this is where the two meet.
@@ -160,17 +170,18 @@ async def prepare(
     nothing to say and only for fields the fill actually left blank: asking
     again for something already answered is not a question this exists to ask.
 
-    **`params` is also what `extract` is told is already known** (board
-    `what-the-room-already-knows`, ticket 08, D8) — passed through as
-    `known=params`, before this call fills anything further, so the schema
-    the model is shown drops what this task's own store already has.
+    **`context` carries `known`, and it is `params`** (ticket 08's D8,
+    carried by `context` since ticket 15): the caller builds `context` from
+    the same `params` it passes here, before this call fills anything
+    further, so the schema the model is shown already drops what this
+    task's own store has. `channel_id` no longer reaches this function at
+    all — `context.room` is resolved before `prepare` is ever called.
     """
     clarify: Clarify | None = None
-    if text is not None:
+    if context is not None and context.transcript is not None:
         try:
             extracted, clarify = await (extract or _extract)(
-                task_type, text, known=params,
-                channel_id=channel_id, task_id=task_id, node=node,
+                task_type, context, task_id=task_id, node=node,
             )
         except Refused as refusal:
             # A ceiling, not a failure. Falling through would leave the fields
@@ -225,19 +236,16 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
     """
 
     async def extract(
-        task_type: str, text: str, *, known=None,
-        channel_id=None, task_id=None, node=None,
+        task_type: str, context: FullContext, *, task_id=None, node=None,
     ):
         # Asked of the extraction family rather than reconstructed here. The
         # reconstruction knew about the field schema and the reporter's text,
         # and ticket 01 gave the prompt a third input it could not see — so an
         # operator who wrote down what a room is got a task that never read
-        # it, because the fingerprint had not changed. `known` is ticket 08's
-        # fifth: a field getting filled shrinks the schema, which the digest
-        # must see move the same way.
-        digest = await input_fingerprint(
-            task_type, text, known=known, channel_id=channel_id, task_id=task_id
-        )
+        # it, because the fingerprint had not changed. Every input `would_ask`
+        # reads is a field of `context` now (ticket 15, D26), so a new one
+        # cannot be forgotten here either.
+        digest = await input_fingerprint(task_type, context)
         mark = await db.extraction_mark(task_id)
         if mark is not None and mark.fingerprint == digest:
             log.info(
@@ -249,8 +257,7 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
                 Clarify(mark.asked_about, mark.because) if mark.asked_about else None,
             )
         extracted, clarify = await _extract(
-            task_type, text, known=known,
-            channel_id=channel_id, task_id=task_id, node=node,
+            task_type, context, task_id=task_id, node=node,
         )
         if extracted is None and clarify is None:
             # Nothing to remember, so nothing is written — and the next pass

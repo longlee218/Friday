@@ -27,6 +27,7 @@ def _context_modules() -> list[Path]:
     root = Path(__file__).resolve().parents[1] / "friday"
     return [
         root / "triage" / "context.py",
+        root / "extraction" / "context.py",
     ]
 
 
@@ -93,5 +94,6 @@ def test_the_list_of_gather_modules_is_a_literal_not_a_derivation():
     }
 
     assert found == set(), f"the module list is derived by {found}, not written out"
-    assert [p.name for p in _context_modules()] == ["context.py"]
+    assert [p.name for p in _context_modules()] == ["context.py", "context.py"]
+    assert [p.parent.name for p in _context_modules()] == ["triage", "extraction"]
     assert all(p.exists() for p in _context_modules()), "a listed gather module does not exist"

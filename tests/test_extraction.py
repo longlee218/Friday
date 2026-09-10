@@ -28,7 +28,19 @@ from friday.extraction import (
     extract,
     registered,
 )
+from friday.extraction.context import FullContext
 from friday.domain.validation import Matches
+
+
+def _context(text="", params_cls=None, *, room=None, asked=(), memories=(), known=None):
+    """A `FullContext` built the way `build_full_context` would, for tests
+    that only care about rendering, not gathering. Mirrors the shape
+    `build_input`'s five arguments used to have before ticket 15's D26."""
+    if known is None:
+        known = params_cls() if params_cls is not None else None
+    return FullContext(
+        transcript=text, room=room, domain_memories=memories, asked=asked, known=known
+    )
 
 
 # --- parse helpers ----------------------------------------------------
@@ -141,7 +153,9 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
     _install("stub_test_31", ext)
 
     try:
-        params, clarify = asyncio.run(extract("stub_test_31", "the api is wrong"))
+        params, clarify = asyncio.run(
+            extract("stub_test_31", _context("the api is wrong", ParamsWithRules))
+        )
         assert isinstance(params, ParamsWithRules)
         assert params.environment == "production"
         assert clarify is None
@@ -172,7 +186,7 @@ def test_an_extractor_returns_none_when_harness_fails():
     _install("failing_test_31", ext)
 
     try:
-        params, clarify = asyncio.run(extract("failing_test_31", "x"))
+        params, clarify = asyncio.run(extract("failing_test_31", _context("x", Params)))
         assert params is None
         assert clarify is None
     finally:
@@ -203,7 +217,9 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
         # Output is not JSON and has no key:value lines, so _parse returns {}.
         # The Params constructor then fails with TypeError on the missing
         # required field; Extractor returns None.
-        params, clarify = asyncio.run(extract("bad_output_test_31", "x"))
+        params, clarify = asyncio.run(
+            extract("bad_output_test_31", _context("x", known=StrictParams(required_id="")))
+        )
         assert params is None
         assert clarify is None
     finally:
@@ -211,7 +227,9 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
 
 
 async def test_extract_returns_none_for_unregistered_task_type():
-    assert await extract("not_a_real_task_type_31_xyz", "anything") == (None, None)
+    assert await extract(
+        "not_a_real_task_type_31_xyz", _context("anything")
+    ) == (None, None)
 
 
 # --- ask_clarification --------------------------------------------------
@@ -263,7 +281,9 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
     _install("clarify_test_31", ext)
 
     try:
-        params, clarify = await extract("clarify_test_31", "the api is broken")
+        params, clarify = await extract(
+            "clarify_test_31", _context("the api is broken", ApiIssueParams)
+        )
         assert clarify == Clarify(
             fields=("correlation_id",), because="no id or curl anywhere in the report"
         )
@@ -391,7 +411,7 @@ def test_the_doc_reaches_the_extractors_prompt():
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
 
-    prompt = build_input("API lỗi", ApiIssueParams)
+    prompt = build_input(_context("API lỗi", ApiIssueParams))
 
     assert "copied exactly" in prompt
     assert "- summary: summary" not in prompt
@@ -406,25 +426,25 @@ def test_a_field_already_known_drops_out_of_the_schema():
 
     known = ApiIssueParams(environment="production")
 
-    prompt = build_input("API lỗi", ApiIssueParams, known=known)
+    prompt = build_input(_context("API lỗi", known=known))
 
     assert "- environment:" not in prompt
     assert "- summary:" in prompt, "a still-blank field must stay in the schema"
 
 
-def test_known_left_unset_shows_every_field_exactly_as_before():
-    """The default, and every call site before this ticket — a room with no
-    context file already gets this guarantee for `room_facts`; `known`
-    unset is the same promise for the schema half."""
+def test_a_freshly_constructed_known_shows_every_field():
+    """`context.known` is never `None` (ticket 15, D26) — a task with
+    nothing filled in yet is `params_cls()`, every field its own default —
+    so this, not an absent `known`, is what "nothing known yet" looks like
+    now. A room with no context file already gets the same guarantee for
+    `room_facts`."""
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
 
-    with_known_none = build_input("API lỗi", ApiIssueParams)
-    with_known_absent = build_input("API lỗi", ApiIssueParams, known=None)
+    prompt = build_input(_context("API lỗi", ApiIssueParams))
 
-    assert with_known_none == with_known_absent
-    assert "- environment:" in with_known_none
-    assert "- correlation_id:" in with_known_none
+    assert "- environment:" in prompt
+    assert "- correlation_id:" in prompt
 
 
 def test_an_empty_string_field_is_not_treated_as_known():
@@ -436,7 +456,7 @@ def test_an_empty_string_field_is_not_treated_as_known():
 
     known = ApiIssueParams(environment="")
 
-    prompt = build_input("API lỗi", ApiIssueParams, known=known)
+    prompt = build_input(_context("API lỗi", known=known))
 
     assert "- environment:" in prompt
 
@@ -467,7 +487,7 @@ async def test_a_model_that_could_not_answer_is_not_a_refusal():
     ext = build_extractor(params_cls=Params, harness=Refuses(), name="refuses")
 
     with pytest.raises(Refused, match="tokens today"):
-        await ext.run("anything")
+        await ext.run(_context("anything", Params))
 
 
 # --- the room reaches the extractor (ticket 01) ---------------------------
@@ -488,8 +508,8 @@ def test_a_room_with_no_context_file_leaves_the_prompt_exactly_as_it_was():
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
 
-    assert build_input("API lỗi", ApiIssueParams, room=None) == build_input(
-        "API lỗi", ApiIssueParams
+    assert build_input(_context("API lỗi", ApiIssueParams, room=None)) == build_input(
+        _context("API lỗi", ApiIssueParams)
     )
 
 
@@ -504,7 +524,7 @@ def test_the_rooms_facts_reach_the_input_and_not_the_instructions():
     from friday.extraction.prompt import build_input, build_instructions
 
     said = build_input(
-        "API lỗi", ApiIssueParams, room=_room(**{"test.apero": "staging"})
+        _context("API lỗi", ApiIssueParams, room=_room(**{"test.apero": "staging"}))
     )
 
     assert "test.apero" in said
@@ -518,7 +538,9 @@ def test_the_rooms_facts_arrive_through_the_memory_section():
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
 
-    said = build_input("API lỗi", ApiIssueParams, room=_room(register="thân mật"))
+    said = build_input(
+        _context("API lỗi", ApiIssueParams, room=_room(register="thân mật"))
+    )
 
     assert "<memory>" in said
     assert "[channel" in said
@@ -532,7 +554,9 @@ def test_the_field_schema_comes_before_the_room():
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
 
-    said = build_input("API lỗi", ApiIssueParams, room=_room(register="thân mật"))
+    said = build_input(
+        _context("API lỗi", ApiIssueParams, room=_room(register="thân mật"))
+    )
 
     assert said.index("Fields:") < said.index("<memory>") < said.index("What they said:")
 
@@ -552,72 +576,11 @@ def test_an_override_the_operator_wrote_wins_over_a_derived_summary():
         derived={"env": "from the summariser"},
         overrides={"env": "from the operator"},
     )
-    said = build_input("API lỗi", ApiIssueParams, room=room)
+    said = build_input(_context("API lỗi", ApiIssueParams, room=room))
 
     assert "from the operator" in said
     assert "from the summariser" not in said
     assert "from base" not in said
-
-
-def test_the_extractor_itself_looks_the_room_up_from_the_channel_it_is_given():
-    """The guard the end-to-end test could not be: that one's stub built the
-    prompt itself, so `Extractor.run`'s own lookup — store plus `channel_id`
-    to room to prompt — had no test at all, and a mutation that made the
-    extractor ignore its store passed the whole suite.
-
-    This is the point of the ticket, so it is asserted at the seam that does
-    it rather than beside it."""
-    from friday.memory.channel_context import ChannelContext
-
-    seen: list[str] = []
-
-    class _Store:
-        def context(self, channel_id):
-            return (
-                ChannelContext(
-                    channel_id=channel_id,
-                    base={},
-                    derived={},
-                    overrides={"test.apero": "staging"},
-                )
-                if channel_id == "watched"
-                else None
-            )
-
-    class StubResult:
-        final_output = '{"environment": "staging"}'
-
-    class StubHarness:
-        tool_turns = 0
-        last_error = None
-
-        async def run(self, prompt, *, context=None, extra_turns=0,
-                      task_id=None, node=None):
-            seen.append(prompt)
-            return StubResult()
-
-    @dataclass
-    class Fields:
-        environment: Optional[str] = None
-
-    ext = build_extractor(
-        params_cls=Fields,
-        harness=StubHarness(),  # type: ignore[arg-type]
-        name="stub",
-        context=_Store(),
-    )
-    _install("stub_room", ext)
-    try:
-        asyncio.run(extract("stub_room", "API lỗi", channel_id="watched"))
-        asyncio.run(extract("stub_room", "API lỗi", channel_id="somewhere-else"))
-    finally:
-        registered().pop("stub_room", None)
-
-    with_room, without = seen
-    assert "staging" in with_room, "the extractor did not read its own store"
-    assert "[channel" in with_room
-    assert "staging" not in without, "a room leaked into another channel"
-    assert "[channel" not in without
 
 
 def test_a_layer_the_operator_did_not_override_still_reaches_the_prompt():
@@ -630,14 +593,16 @@ def test_a_layer_the_operator_did_not_override_still_reaches_the_prompt():
     from friday.memory.channel_context import ChannelContext
 
     said = build_input(
-        "API lỗi",
-        ApiIssueParams,
-        room=ChannelContext(
-            channel_id="watched",
-            base={"company": "apero"},
-            derived={"busiest": "the reelme team"},
-            overrides={"test.apero": "staging"},
-        ),
+        _context(
+            "API lỗi",
+            ApiIssueParams,
+            room=ChannelContext(
+                channel_id="watched",
+                base={"company": "apero"},
+                derived={"busiest": "the reelme team"},
+                overrides={"test.apero": "staging"},
+            ),
+        )
     )
 
     assert "apero" in said, "the shared base layer never reached the prompt"
@@ -656,7 +621,7 @@ def test_outstanding_questions_reach_the_conversation_slot_not_the_channel():
     from friday.extraction.prompt import build_input
 
     said = build_input(
-        "API lỗi", ApiIssueParams, asked=("em gửi anh curl với",)
+        _context("API lỗi", ApiIssueParams, asked=("em gửi anh curl với",))
     )
 
     assert "[conversation" in said
@@ -670,8 +635,8 @@ def test_a_task_that_asked_nothing_renders_no_such_content():
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
 
-    assert build_input("API lỗi", ApiIssueParams, asked=()) == build_input(
-        "API lỗi", ApiIssueParams
+    assert build_input(_context("API lỗi", ApiIssueParams, asked=())) == build_input(
+        _context("API lỗi", ApiIssueParams)
     )
 
 
@@ -683,12 +648,14 @@ def test_the_room_and_the_outstanding_questions_are_both_labelled():
     from friday.memory.channel_context import ChannelContext
 
     said = build_input(
-        "API lỗi",
-        ApiIssueParams,
-        room=ChannelContext(
-            channel_id="watched", base={}, derived={}, overrides={"test.apero": "staging"}
-        ),
-        asked=("còn environment nào em?",),
+        _context(
+            "API lỗi",
+            ApiIssueParams,
+            room=ChannelContext(
+                channel_id="watched", base={}, derived={}, overrides={"test.apero": "staging"}
+            ),
+            asked=("còn environment nào em?",),
+        )
     )
 
     assert "[conversation" in said and "[channel" in said
@@ -697,125 +664,11 @@ def test_the_room_and_the_outstanding_questions_are_both_labelled():
     )
 
 
-async def test_the_extractor_itself_reads_what_it_already_asked(db):
-    """The guard the prompt-level tests cannot be. Ticket 01 shipped with the
-    equivalent hole: its end-to-end double built the prompt itself, so
-    `Extractor`'s own lookup had no test and a mutation that made it ignore
-    its store passed the suite. Asserted at the seam that does the lookup."""
-    from friday.domain.models import ApiIssueParams
-    from tests.test_outbox import _asked, _opened_by
-    from tests.test_pool import make_task
-
-    task = await make_task(db)
-    await _opened_by(db, task)
-    await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
-
-    seen: list[str] = []
-
-    class StubResult:
-        final_output = '{"environment": null}'
-
-    class StubHarness:
-        tool_turns = 0
-        last_error = None
-
-        async def run(self, prompt, *, context=None, extra_turns=0,
-                      task_id=None, node=None):
-            seen.append(prompt)
-            return StubResult()
-
-    ext = build_extractor(
-        params_cls=ApiIssueParams,
-        harness=StubHarness(),  # type: ignore[arg-type]
-        name="stub",
-        db=db,
-    )
-    _install("asked_probe", ext)
-    try:
-        await extract("asked_probe", "API lỗi", task_id=task.id)
-        await extract("asked_probe", "API lỗi")
-    finally:
-        registered().pop("asked_probe", None)
-
-    with_task, without = seen
-    assert "em gửi anh curl với" in with_task, (
-        "the extractor did not read what it had already asked"
-    )
-    assert "[conversation" in with_task
-    assert "em gửi anh curl với" not in without, (
-        "a question leaked into a call about no task"
-    )
-
-
-async def test_the_extractor_itself_reads_domain_kind_memories(db):
-    """Board `what-the-room-already-knows`, ticket 10: the extractor reads
-    the four domain kinds (D14) through `db.domain_memories`, the same seam
-    `test_the_extractor_itself_reads_what_it_already_asked` proved for
-    outstanding questions — asserted at the lookup, not through a stub that
-    would pass whether or not `Extractor` actually reached its store."""
-    from friday.domain.models import ApiIssueParams, MemoryKind, MemoryScope
-
-    await db.memory_add(
-        MemoryScope(channel_id="watched", task_id=None, agent="responder"),
-        "test.apero is staging",
-        kind=MemoryKind.FACT,
-    )
-
-    ext = build_extractor(params_cls=ApiIssueParams, harness=None, name="stub", db=db)  # type: ignore[arg-type]
-
-    with_room = await ext.would_ask("API lỗi", channel_id="watched")
-    without_channel = await ext.would_ask("API lỗi")
-
-    assert "test.apero is staging" in with_room
-    assert "fact:" in with_room
-    assert "test.apero is staging" not in without_channel, (
-        "a room leaked into a call about no channel"
-    )
-
-
-async def test_voice_kind_memories_do_not_reach_the_extractor(db):
-    """`VOICE` is the responder's alone (D14) — however it got written, it
-    must not surface in the extractor's prompt."""
-    from friday.domain.models import ApiIssueParams, MemoryKind, MemoryScope
-
-    scope = MemoryScope(channel_id="watched", task_id=None, agent="responder")
-    await db.memory_add(scope, "test.apero is staging", kind=MemoryKind.FACT)
-    await db.memory_add(scope, "they like short replies", kind=MemoryKind.VOICE)
-
-    ext = build_extractor(params_cls=ApiIssueParams, harness=None, name="stub", db=db)  # type: ignore[arg-type]
-
-    said = await ext.would_ask("API lỗi", channel_id="watched")
-
-    assert "test.apero is staging" in said
-    assert "they like short replies" not in said
-
-
-async def test_the_outstanding_questions_cost_no_model_call(db):
-    """Derived, not summarised. The whole value of this input is that it is a
-    query over what was actually sent, so it cannot be wrong in an interesting
-    way — and it must not quietly become the fourth agent in the pipeline."""
-    from friday.domain.models import ApiIssueParams
-    from tests.test_outbox import _asked, _opened_by
-    from tests.test_pool import make_task
-
-    task = await make_task(db)
-    await _opened_by(db, task)
-    await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
-
-    class _Exploding:
-        tool_turns = 0
-        last_error = None
-
-        async def run(self, *a, **k):  # pragma: no cover - must not be reached
-            raise AssertionError("a model was called to work out what we asked")
-
-    ext = build_extractor(
-        params_cls=ApiIssueParams,
-        harness=_Exploding(),  # type: ignore[arg-type]
-        name="stub",
-        db=db,
-    )
-
-    said = await ext.would_ask("API lỗi", task_id=task.id)
-
-    assert "em gửi anh curl với" in said
+#: `test_the_extractor_itself_reads_what_it_already_asked`,
+#: `test_the_extractor_itself_reads_domain_kind_memories`,
+#: `test_voice_kind_memories_do_not_reach_the_extractor` and
+#: `test_the_outstanding_questions_cost_no_model_call` moved to
+#: `tests/test_extraction_context.py` in ticket 15 (D26): they tested
+#: `Extractor`'s own lookup of the room, the domain memories and the open
+#: questions, which no longer exists — `build_full_context` does all four
+#: reads now, and `Extractor` holds no store of its own to test here.

@@ -175,7 +175,7 @@ What is actually on disk.
 | `friday/inbox/` | Deep module: `stream()`, `sweep_once()`, `tally()`. Gateway, backfill, cursors and dedup are implementation |
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py` (the account), `bot.py` (approval cards) and `normalise.py`. Its `__init__.py` is empty on purpose |
 | `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages. `context.py` gathers what a mention is shown (D26); `prompt.py` renders it |
-| `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt and its `Params` schema; **one `extractor` block in `config.yaml` serves all of them** — it was one block per type, and all three held identical values for as long as they existed, so what the split bought was one configuration written three times |
+| `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt and its `Params` schema; **one `extractor` block in `config.yaml` serves all of them** — it was one block per type, and all three held identical values for as long as they existed, so what the split bought was one configuration written three times. `context.py` is node 0's own gather function (ticket 15, D26): the transcript, the room, the domain memories, the outstanding questions and `known`, one call, one frozen `FullContext` |
 | `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds the entry node every graph shares and holds the fill-and-validate mechanism it runs. `dag/router.py` maps a task type to a graph. **Every type now gets the same one-node graph** |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
 | `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), remembering (`memory` — `memory_search`, `memory_add`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder; ticket 09's D9). A test asserts the list — all twelve, factories built rather than skipped — and forbids declaring one anywhere else |
@@ -823,13 +823,29 @@ not an implementation detail:
   **A field already in the task's own parameters drops out of the schema
   the extractor is shown**, the other half of D8's three-way split (a
   schema field is "compacted into the task's parameters" because the
-  extractor already copied it there). `Extractor.would_ask`'s `known`
-  reaches `build_input`, which skips a field once `known` has anything
-  truthy for it — empty string does not count, the same rule `_fill`
-  already applies. This is a fifth input to `input_fingerprint`: a field
-  getting filled shrinks the schema, which is a real prompt change the
-  digest has to see move, corrected in the same ticket in
-  `ExtractionMark`'s own docstring, which had claimed the opposite.
+  extractor already copied it there). `known` reaches `build_input`, which
+  skips a field once `known` has anything truthy for it — empty string does
+  not count, the same rule `_fill` already applies. This is a fifth input to
+  `input_fingerprint`: a field getting filled shrinks the schema, which is a
+  real prompt change the digest has to see move, corrected in the same
+  ticket in `ExtractionMark`'s own docstring, which had claimed the
+  opposite.
+
+  **The five signatures that threaded `known` from node 0 to `build_input`
+  are gone** (ticket 15, D26): `friday/extraction/context.py`'s
+  `build_full_context` is now the one place node 0 gathers everything an
+  extraction needs — the transcript under its budget, `known`, and the
+  three inputs ticket 01 and ticket 10 added to the extractor's own
+  `would_ask` (the room, the domain memories, the outstanding questions) —
+  into one frozen `FullContext`. **The room is resolved here now, not by
+  the extractor**: `context_store` reaches `build_full_context` by closure
+  through `prepare_node`, the same way `budget_tokens` already did, and
+  `Extractor` no longer holds a context store or a database of its own —
+  `would_ask`, `run`, `extract` and `input_fingerprint` all take the one
+  `FullContext` object and nothing else. Fixed as a side effect: `register_
+  dags` had been writing the context store into `DAG_DEPS_EXTRA["context_
+  store"]`, a dict read by task *type*, so that value was never once
+  reachable — nothing had ever read it.
 
 ## Conventions
 

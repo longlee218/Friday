@@ -65,7 +65,11 @@ def dag_for(task_type: str) -> DAG | None:
 
 
 def build_simple_dag(
-    task_type: str, params_cls: type[Params], *, budget_tokens: int | None = None
+    task_type: str,
+    params_cls: type[Params],
+    *,
+    budget_tokens: int | None = None,
+    context_store: Any = None,
 ) -> DAG:
     """`prepare`, then ask for what is missing or hand the rest over — what
     every type without an investigation needs (D1). There is nothing here
@@ -73,8 +77,10 @@ def build_simple_dag(
     not before.
 
     `budget_tokens` — board `what-the-room-already-knows`, ticket 08 —
-    passes straight through to `prepare_node`, the same for every type:
-    node 0's budget is one number in `config.yaml`, not one per task type.
+    and `context_store` — ticket 15 — both pass straight through to
+    `prepare_node`, the same for every type: node 0's budget and the
+    channel context store are each one value shared by every task type,
+    not one per type.
     """
     return DAG(
         name=task_type,
@@ -84,6 +90,7 @@ def build_simple_dag(
                 params_cls,
                 on_ready=lambda filled: plan_by_required_parameters(task_type, filled),
                 budget_tokens=budget_tokens,
+                context_store=context_store,
             ),
         ),
     )
@@ -115,13 +122,29 @@ def register_dags(
     `dag_for` never answers "no graph" for a type this covers, which is every
     classifiable type there is. Build a multi-node graph when there are steps
     worth skipping and somebody has said what they are.
+
+    **`context_store` reaches node 0 by closure now, not through
+    `DAG_DEPS_EXTRA`** (board `what-the-room-already-knows`, ticket 15).
+    This parameter used to be written into `DAG_DEPS_EXTRA["context_store"]`
+    — a dict keyed by *task type*, per its own annotation — so the value
+    landed under a key no `DAGDeps.extra` lookup, keyed by `task.type`,
+    could ever reach: `deps.extra.get(task.type, {})` never once produced
+    `"context_store"`. Found while wiring `build_full_context`'s own need
+    for it, not by anything that had been reading it — nothing was. Passed
+    straight to `build_simple_dag` instead, the same way `budget_tokens`
+    already is.
     """
     EDGE_ROUTER.clear()
     budget_tokens = config.context.extraction_budget_tokens
     for task_type, params_cls in PARAMS.items():
         register_dag(
             task_type,
-            build_simple_dag(task_type, params_cls, budget_tokens=budget_tokens),
+            build_simple_dag(
+                task_type,
+                params_cls,
+                budget_tokens=budget_tokens,
+                context_store=context_store,
+            ),
         )
 
     # No graph has a node agent any more — the one that did was `api_issue`'s
@@ -129,8 +152,6 @@ def register_dags(
     # dict stays, because it is what a graph's agents would be handed down
     # through, and `Pool` reads it either way.
     DAG_DEPS_EXTRA.clear()
-    if context_store is not None:
-        DAG_DEPS_EXTRA["context_store"] = context_store
     # Replaced, not merged. Merging means a second call — a test, a restart in
     # the same process — leaves the previous run's servers reachable, and a
     # closed connection that is still in the dict is worse than an absent one:

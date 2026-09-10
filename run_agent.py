@@ -190,8 +190,6 @@ async def _run(stack: AsyncExitStack) -> None:
         skills=skills,
         record=record_call,
         spent=db.spent_today,
-        context=context_store,
-        db=db,
     )
 
     # Register the workflow graphs. Same shape as the extractors above and for

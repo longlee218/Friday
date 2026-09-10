@@ -19,7 +19,7 @@ from friday.domain.actions import Ask, HandOver
 from friday.dag.prepare import prepare
 
 
-async def _decide(task_type, params, *, text=None):
+async def _decide(task_type, params):
     """The simple path, exactly as `build_simple_dag`'s node wires it —
     `prepare_node`'s `on_ready` is `plan_by_required_parameters`.
 
@@ -27,10 +27,14 @@ async def _decide(task_type, params, *, text=None):
     did not — the node calls these two and routes to a graph in between — so a
     convenience wrapper had become a second path that only tests took, which is
     how five tests came to hold an unreachable branch elsewhere in this file.
+
+    No `context=` passed — every caller here wants "nothing to extract from",
+    which is what `context=None` already means (board
+    `what-the-room-already-knows`, ticket 15).
     """
     from friday.dag.prepare import plan_by_required_parameters, prepare
 
-    params, problem = await prepare(task_type, params, text=text)
+    params, problem = await prepare(task_type, params)
     return problem or plan_by_required_parameters(task_type, params)
 
 
@@ -159,14 +163,15 @@ async def _prepare_with_clarify(params_obj, clarify, *, extracted=None, monkeypa
     code's own floor and a model's `Clarify` can be tested without a real
     extractor or model."""
     import friday.dag.prepare as wf
+    from tests.test_extraction import _context
 
-    async def stub_extract(
-        task_type, text, *, known=None, channel_id=None, task_id=None, node=None
-    ):
+    async def stub_extract(task_type, context, *, task_id=None, node=None):
         return extracted, clarify
 
     monkeypatch.setattr(wf, "_extract", stub_extract)
-    return await wf.prepare("api_issue", params_obj, text="irrelevant")
+    return await wf.prepare(
+        "api_issue", params_obj, context=_context("irrelevant", type(params_obj))
+    )
 
 
 async def test_code_floor_wins_over_a_clarify_that_names_a_different_field(monkeypatch):
@@ -299,10 +304,9 @@ async def test_a_refused_extractor_hands_over_instead_of_asking(monkeypatch):
     from friday.agent.harness import Refused
     from friday.domain.actions import HandOver
     from friday.domain.models import ApiIssueParams
+    from tests.test_extraction import _context
 
-    async def refused(
-        task_type, text, *, known=None, channel_id=None, task_id=None, node=None
-    ):
+    async def refused(task_type, context, *, task_id=None, node=None):
         raise Refused("api_issue_extractor has spent 999 of its 10 tokens today")
 
     monkeypatch.setattr(wf, "_extract", refused)
@@ -310,7 +314,10 @@ async def test_a_refused_extractor_hands_over_instead_of_asking(monkeypatch):
     _, action = await wf.prepare(
         "api_issue",
         ApiIssueParams(summary="checkout 500"),
-        text="prod broke, correlationId abcdef01-2345-6789-abcd-ef0123456789",
+        context=_context(
+            "prod broke, correlationId abcdef01-2345-6789-abcd-ef0123456789",
+            ApiIssueParams,
+        ),
     )
 
     assert isinstance(action, HandOver)
@@ -343,14 +350,25 @@ class _StandsForAnExtractor:
     would have to be handled by a fallback — and a fallback here would
     fingerprint something other than the prompt, which is the bug ticket 01's
     review found in the first place.
+
+    Board `what-the-room-already-knows`, ticket 15, D26: `context` arrives
+    already gathered — the room, the domain memories, the open questions and
+    `known` are all fields of it now, not arguments a caller threads through.
+
+    **Renders with `known` forced blank**, matching what this double always
+    did before `known` reached `build_input` at all (ticket 08): it never
+    threaded `known` through, so the schema it rendered never shrank for an
+    already-filled field. Only `_UsesKnown` and `_RecordsWhatItWasShown`
+    below care what `known` actually filters, and both render
+    `context` unmodified instead of going through this default.
     """
 
-    _room = None
+    async def would_ask(self, context):
+        from dataclasses import replace
 
-    async def would_ask(self, text, *, channel_id=None, task_id=None, known=None):
         from friday.extraction.prompt import build_input
 
-        return build_input(text, ApiIssueParams, room=self._room)
+        return build_input(replace(context, known=type(context.known)()))
 
 
 class _CountingExtractor(_StandsForAnExtractor):
@@ -360,8 +378,8 @@ class _CountingExtractor(_StandsForAnExtractor):
     def __init__(self, params, clarify=None):
         self.params, self.clarify, self.texts = params, clarify, []
 
-    async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
-        self.texts.append(text)
+    async def run(self, context, *, task_id=None, node=None):
+        self.texts.append(context.transcript)
         return self.params, self.clarify
 
 
@@ -404,13 +422,18 @@ async def test_a_field_already_filled_drops_out_of_the_next_passs_schema(db):
     seen: list[str] = []
 
     class _RecordsWhatItWasShown(_StandsForAnExtractor):
-        async def would_ask(self, text, *, channel_id=None, task_id=None, known=None):
+        async def would_ask(self, context):
             from friday.extraction.prompt import build_input
 
-            return build_input(text, ApiIssueParams, known=known)
+            return build_input(context)
 
-        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
-            seen.append(await self.would_ask(text, channel_id=channel_id, known=known))
+        async def run(self, context, *, task_id=None, node=None):
+            # Node 0 rebuilds `context` from the task's current params on
+            # every pass, so a field filled by the first run is already
+            # dropped from the schema `context.known` carries into the
+            # second — rendered here, unlike the base double, which forces
+            # `known` blank.
+            seen.append(await self.would_ask(context))
             return ApiIssueParams(environment="production"), None
 
     _install("api_issue", _RecordsWhatItWasShown())
@@ -498,30 +521,32 @@ async def test_the_fingerprint_is_the_prompt_so_every_input_counts():
     room."""
     from friday.extraction import input_fingerprint, registered
     from friday.memory.channel_context import ChannelContext
-    from tests.test_extraction import _install
+    from tests.test_extraction import _context, _install
 
-    class _WithRoom(_StandsForAnExtractor):
-        _room = ChannelContext(
-            channel_id="watched", base={}, derived={}, overrides={"env": "staging"}
-        )
-
-    class _Bare(_StandsForAnExtractor):
-        pass
-
-    _install("fp_probe", _Bare())
+    _install("fp_probe", _StandsForAnExtractor())
     try:
-        text_a = await input_fingerprint("fp_probe", "API lỗi")
-        text_b = await input_fingerprint("fp_probe", "API vẫn lỗi")
-        _install("fp_probe", _WithRoom())
-        with_room = await input_fingerprint("fp_probe", "API lỗi")
+        text_a = await input_fingerprint("fp_probe", _context("API lỗi", ApiIssueParams))
+        text_b = await input_fingerprint(
+            "fp_probe", _context("API vẫn lỗi", ApiIssueParams)
+        )
+        with_room = await input_fingerprint(
+            "fp_probe",
+            _context(
+                "API lỗi",
+                ApiIssueParams,
+                room=ChannelContext(
+                    channel_id="watched", base={}, derived={}, overrides={"env": "staging"}
+                ),
+            ),
+        )
     finally:
         registered().pop("fp_probe", None)
 
     assert text_a != text_b, "the reporter's words do not move the fingerprint"
     assert with_room != text_a, "the room does not move the fingerprint"
-    assert await input_fingerprint("no_such_type", "x") == "", (
-        "an unregistered type should have nothing to remember"
-    )
+    assert await input_fingerprint(
+        "no_such_type", _context("x", ApiIssueParams)
+    ) == "", "an unregistered type should have nothing to remember"
 
 
 async def test_known_moves_the_fingerprint_too():
@@ -530,19 +555,22 @@ async def test_known_moves_the_fingerprint_too():
     move with it, or a stale mark from before the field was filled would
     replay an answer built against a wider schema."""
     from friday.extraction import input_fingerprint, registered
-    from tests.test_extraction import _install
+    from tests.test_extraction import _context, _install
 
     class _UsesKnown(_StandsForAnExtractor):
-        async def would_ask(self, text, *, channel_id=None, task_id=None, known=None):
+        async def would_ask(self, context):
             from friday.extraction.prompt import build_input
 
-            return build_input(text, ApiIssueParams, known=known)
+            return build_input(context)
 
     _install("fp_probe", _UsesKnown())
     try:
-        bare = await input_fingerprint("fp_probe", "API lỗi")
+        bare = await input_fingerprint("fp_probe", _context("API lỗi", ApiIssueParams))
         with_known = await input_fingerprint(
-            "fp_probe", "API lỗi", known=ApiIssueParams(environment="production")
+            "fp_probe",
+            _context(
+                "API lỗi", ApiIssueParams, known=ApiIssueParams(environment="production")
+            ),
         )
     finally:
         registered().pop("fp_probe", None)
@@ -600,7 +628,7 @@ async def test_a_call_that_produced_nothing_is_not_remembered_as_an_answer(db):
         def __init__(self):
             self.calls = 0
 
-        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
+        async def run(self, context, *, task_id=None, node=None):
             self.calls += 1
             return None, None
 
@@ -645,21 +673,20 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
     seen: list[str] = []
 
     class _ReadsTheRoom(_StandsForAnExtractor):
-        async def would_ask(self, text, *, channel_id=None, task_id=None, known=None):
-            from friday.extraction.prompt import build_input
-
-            return build_input(text, ApiIssueParams, room=store.context(channel_id))
-
-        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
-            said = await self.would_ask(text, channel_id=channel_id)
+        async def run(self, context, *, task_id=None, node=None):
+            # Board `what-the-room-already-knows`, ticket 15: the room now
+            # arrives already resolved on `context.room`, gathered by
+            # `build_full_context` from the `context_store` given to
+            # `prepare_node` below — this double no longer resolves it
+            # itself.
+            said = await self.would_ask(context)
             seen.append(said)
             # Asserted on the *value* and on the section, never on
             # `test.apero`: the reporter's own message says `test.apero`, so
-            # the first version of this test passed with `channel_id` never
-            # threaded at all. Only the room can put `staging` here.
-            assert "[channel" in said, (
-                f"no room section — channel_id was {channel_id!r}"
-            )
+            # the first version of this test passed with the room never
+            # actually reaching the prompt. Only the room can put `staging`
+            # here.
+            assert "[channel" in said, f"no room section — room was {context.room!r}"
             assert "staging" in said, "the room's value never reached the prompt"
             return (
                 ApiIssueParams(
@@ -672,7 +699,7 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
 
     _install("api_issue", _ReadsTheRoom())
     task = await _reported(db, text="@Lee kiểm tra cho e curl sau https://test.apero/health")
-    node = prepare_node("api_issue", ApiIssueParams)
+    node = prepare_node("api_issue", ApiIssueParams, context_store=store)
 
     outcome = await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
 
@@ -707,18 +734,13 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     asked: list[str] = []
 
     class _Watching(_StandsForAnExtractor):
-        async def would_ask(self, text, *, channel_id=None, task_id=None, known=None):
-            from friday.extraction.prompt import build_input
-
-            return build_input(text, ApiIssueParams, room=store.context(channel_id))
-
-        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
-            asked.append(await self.would_ask(text, channel_id=channel_id))
+        async def run(self, context, *, task_id=None, node=None):
+            asked.append(await self.would_ask(context))
             return ApiIssueParams(summary="service down"), None
 
     _install("api_issue", _Watching())
     task = await _reported(db)
-    node = prepare_node("api_issue", ApiIssueParams)
+    node = prepare_node("api_issue", ApiIssueParams, context_store=store)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
     # `[channel`, not "staging": the field schema's own `doc` for
@@ -747,7 +769,7 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
 async def test_prepare_node_truncates_the_build_to_the_configured_budget(db):
     """The wiring end to end: `prepare_node(..., budget_tokens=...)` reaches
     `original_text_for` through `deps.db`, not a rebuilt query — the same
-    seam `test_the_extractor_itself_looks_the_room_up_from_the_channel_it_is_given`
+    seam `test_a_room_fact_reaches_the_extractor_and_settles_the_field`
     already proves for the room."""
     from friday.dag.prepare import prepare_node
     from tests.test_extraction import _install
@@ -756,8 +778,8 @@ async def test_prepare_node_truncates_the_build_to_the_configured_budget(db):
     seen: list[str] = []
 
     class _RecordsTheText(_StandsForAnExtractor):
-        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
-            seen.append(text)
+        async def run(self, context, *, task_id=None, node=None):
+            seen.append(context.transcript)
             return ApiIssueParams(summary="checkout 500"), None
 
     _install("api_issue", _RecordsTheText())
@@ -783,8 +805,8 @@ async def test_an_unconfigured_budget_reaches_prepare_node_as_no_compaction(db):
     seen: list[str] = []
 
     class _RecordsTheText(_StandsForAnExtractor):
-        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
-            seen.append(text)
+        async def run(self, context, *, task_id=None, node=None):
+            seen.append(context.transcript)
             return ApiIssueParams(summary="checkout 500"), None
 
     _install("api_issue", _RecordsTheText())
@@ -806,7 +828,7 @@ async def test_two_ineffective_compactions_stop_a_third_from_being_attempted(db)
     from tests.test_extraction import _install
 
     class _AlwaysFillsSomething(_StandsForAnExtractor):
-        async def run(self, text, *, channel_id=None, task_id=None, node=None, known=None):
+        async def run(self, context, *, task_id=None, node=None):
             return ApiIssueParams(summary="checkout 500"), None
 
     _install("api_issue", _AlwaysFillsSomething())

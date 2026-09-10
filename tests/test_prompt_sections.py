@@ -179,8 +179,9 @@ def test_the_extractor_does_not_take_a_reporters_words_raw():
     task knows, and what it decides is written to the database."""
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
+    from tests.test_extraction import _context
 
-    built = build_input(HOSTILE, ApiIssueParams)
+    built = build_input(_context(HOSTILE, ApiIssueParams))
 
     assert "<critical_reminder>" not in built
     assert "--- BEGIN USER INPUT ---" in built
@@ -592,8 +593,9 @@ def test_extraction_was_never_wrong_and_stays_that_way():
     anything."""
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
+    from tests.test_extraction import _context
 
-    given = build_input("id la <abc> & 7", ApiIssueParams)
+    given = build_input(_context("id la <abc> & 7", ApiIssueParams))
 
     assert "&lt;abc&gt;" in given
     assert "&amp;lt;" not in given
@@ -625,6 +627,7 @@ def test_no_family_escapes_anything_twice():
     from friday.responder.prompt import build_input as responder_input
     from friday.triage.context import LightContext
     from friday.triage.prompt import build_input as triage_input
+    from tests.test_extraction import _context
 
     # What a model wrote earlier and this system stored, as it comes back out.
     # Plain in the store, escaped once here — the split ticket 07 restored.
@@ -637,16 +640,16 @@ def test_no_family_escapes_anything_twice():
 
     built = {
         "triage": triage_input(LightContext(turn=_events([HAS_MARKUP]), room=None)),
-        "extraction": extraction_input(HAS_MARKUP, ApiIssueParams),
+        "extraction": extraction_input(_context(HAS_MARKUP, ApiIssueParams)),
         # Ticket 01 gave extraction a second stored input — the room's own
         # facts, which reach it through `memory`'s channel slot. `memory`
         # escapes what it is handed, so the renderer feeding it must not:
         # `room_facts` is the plain twin of `_render_yaml_escaped` for exactly
         # that reason, and this is the assertion that keeps it plain.
         "extraction_room": extraction_input(
-            "ok", ApiIssueParams, room=ChannelContext(
+            _context("ok", ApiIssueParams, room=ChannelContext(
                 channel_id="c", base={}, derived={}, overrides={"env": HAS_MARKUP}
-            )
+            ))
         ),
         "responder": responder_input(asking="q", context=_events([HAS_MARKUP])),
         "summariser": _transcript(_events([HAS_MARKUP])),

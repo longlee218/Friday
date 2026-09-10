@@ -200,6 +200,7 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
     end-to-end tests through."""
     from friday.domain.models import ApiIssueParams
     from friday.extraction import build_extractor
+    from tests.test_extraction import _context
 
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
@@ -236,7 +237,7 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
         harness=StubHarness(),  # type: ignore[arg-type]
         name="stub",
     )
-    filled, _ = await ext.run(text, channel_id=event.channel_id, task_id=task.id)
+    filled, _ = await ext.run(_context(text, ApiIssueParams), task_id=task.id)
 
     assert "c0rr3l4t10n" in seen_prompts[0], (
         "the id never reached the model's own input"

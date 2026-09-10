@@ -23,6 +23,7 @@ the reporter is asked for everything they just wrote.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import fields as dataclass_fields
 
 from friday.agent.instruction_prompt import (
     SkillMeta,
@@ -40,7 +41,7 @@ from friday.agent.instruction_prompt import (
     trust_boundary,
     user_input,
 )
-from friday.domain.models import Memory, Params
+from friday.extraction.context import FullContext
 
 __all__ = ["build_input", "build_instructions"]
 
@@ -99,31 +100,33 @@ def build_instructions(
     )
 
 
-def build_input(
-    text: str,
-    params_cls: type[Params],
-    *,
-    room=None,
-    asked=(),
-    memories: Sequence[Memory] = (),
-    known: Params | None = None,
-) -> str:
+def build_input(context: FullContext) -> str:
     """The field schema, what the room is known to be, then the reporter's
     words — in that order, and the order is the cache.
 
-    Each field's meaning is its `doc` metadata on the params class — the field
-    and its meaning live on the same line there, so they cannot drift apart.
-    This renders them; it does not define them.
+    **One value, not five arguments** (board `what-the-room-already-knows`,
+    ticket 15, D26): `context` is gathered by `friday.extraction.context
+    .build_full_context`, the only place node 0's own build resolves a
+    room, reads the domain memories, reads what has been asked, or reads
+    the transcript under its budget. This function renders; it does not
+    gather.
 
-    **`known` drops an already-filled field from the schema** (board
-    `what-the-room-already-knows`, ticket 08, D8: "a field the parameter
-    schema names is compacted into the task's parameters, because the
-    extractor has already copied it verbatim and the store already persists
-    it"). `_fill` already refuses to let a later pass *overwrite* a filled
-    field; this is the other half — not asking about it again, so a task
-    with three of four fields answered pays for one line of schema and not
-    four, on every pass a busy room causes. `None` (the default, and every
-    call site before this ticket) shows every field, unchanged.
+    Each field's meaning is its `doc` metadata on the params class — the
+    field and its meaning live on the same line there, so they cannot drift
+    apart. This renders them; it does not define them. The class itself is
+    `type(context.known)` — `known` is always a real `Params` instance
+    (never `None`; a task with nothing filled in yet is `params_cls()`,
+    every field its own default), so there is no params class to pass
+    separately any more.
+
+    **`context.known` drops an already-filled field from the schema**
+    (ticket 08, D8: "a field the parameter schema names is compacted into
+    the task's parameters, because the extractor has already copied it
+    verbatim and the store already persists it"). `_fill` already refuses
+    to let a later pass *overwrite* a filled field; this is the other half
+    — not asking about it again, so a task with three of four fields
+    answered pays for one line of schema and not four, on every pass a busy
+    room causes.
 
     **The room goes between them, not first.** Stable-first, and which is
     stabler is not a judgement call: one `Harness` per task type serves every
@@ -139,54 +142,60 @@ def build_input(
     speaking rather than the one it reads as its own operator — text that
     arrives in one call's input cannot rewrite the prompt of every later call.
 
-    **`asked` is what this task has already asked the reporter and not had
-    answered** — derived from the outbox, with no model involved, so it cannot
-    be wrong in an interesting way. It goes in `memory`'s conversation slot
-    because that is what the slot is: this exchange, where the room's facts are
-    the channel. The failure it exists for is recorded — the system asked for
-    an environment, nobody answered, and the next pass was free to ask again
-    because nothing in the prompt said a question was outstanding.
+    **`context.asked` is what this task has already asked the reporter and
+    not had answered** — derived from the outbox, with no model involved, so
+    it cannot be wrong in an interesting way. It goes in `memory`'s
+    conversation slot because that is what the slot is: this exchange, where
+    the room's facts are the channel. The failure it exists for is recorded
+    — the system asked for an environment, nobody answered, and the next
+    pass was free to ask again because nothing in the prompt said a question
+    was outstanding.
 
     A room with nothing written about it renders no section at all, so the
     prompt of an unconfigured install is byte-identical to what it was before
     this existed. A test says so, because "close enough" would still cost
     every extractor in every such install its prefix.
 
-    **`memories` shares the channel slot with `room_facts`, not a fourth
-    slot of its own** (board `what-the-room-already-knows`, ticket 10, D14).
-    Both answer the same question — what is this room known to be — from two
-    different producers: the operator's hand, through `ChannelContext`, and
-    an agent's own domain-kind memories, through `db.domain_memories`. An
-    agent given two blocks for the same kind of thing would have to work out
-    that they mean one another, the same reasoning `memory`'s own docstring
-    gives for not splitting `conversation` and `channel` further.
+    **`context.domain_memories` shares the channel slot with `room_facts`,
+    not a fourth slot of its own** (board `what-the-room-already-knows`,
+    ticket 10, D14). Both answer the same question — what is this room known
+    to be — from two different producers: the operator's hand, through
+    `ChannelContext`, and an agent's own domain-kind memories, through
+    `db.domain_memories`. An agent given two blocks for the same kind of
+    thing would have to work out that they mean one another, the same
+    reasoning `memory`'s own docstring gives for not splitting
+    `conversation` and `channel` further.
 
     The reporter's own words go through the one boundary. They used to be
     interpolated raw: a message carrying `</task><critical_reminder>…` put its
     own section into this prompt, and the extractor is the agent most worth
     aiming that at — it is the one that decides what a task knows.
     """
+    params_cls = type(context.known)
     schema_lines = []
-    for f in params_cls.__dataclass_fields__.values():  # type: ignore[attr-defined]
+    for f in dataclass_fields(params_cls):
         # Truthy, not merely non-`None` — the same rule `_fill` already
         # applies (`dag/prepare.py::_fill`'s own "an empty string is not a
         # value someone supplied"). A field a model once wrote `""` for is
         # still blank and still worth asking the schema to name.
-        if known is not None and getattr(known, f.name, None):
+        if getattr(context.known, f.name, None):
             continue
         doc = (f.metadata or {}).get("doc", f.name.replace("_", " "))
         schema_lines.append(f"- {f.name}: {doc}")
     schema = "\n".join(schema_lines) or "(no fields)"
     channel_body = "\n".join(
-        filter(None, [room_facts(room), remembered_facts(list(memories))])
+        filter(
+            None,
+            [room_facts(context.room), remembered_facts(list(context.domain_memories))],
+        )
     )
     return (
         f"Fields:\n{schema}\n\n"
         + assemble(
             memory(
-                conversation_body=outstanding_questions(asked),
+                conversation_body=outstanding_questions(context.asked),
                 channel_body=channel_body,
             )
         )
-        + f"What they said:\n{user_input(text)}"
+        + f"What they said:\n{user_input(context.transcript or '')}"
     )

@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from friday.agent.harness import Harness, Refused
 from friday.extraction.clarify import Clarify, FieldsCapture
+from friday.extraction.context import FullContext
 from friday.tools.ask_for_fields import ask_for_fields_tool
 from friday.domain.models import MODEL_AUTHORED, PARAMS, Params
 from friday.extraction.prompt import build_input, build_instructions
@@ -76,95 +77,39 @@ class Extractor:
         harness: Harness,
         params_cls: type[Params],
         name: str,
-        context=None,
-        db=None,
     ) -> None:
         self._harness = harness
         self._params_cls = params_cls
         self.name = name
-        #: Where what-we-already-asked is read from. Held for the lifetime of
-        #: the process like `context`, and read per call — the same split, and
-        #: the reason there is no fifth parameter threading down from node 0.
-        self._db = db
-        #: Where the rooms' own facts live. `None` means no channel has a
-        #: context file, which is a fresh install — the prompt is then
-        #: byte-identical to what it was before rooms reached this agent.
-        self._context = context
 
-    async def would_ask(
-        self,
-        text: str,
-        *,
-        channel_id: str | None = None,
-        task_id: int | None = None,
-        known: Params | None = None,
-    ) -> str:
+    async def would_ask(self, context: FullContext) -> str:
         """The per-call input this would send, without sending it.
 
-        One method so `run` and `input_fingerprint` cannot disagree about what
-        the prompt is — which is exactly how the mark came to be stale: two
-        places described the same prompt and only one of them learned about the
-        room.
+        One method so `run` and `input_fingerprint` cannot disagree about
+        what the prompt is — which is exactly how the mark came to be
+        stale: two places described the same prompt and only one of them
+        learned about the room.
 
-        Async since ticket 05: one of the prompt's inputs is a query. Which
-        also settles a question that could have been got wrong — the
-        outstanding questions are now inside the fingerprint, so the moment
-        the reporter answers one, the prompt changes and the extraction runs
-        again rather than replaying an answer taken before they spoke.
-
-        `known` — the task's current parameters, ticket 08's D8 — is passed
-        straight through to `build_input`, which drops an already-filled
-        field from the schema. Reaching the fingerprint through here is what
-        keeps it honest: a field getting filled shrinks the schema, which
-        changes the prompt, which is exactly what `input_fingerprint` must
-        see move.
+        **`context` is gathered once, by node 0, before this is called**
+        (board `what-the-room-already-knows`, ticket 15, D26). This class
+        no longer holds a store or a context store of its own — it used to,
+        and reached them here on every call, the way `friday/dag/prepare.py`
+        argued for threading a string "through four layers" rather than a
+        dict. That argument does not survive `FullContext`: the object *is*
+        the point now, gathered in exactly one place
+        (`friday.extraction.context.build_full_context`) so a fifth input
+        cannot again mean a fifth signature to thread it through.
         """
-        room = (
-            self._context.context(channel_id)
-            if self._context is not None and channel_id is not None
-            else None
-        )
-        asked = (
-            await self._db.unanswered_questions(task_id)
-            if self._db is not None and task_id is not None
-            else ()
-        )
-        # Board `what-the-room-already-knows`, ticket 10: the four domain
-        # kinds an agent has written down about this room's facts, alongside
-        # what the operator wrote by hand into `room`. `channel_id is None`
-        # is the same "no room to ask about" case `room` above already
-        # guards.
-        memories = (
-            await self._db.domain_memories(channel_id)
-            if self._db is not None and channel_id is not None
-            else ()
-        )
-        return build_input(
-            text,
-            self._params_cls,
-            room=room,
-            asked=asked,
-            memories=memories,
-            known=known,
-        )
+        return build_input(context)
 
     async def run(
-        self,
-        text: str,
-        *,
-        channel_id: str | None = None,
-        task_id: int | None = None,
-        node: str | None = None,
-        known: Params | None = None,
+        self, context: FullContext, *, task_id: int | None = None, node: str | None = None
     ) -> tuple[Params | None, Clarify | None]:
         """Ask the model to fill the fields. `(None, None)` if the call failed.
 
-        `channel_id` is which room this is, so the prompt can carry what the
-        room is known to be. The store is closed over at registration and the
-        room is looked up here, which is the split the responder already uses:
-        a store lives as long as the process, a room lasts one call. Passing
-        the resolved `ChannelContext` down instead would thread a dict through
-        four layers where a string does.
+        `task_id` and `node` name the call for the recording sink — they are
+        not content the model sees, which is why they stay separate
+        arguments rather than fields of `context`.
 
         The harness already swallows exceptions into `last_error`, so a
         `None` params here means "the model could not answer" — the workflow
@@ -179,9 +124,7 @@ class Extractor:
         """
         capture = FieldsCapture()
         result = await self._harness.run(
-            await self.would_ask(
-                text, channel_id=channel_id, task_id=task_id, known=known
-            ),
+            await self.would_ask(context),
             context=capture,
             extra_turns=1,
             task_id=task_id,
@@ -228,8 +171,6 @@ def build_extractor(
     params_cls: type[Params],
     harness: Harness,
     name: str,
-    context=None,
-    db=None,
 ) -> Extractor:
     """Wire a Harness to a Params class under a name.
 
@@ -242,10 +183,13 @@ def build_extractor(
     `params_cls=DocQuestionParams` would silently produce the wrong type at
     runtime. The check is enforced at registration, not at extraction, so a
     misconfigured system fails to start rather than producing a wrong answer.
+
+    **No `context=`/`db=` any more** (ticket 15, D26): those reached the
+    room, the domain memories and the open questions from inside this
+    class; now `friday.extraction.context.build_full_context` gathers all
+    three, called by node 0, which already holds both.
     """
-    return Extractor(
-        harness=harness, params_cls=params_cls, name=name, context=context, db=db
-    )
+    return Extractor(harness=harness, params_cls=params_cls, name=name)
 
 
 def registered() -> dict[str, Extractor]:
@@ -255,14 +199,12 @@ def registered() -> dict[str, Extractor]:
 
 async def extract(
     task_type: str,
-    text: str,
+    context: FullContext,
     *,
-    channel_id: str | None = None,
     task_id: int | None = None,
     node: str | None = None,
-    known: Params | None = None,
 ) -> tuple[Params | None, Clarify | None]:
-    """Run the extractor registered for `task_type` over `text`.
+    """Run the extractor registered for `task_type` over `context`.
 
     Returns the filled Params, or None if no extractor is registered or the
     extractor failed. None is the right answer for "skip this step" — the
@@ -270,29 +212,17 @@ async def extract(
     hallucinated fields". The `Clarify`, if any, is independent of whether
     the params came back — the model may have called the tool and still
     written nothing usable, or the reverse.
-
-    `known` is passed straight through to `Extractor.run` (ticket 08, D8):
-    the fields it already has drop out of the schema the model is shown.
     """
     ext = _EXTRACTORS.get(task_type)
     if ext is None:
         return None, None
-    return await ext.run(
-        text, channel_id=channel_id, task_id=task_id, node=node, known=known
-    )
+    return await ext.run(context, task_id=task_id, node=node)
 
 
 
 
 
-async def input_fingerprint(
-    task_type: str,
-    text: str,
-    *,
-    channel_id: str | None = None,
-    task_id: int | None = None,
-    known: Params | None = None,
-) -> str:
+async def input_fingerprint(task_type: str, context: FullContext) -> str:
     """One string standing for everything this extractor is about to be shown.
 
     **The prompt itself, hashed** — not a reconstruction of it. Node 0 used to
@@ -306,26 +236,24 @@ async def input_fingerprint(
     is the one scenario ticket 01 exists for, since the operator writes the
     fact *because* the task asked.
 
-    Computing it here removes the class of bug rather than the instance: a
-    fourth input cannot be forgotten, because there is nothing to remember.
+    Computing it here removes the class of bug rather than the instance:
+    every input `would_ask` reads is a field of `context` now, so a new one
+    cannot be forgotten — there is no second place to remember it in the
+    first place (ticket 15, D26). `known` (ticket 08's D8, a fifth input
+    that used to thread through five separate signatures) is exactly why
+    this collapse mattered: a field getting filled shrinks the schema
+    `would_ask` renders, and that is a real prompt change the digest has to
+    see move, whichever field of `context` happens to carry it.
 
     Returns the empty string for an unregistered type, which is what `extract`
     answers for one too — a caller with no extractor has nothing to remember.
-
-    **A fifth input, ticket 08's D8: `known`.** The same reasoning as the
-    third — a field getting filled shrinks the schema `would_ask` renders,
-    so the fingerprint has to see that move too, or a task whose reporter
-    just answered the last open field would replay a stale mark built
-    against the wider schema.
     """
     import hashlib
 
     ext = _EXTRACTORS.get(task_type)
     if ext is None:
         return ""
-    said = await ext.would_ask(
-        text, channel_id=channel_id, task_id=task_id, known=known
-    )
+    said = await ext.would_ask(context)
     return hashlib.sha256(said.encode()).hexdigest()
 
 
@@ -341,12 +269,6 @@ def register(
     skills=None,
     record=None,
     spent=None,
-    #: Where the rooms' own facts live. Injected here rather than looked up
-    #: per call, the same split the responder uses: a store lives as long as
-    #: the process, a room lasts one call.
-    context=None,
-    #: The store, for what this task has already asked and not had answered.
-    db=None,
 ) -> None:
     """Register one task type's extractor from configuration.
 
@@ -358,6 +280,13 @@ def register(
     extractor registered against the wrong schema produces the wrong `Params`
     at runtime, in the middle of a task, where the only symptom is fields that
     never fill in. Refusing at startup costs a restart.
+
+    **No `context=`/`db=` any more** (ticket 15, D26): the room, the domain
+    memories and the open questions were injected here and read per call
+    from inside `Extractor`. They reach node 0's own `build_full_context`
+    instead, from node 0's own dependencies — where the context store and
+    the database already travel — so this registration only ever wires a
+    model to a schema.
     """
     from friday.agent.harness import Harness, Refused
 
@@ -382,8 +311,6 @@ def register(
             for s in skills.skills()
         ]
     _EXTRACTORS[task_type] = build_extractor(
-        context=context,
-        db=db,
         params_cls=params_cls,
         harness=Harness(
             config=config,
@@ -513,8 +440,6 @@ def register_extractors(
     skills=None,
     record=None,
     spent=None,
-    context=None,
-    db=None,
 ) -> None:
     """Wire every extractor the configuration declares.
 
@@ -560,6 +485,4 @@ def register_extractors(
             skills=skills,
             record=record,
             spent=spent,
-            context=context,
-            db=db,
         )

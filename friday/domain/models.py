@@ -697,20 +697,23 @@ class ExtractionMark:
     sha256, seven and a half hours apart, because the task sat pending across a
     restart and every pass paid again.
 
-    **The fingerprint is over the extractor's per-call input**: the reporter's
-    text, and the field schema it is asked to fill. Both, because both vary —
-    the text when somebody says something, the schema when a field is added or
-    its meaning reworded, and either changes the prompt.
+    **The fingerprint is over the extractor's per-call input** — since board
+    `what-the-room-already-knows`'s ticket 15 (D26), that means one thing:
+    `friday.extraction.context.FullContext`, the single value node 0 gathers
+    and hands to `build_input`. Every one of its fields moves the digest,
+    because `input_fingerprint` hashes what `would_ask` actually renders
+    from it, not a reconstruction naming some of them — the reconstruction
+    is exactly what broke the day ticket 01 gave the prompt a third input it
+    could not see.
 
-    The task's parameters were not in it until ticket 08's D8: they now
-    shape the schema half indirectly — an already-filled field drops out of
-    what the model is shown (`friday/extraction/prompt.py::build_input`'s
-    `known`) — so a fill changes the prompt and has to change the digest the
-    same way ticket 01's room did. Before that, a parameter change still
-    changed what node 0 concluded even with a replayed answer, because the
-    replayed question was re-filtered against the parameters as they stood;
-    that re-filtering is unchanged, it is just no longer the only route by
-    which the parameters affect the outcome.
+    The task's parameters were not part of this at all until ticket 08's D8:
+    they now shape the schema — an already-filled field drops out of what
+    the model is shown, via `context.known` — so a fill changes the prompt
+    and has to change the digest the same way ticket 01's room did. A
+    parameter change already changed what node 0 concluded even with a
+    replayed answer, because the replayed question was re-filtered against
+    the parameters as they stood; that re-filtering is unchanged, it is just
+    no longer the only route by which the parameters affect the outcome.
 
     Per-call input, not the whole prompt: the extractor's `instructions` carry
     the skill catalogue and the job text, which change on a restart rather than

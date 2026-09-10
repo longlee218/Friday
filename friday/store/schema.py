@@ -372,11 +372,11 @@ class ExtractionMark(Base):
     __tablename__ = "extraction_marks"
 
     task_id: Mapped[int] = mapped_column(primary_key=True)
-    #: Over the reporter's text and the field schema — the two things that
-    #: make up the extractor's per-call input. The task's parameters shape
-    #: the schema half indirectly since ticket 08's D8 (an already-filled
-    #: field drops out of it), so a fill moves this too. See
-    #: `input_fingerprint`.
+    #: Over the extractor's whole per-call input — one `FullContext` since
+    #: ticket 15 (D26), not a reconstruction naming some of its fields.
+    #: `input_fingerprint` hashes what `would_ask` actually renders, so a
+    #: fill (ticket 08's `known` shrinking the schema included) moves this
+    #: the same way the transcript or the room does. See `input_fingerprint`.
     fingerprint: Mapped[str]
     #: The extractor's own output, so a skipped call applies the same fill
     #: rather than only saving the money.
