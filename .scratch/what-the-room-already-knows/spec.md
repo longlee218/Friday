@@ -402,6 +402,52 @@ override the user's current request". One is a gate with no caller; the other
 asks the model to police itself. A refusal at the single write path is stronger
 than either, and it is cheap, because every producer in D19 goes through it.
 
+**D26 — Context is gathered by one function per family, and what it returns
+is content.** Added 2026-09-10, after tickets 07–10 had landed, from reading
+what they left behind rather than from the original session. D3 named two
+builds and D4 said what a builder returns, and neither was ever built as a
+thing: the light build is a lookup inside `Triage.decide`, and the full build
+is split across two places — node 0 fetches the transcript (with its budget
+and cooldown), the extractor's own `would_ask` fetches the room, the domain
+memories and the open questions. Loading a room's facts is gathering context,
+the same as loading the transcript is, and there is no single point at which
+"what did this agent see, and why" can be logged, inspected or debugged.
+
+So: each prompt family that gathers anything has exactly one gather function,
+beside its prompt module, returning one frozen value. The function reads; it
+never writes, never imports a section builder, never constructs a section,
+never joins. The family's `build_input` takes that value and nothing else.
+The one write on the full path — recording that a compaction was ineffective
+— stays in node 0, decided from a field the value reports, so a builder can
+be called from anywhere (a fingerprint, a test, a probe) without a side
+effect.
+
+**No shared base class and no shared shape across families.** Ticket 45
+deleted exactly that — one dataclass with a fixed shape for every family —
+and D4 already records why: the families diverge, and a shape shared across
+them becomes the thing every change has to fight. What is shared is the
+convention — one `context.py` per family, one value, one log line of what it
+gathered (counts and sizes, never content) — and a test that lists the gather
+modules by name rather than deriving them, the lesson ticket 15 of the first
+board left when a derived module name let a test silently stop checking.
+
+**DAG-ready by construction, not DAG-resident yet.** Story 44 wants the full
+context readable from the run's own state by a later node, and the value
+D26 describes is exactly what would go there: frozen, data only, no store
+handle, no rendering — and node 0 is the graph's entry, which the pool
+already keeps out of the checkpoint, so context under its key would never be
+persisted, which is right for derived state that is rebuilt every pass. But
+no second node exists today, and writing the value into state with nothing
+to read it is the seam-without-a-consumer D2 forbids. So tickets 14 and 15
+build the values and stop there. The next piece of DAG work adds the one
+line in node 0 that puts `FullContext` into state *and* the node that reads
+it, in the same ticket. Two constraints that ticket inherits: a later node
+must never copy the context into its own output, since those outputs are
+persisted as JSON; and node 0 returns one value today, read by
+`prepared_ok`, so the placement is either a composite output or an engine
+change, decided then. `LightContext` never goes into a graph at all —
+triage runs before a task exists.
+
 ## Testing Decisions
 
 A good test here asserts what an agent was shown, not how the code decided to

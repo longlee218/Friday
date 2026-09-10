@@ -547,9 +547,10 @@ def test_triage_sees_what_the_reporter_typed_escaped_once():
     """It rendered the section and then passed the whole thing through
     `user_input`, and both escape — so the model was shown
     `&amp;lt;b&amp;gt;` where somebody wrote `<b>`."""
+    from friday.triage.context import LightContext
     from friday.triage.prompt import build_input
 
-    given = build_input(_events([HAS_MARKUP]))
+    given = build_input(LightContext(turn=_events([HAS_MARKUP]), room=None))
 
     assert "&lt;b&gt;" in given
     assert "&amp;lt;" not in given, "escaped twice"
@@ -574,9 +575,11 @@ def test_the_conversation_is_a_real_section_for_both_of_them():
     given had stopped being a section. Every other agent here reads labelled
     sections; these read a description of one."""
     from friday.memory.channel_context import _transcript
+    from friday.triage.context import LightContext
     from friday.triage.prompt import build_input
 
-    for given in (build_input(_events([HAS_MARKUP])), _transcript(_events([HAS_MARKUP]))):
+    triage_said = build_input(LightContext(turn=_events([HAS_MARKUP]), room=None))
+    for given in (triage_said, _transcript(_events([HAS_MARKUP]))):
         assert "<conversation>" in given
         assert "&lt;conversation&gt;" not in given
 
@@ -620,6 +623,7 @@ def test_no_family_escapes_anything_twice():
     from friday.extraction.prompt import build_input as extraction_input
     from friday.memory.channel_context import _transcript
     from friday.responder.prompt import build_input as responder_input
+    from friday.triage.context import LightContext
     from friday.triage.prompt import build_input as triage_input
 
     # What a model wrote earlier and this system stored, as it comes back out.
@@ -632,7 +636,7 @@ def test_no_family_escapes_anything_twice():
     )
 
     built = {
-        "triage": triage_input(_events([HAS_MARKUP])),
+        "triage": triage_input(LightContext(turn=_events([HAS_MARKUP]), room=None)),
         "extraction": extraction_input(HAS_MARKUP, ApiIssueParams),
         # Ticket 01 gave extraction a second stored input — the room's own
         # facts, which reach it through `memory`'s channel slot. `memory`

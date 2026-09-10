@@ -174,7 +174,7 @@ What is actually on disk.
 | **`friday/text/`** | `transform.py` splits code out before cleaning the prose; `param_hygiene.py` cleans one value. Decides nothing |
 | `friday/inbox/` | Deep module: `stream()`, `sweep_once()`, `tally()`. Gateway, backfill, cursors and dedup are implementation |
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py` (the account), `bot.py` (approval cards) and `normalise.py`. Its `__init__.py` is empty on purpose |
-| `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages |
+| `friday/triage/` | Classification and nothing else, its sensitive-word prefilter, and the loop that polls untriaged messages. `context.py` gathers what a mention is shown (D26); `prompt.py` renders it |
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt and its `Params` schema; **one `extractor` block in `config.yaml` serves all of them** — it was one block per type, and all three held identical values for as long as they existed, so what the split bought was one configuration written three times |
 | `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds the entry node every graph shares and holds the fill-and-validate mechanism it runs. `dag/router.py` maps a task type to a graph. **Every type now gets the same one-node graph** |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
@@ -587,6 +587,21 @@ not an implementation detail:
   Domain memory, task parameters and artifacts do not reach triage under this
   design, on the same ground as before: it decides a label, not a value, and
   those three are exactly what a value gets built from.
+
+  **Gathered by one function, not resolved inline** (ticket 14, D26).
+  `Triage.decide` used to look the room up itself and hand `build_input` the
+  turn and the room as two separate arguments — the only point at which
+  "what did the classifier see for this mention" existed was the call to
+  `build_input` itself, nowhere a value could be logged or inspected first.
+  `friday/triage/context.py`'s `build_light_context` is now the one place
+  triage resolves a room; it returns a frozen `LightContext(turn, room)`,
+  and `build_input` takes that value and nothing else. The turn itself is
+  still computed by `TriageRunner.turn_from`, not by the builder — the
+  runner needs it for its own "has this turn closed" question, and a second
+  computation here would be a second place deciding what a turn is. The
+  builder reads and logs one debug line of counts and sizes; it never
+  writes, never imports a section builder, and never renders — the same
+  rule an extraction gather module will be held to, once ticket 15 builds one.
 - **The operator's own message ends the work — unless they tagged themselves.**
   Their messages are always kept, because them answering is what closes a
   task, and they create no work: the agent answering its own replies is a loop

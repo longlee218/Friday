@@ -4,6 +4,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from friday.triage.context import build_light_context
 from friday.triage.prompt import build_input, build_instructions
 from friday.config import AgentConfig
 from friday.agent.harness import Harness, stop_when
@@ -104,6 +105,13 @@ class Triage:
         gone. What replaces it is the room's own summary, read from the
         context store this class now holds, plus `turn` in place of a
         pre-joined string.
+
+        **Ticket 14 (D26):** this method no longer resolves the room itself.
+        `build_light_context` is the one place that happens; this just calls
+        it and renders from what it returns. `turn` still falls back to
+        `[event]` here, not inside the builder — the builder takes a turn as
+        given, and deciding what "no turn was given" should mean is this
+        method's call, not a second rule about turns to remember.
         """
         held = self._sensitive.found(event.text)
         if held is not None:
@@ -124,12 +132,12 @@ class Triage:
         # One extra turn: the answer arrives as a tool call, which is the call
         # and its result where a written answer would be one turn.
 
-        room = (
-            self._context.context(event.conversation.channel_id)
-            if self._context is not None
-            else None
+        context = build_light_context(
+            self._context,
+            channel_id=event.conversation.channel_id,
+            turn=list(turn) or [event],
         )
-        said = build_input(list(turn) or [event], room=room)
+        said = build_input(context)
         result = await self._run.run(
             said,
             context=capture,

@@ -34,8 +34,7 @@ from friday.agent.instruction_prompt import (
     thinking_style,
     trust_boundary,
 )
-from friday.domain.models import InboundEvent
-from friday.memory.channel_context import ChannelContext
+from friday.triage.context import LightContext
 
 __all__ = ["build_input", "build_instructions"]
 
@@ -103,18 +102,23 @@ def build_instructions(examples: Sequence[tuple[str, str]] = ()) -> str:
     )
 
 
-def build_input(
-    turn: Sequence[InboundEvent], *, room: ChannelContext | None = None
-) -> str:
+def build_input(context: LightContext) -> str:
     """The room's summary, then the turn — the light context ticket 09
     replaced the unbounded relevance window with.
 
-    **The room, not the reporter's own words, is what changed here.** `turn`
-    is unchanged in shape from what this function always rendered — the
-    difference is what used to be concatenated in front of it: every message
-    that had ever mentioned the operator in this conversation, unbounded and
-    growing forever. That window is gone; what a classifier needs instead is
-    a fact about the room, not a transcript of it.
+    **One value, not two arguments** (board `what-the-room-already-knows`,
+    ticket 14, D26): `context.turn` and `context.room` are gathered by
+    `friday.triage.context.build_light_context`, the only place triage
+    resolves a room. This function renders; it does not gather — reading
+    `context_store` itself, the way this used to, is exactly the thing 14
+    moved out.
+
+    **The room, not the reporter's own words, is what changed in ticket 09.**
+    `turn` is unchanged in shape from what this function always rendered —
+    the difference is what used to be concatenated in front of it: every
+    message that had ever mentioned the operator in this conversation,
+    unbounded and growing forever. That window is gone; what a classifier
+    needs instead is a fact about the room, not a transcript of it.
 
     **`channel_derived`, not a section built for this.** It is the same
     section the responder already reads, and it renders exactly
@@ -131,4 +135,6 @@ def build_input(
     seam says why, and this prompt is one of the two that got it wrong until
     ticket 06.
     """
-    return assemble(channel_derived(room), conversation(list(turn), quoted=True))
+    return assemble(
+        channel_derived(context.room), conversation(list(context.turn), quoted=True)
+    )
