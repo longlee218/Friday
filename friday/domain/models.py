@@ -414,6 +414,62 @@ class Memory:
     superseded_by: str | None = None
 
 
+class CandidateStatus(StrEnum):
+    """Where one candidate memory stands (board `what-the-room-already-knows`,
+    ticket 12, D19, D20). `PENDING` is read by no prompt and no tool — that is
+    the whole point, and the property `MemoryCandidate.status` exists to let a
+    reader tell apart. `ACCEPTED`/`REJECTED` are both terminal and both stay
+    visible: a rejected candidate is discarded, not deleted, so the operator
+    can see what was proposed and turned down."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryCandidate:
+    """A memory an agent proposed, waiting for the operator's mark before it
+    is anything more than that (board `what-the-room-already-knows`, ticket
+    12, D19's second producer, D20).
+
+    Never read by a prompt or a tool while `PENDING` — it lives in its own
+    table for exactly that reason, the same guarantee `.scratch/what-the-room
+    -already-knows/spec.md`'s D20 names: the tier that died was not wrong
+    about the floor, only about having neither a producer nor a place for a
+    person to look. This has both.
+
+    `source_message_id` is what resolves it: the same message the operator
+    already reacts to in order to confirm or reject the classification that
+    opened this task (`Database.source_message_of`) — "the gesture that
+    already confirms a classification" (D19), so there is one thing to learn,
+    not two. `None` when no message was in scope when this was proposed,
+    which leaves it resolvable by nothing — the same "silence is not a mark"
+    a `PENDING` row with a message id can also end up in, just for a
+    different reason.
+
+    `memory_id` is set only once accepted, and only if the write actually
+    landed — a channel at its cap (D18) or a line ticket 11's guard refused
+    both leave it `None` with the candidate still marked `ACCEPTED`: the
+    operator's judgement is recorded regardless of whether the row exists,
+    the same way `Verdict` records what they said independent of what a
+    later pass does with it.
+    """
+
+    id: str
+    channel_id: str
+    agent: str
+    text: str
+    kind: str
+    task_id: int | None
+    source_message_id: str | None
+    status: str
+    proposed_at: datetime
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None
+    memory_id: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class Artifact:
     """Verbatim material a message carried — code, a stack trace, SQL, a log,

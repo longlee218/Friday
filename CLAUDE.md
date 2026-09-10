@@ -178,7 +178,7 @@ What is actually on disk.
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt and its `Params` schema; **one `extractor` block in `config.yaml` serves all of them** — it was one block per type, and all three held identical values for as long as they existed, so what the split bought was one configuration written three times. `context.py` is node 0's own gather function (ticket 15, D26): the transcript, the room, the domain memories, the outstanding questions and `known`, one call, one frozen `FullContext` |
 | `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds the entry node every graph shares and holds the fill-and-validate mechanism it runs. `dag/router.py` maps a task type to a graph. **Every type now gets the same one-node graph** |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
-| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), remembering (`memory` — `memory_search`, `memory_add`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder; ticket 09's D9). A test asserts the list — all twelve, factories built rather than skipped — and forbids declaring one anywhere else |
+| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), remembering (`memory` — `memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder; ticket 09's D9, `memory_propose` ticket 12's D19) — all thirteen. A test asserts the list, factories built rather than skipped, and forbids declaring one anywhere else |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `web/` | The operator monitor, on `:8086`. A React + Vite SPA built to static files and served by `ops/api.py`'s app — one process, one container, no Node at runtime. The current shape is the monitor dashboard described in `.scratch/a-monitor-on-the-whole-path/spec.md`: a live feed driven by SSE (`/api/events`), running tasks, drill-down to the Flow screen, breadcrumbs, the Agent vs Reporter marker on Rooms rows. The dark palette and motion tokens live in `web/src/index.css` under `:root` — no component file carries a hex literal or an inline `style={{}}` (`tests/test_web_tokens.py` enforces this). Keyboard shortcuts (`g m`, `g b`, `g r`, `?`, `/`, `r`, `esc`) are wired in `web/src/keyboard.ts`; `?` opens the overlay. Replaced `friday/board/`, 196 lines of f-string HTML and HTMX polling, which was deleted rather than ported: it rendered the same prompts and provider errors as the JSON API while running none of them through `redact.scrub`, which is the two-renderers failure this file already records once for escaping |
@@ -775,8 +775,9 @@ not an implementation detail:
   values — `fact`, `constraint`, `finding`, `decision`, `voice` — and
   `reader_for(kind)` is the one function that decides who reads a row, so
   nothing has to keep a second column in agreement with it. The responder's
-  four tools are unchanged and write and search only `voice`; the extractor
-  has no memory tools of its own — the same reasoning that keeps it off
+  memory tools write and search only `voice` (ticket 12's `memory_propose`
+  included); the extractor has no memory tools of its own — the same
+  reasoning that keeps it off
   triage does not apply here, but its turn budget is one call plus one retry
   and a tool-result round trip would spend it on searching — so the four
   domain kinds reach it by **injection**, through the memory section's
@@ -812,6 +813,39 @@ not an implementation detail:
   like). Either alone is not enough, which is what keeps a real domain
   constraint on the accepted side while still catching a directive aimed at
   the agent.
+
+  **A candidate memory waits for the operator's mark, and the mark is the
+  one that already confirms a classification**
+  (`.scratch/what-the-room-already-knows/`, ticket 12, D19, D20). D19's
+  second producer, beside `memory_add`'s automatic write: the responder's
+  fifth tool, `memory_propose`, stages a `MemoryCandidate` in its own table
+  rather than writing to `memories` — every reader that serves a model
+  would otherwise have to remember to filter a `PENDING` row out, which is
+  exactly the guarantee D20 asks to hold structurally instead.
+  `candidates_for_channel` (`GET /api/channels/{id}/candidates`) is the
+  "place for a person to look" the old staging-and-promotion tier never had.
+
+  **Resolution rides the same reaction the operator already uses to mark a
+  classification right or wrong** — `source_message_id` on a candidate is
+  the task's own opening message (`Database.source_message_of`), the exact
+  one `Verdict` is keyed on, so there is one gesture to learn, not two.
+  `run_agent.py`'s `marked()` callback calls `resolve_candidates_for_
+  message` right alongside `record_verdict`, on the reaction being *added*
+  only — taking a mark back does not un-resolve a candidate it already
+  settled. Marked right, the candidate is written through `memory_add` —
+  ticket 11's refusal and the 200-per-channel cap (D18) both still apply,
+  and either one refusing leaves the candidate `ACCEPTED` with `memory_id`
+  still `None` rather than raising into a live reaction handler. Marked
+  wrong, it is discarded but stays listed, never deleted. A verdict that
+  already exists when a candidate is proposed resolves it immediately,
+  rather than leaving it waiting on a reaction that already happened.
+
+  **D18's other half: a full channel is now visible to the one party who
+  can clear it.** `Database.full_memory_channels` names every channel at
+  `MEMORY_PER_CHANNEL`; the heartbeat says so in its own line and
+  `GET /api/board` carries the same list — the ceiling itself is unchanged,
+  refusing the write and evicting nothing, but before this ticket the only
+  party ever told was the model reading the refusal message.
 - **Node 0's own build respects a budget, and the budget is primary; a
   message count is secondary** (`.scratch/what-the-room-already-knows/`,
   ticket 08, D5-D7). `config.yaml`'s `context.extraction_budget_tokens` is

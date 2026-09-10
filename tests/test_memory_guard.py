@@ -156,7 +156,7 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
             check_not_instruction_shaped(text)
             raise AssertionError("should have refused before reaching the store")
 
-    _, add, update, _ = memory_tools(Store())
+    _, add, _, update, _ = memory_tools(Store())
 
     said = await add.on_invoke_tool(
         ToolContext(
@@ -182,7 +182,7 @@ async def test_the_update_tool_also_tells_the_model_why():
             check_not_instruction_shaped(text)
             raise AssertionError("should have refused before reaching the store")
 
-    _, _, update, _ = memory_tools(Store())
+    _, _, _, update, _ = memory_tools(Store())
 
     said = await update.on_invoke_tool(
         ToolContext(

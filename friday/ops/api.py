@@ -117,6 +117,9 @@ def build_api(
                 "status": provider_status(),
                 "confidence_threshold": confidence_threshold,
                 "counts": await db.counts(),
+                # D18: the model already gets the refusal; this is the
+                # operator's own view of the same condition.
+                "full_memory_channels": await db.full_memory_channels(),
                 "failed": [_outbound(row) for row in await db.outbound(FAILED, limit=50)],
                 "tasks_by_state": {
                     state.value: [_task(t) for t in tasks if t.state == state]
@@ -384,6 +387,29 @@ def build_api(
                 "deleted_at": m.deleted_at,
             }
             for m in await db.memories_for_channel(channel_id, limit=limit)
+        ])
+
+    @api.get("/api/channels/{channel_id}/candidates")
+    async def channel_candidates(
+        channel_id: str = Path(...),
+        limit: int = Query(200, ge=1, le=MAX_PAGE),
+    ) -> list[dict]:
+        """This channel's candidate memories, newest first — pending and
+        resolved alike (board `what-the-room-already-knows`, ticket 12,
+        D19, D20).
+
+        The "place for a person to look" the old staging tier never had: a
+        `PENDING` row is read by no prompt and no tool, so this route is the
+        only way to see one before it is marked, and a `REJECTED` row stays
+        listed rather than deleted, so the operator can see what was
+        proposed and turned down.
+        """
+        return _clean([
+            asdict(c) | {
+                "proposed_at": c.proposed_at,
+                "resolved_at": c.resolved_at,
+            }
+            for c in await db.candidates_for_channel(channel_id, limit=limit)
         ])
 
     @api.get("/api/conversations")

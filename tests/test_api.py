@@ -316,6 +316,53 @@ async def test_a_channels_memories_are_bounded_like_every_other_list_route(clien
     assert len(got) == 2
 
 
+async def test_the_board_names_a_full_memory_channel(client, db):
+    """Board `what-the-room-already-knows`, ticket 12, D18: the operator's
+    own view of the ceiling, not only the model's refusal message."""
+    from friday.domain.models import MemoryScope
+
+    scope = MemoryScope(channel_id="100", task_id=None, agent="responder")
+    for n in range(db.MEMORY_PER_CHANNEL):
+        await db.memory_add(scope, f"fact number {n}")
+
+    assert client.get("/api/board").json()["full_memory_channels"] == ["100"]
+
+
+async def test_a_channels_candidates_are_reachable_pending_and_resolved(client, db):
+    """Board `what-the-room-already-knows`, ticket 12: the "place for a
+    person to look" a pending candidate needs, since no prompt or tool reads
+    it — and a rejected one stays listed rather than deleted."""
+    from friday.domain.models import CandidateStatus, MemoryScope
+
+    scope = MemoryScope(
+        channel_id="100", task_id=None, agent="responder", message_id="m1"
+    )
+    pending = await db.propose_memory(scope, "they usually reply in Vietnamese")
+    other = MemoryScope(
+        channel_id="100", task_id=None, agent="responder", message_id="m2"
+    )
+    rejected = await db.propose_memory(other, "they deploy on fridays")
+    await db.resolve_candidates_for_message(
+        provider_message_id="m2", mark="wrong", by="lee"
+    )
+
+    got = client.get("/api/channels/100/candidates").json()
+
+    by_id = {c["id"]: c for c in got}
+    assert by_id[pending.id]["status"] == CandidateStatus.PENDING
+    assert by_id[rejected.id]["status"] == CandidateStatus.REJECTED
+
+
+async def test_a_channels_candidates_do_not_leak_another_ones(client, db):
+    from friday.domain.models import MemoryScope
+
+    await db.propose_memory(
+        MemoryScope(channel_id="200", task_id=None, agent="responder"), "not this room"
+    )
+
+    assert client.get("/api/channels/100/candidates").json() == []
+
+
 # --- a message's whole path (board `a-window-on-the-whole-path`, ticket 02) ---
 
 

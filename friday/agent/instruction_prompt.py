@@ -636,13 +636,17 @@ def memory_lines(found) -> str:
     )
 
 
-MEMORY_TOOLS = ("memory_search", "memory_add", "memory_update", "memory_delete")
+MEMORY_TOOLS = (
+    "memory_search", "memory_add", "memory_propose", "memory_update", "memory_delete",
+)
 
 _MEMORY_TOOL_SYSTEM = """You can reach for what has been remembered rather than
 working only from what is in front of you:
 
 - memory_search(query): find what is already known about this
 - memory_add(text): write down something worth keeping
+- memory_propose(text): suggest something you are not fully sure of, for the
+  operator to review before it is kept
 - memory_update(id, text): correct something already written down
 - memory_delete(id): remove something that turned out to be wrong
 

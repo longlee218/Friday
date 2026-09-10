@@ -115,6 +115,12 @@ class Heartbeat:
             # Loud, because these are messages nobody has delivered and the
             # only way anyone finds out is by being told.
             parts.append(f"{failed} FAILED TO SEND")
+        full = await self._db.full_memory_channels()
+        if full:
+            # D18's other half: the ceiling already refuses the write and
+            # evicts nothing, so the operator is the only party who can act
+            # on this, and the model already knows from the refusal message.
+            parts.append(f"memory full: {', '.join(full)}")
         return " | ".join(parts)
 
 

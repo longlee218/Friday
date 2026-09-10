@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, String, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Base", "Conversation", "Cursor", "DagState", "Memory", "Message", "ModelCall", "Outbound", "Task", "ToolCall", "Verdict"]
+__all__ = ["Base", "Conversation", "Cursor", "DagState", "Memory", "MemoryCandidate", "Message", "ModelCall", "Outbound", "Task", "ToolCall", "Verdict"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -328,6 +328,37 @@ class Memory(Base):
     #: this with a server default of `"active"` for any pre-existing row.
     status: Mapped[str] = mapped_column(default="active")
     superseded_by: Mapped[str | None] = mapped_column(default=None)
+
+
+class MemoryCandidate(Base):
+    """A memory an agent proposed, waiting for the operator's mark (board
+    `what-the-room-already-knows`, ticket 12, D19, D20).
+
+    Its own table rather than a `Memory` row with a `"pending"` status: every
+    reader that serves a model would need to remember to filter it out, which
+    is exactly the kind of guarantee D20 says has to hold structurally, not by
+    everyone remembering a `WHERE`.
+    """
+
+    __tablename__ = "memory_candidates"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    channel_id: Mapped[str] = mapped_column(index=True)
+    agent: Mapped[str]
+    text: Mapped[str]
+    kind: Mapped[str]
+    task_id: Mapped[int | None] = mapped_column(index=True)
+    #: The message that resolves this candidate — the same one the operator
+    #: reacts to in order to mark the classification that opened this task.
+    source_message_id: Mapped[str | None] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(default="pending", index=True)
+    proposed_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(IsoDateTime, default=None)
+    resolved_by: Mapped[str | None] = mapped_column(default=None)
+    #: Set only once accepted, and only if the write actually landed — see
+    #: `friday.domain.models.MemoryCandidate`'s own docstring for why it can
+    #: stay `None` on an accepted row.
+    memory_id: Mapped[str | None] = mapped_column(default=None)
 
 
 class Artifact(Base):

@@ -135,6 +135,39 @@ async def test_a_full_channel_refuses_a_new_memory_rather_than_evicting_one(db):
     )
 
 
+async def test_full_memory_channels_names_a_channel_at_the_cap(db):
+    """Board `what-the-room-already-knows`, ticket 12, D18: the visibility
+    half of the ceiling, read directly at the store rather than through the
+    heartbeat's rendering of it."""
+    from friday.store.db import Database
+
+    for n in range(Database.MEMORY_PER_CHANNEL):
+        await db.memory_add(ROOM, f"fact number {n}")
+
+    assert await db.full_memory_channels() == ["c1"]
+
+
+async def test_full_memory_channels_ignores_a_room_with_headroom(db):
+    await db.memory_add(ROOM, "test.apero is staging")
+
+    assert await db.full_memory_channels() == []
+
+
+async def test_full_memory_channels_does_not_count_deleted_or_superseded_rows(db):
+    """A channel that has churned through corrections must not read as full
+    from rows nothing serves any more."""
+    from friday.store.db import Database
+
+    written = [
+        await db.memory_add(ROOM, f"fact number {n}")
+        for n in range(Database.MEMORY_PER_CHANNEL)
+    ]
+    await db.memory_delete(ROOM, written[0].id)
+    await db.memory_supersede(ROOM, written[1].id, "fact number 1, corrected")
+
+    assert await db.full_memory_channels() == []
+
+
 async def test_the_operator_can_see_a_deleted_memory_and_who_removed_it(db):
     """`memory_delete` hides a line from every tool; it does not erase what it
     said or who took it out. That is the operator's floor now that a

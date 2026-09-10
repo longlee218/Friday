@@ -129,11 +129,18 @@ async def _run(stack: AsyncExitStack) -> None:
     async def marked(
         *, provider_message_id: str, mark, by: str, taking_back: bool
     ) -> None:
-        """The operator reacted to a classification. Record it; change nothing.
+        """The operator reacted to a classification. Record it; change nothing
+        else about the classification itself — but also resolve any candidate
+        memory waiting on this same message (board
+        `what-the-room-already-knows`, ticket 12, D19, D20).
 
-        Marking one has no effect on the message it concerns — nothing is
-        re-sent, nothing is undone. It only decides whether that
+        Marking a classification has no effect on the message it concerns —
+        nothing is re-sent, nothing is undone. It only decides whether that
         classification is ever shown back to the classifier as an example.
+        A pending candidate is different: this is the mark that decides
+        whether it becomes a memory at all, which is D19's own point — "the
+        gesture that already confirms a classification" is this one, not a
+        second gesture to learn.
         """
         current = await db.verdict_for(
             provider=provider.name, provider_message_id=provider_message_id
@@ -145,6 +152,12 @@ async def _run(stack: AsyncExitStack) -> None:
             # is added, so ✅ then ❌ then remove-the-✅ is the natural order —
             # and clearing unconditionally would throw away the ❌ that is
             # still sitting on the message.
+            #
+            # A candidate already resolved by the reaction being *added* is
+            # not undone by it being taken back — the same way `Verdict`
+            # itself is not "un-recorded" retroactively into whatever a
+            # classifier did with it meanwhile. Resolution only ever runs on
+            # the add.
             if current is not None and current[0] == str(mark):
                 await db.clear_verdict(
                     provider=provider.name,
@@ -157,6 +170,9 @@ async def _run(stack: AsyncExitStack) -> None:
             provider_message_id=provider_message_id,
             mark=str(mark),
             by=by,
+        )
+        await db.resolve_candidates_for_message(
+            provider_message_id=provider_message_id, mark=str(mark), by=by,
         )
 
     provider.on_verdict = marked

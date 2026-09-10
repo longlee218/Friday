@@ -55,7 +55,7 @@ import logging
 from friday.agent.harness import ToolContext, tool
 from friday.agent.instruction_prompt import memory_lines
 from friday.domain.memory_guard import InstructionShaped
-from friday.domain.models import MemoryKind, MemoryScope
+from friday.domain.models import CandidateStatus, MemoryKind, MemoryScope
 
 __all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "MemoryScope", "memory_tools"]
 
@@ -87,12 +87,12 @@ RESULTS = 8
 
 
 def memory_tools(db):
-    """The four tools, bound to one store. The scope arrives per run.
+    """The five tools, bound to one store. The scope arrives per run.
 
     A factory for the same reason `search_skills_tool` is one: what an agent
     can reach is composition, not something the agent declares. Returns them
-    in a list to be handed to `Harness(tools=...)`; an agent gets all four or
-    none, because three of them are unusable without the fourth.
+    in a list to be handed to `Harness(tools=...)`; an agent gets all five or
+    none, because four of them are unusable without the fifth (`search`).
 
     The split is by lifetime. `db` lives as long as the process, so it is
     closed over; the scope lives as long as one run, so it is
@@ -106,12 +106,13 @@ def memory_tools(db):
     "try again" after a write that may have landed is how a room ends up with
     the same memory twice.
 
-    `db` is `friday/store/db.py`'s `Database`, answering four methods:
+    `db` is `friday/store/db.py`'s `Database`, answering five methods:
 
-        memory_search(scope, query, *, limit) -> list[Memory]
-        memory_add(scope, text)               -> Memory | None
-        memory_update(scope, memory_id, text) -> Memory | None
-        memory_delete(scope, memory_id)       -> bool
+        memory_search(scope, query, *, limit)  -> list[Memory]
+        memory_add(scope, text)                -> Memory | None
+        memory_update(scope, memory_id, text)  -> Memory | None
+        memory_delete(scope, memory_id)        -> bool
+        propose_memory(scope, text, *, kind)   -> MemoryCandidate
 
     `None`/`False` means two different things depending on which method gives
     it, and both are deliberate rather than an overloaded shorthand. From
@@ -157,9 +158,11 @@ def memory_tools(db):
 
         Worth writing: how a system actually behaves once you have established
         it, a person's standing preference, a step that turned out to be
-        necessary. Not worth writing: anything readable off the task you are
-        working on, anything you have not confirmed, and anything you would not
-        stand behind in a month — this is read back as fact, not as a guess.
+        necessary. Not worth writing outright: anything readable off the task
+        you are working on. Something you believe but are not fully confident
+        of is `memory_propose`'s job, not this one's — this is read back as
+        fact, not as a guess, so write here only what you would stand behind
+        in a month.
 
         Search before you write. A second copy of something already known is
         worse than nothing: it takes a slot, and the two will disagree the day
@@ -190,6 +193,43 @@ def memory_tools(db):
             )
         log.info("memory added by %s: %r", scope.agent, kept)
         return f"remembered as {written.id}"
+
+    async def memory_propose(ctx: ToolContext[MemoryScope], text: str) -> str:
+        """Suggest something worth remembering, without writing it yet.
+
+        Use this instead of memory_add when you believe something but are not
+        fully confident of it, or when being wrong about it would cost more
+        than an awkward sentence — a claim a later task might act on. The
+        operator reviews it before anything reads it back; nothing changes
+        for this run or any other in the meantime, and there is nothing to
+        poll or wait for.
+
+        Board `what-the-room-already-knows`, ticket 12 (D19, D20): this
+        restores the review floor the old `remember()` tool had, without
+        restoring the tier it staged into — that one had a producer and
+        nobody looking; this has both.
+
+        Returns the candidate's id, for your own record.
+
+        Args:
+            text: one sentence, at most {TEXT_CHARS} characters, that will
+                make sense to a run that has none of your current context.
+        """
+        scope = _scope(ctx)
+        kept = _bounded(text)
+        proposed = await db.propose_memory(scope, kept, kind=MemoryKind.VOICE)
+        log.info(
+            "memory proposed by %s: %r (%s)", scope.agent, kept, proposed.status
+        )
+        if proposed.status != CandidateStatus.PENDING:
+            # `propose_memory` resolves immediately when the message it is
+            # scoped to already carries a verdict — the operator marked the
+            # classification before this run got here. Reporting the actual
+            # outcome is more useful than telling the model to wait for a
+            # mark that has already happened.
+            outcome = "accepted" if proposed.status == CandidateStatus.ACCEPTED else "rejected"
+            return f"proposed as {proposed.id} — already marked {outcome}"
+        return f"proposed as {proposed.id} — waiting for a mark"
 
     @tool
     async def memory_update(
@@ -248,10 +288,14 @@ def memory_tools(db):
     # `replace` rather than `format`: a docstring is prose and may hold a brace.
     memory_search.__doc__ = memory_search.__doc__.replace("{RESULTS}", str(RESULTS))
     memory_add.__doc__ = memory_add.__doc__.replace("{TEXT_CHARS}", str(TEXT_CHARS))
+    memory_propose.__doc__ = memory_propose.__doc__.replace(
+        "{TEXT_CHARS}", str(TEXT_CHARS)
+    )
 
     return [
         tool(memory_search),
         tool(memory_add),
+        tool(memory_propose),
         memory_update,
         memory_delete,
     ]

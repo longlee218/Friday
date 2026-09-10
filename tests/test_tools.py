@@ -91,6 +91,7 @@ def test_the_tools_this_system_has_are_all_in_one_place():
         "ask_for_fields",
         "memory_search",
         "memory_add",
+        "memory_propose",
         "memory_update",
         "memory_delete",
     }
@@ -412,7 +413,7 @@ def test_the_numbers_the_memory_prose_quotes_are_the_ones_it_enforces():
     differ and nothing would notice."""
     from friday.tools.memory import RESULTS, TEXT_CHARS, memory_tools
 
-    search, add, _, _ = memory_tools(object())
+    search, add, _, _, _ = memory_tools(object())
 
     assert f"up to {RESULTS} lines" in search.description
     assert f"at most {TEXT_CHARS} characters" in (
@@ -434,7 +435,7 @@ async def test_memory_add_tells_the_model_the_channel_is_full_rather_than_losing
         async def memory_add(self, scope, text, kind):
             return None
 
-    _, add, _, _ = memory_tools(FullChannel())
+    _, add, _, _, _ = memory_tools(FullChannel())
 
     said = await add.on_invoke_tool(
         ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
@@ -463,12 +464,107 @@ async def test_memory_add_writes_under_the_voice_kind():
             seen["kind"] = kind
             return None
 
-    _, add, _, _ = memory_tools(Store())
+    _, add, _, _, _ = memory_tools(Store())
 
     await add.on_invoke_tool(
         ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
                     tool_name="memory_add", tool_call_id="1", tool_arguments="{}"),
         '{"text": "they like short replies"}',
+    )
+
+    assert seen["kind"] == MemoryKind.VOICE
+
+
+async def test_memory_propose_tells_the_model_it_is_waiting_for_a_mark():
+    """Board `what-the-room-already-knows`, ticket 12: the tool's own answer
+    says nothing is decided yet — a model reading "proposed" and stopping
+    there would treat a candidate as remembered, which it is not until
+    marked."""
+    from agents.tool_context import ToolContext
+
+    from friday.domain.models import CandidateStatus, MemoryCandidate, MemoryScope
+    from friday.tools.memory import memory_tools
+    from datetime import datetime, timezone
+
+    class Store:
+        async def propose_memory(self, scope, text, kind):
+            return MemoryCandidate(
+                id="cand1", channel_id=scope.channel_id, agent=scope.agent,
+                text=text, kind=kind, task_id=scope.task_id,
+                source_message_id=scope.message_id, status=CandidateStatus.PENDING,
+                proposed_at=datetime.now(timezone.utc),
+            )
+
+    _, _, propose, _, _ = memory_tools(Store())
+
+    said = await propose.on_invoke_tool(
+        ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
+                    tool_name="memory_propose", tool_call_id="1", tool_arguments="{}"),
+        '{"text": "they might prefer shorter replies"}',
+    )
+
+    assert "cand1" in said
+    assert "waiting for a mark" in said
+
+
+async def test_memory_propose_reports_an_immediate_resolution():
+    """`propose_memory` resolves on the spot when the message it is scoped to
+    already carries a verdict — the tool has to say what actually happened,
+    not the generic "waiting" answer."""
+    from agents.tool_context import ToolContext
+
+    from friday.domain.models import CandidateStatus, MemoryCandidate, MemoryScope
+    from friday.tools.memory import memory_tools
+    from datetime import datetime, timezone
+
+    class Store:
+        async def propose_memory(self, scope, text, kind):
+            return MemoryCandidate(
+                id="cand1", channel_id=scope.channel_id, agent=scope.agent,
+                text=text, kind=kind, task_id=scope.task_id,
+                source_message_id=scope.message_id, status=CandidateStatus.ACCEPTED,
+                proposed_at=datetime.now(timezone.utc), memory_id="m9",
+            )
+
+    _, _, propose, _, _ = memory_tools(Store())
+
+    said = await propose.on_invoke_tool(
+        ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
+                    tool_name="memory_propose", tool_call_id="1", tool_arguments="{}"),
+        '{"text": "they might prefer shorter replies"}',
+    )
+
+    assert "already marked accepted" in said
+    assert "waiting" not in said
+
+
+async def test_memory_propose_writes_under_the_voice_kind():
+    from agents.tool_context import ToolContext
+
+    from friday.domain.models import MemoryKind, MemoryScope
+    from friday.tools.memory import memory_tools
+
+    seen = {}
+
+    class Store:
+        async def propose_memory(self, scope, text, kind):
+            from friday.domain.models import CandidateStatus, MemoryCandidate
+            from datetime import datetime, timezone
+
+            seen["kind"] = kind
+            return MemoryCandidate(
+                id="cand1", channel_id=scope.channel_id, agent=scope.agent,
+                text=text, kind=kind, task_id=scope.task_id,
+                source_message_id=scope.message_id, status=CandidateStatus.PENDING,
+                proposed_at=datetime.now(timezone.utc),
+            )
+
+    _, _, propose, _, _ = memory_tools(Store())
+
+    await propose.on_invoke_tool(
+        ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
+                    tool_name="memory_propose", tool_call_id="1", tool_arguments="{}"),
+        '{"text": "they might prefer shorter replies"}',
     )
 
     assert seen["kind"] == MemoryKind.VOICE
@@ -487,7 +583,7 @@ async def test_memory_search_reads_only_the_voice_kind():
             seen["kind"] = kind
             return []
 
-    search, _, _, _ = memory_tools(Store())
+    search, _, _, _, _ = memory_tools(Store())
 
     await search.on_invoke_tool(
         ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
@@ -509,7 +605,7 @@ def test_memory_search_does_not_promise_a_ranking_it_does_not_do():
     asserting the opposite."""
     from friday.tools.memory import memory_tools
 
-    search, _, _, _ = memory_tools(object())
+    search, _, _, _, _ = memory_tools(object())
 
     assert "best match" not in search.description
     assert "newest first" in search.description
@@ -536,7 +632,7 @@ async def test_a_hostile_memory_cannot_close_a_section_in_the_responders_prompt(
         async def memory_search(self, scope, query, kind, limit):
             return [Memory()]
 
-    search, _, _, _ = memory_tools(Store())
+    search, _, _, _, _ = memory_tools(Store())
 
     from agents.tool_context import ToolContext
 

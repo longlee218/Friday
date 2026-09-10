@@ -142,6 +142,10 @@ export interface Board {
    *  is not the same as 0.7 — the page must not invent the line it draws. */
   confidence_threshold: number | null;
   counts: Counts;
+  /** Channels at `MEMORY_PER_CHANNEL` (ticket 12, D18) — the ceiling already
+   *  refuses the write and evicts nothing; this is the operator's own view
+   *  of the same condition. */
+  full_memory_channels: string[];
   failed: Outbound[];
   tasks_by_state: Record<string, Task[]>;
   messages: Message[];
@@ -226,6 +230,26 @@ export interface Memory {
   updated_at: string;
   deleted_at: string | null;
   deleted_by: string | null;
+}
+
+/** A memory an agent proposed, waiting for the operator's mark — or already
+ *  marked (board `what-the-room-already-knows`, ticket 12). `status` is
+ *  `"pending"`, `"accepted"` or `"rejected"`; `memory_id` is set only once
+ *  accepted, and only if the write actually landed.
+ */
+export interface MemoryCandidate {
+  id: string;
+  channel_id: string;
+  agent: string;
+  text: string;
+  kind: string;
+  task_id: number | null;
+  source_message_id: string | null;
+  status: string;
+  proposed_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  memory_id: string | null;
 }
 
 /** A line on the Monitor screen's live feed.
