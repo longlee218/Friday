@@ -37,6 +37,7 @@ from sqlalchemy.pool import StaticPool
 
 from friday.store import schema
 from friday.domain.conversation import ConversationId
+from friday.domain.memory_guard import check_not_instruction_shaped
 from friday.domain.states import OutboundState
 from friday.domain.models import (
     Artifact,
@@ -1224,7 +1225,14 @@ class Database:
         caller, is ever in flight. It becomes a real question the day a
         second memory-tool-bearing agent runs concurrently with the pool's
         loop, which is not true of anything wired today.
+
+        Checked against `check_not_instruction_shaped` before either the cap
+        or the write (board `what-the-room-already-knows`, ticket 11, D25):
+        this is the single write path every producer of a new memory shares,
+        the operator's own hand included, so the check happens here once
+        rather than being a rule each caller has to remember.
         """
+        check_not_instruction_shaped(text)
         async with self._sessions.begin() as session:
             count = await session.scalar(
                 select(func.count()).select_from(schema.Memory).where(
@@ -1263,7 +1271,13 @@ class Database:
 
         Distinct from `memory_supersede` (D16): this never changes what the
         memory claims, only how it is worded, so it never touches `kind`,
-        `status` or `superseded_by`."""
+        `status` or `superseded_by`.
+
+        Checked against `check_not_instruction_shaped` (ticket 11, D25) the
+        same way `memory_add` is: a correction is a new line of text, and
+        this is one of the write paths every producer of one shares.
+        """
+        check_not_instruction_shaped(text)
         async with self._sessions.begin() as session:
             row = await self._live_memory(session, scope, memory_id)
             if row is None:
@@ -1294,7 +1308,13 @@ class Database:
         Never refused for the channel's cap: an active row becomes inactive
         and a new active row is written in the same call, so the channel's
         active count does not move.
+
+        Checked against `check_not_instruction_shaped` (ticket 11, D25) the
+        same way `memory_add` and `memory_update` are: the new claim is a new
+        line of text and this is one of the write paths every producer of
+        one shares.
         """
+        check_not_instruction_shaped(text)
         async with self._sessions.begin() as session:
             old = await self._live_memory(session, scope, memory_id)
             if old is None:

@@ -42,6 +42,7 @@ from fastapi.staticfiles import StaticFiles
 
 from friday.agent.instruction_prompt import channel_sections
 from friday.domain.conversation import ConversationId
+from friday.domain.memory_guard import InstructionShaped
 from friday.store.db import Database
 from friday.domain.models import InboundEvent, Outbound, Task
 from friday.outbox import FAILED
@@ -633,6 +634,11 @@ def _mount_context(api: FastAPI, store: Any) -> None:
 
         Takes effect on reload, not now. That is the one rule (D8), and
         `GET .../context` exposes the difference as `live`.
+
+        A value refused by `check_not_instruction_shaped` (board
+        `what-the-room-already-knows`, ticket 11, D25) is a 422 too — this is
+        the operator's own hand, the one producer D19 says the board may not
+        ship without, and the refusal binds it the same as any other.
         """
         overrides = body.get("overrides")
         if not isinstance(overrides, dict):
@@ -649,7 +655,10 @@ def _mount_context(api: FastAPI, store: Any) -> None:
             raise HTTPException(
                 404, f"{channel_id} has no context file — create it first"
             )
-        store.set_overrides(channel_id, overrides)
+        try:
+            store.set_overrides(channel_id, overrides)
+        except InstructionShaped as refused:
+            raise HTTPException(422, str(refused)) from None
         return _clean({"channel_id": channel_id, "saved": True, "live": False})
 
     @api.post("/api/context/reload")

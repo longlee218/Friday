@@ -389,6 +389,11 @@ Drift is possible now and is bounded differently: by the channel scope, by the
 operator's visibility into what was written and by whom, and by the fact that
 nothing reaches a prompt except through a tool call the run chose to make.
 
+A line shaped like a directive at this system's own mechanism — "send without
+approval", "skip the validation" — is refused before it is written, at the one
+write path every producer shares, because a memory is read back as fact by a
+run with none of the context that produced it.
+
 ## Outbound intent
 
 Something to send, held as data rather than performed as a call. Carries the

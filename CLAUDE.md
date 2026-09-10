@@ -166,7 +166,7 @@ What is actually on disk.
 | `init_channel.py` | One-off: create a channel's context file for the operator to fill in |
 | `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, MCP servers, and the sensitive words that keep a message away from the model |
 | `friday/config.py` | Loads `config.yaml` and resolves `${VAR}`. Outside the packages because it is read before any of them |
-| **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `states.py` (`TaskState`, `OutboundState`, and the legal transitions), `actions.py` (`Ask`/`Reply`/`HandOver`, what a decision about a task comes to), `validation.py` (the rule engine, one call site) |
+| **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `states.py` (`TaskState`, `OutboundState`, and the legal transitions), `actions.py` (`Ask`/`Reply`/`HandOver`, what a decision about a task comes to), `validation.py` (the rule engine, one call site), `memory_guard.py` (ticket 11: whether a line reads as an instruction at this system's own mechanism rather than a fact, checked at every memory write path) |
 | **`friday/store/`** | `schema.py` holds the mapped classes, `db.py` is the only store and converts at the edge — nothing above it knows SQLAlchemy exists |
 | **`friday/agent/`** | What it takes to call a model, and nothing about what to call it for: `harness.py` (the only module that may import the SDK), `instruction_prompt.py`, `skills.py`, `mcp.py`, `llm_log.py` |
 | **`friday/memory/`** | What is kept between tasks, in tiers that never mix: `channel_context.py` (per-channel YAML), `verdicts.py` (the operator marking a classification right). There was a third — `observations.py`/`notes.py`, staged guesses promoted once an approved outcome corroborated them — dropped once it had gone months with no producer (ticket 09's D9); an agent's own memory is a tool now, `friday/tools/memory.py`, not a tier here |
@@ -786,6 +786,32 @@ not an implementation detail:
   (`memory_supersede`, new) marks it superseded and points at what replaced
   it, and every reader that serves a model reads active rows only — a
   superseded or deleted one stays visible to the operator and nowhere else.
+
+  **A line shaped like a directive at this system's own mechanism is refused,
+  in code, before it becomes a row** (`.scratch/what-the-room-already-knows/`,
+  ticket 11, D19, D25). A memory is read back as a statement of fact by a run
+  that has none of the context that produced it, so "send without approval",
+  "always reply in English", "skip the validation" are instructions with a
+  long life and no author present — the most dangerous row this board can
+  create. `friday/domain/memory_guard.py`'s `check_not_instruction_shaped` is
+  deterministic and involves no model, and it sits at the single write path
+  every producer shares: `Database.memory_add`/`memory_update`/
+  `memory_supersede`, and `ContextStore.set_overrides`/`init_channel` — the
+  route the operator's own hand writes room facts through, which is the
+  producer D19 says this board may not ship without. A refused write raises
+  `InstructionShaped`; the tool layer and the API route each catch it and
+  tell whoever attempted it why, rather than letting it fall through to a
+  generic "that tool is unavailable" that explains nothing.
+
+  **Narrower than "any imperative sentence".** `never deploy on fridays` is a
+  domain constraint about the team's own practice — exactly the shape
+  `MemoryKind.CONSTRAINT` exists to hold — and it is accepted: the check only
+  refuses a line that both *reads* like a command (a bare-verb or
+  `always`/`never`/`don't`-led sentence-initial word) *and* names one of this
+  system's own moving parts (approval, validation, reply, escalation, and the
+  like). Either alone is not enough, which is what keeps a real domain
+  constraint on the accepted side while still catching a directive aimed at
+  the agent.
 - **Node 0's own build respects a budget, and the budget is primary; a
   message count is secondary** (`.scratch/what-the-room-already-knows/`,
   ticket 08, D5-D7). `config.yaml`'s `context.extraction_budget_tokens` is

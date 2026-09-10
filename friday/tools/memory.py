@@ -54,6 +54,7 @@ import logging
 
 from friday.agent.harness import ToolContext, tool
 from friday.agent.instruction_prompt import memory_lines
+from friday.domain.memory_guard import InstructionShaped
 from friday.domain.models import MemoryKind, MemoryScope
 
 __all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "MemoryScope", "memory_tools"]
@@ -172,7 +173,11 @@ def memory_tools(db):
         """
         scope = _scope(ctx)
         kept = _bounded(text)
-        written = await db.memory_add(scope, kept, kind=MemoryKind.VOICE)
+        try:
+            written = await db.memory_add(scope, kept, kind=MemoryKind.VOICE)
+        except InstructionShaped as refused:
+            log.info("memory refused for %s: %s", scope.agent, refused)
+            return str(refused)
         if written is None:
             # The store's own cap, not a failure — see `Database.MEMORY_PER_CHANNEL`.
             # Nothing is evicted to make room, so the model has to make room
@@ -206,7 +211,11 @@ def memory_tools(db):
                 rather than being appended to it.
         """
         scope = _scope(ctx)
-        updated = await db.memory_update(scope, memory_id, _bounded(text))
+        try:
+            updated = await db.memory_update(scope, memory_id, _bounded(text))
+        except InstructionShaped as refused:
+            log.info("memory update refused for %s: %s", scope.agent, refused)
+            return str(refused)
         if updated is None:
             return _no_such(memory_id)
         log.info("memory %s updated by %s", memory_id, scope.agent)

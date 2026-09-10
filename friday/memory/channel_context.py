@@ -23,6 +23,7 @@ from typing import Any
 import yaml
 
 from friday.config import AgentConfig
+from friday.domain.memory_guard import check_not_instruction_shaped
 from friday.store.db import Database
 from friday.agent.harness import Harness
 
@@ -153,6 +154,14 @@ def _parse_summary(raw: str) -> dict[str, Any]:
     return cleaned
 
 
+def _check_overrides(overrides: dict[str, Any]) -> None:
+    """Every string value, checked — a nested mapping (`people:` holds one)
+    is not a line of prose and is not this check's business, per
+    `check_not_instruction_shaped`'s own rule for non-`str` values."""
+    for value in overrides.values():
+        check_not_instruction_shaped(value)
+
+
 @dataclass(frozen=True, slots=True)
 class ChannelContext:
     """One channel's knowledge, already layered: base < derived < overrides.
@@ -230,6 +239,7 @@ class ContextStore:
         `overrides` is that nothing clobbers it, an operator's own `init` call
         included.
         """
+        _check_overrides(overrides or {})
         path = self.path_for(channel_id)
         if path.exists():
             raise FileExistsError(f"{path} already exists — edit it directly")
@@ -255,7 +265,14 @@ class ContextStore:
         Replaces rather than merges. A key the operator deleted has to
         actually go, and merging would make removal impossible from the only
         interface that can write.
+
+        Checked against `check_not_instruction_shaped` (board
+        `what-the-room-already-knows`, ticket 11, D25) before anything is
+        written: this and `init_channel` are the only two places `overrides`
+        is written, and D19 names the operator's own hand — this route — as
+        the producer the board may not ship without.
         """
+        _check_overrides(overrides)
         existing = self._read(self.path_for(channel_id)) or {}
         existing.setdefault("derived", {})
         existing["overrides"] = overrides
