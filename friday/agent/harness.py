@@ -60,7 +60,7 @@ from openai import (
     RateLimitError,
 )
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from friday.agent.structured import describe, find_json, fits
 from friday.config import AgentConfig

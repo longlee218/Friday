@@ -191,6 +191,17 @@ def build_input(context: FullContext) -> str:
     #
     # `omit=context.known` is ticket 08's D8 — a field already in the task's
     # parameters drops out of the schema, on the truthy test `_fill` uses.
+    #
+    # **The *tool's* parameters do not shrink with it**, and that is a choice
+    # rather than an oversight (board `every-answer-has-a-shape`, ticket 08).
+    # The answer shape is generated once per task type and cached, because
+    # `build_extractor` and the run's own terminator both compare classes; one
+    # per combination of already-known fields would be a class per call, and
+    # a tool schema that changed shape between calls is the opposite of what
+    # the stable-prefix work in this file was for. What the shrinking prompt
+    # buys is still bought: it is what the model is *told* to fill, and it is
+    # what `input_fingerprint` hashes, so a field getting filled still moves
+    # the mark and still earns a fresh extraction.
     schema = describe(type(context.known), omit=context.known) or "(no fields)"
     channel_body = "\n".join(
         filter(
