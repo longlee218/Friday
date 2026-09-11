@@ -467,6 +467,36 @@ not an implementation detail:
   the store before the call and **fails open** — a store that cannot answer
   this has already stopped the work by other means, and refusing on it would
   turn one bad read into every agent refusing at once.
+- **One state travels a message's whole journey, and it is read-only.**
+  `FridayState` (`friday/domain/models.py`) is what a run is *about*: the
+  room, the agent now running, and — as the journey supplies them — the
+  provider, thread, message, author, reply and task. It is what the SDK's
+  per-run `context` carries for the memory tools, and the store's memory
+  methods take it as the scope, reading the channel, task, agent and source
+  message off it.
+
+  **It replaced `MemoryScope`, which is deleted rather than aliased.** That
+  named the same room under a second name for a narrower purpose, and a second
+  name for one thing is how two things drift. Nothing about who may read a
+  memory changed: scope is still runtime-supplied, still never named by the
+  model, and a channel's memory is still invisible to a run in another one.
+
+  **Fields cannot be assigned; every change is a named method returning a new
+  state** — `as_agent`, `for_task`, `about_message`. Not a style choice: this
+  value is handed to a tool, to the store and to the recording sink inside one
+  run, and a field anything could assign makes "what can change this, and
+  where" unanswerable. There is deliberately **no** general `with_(**fields)`,
+  which would make every change legal again and put that list back out of
+  reach. Only `channel_id` and `agent` are required — the boundary and the
+  provenance; the rest are `None` until the journey supplies them, the way
+  `task_id` already meant "this run belongs to no task".
+
+  What it is for is visible at `Pool._say`: the responder took `channel_id`,
+  `task_id` and `message_id` as three parameters, and the pool built all three
+  from a conversation it was already holding. It takes one object now, which
+  is the whole of D22 — adding one more fact must not mean threading one more
+  parameter through five signatures.
+
 - **`friday/agent/harness.py` is the only module that may import `agents`.** The SDK
   is here for speed, not for keeps, and that is only true while replacing it
   means rewriting one file. What other modules need — `tool`, `ToolContext`,
@@ -801,7 +831,7 @@ not an implementation detail:
   result**, never appended to `instructions` — closed by construction, since a
   tool result cannot rewrite the prompt of every later call the way a promoted
   note once could (commit f0686f2); **scope is runtime-supplied** on
-  `MemoryScope`, read off the run's context rather than named by the model, so
+  `FridayState`, read off the run's context rather than named by the model, so
   a channel's memory is invisible to a run in another one; and **ids are
   opaque and sparse**, so an invented one fails rather than landing on a
   neighbouring row. Drift is possible and is bounded by the channel scope and

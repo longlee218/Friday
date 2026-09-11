@@ -45,10 +45,10 @@ async def test_the_extractor_itself_reads_domain_kind_memories(db):
     (D14) reach the extractor through `db.domain_memories`, the same seam
     `test_the_extractor_itself_reads_what_it_already_asked` proved for
     outstanding questions."""
-    from friday.domain.models import Memory, MemoryKind, MemoryScope
+    from friday.domain.models import Memory, MemoryKind, FridayState
 
     await db.memory_add(
-        MemoryScope(channel_id="watched", task_id=None, agent="responder"),
+        FridayState(channel_id="watched", task_id=None, agent="responder"),
         "test.apero is staging",
         kind=MemoryKind.FACT,
     )
@@ -69,9 +69,9 @@ async def test_the_extractor_itself_reads_domain_kind_memories(db):
 async def test_voice_kind_memories_do_not_reach_the_extractor(db):
     """`VOICE` is the responder's alone (D14) — however it got written, it
     must not surface in what the extractor is shown."""
-    from friday.domain.models import MemoryKind, MemoryScope
+    from friday.domain.models import MemoryKind, FridayState
 
-    scope = MemoryScope(channel_id="watched", task_id=None, agent="responder")
+    scope = FridayState(channel_id="watched", task_id=None, agent="responder")
     await db.memory_add(scope, "test.apero is staging", kind=MemoryKind.FACT)
     await db.memory_add(scope, "they like short replies", kind=MemoryKind.VOICE)
 

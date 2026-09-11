@@ -48,9 +48,9 @@ async def test_a_full_channel_is_named_in_the_beat(db):
     already refuses the write and evicts nothing — this is the operator's
     own visibility into the same condition, not only the model's refusal
     message."""
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
 
-    scope = MemoryScope(channel_id="watched", task_id=None, agent="responder")
+    scope = FridayState(channel_id="watched", task_id=None, agent="responder")
     for n in range(db.MEMORY_PER_CHANNEL):
         await db.memory_add(scope, f"fact number {n}")
 
@@ -60,10 +60,10 @@ async def test_a_full_channel_is_named_in_the_beat(db):
 
 
 async def test_a_room_with_headroom_is_not_named_in_the_beat(db):
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
 
     await db.memory_add(
-        MemoryScope(channel_id="watched", task_id=None, agent="responder"),
+        FridayState(channel_id="watched", task_id=None, agent="responder"),
         "test.apero is staging",
     )
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 from enum import StrEnum
@@ -516,54 +516,107 @@ class Artifact:
 
 
 @dataclass(frozen=True, slots=True)
-class MemoryScope:
-    """Where a memory belongs and who wrote it. Runtime-supplied, every field.
+class FridayState:
+    """What one message's journey knows about itself, the whole way down.
 
-    Here rather than beside the tools that use it (`friday/tools/memory.py`):
-    it is also part of `Database`'s own signature — five `friday/store/db.py`
-    methods take a `scope`, and a store may not import from `friday/tools/`.
-    It was a quoted forward reference there before this move
-    (`scope: "MemoryScope"  # type: ignore[name-defined]`), which is a real
-    gap and not a stylistic one: mypy checked nothing about the one parameter
-    whose entire job is "never wrong". `friday/domain/` is the vocabulary
-    both sides read, which is what a store and a tool factory are allowed to
-    share.
+    Board `every-answer-has-a-shape`, D8–D10. This is what the SDK's per-run
+    `context` carries, and it is the **only** thing it carries: the slot used
+    to mean "who is this run about" for one agent and "where the answer will
+    appear" for another, which is two mechanisms sharing one parameter.
 
-    `channel_id` is the read *and* write boundary — a memory written in one
-    room is invisible in another. Not a nicety: this system's rooms are
-    different teams, and a fact learned in one is a leak in the next.
-
-    `task_id`, `agent`, and `message_id` are provenance. They are never
-    searched on; they are what lets the operator's board answer "who wrote
-    this, and while doing what" about a line the agent is now acting on.
-    `task_id` is nullable rather than optional — a run that belongs to no
-    task says so by passing `None`. `message_id` is the message that produced
-    this memory, when one is in scope (the responder usually sets it from
-    the message it is drafting a reply to); a tool without a source message
-    leaves it `None`. A default would let provenance go missing without
-    anybody deciding it should.
-
-    **This is the run's context object, not a closure variable**, and the
-    distinction is the difference between working and being silently wrong. An
-    agent here is built once, at startup — `Responder.build` in the composition
-    root, reused for every task in every channel — so a scope captured when the
-    tools were made would pin every room's memory to whichever room happened to
-    be first. It arrives per call instead, as `Harness.run(context=...)`, the
-    way `FieldsCapture` already does. The model still cannot name it, which
+    **It replaces `MemoryScope`**, which named the same room under a second
+    name for a narrower purpose — a memory's channel, task, agent and source
+    message. One notion of "which room is this", not two, because a second
+    name for one thing is how the two drift (D10). Everything that made
+    `MemoryScope` correct is unchanged and is the reason this is a value
+    rather than a closure variable: an agent here is built once, at startup,
+    and reused for every task in every channel, so a scope captured when the
+    tools were made would pin every room's memory to whichever room happened
+    to be first. It arrives per call. The model still cannot name it, which
     was the point.
+
+    `channel_id` is the read *and* write boundary for memory — a memory
+    written in one room is invisible in another. Not a nicety: this system's
+    rooms are different teams, and a fact learned in one is a leak in the
+    next.
+
+    **Read-only, and every change is a named method** (D9). Not a style
+    choice: this value is handed to a tool, to the store, and to the recording
+    sink within one run, and a field anything could assign would make "what
+    can change this, and where" unanswerable — which is the question the
+    threading this replaces could not answer either. Each method below returns
+    a *new* state, so a value handed to one step cannot be changed underneath
+    another, and each changes exactly one thing. There is deliberately no
+    general `with_(**fields)`: a generic setter would make every change legal
+    again and put the list back out of reach.
+
+    **Only `channel_id` and `agent` are required**, and that is not laziness
+    about the rest. Those two are the boundary and the provenance: a memory
+    written without a room has nowhere safe to live, and one written without
+    an author loses "who wrote this, and while doing what" — the question the
+    operator's board exists to answer about a line an agent is now acting on.
+    Everything else is a fact the journey supplies when it has it, which is
+    what `None` already meant on `task_id`: a run that belongs to no task says
+    so. `for_event` is the full-fidelity constructor and fills seven of them
+    at once.
     """
 
     channel_id: str
-    task_id: int | None
+    #: Which agent is running right now. Changed by `as_agent` at each
+    #: hand-off, so a memory written during an extraction is not attributed to
+    #: whoever ran first.
     agent: str
-    #: The message that produced this memory, when one is in scope (ticket
-    #: 11). The responder sets it from the message it is currently
-    #: drafting a reply to; tools without a source message (the responder
-    #: re-reading its own context, say) leave it `None`, and the store
-    #: keeps it `None`. The Rooms screen joins `memories.source_message_id`
-    #: against `messages.provider_message_id` to mark the row that
-    #: produced the memory.
+    #: Which provider the message came from. The other half of a message's
+    #: identity key — the store dedupes on `(provider, provider_message_id)` —
+    #: and `None` in a state built by hand for something that does not need
+    #: it, the same way `task_id` is `None` before triage has decided.
+    provider: str | None = None
+    thread_id: str | None = None
+    #: The message this step is about. For triage that is the mention; for the
+    #: responder, the message it is drafting a reply to. It is also what the
+    #: recording sink correlates a model call by, and what a memory records as
+    #: the message that produced it — a tool with no message in scope leaves
+    #: it `None`, and the store keeps it `None`.
     message_id: str | None = None
+    author_id: str | None = None
+    author_name: str | None = None
+    #: The `provider_message_id` this replies to, if it is a reply.
+    reply_to: str | None = None
+    #: The task this message became, once it has become one. `None` for a run
+    #: that belongs to no task, which is every run before triage has decided.
+    task_id: int | None = None
+
+    @classmethod
+    def for_conversation(
+        cls, conversation: "ConversationId", *, agent: str
+    ) -> "FridayState":
+        """The state for work about a conversation rather than about one
+        message — a task being worked on, which is what the pool has.
+
+        `ConversationId` already is the provider-qualified place, so taking it
+        whole is the same argument this class makes one level up: the pool
+        used to hand a responder `channel_id`, `task_id` and `message_id` as
+        three parameters and take the channel off a conversation it had in its
+        hand.
+        """
+        return cls(
+            channel_id=conversation.channel_id,
+            agent=agent,
+            provider=conversation.provider,
+            thread_id=conversation.thread_id,
+        )
+
+    def as_agent(self, agent: str) -> "FridayState":
+        """Hand the run on to a different agent."""
+        return replace(self, agent=agent)
+
+    def for_task(self, task_id: int | None) -> "FridayState":
+        """The message became this task."""
+        return replace(self, task_id=task_id)
+
+    def about_message(self, message_id: str | None) -> "FridayState":
+        """This step is about a different message than the last one was."""
+        return replace(self, message_id=message_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -798,7 +851,7 @@ class ExtractionMark:
     the fields it asks about are usually the optional ones no structural rule
     challenges.
 
-    Here rather than beside the node, for the reason `MemoryScope` is here: it
+    Here rather than beside the node, for the reason `FridayState` is here: it
     is part of `Database`'s signature as well, and a store may not import from
     the packages above it.
     """

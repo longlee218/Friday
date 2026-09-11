@@ -48,7 +48,7 @@ from friday.domain.models import (
     MemoryCandidate,
     MemoryKind,
     DECISIONS,
-    MemoryScope,
+    FridayState,
     MemoryStatus,
     InboundEvent,
     MentionType,
@@ -1097,7 +1097,7 @@ class Database:
     # ---- memory ----------------------------------------------------------
     #
     # Ticket 09's D9: an agent writes its own memory and reads it back,
-    # scoped to one channel by `MemoryScope`. What replaced the old
+    # scoped to one channel by `FridayState`. What replaced the old
     # staging-and-promotion tier is enforced here, not in the tool layer —
     # the tool relays whatever it gets back, so a check that only lived there
     # would not survive a second caller.
@@ -1127,7 +1127,7 @@ class Database:
     TEXT_CHARS = 500
 
     async def memory_search(
-        self, scope: MemoryScope, query: str, *, kind: str, limit: int
+        self, scope: FridayState, query: str, *, kind: str, limit: int
     ) -> list[Memory]:
         """Every active match of this kind in this channel, newest first —
         not ranked by how well it matches, only by when it was written.
@@ -1199,7 +1199,7 @@ class Database:
             return [_memory(row) for row in rows]
 
     async def memory_add(
-        self, scope: MemoryScope, text: str, *, kind: str = MemoryKind.VOICE
+        self, scope: FridayState, text: str, *, kind: str = MemoryKind.VOICE
     ) -> Memory | None:
         """Write a new memory, or refuse if the channel is already full.
 
@@ -1262,7 +1262,7 @@ class Database:
             return _memory(row)
 
     async def memory_update(
-        self, scope: MemoryScope, memory_id: str, text: str
+        self, scope: FridayState, memory_id: str, text: str
     ) -> Memory | None:
         """Correct a memory's wording in place — the same claim, said
         better — or `None` if this scope has no such (live, active) memory by
@@ -1288,7 +1288,7 @@ class Database:
             return _memory(row)
 
     async def memory_supersede(
-        self, scope: MemoryScope, memory_id: str, text: str
+        self, scope: FridayState, memory_id: str, text: str
     ) -> Memory | None:
         """Replace what a memory claims, rather than correcting how it is
         worded (D16) — the operation `memory_update` deliberately is not.
@@ -1339,7 +1339,7 @@ class Database:
             await session.flush()
             return _memory(new_row)
 
-    async def memory_delete(self, scope: MemoryScope, memory_id: str) -> bool:
+    async def memory_delete(self, scope: FridayState, memory_id: str) -> bool:
         """Soft-delete: the row survives with who removed it and when, so an
         operator can see what a line said after it is gone. `False` for the
         same cases `memory_update` treats alike."""
@@ -1394,7 +1394,7 @@ class Database:
             )
             return [_memory(row) for row in rows]
 
-    async def _live_memory(self, session, scope: MemoryScope, memory_id: str):
+    async def _live_memory(self, session, scope: FridayState, memory_id: str):
         """The row, if it exists, belongs to this scope, is not deleted, and
         is still active — the one query `memory_update`, `memory_supersede`
         and `memory_delete` share, so the reasons an id can fail to resolve
@@ -1419,7 +1419,7 @@ class Database:
     # exclude a pending row — the guarantee D20 asks to hold structurally.
 
     async def propose_memory(
-        self, scope: MemoryScope, text: str, *, kind: str = MemoryKind.VOICE
+        self, scope: FridayState, text: str, *, kind: str = MemoryKind.VOICE
     ) -> MemoryCandidate:
         """Stage a memory for the operator's mark rather than writing it.
 
@@ -1498,7 +1498,7 @@ class Database:
         accepted = mark == "right"
         memory_id = None
         if accepted:
-            scope = MemoryScope(
+            scope = FridayState(
                 channel_id=candidate.channel_id,
                 task_id=candidate.task_id,
                 agent=candidate.agent,
@@ -1907,7 +1907,7 @@ class Database:
         """The message that opened this task — its `provider_message_id`.
 
         The Rooms screen marks this row with the task glyph; the responder
-        uses it as the `message_id` on the `MemoryScope` it hands the
+        uses it as the `message_id` on the `FridayState` it hands the
         memory tools, so a memory written while processing this task
         carries the link back to the source message. `None` when the
         task has no message attached (a manually-seeded task, or a

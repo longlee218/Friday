@@ -8,11 +8,11 @@ these tests drive the store directly, the same seam `tests/test_memory_store
 from __future__ import annotations
 
 from friday.domain.memory_guard import InstructionShaped
-from friday.domain.models import CandidateStatus, MemoryKind, MemoryScope
+from friday.domain.models import CandidateStatus, MemoryKind, FridayState
 
-ROOM = MemoryScope(channel_id="c1", task_id=7, agent="responder", message_id="m1")
-OTHER_ROOM = MemoryScope(channel_id="c2", task_id=None, agent="responder", message_id="m2")
-NO_MESSAGE = MemoryScope(channel_id="c1", task_id=7, agent="responder")
+ROOM = FridayState(channel_id="c1", task_id=7, agent="responder", message_id="m1")
+OTHER_ROOM = FridayState(channel_id="c2", task_id=None, agent="responder", message_id="m2")
+NO_MESSAGE = FridayState(channel_id="c1", task_id=7, agent="responder")
 
 
 async def test_a_proposal_is_pending_and_reads_back_nowhere(db):

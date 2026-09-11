@@ -13,6 +13,7 @@ from agents.testing import ScriptedModel, assistant_message
 from friday.memory.channel_context import ContextRebuilder, ContextStore
 from friday.config import AgentConfig
 from friday.domain.conversation import ConversationId
+from friday.domain.models import FridayState
 from friday.ops.liveness import Heartbeat
 from friday.domain.states import TaskState
 from tests.conftest import make_event
@@ -392,7 +393,10 @@ async def test_the_responder_writes_differently_in_a_different_room(tmp_path):
         context_store=store,
     )
     for room in ("team", "client"):
-        await responder.draft(asking="cho anh xin correlationId", channel_id=room)
+        await responder.draft(
+            asking="cho anh xin correlationId",
+            state=FridayState(channel_id=room, agent="responder"),
+        )
 
     team, client = prompts
     assert "anh/em" in team and "anh/em" not in client
@@ -409,7 +413,10 @@ async def test_a_room_with_no_file_leaves_the_prompt_as_it_was(tmp_path):
         model=FieldsCapture(prompts),
         context_store=_room(tmp_path),
     )
-    await responder.draft(asking="cho anh xin correlationId", channel_id="unknown-room")
+    await responder.draft(
+        asking="cho anh xin correlationId",
+        state=FridayState(channel_id="unknown-room", agent="responder"),
+    )
 
     assert "channel_" not in prompts[0]
 
@@ -432,7 +439,10 @@ async def test_a_named_person_reaches_the_prompt_beside_the_rooms_register(tmp_p
         context_store=store,
     )
 
-    await responder.draft(asking="cho anh xin correlationId", channel_id="client")
+    await responder.draft(
+        asking="cho anh xin correlationId",
+        state=FridayState(channel_id="client", agent="responder"),
+    )
 
     assert "trang trọng" in prompts[0]
     assert "dana" in prompts[0] and "gọi em" in prompts[0]

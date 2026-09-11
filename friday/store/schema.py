@@ -313,7 +313,7 @@ class Memory(Base):
     kind: Mapped[str]
     task_id: Mapped[int | None] = mapped_column(index=True)
     #: The message that produced this memory. Set by memory_add from the
-    #: MemoryScope.message_id field; the Rooms screen joins on it to
+    #: FridayState.message_id field; the Rooms screen joins on it to
     #: mark the source row with an enrichment glyph. Nullable because
     #: older rows were written before this link existed, and a
     #: backfill is a guess the operator would have to audit by hand.

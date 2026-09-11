@@ -27,7 +27,7 @@ from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS, dag_for
 from friday.store.db import Database
 from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.states import TaskState
-from friday.domain.models import PARAMS, Task
+from friday.domain.models import PARAMS, FridayState, Task
 from friday.outbox import Kind
 from friday.responder.check import rejected
 
@@ -318,19 +318,22 @@ class Pool:
         if self._responder is None:
             return template
         draft = await self._responder.draft(
-            task_id=task.id,
             asking=template,
             params=_as_params(task),
-            channel_id=task.conversation.channel_id,
+            # What this run is about, as one value. `about_message` carries
+            # the message that opened this task, so a memory written while
+            # the responder is drafting reaches the row through
+            # `FridayState.message_id` and the Rooms screen joins its
+            # enrichment glyph on it. Without that, every enrichment marker
+            # on the screen is wrong.
+            state=FridayState.for_conversation(
+                task.conversation, agent="responder"
+            )
+            .for_task(task.id)
+            .about_message(await self._db.source_message_of(task.id)),
             stranger=await self._stranger(task),
             context=await self._db.relevant_messages(task.conversation),
             tone=await self._db.tone_examples(limit=self._tone_examples),
-            # The message that opened this task. A memory written while
-            # the responder is drafting will carry it through
-            # `MemoryScope.message_id` to the row, and the Rooms screen
-            # will join on it. Without this, every enrichment marker on
-            # the screen is wrong.
-            message_id=await self._db.source_message_of(task.id),
         )
         if draft is None:
             return template

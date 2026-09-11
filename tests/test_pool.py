@@ -101,11 +101,12 @@ class StubResponder:
         self.asked: list[str] = []
         self.given_params: list = []
         self.strangers: list[bool] = []
+        self.states: list = []
 
-    async def draft(self, *, asking, params=None, channel_id=None,
-                    stranger=False, context=(), tone=(), task_id=None,
-                    message_id=None):
+    async def draft(self, *, asking, params=None, state=None,
+                    stranger=False, context=(), tone=()):
         self.strangers.append(stranger)
+        self.states.append(state)
         from friday.responder import Draft
 
         self.asked.append(asking)

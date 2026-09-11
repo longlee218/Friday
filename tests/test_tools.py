@@ -359,7 +359,7 @@ async def test_memory_tools_say_so_when_they_were_wired_without_a_scope(caplog):
     `AttributeError` reached `harness._tool_failed`, the model was told the
     tool was unavailable, and the operator got one WARNING that read like the
     store being down. It is not — it is an agent built without
-    `context_type=MemoryScope`, which is the failure mode of wiring a new
+    `context_type=FridayState`, which is the failure mode of wiring a new
     agent to these.
 
     The model is still told "unavailable", and that is honest: with no scope
@@ -369,7 +369,7 @@ async def test_memory_tools_say_so_when_they_were_wired_without_a_scope(caplog):
 
     from agents.tool_context import ToolContext
 
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
     from friday.tools.memory import memory_tools
 
     seen = {}
@@ -393,11 +393,11 @@ async def test_memory_tools_say_so_when_they_were_wired_without_a_scope(caplog):
         )
 
     assert "unavailable" in said, said
-    assert "context_type=MemoryScope" in caplog.text, caplog.text
+    assert "context_type=FridayState" in caplog.text, caplog.text
     assert "scope" not in seen, "the store must not be reached without a scope"
 
     said = await search.on_invoke_tool(
-        ToolContext(context=MemoryScope(channel_id="c1", task_id=7, agent="responder"),
+        ToolContext(context=FridayState(channel_id="c1", task_id=7, agent="responder"),
                     tool_name="memory_search", tool_call_id="1", tool_arguments="{}"),
         '{"query": "anything"}',
     )
@@ -429,7 +429,7 @@ async def test_memory_add_tells_the_model_the_channel_is_full_rather_than_losing
     — the model is told to correct or remove something on purpose instead."""
     from agents.tool_context import ToolContext
 
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
     from friday.tools.memory import memory_tools
 
     class FullChannel:
@@ -439,7 +439,7 @@ async def test_memory_add_tells_the_model_the_channel_is_full_rather_than_losing
     _, add, _, _, _ = memory_tools(FullChannel())
 
     said = await add.on_invoke_tool(
-        ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
+        ToolContext(context=FridayState(channel_id="c1", task_id=None, agent="responder"),
                     tool_name="memory_add", tool_call_id="1", tool_arguments="{}"),
         '{"text": "one more fact"}',
     )
@@ -455,7 +455,7 @@ async def test_memory_add_writes_under_the_voice_kind():
     writes, not by kind."""
     from agents.tool_context import ToolContext
 
-    from friday.domain.models import MemoryKind, MemoryScope
+    from friday.domain.models import MemoryKind, FridayState
     from friday.tools.memory import memory_tools
 
     seen = {}
@@ -468,7 +468,7 @@ async def test_memory_add_writes_under_the_voice_kind():
     _, add, _, _, _ = memory_tools(Store())
 
     await add.on_invoke_tool(
-        ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
+        ToolContext(context=FridayState(channel_id="c1", task_id=None, agent="responder"),
                     tool_name="memory_add", tool_call_id="1", tool_arguments="{}"),
         '{"text": "they like short replies"}',
     )
@@ -483,7 +483,7 @@ async def test_memory_propose_tells_the_model_it_is_waiting_for_a_mark():
     marked."""
     from agents.tool_context import ToolContext
 
-    from friday.domain.models import CandidateStatus, MemoryCandidate, MemoryScope
+    from friday.domain.models import CandidateStatus, MemoryCandidate, FridayState
     from friday.tools.memory import memory_tools
     from datetime import datetime, timezone
 
@@ -499,7 +499,7 @@ async def test_memory_propose_tells_the_model_it_is_waiting_for_a_mark():
     _, _, propose, _, _ = memory_tools(Store())
 
     said = await propose.on_invoke_tool(
-        ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
+        ToolContext(context=FridayState(channel_id="c1", task_id=None, agent="responder"),
                     tool_name="memory_propose", tool_call_id="1", tool_arguments="{}"),
         '{"text": "they might prefer shorter replies"}',
     )
@@ -514,7 +514,7 @@ async def test_memory_propose_reports_an_immediate_resolution():
     not the generic "waiting" answer."""
     from agents.tool_context import ToolContext
 
-    from friday.domain.models import CandidateStatus, MemoryCandidate, MemoryScope
+    from friday.domain.models import CandidateStatus, MemoryCandidate, FridayState
     from friday.tools.memory import memory_tools
     from datetime import datetime, timezone
 
@@ -530,7 +530,7 @@ async def test_memory_propose_reports_an_immediate_resolution():
     _, _, propose, _, _ = memory_tools(Store())
 
     said = await propose.on_invoke_tool(
-        ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
+        ToolContext(context=FridayState(channel_id="c1", task_id=None, agent="responder"),
                     tool_name="memory_propose", tool_call_id="1", tool_arguments="{}"),
         '{"text": "they might prefer shorter replies"}',
     )
@@ -542,7 +542,7 @@ async def test_memory_propose_reports_an_immediate_resolution():
 async def test_memory_propose_writes_under_the_voice_kind():
     from agents.tool_context import ToolContext
 
-    from friday.domain.models import MemoryKind, MemoryScope
+    from friday.domain.models import MemoryKind, FridayState
     from friday.tools.memory import memory_tools
 
     seen = {}
@@ -563,7 +563,7 @@ async def test_memory_propose_writes_under_the_voice_kind():
     _, _, propose, _, _ = memory_tools(Store())
 
     await propose.on_invoke_tool(
-        ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
+        ToolContext(context=FridayState(channel_id="c1", task_id=None, agent="responder"),
                     tool_name="memory_propose", tool_call_id="1", tool_arguments="{}"),
         '{"text": "they might prefer shorter replies"}',
     )
@@ -574,7 +574,7 @@ async def test_memory_propose_writes_under_the_voice_kind():
 async def test_memory_search_reads_only_the_voice_kind():
     from agents.tool_context import ToolContext
 
-    from friday.domain.models import MemoryKind, MemoryScope
+    from friday.domain.models import MemoryKind, FridayState
     from friday.tools.memory import memory_tools
 
     seen = {}
@@ -587,7 +587,7 @@ async def test_memory_search_reads_only_the_voice_kind():
     search, _, _, _, _ = memory_tools(Store())
 
     await search.on_invoke_tool(
-        ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
+        ToolContext(context=FridayState(channel_id="c1", task_id=None, agent="responder"),
                     tool_name="memory_search", tool_call_id="1", tool_arguments="{}"),
         '{"query": "anything"}',
     )
@@ -622,7 +622,7 @@ async def test_a_hostile_memory_cannot_close_a_section_in_the_responders_prompt(
     escaped for: a memory persists, so an unescaped one would replay on
     every later search in the room, not just the one call that wrote it.
     """
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
     from friday.tools.memory import memory_tools
 
     class Memory:
@@ -638,7 +638,7 @@ async def test_a_hostile_memory_cannot_close_a_section_in_the_responders_prompt(
     from agents.tool_context import ToolContext
 
     said = await search.on_invoke_tool(
-        ToolContext(context=MemoryScope(channel_id="c1", task_id=None, agent="responder"),
+        ToolContext(context=FridayState(channel_id="c1", task_id=None, agent="responder"),
                     tool_name="memory_search", tool_call_id="1", tool_arguments="{}"),
         '{"query": "anything"}',
     )

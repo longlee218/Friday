@@ -6,7 +6,7 @@ one for months); this is an agent writing directly and reading back what it
 wrote, with the floor moved from an approval count to three narrower
 guarantees — see `friday/tools/memory.py`'s module docstring for the argument.
 
-These tests drive the store directly, without the tool layer: `MemoryScope` is
+These tests drive the store directly, without the tool layer: `FridayState` is
 the only shape a caller needs, and every one of the properties below has to
 hold at the store, because a tool that forgot to check would just relay
 whatever it got back.
@@ -14,11 +14,11 @@ whatever it got back.
 
 from __future__ import annotations
 
-from friday.domain.models import MemoryKind, MemoryScope
+from friday.domain.models import MemoryKind, FridayState
 
-ROOM = MemoryScope(channel_id="c1", task_id=7, agent="responder")
-OTHER_ROOM = MemoryScope(channel_id="c2", task_id=None, agent="responder")
-ROOM_WITH_SOURCE = MemoryScope(
+ROOM = FridayState(channel_id="c1", task_id=7, agent="responder")
+OTHER_ROOM = FridayState(channel_id="c2", task_id=None, agent="responder")
+ROOM_WITH_SOURCE = FridayState(
     channel_id="c1", task_id=7, agent="responder", message_id="9001"
 )
 
@@ -284,7 +284,7 @@ async def test_memory_search_requires_a_limit_rather_than_defaulting_to_one(db):
 
 
 async def test_memory_add_records_the_source_message_id(db):
-    """`MemoryScope.message_id` is the link the Rooms screen joins on to
+    """`FridayState.message_id` is the link the Rooms screen joins on to
     mark the source row with an enrichment glyph. The store records it
     on the row; a `None` source leaves the column `None`, and a non-`None`
     source comes back out."""

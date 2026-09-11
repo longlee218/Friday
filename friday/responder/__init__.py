@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from friday.config import AgentConfig
 from friday.responder.prompt import build_input, build_instructions
 from friday.agent.harness import Harness
-from friday.domain.models import MemoryScope
+from friday.domain.models import FridayState
 from friday.tools.memory import memory_tools
 from friday.domain.models import Params, InboundEvent
 
@@ -156,7 +156,7 @@ class Responder:
             skills=skills,
             model=model,
             tools=tools,
-            context_type=MemoryScope if self._has_memory else None,
+            context_type=FridayState if self._has_memory else None,
             record=record,
             spent=spent,
         )
@@ -172,17 +172,22 @@ class Responder:
         *,
         asking: str,
         params: "Params | None" = None,
-        channel_id: str | None = None,
+        #: What this run is about: the room, the task, and the message that
+        #: opened it. **One object rather than the three parameters this
+        #: replaced** (board `every-answer-has-a-shape`, D8/D22) — `channel_id`
+        #: for the room lookup, `task_id` for the recording sink, and
+        #: `message_id` so a memory written during this draft carries the row
+        #: the Rooms screen joins its enrichment glyph on. Each layer naming
+        #: the subset it happened to need is how adding one more fact became
+        #: threading one more parameter.
+        #:
+        #: `None` for a caller with no room to be in, which is a test and not
+        #: a real task; a memory tool run without one reports "unavailable"
+        #: rather than crashing.
+        state: FridayState | None = None,
         stranger: bool = False,
         context: Sequence[InboundEvent] = (),
         tone: Sequence[InboundEvent] = (),
-        task_id: int | None = None,
-        #: The message that produced this task, when one is in scope (ticket
-        #: 11). Stored on any memory the responder writes during this
-        #: draft, so the Rooms screen can mark the source row with an
-        #: enrichment glyph. `None` is the ordinary case when the call
-        #: did not come from a message.
-        message_id: str | None = None,
     ) -> Draft | None:
         """Write what `asking` says, in the operator's voice.
 
@@ -198,6 +203,7 @@ class Responder:
         Never a message in someone else's name that the model was unsure of,
         and never silence either.
         """
+        channel_id = state.channel_id if state is not None else None
         room = (
             self._context.context(channel_id)
             if self._context is not None and channel_id is not None
@@ -212,20 +218,11 @@ class Responder:
             tone=tone,
             context=context,
         )
-        # `None` when there is no channel to scope a memory to, or no memory
-        # tools to scope it for — a memory tool called with no scope reports
-        # "unavailable" rather than crashing, but the ordinary case is that
-        # a real task always has a channel.
-        scope = (
-            MemoryScope(
-                channel_id=channel_id,
-                task_id=task_id,
-                agent="responder",
-                message_id=message_id,
-            )
-            if self._has_memory and channel_id is not None
-            else None
-        )
+        # `None` when there is no state to scope a memory by, or no memory
+        # tools to scope it for — a memory tool called with no state reports
+        # "unavailable" rather than crashing, but the ordinary case is that a
+        # real task always has one.
+        scope = state if self._has_memory else None
         # Room for every tool call it might make before the reply is
         # written. A ceiling, not a target: it costs nothing to a run that
         # answers in one turn, and without it an agent that reaches for a
@@ -234,7 +231,7 @@ class Responder:
             said,
             context=scope,
             extra_turns=self._tool_turns,
-            task_id=task_id,
+            task_id=state.task_id if state is not None else None,
         )
         if result is None:
             log.warning("falling back to the template")

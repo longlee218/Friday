@@ -284,9 +284,9 @@ async def test_a_channels_memories_are_reachable_live_and_deleted(client, db):
     """`memory_delete` hides a line from every tool but keeps the row, and
     this is the one route that reads it back — the operator's own view, not
     scoped by agent the way the tool is."""
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
 
-    scope = MemoryScope(channel_id="100", task_id=None, agent="responder")
+    scope = FridayState(channel_id="100", task_id=None, agent="responder")
     kept = await db.memory_add(scope, "checkout runs on cluster b")
     gone = await db.memory_add(scope, "they deploy on fridays")
     await db.memory_delete(scope, gone.id)
@@ -304,9 +304,9 @@ async def test_a_channels_memories_are_bounded_like_every_other_list_route(clien
     purged — a channel that has churned many corrections holds an unbounded
     number of rows, and every other list route on this board is bounded."""
     from friday.store.db import Database
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
 
-    scope = MemoryScope(channel_id="100", task_id=None, agent="responder")
+    scope = FridayState(channel_id="100", task_id=None, agent="responder")
     for n in range(5):
         written = await db.memory_add(scope, f"fact {n}")
         await db.memory_delete(scope, written.id)
@@ -319,9 +319,9 @@ async def test_a_channels_memories_are_bounded_like_every_other_list_route(clien
 async def test_the_board_names_a_full_memory_channel(client, db):
     """Board `what-the-room-already-knows`, ticket 12, D18: the operator's
     own view of the ceiling, not only the model's refusal message."""
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
 
-    scope = MemoryScope(channel_id="100", task_id=None, agent="responder")
+    scope = FridayState(channel_id="100", task_id=None, agent="responder")
     for n in range(db.MEMORY_PER_CHANNEL):
         await db.memory_add(scope, f"fact number {n}")
 
@@ -332,13 +332,13 @@ async def test_a_channels_candidates_are_reachable_pending_and_resolved(client, 
     """Board `what-the-room-already-knows`, ticket 12: the "place for a
     person to look" a pending candidate needs, since no prompt or tool reads
     it — and a rejected one stays listed rather than deleted."""
-    from friday.domain.models import CandidateStatus, MemoryScope
+    from friday.domain.models import CandidateStatus, FridayState
 
-    scope = MemoryScope(
+    scope = FridayState(
         channel_id="100", task_id=None, agent="responder", message_id="m1"
     )
     pending = await db.propose_memory(scope, "they usually reply in Vietnamese")
-    other = MemoryScope(
+    other = FridayState(
         channel_id="100", task_id=None, agent="responder", message_id="m2"
     )
     rejected = await db.propose_memory(other, "they deploy on fridays")
@@ -354,10 +354,10 @@ async def test_a_channels_candidates_are_reachable_pending_and_resolved(client, 
 
 
 async def test_a_channels_candidates_do_not_leak_another_ones(client, db):
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
 
     await db.propose_memory(
-        MemoryScope(channel_id="200", task_id=None, agent="responder"), "not this room"
+        FridayState(channel_id="200", task_id=None, agent="responder"), "not this room"
     )
 
     assert client.get("/api/channels/100/candidates").json() == []

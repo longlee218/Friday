@@ -161,7 +161,7 @@ async def test_a_responder_given_a_store_can_reach_its_own_memory():
     scoped to the channel this draft is about."""
     from agents.testing import function_call
 
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
 
     seen = {}
 
@@ -182,10 +182,11 @@ async def test_a_responder_given_a_store_can_reach_its_own_memory():
     )
 
     await responder.draft(
-        asking="ask", context=(), tone=TONE, channel_id="c1", task_id=42,
+        asking="ask", context=(), tone=TONE,
+        state=FridayState(channel_id="c1", agent="responder").for_task(42),
     )
 
-    assert seen["scope"] == MemoryScope(channel_id="c1", task_id=42, agent="responder")
+    assert seen["scope"] == FridayState(channel_id="c1", task_id=42, agent="responder")
 
 
 async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
@@ -204,6 +205,8 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
     already reaches into `.agent.model_settings` — one specific construction,
     not a production caller `harness.py`'s own rule is about.
     """
+    from friday.domain.models import FridayState
+
     class Store:
         async def memory_search(self, scope, query, kind, limit):
             return []
@@ -220,7 +223,10 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
         config=CONFIG, model=ScriptedModel([[assistant_message("ok")]]),
         db=Store(), record=with_sink,
     )
-    await with_store.draft(asking="ask", context=(), tone=TONE, channel_id="c1")
+    await with_store.draft(
+        asking="ask", context=(), tone=TONE,
+        state=FridayState(channel_id="c1", agent="responder"),
+    )
 
     without_names = {t.name for t in without._run.agent.tools}
     with_names = {t.name for t in with_store._run.agent.tools}
@@ -256,12 +262,12 @@ def test_a_responder_with_memory_is_built_with_the_matching_context_type(monkeyp
         async def memory_search(self, scope, query, kind, limit):
             return []
 
-    from friday.domain.models import MemoryScope
+    from friday.domain.models import FridayState
 
     Responder(config=CONFIG, model=ScriptedModel([]), db=Store())
     Responder(config=CONFIG, model=ScriptedModel([]))
 
-    assert given == [MemoryScope, None]
+    assert given == [FridayState, None]
 
 
 def test_the_skill_catalogue_is_in_the_instructions_not_the_per_call_input():

@@ -55,9 +55,9 @@ import logging
 from friday.agent.harness import ToolContext, tool
 from friday.agent.instruction_prompt import memory_lines
 from friday.domain.memory_guard import InstructionShaped
-from friday.domain.models import CandidateStatus, MemoryKind, MemoryScope
+from friday.domain.models import CandidateStatus, MemoryKind, FridayState
 
-__all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "MemoryScope", "memory_tools"]
+__all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "FridayState", "memory_tools"]
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ RESULTS = 8
 
 
 def memory_tools(db):
-    """The five tools, bound to one store. The scope arrives per run.
+    """The five tools, bound to one store. The run's state arrives per run.
 
     A factory for the same reason `search_skills_tool` is one: what an agent
     can reach is composition, not something the agent declares. Returns them
@@ -96,9 +96,9 @@ def memory_tools(db):
 
     The split is by lifetime. `db` lives as long as the process, so it is
     closed over; the scope lives as long as one run, so it is
-    `Harness.run(context=MemoryScope(...))` and each tool reads it off
-    `ctx.context` through `_scope`. An agent given these must therefore be
-    built with `context_type=MemoryScope`.
+    `Harness.run(context=FridayState(...))` and each tool reads it off
+    `ctx.context` through `_state`. An agent given these must therefore be
+    built with `context_type=FridayState`.
 
     A store that raises is not this module's problem to phrase. `harness.tool`
     replaces the SDK's failure message for every tool here, because the
@@ -125,7 +125,7 @@ def memory_tools(db):
     instead.
     """
 
-    async def memory_search(ctx: ToolContext[MemoryScope], query: str) -> str:
+    async def memory_search(ctx: ToolContext[FridayState], query: str) -> str:
         """Find what is already known about something, before assuming nothing is.
 
         Search first. What you are about to work out may have been worked out
@@ -148,12 +148,12 @@ def memory_tools(db):
                 would use to describe it — not an id, and not a question.
         """
         found = await db.memory_search(
-            _scope(ctx), query, kind=MemoryKind.VOICE, limit=RESULTS
+            _state(ctx), query, kind=MemoryKind.VOICE, limit=RESULTS
         )
         log.info("memory searched: %r -> %d", query, len(found))
         return memory_lines(found)
 
-    async def memory_add(ctx: ToolContext[MemoryScope], text: str) -> str:
+    async def memory_add(ctx: ToolContext[FridayState], text: str) -> str:
         """Write down something a later run would otherwise have to work out again.
 
         Worth writing: how a system actually behaves once you have established
@@ -174,12 +174,12 @@ def memory_tools(db):
             text: one sentence, at most {TEXT_CHARS} characters, that will
                 make sense to a run that has none of your current context.
         """
-        scope = _scope(ctx)
+        state = _state(ctx)
         kept = _bounded(text)
         try:
-            written = await db.memory_add(scope, kept, kind=MemoryKind.VOICE)
+            written = await db.memory_add(state, kept, kind=MemoryKind.VOICE)
         except InstructionShaped as refused:
-            log.info("memory refused for %s: %s", scope.agent, refused)
+            log.info("memory refused for %s: %s", state.agent, refused)
             return str(refused)
         if written is None:
             # The store's own cap, not a failure — see `Database.MEMORY_PER_CHANNEL`.
@@ -191,10 +191,10 @@ def memory_tools(db):
                 "something already here, or memory_delete to remove something "
                 "that turned out to be wrong, then try again"
             )
-        log.info("memory added by %s: %r", scope.agent, kept)
+        log.info("memory added by %s: %r", state.agent, kept)
         return f"remembered as {written.id}"
 
-    async def memory_propose(ctx: ToolContext[MemoryScope], text: str) -> str:
+    async def memory_propose(ctx: ToolContext[FridayState], text: str) -> str:
         """Suggest something worth remembering, without writing it yet.
 
         Use this instead of memory_add when you believe something but are not
@@ -215,11 +215,11 @@ def memory_tools(db):
             text: one sentence, at most {TEXT_CHARS} characters, that will
                 make sense to a run that has none of your current context.
         """
-        scope = _scope(ctx)
+        state = _state(ctx)
         kept = _bounded(text)
-        proposed = await db.propose_memory(scope, kept, kind=MemoryKind.VOICE)
+        proposed = await db.propose_memory(state, kept, kind=MemoryKind.VOICE)
         log.info(
-            "memory proposed by %s: %r (%s)", scope.agent, kept, proposed.status
+            "memory proposed by %s: %r (%s)", state.agent, kept, proposed.status
         )
         if proposed.status != CandidateStatus.PENDING:
             # `propose_memory` resolves immediately when the message it is
@@ -233,7 +233,7 @@ def memory_tools(db):
 
     @tool
     async def memory_update(
-        ctx: ToolContext[MemoryScope], memory_id: str, text: str
+        ctx: ToolContext[FridayState], memory_id: str, text: str
     ) -> str:
         """Correct something already written down, in place.
 
@@ -250,19 +250,19 @@ def memory_tools(db):
             text: what it should say instead, in full — this replaces the line
                 rather than being appended to it.
         """
-        scope = _scope(ctx)
+        state = _state(ctx)
         try:
-            updated = await db.memory_update(scope, memory_id, _bounded(text))
+            updated = await db.memory_update(state, memory_id, _bounded(text))
         except InstructionShaped as refused:
-            log.info("memory update refused for %s: %s", scope.agent, refused)
+            log.info("memory update refused for %s: %s", state.agent, refused)
             return str(refused)
         if updated is None:
             return _no_such(memory_id)
-        log.info("memory %s updated by %s", memory_id, scope.agent)
+        log.info("memory %s updated by %s", memory_id, state.agent)
         return f"{memory_id} updated"
 
     @tool
-    async def memory_delete(ctx: ToolContext[MemoryScope], memory_id: str) -> str:
+    async def memory_delete(ctx: ToolContext[FridayState], memory_id: str) -> str:
         """Remove something that turned out to be wrong.
 
         For a line that is *false*, not one that is old — a fact you have just
@@ -275,10 +275,10 @@ def memory_tools(db):
         Args:
             memory_id: the id exactly as memory_search returned it.
         """
-        scope = _scope(ctx)
-        if not await db.memory_delete(scope, memory_id):
+        state = _state(ctx)
+        if not await db.memory_delete(state, memory_id):
             return _no_such(memory_id)
-        log.info("memory %s deleted by %s", memory_id, scope.agent)
+        log.info("memory %s deleted by %s", memory_id, state.agent)
         return f"{memory_id} forgotten"
 
     # The numbers the prose quotes are the numbers the code enforces, because
@@ -302,19 +302,19 @@ def memory_tools(db):
 
 
 class NotWired(RuntimeError):
-    """The agent holding these tools was run without a `MemoryScope`.
+    """The agent holding these tools was run without a `FridayState`.
 
     Its own class so the log line names the mistake. Without it the scope was
     dereferenced straight off `ctx.context`, an `AttributeError` on `None`
     reached `harness._tool_failed`, and the operator was told a tool was
     unavailable — which reads as the store being down, and is instead an agent
-    that was built without `context_type=MemoryScope` or run without a
+    that was built without `context_type=FridayState` or run without a
     `context=`. That is the failure mode of wiring a *new* agent to these,
     which is the next thing that happens to this file.
     """
 
 
-def _scope(ctx) -> MemoryScope:
+def _state(ctx) -> FridayState:
     """The run's scope, or a failure that says what is actually wrong.
 
     Every tool here reads it through this. The model still gets "unavailable"
@@ -322,10 +322,10 @@ def _scope(ctx) -> MemoryScope:
     but the operator gets a sentence they can act on.
     """
     scope = getattr(ctx, "context", None)
-    if not isinstance(scope, MemoryScope):
+    if not isinstance(scope, FridayState):
         raise NotWired(
-            "memory tools were run without a MemoryScope: build the agent with "
-            f"context_type=MemoryScope and pass context= to run() (got {scope!r})"
+            "memory tools were run without a FridayState: build the agent with "
+            f"context_type=FridayState and pass context= to run() (got {scope!r})"
         )
     return scope
 
