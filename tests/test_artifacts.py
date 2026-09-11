@@ -234,7 +234,7 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
 
     ext = build_extractor(
         params_cls=ApiIssueParams,
-        harness=StubHarness(),  # type: ignore[arg-type]
+        harness=StubHarness(answers=ApiIssueParams),  # type: ignore[arg-type]
         name="stub",
     )
     filled, _ = await ext.run(_context(text, ApiIssueParams), task_id=task.id)

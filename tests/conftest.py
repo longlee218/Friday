@@ -183,7 +183,18 @@ class ScriptedHarness(Harness):
         # instance attribute set here would shadow it, and the test asserting
         # that a refusal is told apart from a failure would silently stop
         # testing anything.
-        for name, default in (("tool_turns", 0), ("last_error", None), ("refusal", None)):
+        from friday.config import AgentConfig
+
+        for name, default in (
+            ("tool_turns", 0), ("last_error", None), ("refusal", None),
+            ("answers", None),
+            # A `Harness` has one, and the inherited code logs through it. A
+            # stand-in rather than a mock: the only thing read off it here is
+            # the agent's name in a log line.
+            ("_config", AgentConfig(
+                name="scripted", api_key="k", base_url="http://x/v1", model="m",
+            )),
+        ):
             if not hasattr(self, name):
                 setattr(self, name, default)
         for name, value in attrs.items():

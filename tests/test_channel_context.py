@@ -790,3 +790,69 @@ def test_an_unrecognised_key_is_dropped_silently():
     naming a fifth key, never a fifth field in the stored summary — and one
     invented key must not throw away the four real ones beside it."""
     assert _fit('{"topic": "x", "extra": "ignore me"}') == {"topic": "x"}
+
+
+# --- board `every-answer-has-a-shape`, ticket 05 -----------------------------
+
+
+async def test_the_summary_arrives_as_a_tool_call(db, tmp_path):
+    """D3, at the summariser — the first agent moved onto the answer tool.
+
+    Measured reason, not preference: every *written* answer this provider
+    sends carries a `<think>` block, a ```json fence and prose after it, so
+    `json.loads` on the reply fails every time — which is exactly the bug this
+    rebuilder shipped, storing the whole blob, reasoning included, as what the
+    room was about. A tool call's arguments arrive in their own protocol field
+    with none of that around them.
+
+    Nothing here parses anything: the fields go out as the tool's arguments
+    and come back as a `RoomSummary`.
+    """
+    from agents.testing import function_call
+
+    store = ContextStore(tmp_path)
+    store.init_channel("100")
+    rebuilder = ContextRebuilder(
+        store=store, db=db,
+        summary_config=SUMMARY_CONFIG,
+        model=ScriptedModel([[function_call("answer", {
+            "topic": "checkout payments",
+            "facts": ["apero is the staging box"],
+            "decisions": ["500s here are usually the gateway"],
+            "constraints": ["never deploy on fridays"],
+        }, call_id="1")]]),
+    )
+    await db.record_message(make_event(
+        provider="discord", channel_id="100", message_id="m1", text="api lỗi",
+    ))
+
+    await rebuilder.rebuild_all()
+
+    assert store.load("100").derived["summary"]["topic"] == "checkout payments"
+
+
+async def test_a_summary_that_is_not_a_summary_is_never_stored_as_one(db, tmp_path):
+    """The other half of the same failure. An answer whose fields do not fit
+    the shape is refused after its correction turn, the previous summary
+    stands, and the next beat tries again — where this used to store whatever
+    came back and render it into every later prompt for that room."""
+    from agents.testing import function_call
+
+    store = ContextStore(tmp_path)
+    store.init_channel("100")
+    rebuilder = ContextRebuilder(
+        store=store, db=db,
+        summary_config=SUMMARY_CONFIG,
+        model=ScriptedModel([
+            [function_call("answer", {"topic": ["not", "a", "line"]}, call_id="1")],
+            [function_call("answer", {"topic": ["still", "not"]}, call_id="2")],
+            [function_call("answer", {"topic": "too late"}, call_id="3")],
+        ]),
+    )
+    await db.record_message(make_event(
+        provider="discord", channel_id="100", message_id="m1", text="api lỗi",
+    ))
+
+    await rebuilder.rebuild_all()
+
+    assert "summary" not in store.load("100").derived

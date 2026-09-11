@@ -213,6 +213,10 @@ def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
     The check is by *shape*: a factory whose name ends `_tool` belongs in
     `friday/tools/`, whether or not it ever got decorated. A thing that looks
     like a tool and is not is worse than either.
+
+    **`harness.py` is exempt, and the exemption is named rather than silent** —
+    the guard above already skips it, and the test below says what lives there
+    and why, so the exemption cannot quietly grow a second occupant.
     """
     import ast
     from pathlib import Path
@@ -220,7 +224,7 @@ def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
     root = Path(__file__).resolve().parents[1] / "friday"
     offenders = {}
     for path in root.rglob("*.py"):
-        if path.is_relative_to(TOOLS):
+        if path.is_relative_to(TOOLS) or path.name == "harness.py":
             continue
         named = [
             node.name
@@ -232,6 +236,51 @@ def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
             offenders[str(path.relative_to(root.parent))] = named
 
     assert offenders == {}, f"tool-shaped and not in friday/tools/: {offenders}"
+
+
+def test_the_one_tool_outside_the_package_is_the_answer_tool():
+    """Board `every-answer-has-a-shape`, ticket 05. There is exactly one, it is
+    in `harness.py`, and it is not a capability.
+
+    **Why it cannot live in `friday/tools/`.** It is built from a `FunctionTool`
+    straight off the SDK, and `harness.py` is the only module allowed to import
+    that — the seam rule that keeps replacing the SDK a one-file job. So the
+    two guards above skip that file, and this is the assertion that stops the
+    skip from being a blanket one.
+
+    **Why it is not in the list.** The list answers "what can the agents do?",
+    and answering is not something an agent *does*, it is how a run with a
+    declared shape finishes. It is generated per shape rather than declared,
+    it takes whatever fields that shape has, and no agent chooses between it
+    and anything else.
+    """
+    import ast
+
+    source = ast.parse((REPO / "friday" / "agent" / "harness.py").read_text())
+    tool_shaped = [
+        node.name
+        for node in ast.walk(source)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.endswith("_tool")
+    ]
+
+    assert tool_shaped == ["_answer_tool"], (
+        f"harness.py is exempt from the tools-package rule for the answer tool "
+        f"alone; found {tool_shaped}"
+    )
+
+    from friday.agent.harness import ANSWER, _answer_tool
+    from friday.domain.models import ApiIssueParams
+
+    built = _answer_tool(ApiIssueParams)
+
+    assert built.name == ANSWER
+    assert built.name not in _tool_objects(), (
+        "the answer tool is a transport, not one of the doors an agent chooses"
+    )
+    assert set(built.params_json_schema["properties"]) == {
+        f.name for f in __import__("dataclasses").fields(ApiIssueParams)
+    }, "the parameters are the shape's own fields, generated from it"
 
 
 def test_the_skill_tools_ask_the_model_for_what_their_names_promise():

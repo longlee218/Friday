@@ -73,7 +73,7 @@ def test_extractor_decorator_registers_under_task_type():
 
     ext = build_extractor(
         params_cls=FakeParams,
-        harness=StubHarness(),  # type: ignore[arg-type]
+        harness=StubHarness(answers=FakeParams),  # type: ignore[arg-type]
         name="fake_test_type_31",
     )
     _install("fake_test_type_31", ext)
@@ -99,6 +99,8 @@ def test_registering_twice_replaces_rather_than_raises():
         environment: Optional[str] = None
 
     class Silent:
+        answers = Fake
+
         async def run(self, *a, **kw):
             return None
 
@@ -136,7 +138,7 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
             return StubResult()
 
     ext = build_extractor(
-        params_cls=ParamsWithRules, harness=StubHarness(), name="stub"  # type: ignore[arg-type]
+        params_cls=ParamsWithRules, harness=StubHarness(answers=ParamsWithRules), name="stub"  # type: ignore[arg-type]
     )
     _install("stub_test_31", ext)
 
@@ -168,7 +170,7 @@ def test_an_extractor_returns_none_when_harness_fails():
         environment: Optional[str] = None
 
     ext = build_extractor(
-        params_cls=Params, harness=FailingHarness(), name="fail"  # type: ignore[arg-type]
+        params_cls=Params, harness=FailingHarness(answers=Params), name="fail"  # type: ignore[arg-type]
     )
     _install("failing_test_31", ext)
 
@@ -195,7 +197,7 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
         required_id: str  # not Optional - missing raises TypeError
 
     ext = build_extractor(
-        params_cls=StrictParams, harness=StubHarness(), name="bad"  # type: ignore[arg-type]
+        params_cls=StrictParams, harness=StubHarness(answers=StrictParams), name="bad"  # type: ignore[arg-type]
     )
     _install("bad_output_test_31", ext)
 
@@ -258,9 +260,10 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
                             call_id="1",
                         )
                     ],
-                    [assistant_message("{}")],
+                    [function_call("answer", {}, call_id="2")],
                 ]
             ),
+            answers=ApiIssueParams,
         ),
         name="api_issue_ext",
     )
@@ -469,7 +472,7 @@ async def test_a_model_that_could_not_answer_is_not_a_refusal():
     class Params:
         environment: _Optional[str] = None
 
-    ext = build_extractor(params_cls=Params, harness=Refuses(), name="refuses")
+    ext = build_extractor(params_cls=Params, harness=Refuses(answers=Params), name="refuses")
 
     with pytest.raises(Refused, match="tokens today"):
         await ext.run(_context("anything", Params))
@@ -657,3 +660,19 @@ def test_the_room_and_the_outstanding_questions_are_both_labelled():
 #: `Extractor`'s own lookup of the room, the domain memories and the open
 #: questions, which no longer exists — `build_full_context` does all four
 #: reads now, and `Extractor` holds no store of its own to test here.
+
+
+def test_an_extractor_whose_harness_answers_a_different_shape_is_refused():
+    """Board `every-answer-has-a-shape`, ticket 05. Same argument as
+    `register`'s check against `PARAMS`, one level down: a harness that
+    declares a different `answers=` produces the wrong type at runtime, in the
+    middle of a task, where the only symptom is fields that never fill in.
+    Refusing at wiring time costs a restart."""
+    from friday.domain.models import AccessRequestParams, ApiIssueParams
+
+    with pytest.raises(ValueError, match="ApiIssueParams"):
+        build_extractor(
+            params_cls=ApiIssueParams,
+            harness=ScriptedHarness(answers=AccessRequestParams),  # type: ignore[arg-type]
+            name="mismatched",
+        )

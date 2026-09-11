@@ -408,7 +408,7 @@ async def test_an_empty_extraction_is_not_a_successful_one():
 
     class Says(ScriptedHarness):
         def __init__(self, answer):
-            super().__init__()
+            super().__init__(answers=ApiIssueParams)
             self.answer = answer
 
         async def run(self, prompt, **kwargs):

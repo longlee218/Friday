@@ -124,7 +124,6 @@ class Extractor:
         capture = FieldsCapture()
         filled = await self._harness.run_structured(
             await self.would_ask(context),
-            self._params_cls,
             context=capture,
             extra_turns=1,
             task_id=task_id,
@@ -173,7 +172,18 @@ def build_extractor(
     room, the domain memories and the open questions from inside this
     class; now `friday.extraction.context.build_full_context` gathers all
     three, called by node 0, which already holds both.
+
+    **The harness must answer the shape this extractor claims.** Same
+    argument as `register`'s check against `PARAMS`, one level down: a
+    harness that declares a different `answers=` produces the wrong type
+    at runtime, in the middle of a task, where the only symptom is fields
+    that never fill in. Refusing here costs a restart.
     """
+    if getattr(harness, "answers", None) is not params_cls:
+        raise ValueError(
+            f"the {name} extractor fills {params_cls.__name__}, but its "
+            f"harness answers {getattr(harness, 'answers', None)}"
+        )
     return Extractor(harness=harness, params_cls=params_cls, name=name)
 
 
@@ -304,6 +314,10 @@ def register(
             ),
             tools=[ask_for_fields_tool(params_cls)],
             skills=skills,
+            # The shape this extractor answers, declared where it is built.
+            # The harness generates the tool the answer arrives through and
+            # the check it is validated by from this one class.
+            answers=params_cls,
             context_type=FieldsCapture,
             record=record,
             spent=spent,

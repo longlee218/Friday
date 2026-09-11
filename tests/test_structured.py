@@ -21,8 +21,11 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from conftest import ScriptedHarness
+from agents.testing import ScriptedModel, assistant_message, function_call
+
+from friday.agent.harness import Harness
 from friday.agent.structured import describe, find_json, fits
+from friday.config import AgentConfig
 
 
 @dataclass
@@ -165,77 +168,155 @@ def test_the_shape_the_summariser_is_told_is_the_one_it_is_checked_against():
         assert line in told, line
 
 
-# --- run_structured: validate, then one correction turn ---------------------
+# --- run_structured: the answer arrives as a tool call ----------------------
+#
+# Driven through the scripted model transport and a real `Harness`, which is
+# the seam the spec names for this group and the highest one available: it
+# exercises the tool declaration, the argument validation, the correction turn
+# and the final-output handling, none of which a harness double would touch.
+# A double that supplied its own structured-answer method could pass while
+# skipping the whole mechanism, which is what `ScriptedHarness` exists to warn
+# about and what the version of these tests before board
+# `every-answer-has-a-shape` actually did.
 
 
-class _Says(ScriptedHarness):
-    """Answers from a script, one reply per call, and counts the calls."""
-
-    def __init__(self, *answers):
-        super().__init__()
-        self.answers = list(answers)
-        self.prompts: list[str] = []
-
-    async def run(self, prompt, **kwargs):
-        self.prompts.append(prompt)
-        answer = self.answers.pop(0) if self.answers else None
-        return None if answer is None else type("R", (), {"final_output": answer})()
-
-
-async def test_an_answer_that_fits_costs_one_call():
-    harness = _Says('{"name": "x"}')
-
-    assert await harness.run_structured("ask", Shape) == Shape(name="x")
-    assert len(harness.prompts) == 1, "the common path must not pay for a retry"
-
-
-async def test_an_answer_that_does_not_fit_earns_exactly_one_correction():
-    harness = _Says('{"name": ["a"]}', '{"name": "x"}')
-
-    assert await harness.run_structured("ask", Shape) == Shape(name="x")
-    assert len(harness.prompts) == 2
-
-
-async def test_a_second_bad_answer_is_not_a_third_attempt():
-    """A model that cannot produce its own declared shape twice will not on
-    the third go, and this runs on every task in a busy room."""
-    harness = _Says('{"name": ["a"]}', '{"name": ["b"]}')
-
-    assert await harness.run_structured("ask", Shape) is None
-    assert len(harness.prompts) == 2
-
-
-async def test_the_correction_tells_the_model_what_was_wrong():
-    harness = _Says('{"count": "nope"}', '{"count": 1}')
-
-    await harness.run_structured("ask", Shape)
-
-    correction = harness.prompts[1]
-    assert "count" in correction, "the correction must name the field"
-    assert "ask" in correction, "the original request has to be carried again"
-    assert "nope" not in correction, (
-        "the failed reply must not be quoted back: the extractor copies a "
-        "reporter's bytes verbatim, so its own reply is reporter-controlled "
-        "text and would re-enter the prompt outside the trust boundary"
+def _asking(*steps, **options) -> Harness:
+    return Harness(
+        config=AgentConfig(
+            name="shaped", api_key="k", base_url="http://x/v1", model="m",
+            **options,
+        ),
+        instructions="answer the question",
+        answers=Shape,
+        model=ScriptedModel(list(steps)),
     )
 
 
-async def test_a_model_that_never_answered_is_not_corrected():
-    """`None` from `run` is not a malformed reply — nothing came back, and
-    asking again would spend a second call on the same outage."""
-    harness = _Says(None)
+async def test_an_answer_that_fits_costs_one_call():
+    harness = _asking([function_call("answer", {"name": "x"}, call_id="1")])
 
-    assert await harness.run_structured("ask", Shape) is None
-    assert len(harness.prompts) == 1
+    assert await harness.run_structured("ask") == Shape(name="x")
+    assert len(harness.agent.model.calls) == 1, "the common path paid for a retry"
 
 
-async def test_an_empty_reply_is_never_a_successful_empty_answer():
-    """The hazard this replaces, pinned at the seam: an unreadable reply used
-    to become `{}`, and every field of a `Params` has a default, so nothing
-    downstream could tell it from a model that genuinely found nothing."""
-    harness = _Says("", "")
+async def test_an_answer_that_does_not_fit_earns_a_correction_inside_the_run():
+    """One run, not two. The bad call's own tool output carries the reason back
+    to the model, so the correction costs a turn rather than a second
+    `timeout_seconds` — which is what the written-answer version of this method
+    cost, and what made a structured call two clocks instead of one."""
+    harness = _asking(
+        [function_call("answer", {"name": ["a"]}, call_id="1")],
+        [function_call("answer", {"name": "x"}, call_id="2")],
+    )
 
-    assert await harness.run_structured("ask", Shape) is None
+    assert await harness.run_structured("ask") == Shape(name="x")
+    assert len(harness.agent.model.calls) == 2
+
+
+async def test_a_second_bad_answer_is_not_a_third_attempt():
+    """A model that cannot produce its own declared shape twice will not on the
+    third go, and this runs on every task in a busy room. The budget is
+    `max_turns` and nothing else — there is no retry loop of our own."""
+    harness = _asking(
+        [function_call("answer", {"name": ["a"]}, call_id="1")],
+        [function_call("answer", {"name": ["b"]}, call_id="2")],
+        [function_call("answer", {"name": "x"}, call_id="3")],
+    )
+
+    assert await harness.run_structured("ask") is None
+    assert harness.last_error is not None
+
+
+async def test_the_correction_names_the_field_and_quotes_nothing_back():
+    """The reason goes back as the tool's own output. It names the field,
+    because that is what the model needs in order to fix it; it carries none
+    of the arguments, because an extractor's whole job is copying a reporter's
+    bytes out verbatim, so its own arguments are reporter-controlled text.
+
+    **Asserted on the tool's output, not on the whole request**, and the
+    difference is the trust boundary rather than pedantry. The model's own
+    failed call is in the run's history and the SDK replays it — that text
+    never left the model's context, so nothing crossed a boundary. What the
+    deleted written-answer correction did was build a *new* prompt quoting the
+    reply, which is reporter-controlled text re-entering from outside. This is
+    the half we control, and it is the half that was wrong.
+    """
+    harness = _asking(
+        [function_call("answer", {"count": "nope"}, call_id="1")],
+        [function_call("answer", {"count": 1}, call_id="2")],
+    )
+
+    await harness.run_structured("ask")
+
+    turned_back = [
+        item["output"]
+        for item in harness.agent.model.calls[1].input
+        if isinstance(item, dict) and item.get("type") == "function_call_output"
+    ]
+
+    assert any("count" in said for said in turned_back), (
+        "the correction must name the field"
+    )
+    assert not any("nope" in said for said in turned_back), (
+        "the tool quoted the arguments back"
+    )
+
+
+async def test_a_model_that_never_answered_is_not_an_empty_answer():
+    """`None` from the run is not a malformed reply — nothing came back."""
+    harness = _asking([assistant_message("")])
+
+    assert await harness.run_structured("ask") is None
+
+
+async def test_an_answer_written_as_text_is_still_read():
+    """D13: forcing the tool call is not a guarantee — the same probe that
+    found a tool call's arguments clean also found this model answering
+    outside a closed enum it had just been given. A reply that arrives as
+    prose anyway is found and checked against the same shape, by the same
+    helpers, rather than being thrown away."""
+    harness = _asking(
+        [assistant_message('<think>ok</think>\n```json\n{"name": "x"}\n```\nthat is it')]
+    )
+
+    assert await harness.run_structured("ask") == Shape(name="x")
+
+
+async def test_prose_that_is_not_the_shape_is_none_not_a_default_instance():
+    """The hazard this whole method replaces, pinned at the seam: an
+    unreadable reply used to become `{}`, every field of a `Params` has a
+    default, and nothing downstream could tell it from a model that genuinely
+    found nothing."""
+    harness = _asking([assistant_message("xin lỗi, tôi không chắc")])
+
+    assert await harness.run_structured("ask") is None
+
+
+async def test_an_agent_with_no_declared_shape_cannot_be_asked_for_one():
+    """The shape is the agent's contract, declared where the agent is built.
+    Asking an agent that never declared one is a wiring mistake, and it should
+    read as one rather than as a model that would not answer."""
+    harness = Harness(
+        config=AgentConfig(name="plain", api_key="k", base_url="http://x/v1", model="m"),
+        instructions="write prose",
+        model=ScriptedModel([[assistant_message("ok")]]),
+    )
+
+    with pytest.raises(ValueError, match="answers"):
+        await harness.run_structured("ask")
+
+
+def test_the_answer_tool_carries_each_fields_own_meaning():
+    """A tool parameter *is* an instruction to the model, and an undescribed
+    one is an instruction to guess — the argument `classify`'s enum
+    descriptions already make. The meaning lives on the field, as the same
+    `doc` the prompt renders, so there is one source for both readers."""
+    from friday.agent.harness import _answer_tool
+    from friday.domain.models import ApiIssueParams
+
+    described = _answer_tool(ApiIssueParams).params_json_schema["properties"]
+
+    assert "copied exactly" in described["correlation_id"]["description"]
 
 
 # --- what an adversarial review of the first version found ------------------
@@ -297,3 +378,19 @@ def test_a_schema_whose_annotations_do_not_resolve_still_describes():
     said = describe(Local)
 
     assert "value" in said
+
+
+def test_the_shapes_own_docstring_does_not_go_on_the_wire():
+    """A dataclass docstring here is developer prose — `RoomSummary`'s runs to
+    nine paragraphs about why it has four fields and not six — and pydantic
+    puts it on the object as `description`. That would be sent to the provider
+    on every call, as tokens and as confusion. What the model needs about the
+    shape as a whole is on the tool's description; what it needs about a field
+    is on the field."""
+    from friday.agent.harness import _answer_params
+    from friday.memory.channel_context import RoomSummary
+
+    described = _answer_params(RoomSummary)
+
+    assert "description" not in described
+    assert described["properties"]["topic"]["description"]

@@ -23,13 +23,15 @@ not mention the library.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields as dataclass_fields, replace
 from typing import Any
 
 from agents import (
     Agent,
     AgentHooks,
+    FunctionTool,
     ModelSettings,
     OpenAIChatCompletionsModel,
     RunConfig,
@@ -58,7 +60,9 @@ from openai import (
     RateLimitError,
 )
 
-from friday.agent.structured import find_json, fits
+from pydantic import TypeAdapter, ValidationError
+
+from friday.agent.structured import describe, find_json, fits
 from friday.config import AgentConfig
 from friday.ops.redact import scrub
 
@@ -278,6 +282,14 @@ class Harness:
         #: does not have goes looking for it, which is the rule
         #: `clarification_system` and `memory_tool_system` already follow.
         skills=None,
+        #: The shape this agent's answer has, when it has one — a dataclass.
+        #: Declared here rather than passed to `run_structured`, because an
+        #: agent's answer shape does not vary per call: the summariser always
+        #: answers a `RoomSummary`, each extractor always answers its own
+        #: type's `Params`. Declaring it here builds the answer tool, its
+        #: terminator and its `tool_choice` exactly once instead of on every
+        #: call, and puts the agent's contract where the agent is built.
+        answers: type | None = None,
         context_type: type | None = None,
         **agent_options: Any,
     ) -> None:
@@ -332,6 +344,32 @@ class Harness:
                 describe_skill_tool(skills),
                 read_skill_file_tool(skills),
             ]
+
+        #: What `run_structured` validates against and hands back. The tool
+        #: below is how it arrives: measured against the configured provider,
+        #: a tool call's arguments come back in their own protocol field —
+        #: no `<think>` block, no code fence, `json.loads` succeeds — while
+        #: every *written* answer from the same model carries all three.
+        self.answers = answers
+        if answers is not None:
+            if "tool_use_behavior" in agent_options:
+                # Both decide when the run is over, and the answer tool's
+                # terminator is the one that knows what "answered" means here.
+                raise ValueError(
+                    "an agent that declares `answers=` owns its own "
+                    "tool_use_behavior; passing one too would silently win"
+                )
+            tools = [*tools, _answer_tool(answers)]
+            agent_options["tool_use_behavior"] = _answered(answers)
+            # Without a forced call the model writes prose instead, which is
+            # the path this exists to stop being the road. It is not a
+            # guarantee — the same probe that measured the clean arguments
+            # also measured the model answering outside a closed enum — which
+            # is why `run_structured` still validates, and still reads a
+            # written answer if one turns up anyway.
+            agent_options.setdefault("model_settings", {}).setdefault(
+                "tool_choice", "required"
+            )
 
         agent_class = Agent[context_type] if context_type else Agent
         self.agent = agent_class(
@@ -406,7 +444,6 @@ class Harness:
     async def run_structured(
         self,
         prompt: str,
-        schema: type,
         *,
         context: Any = None,
         extra_turns: int = 0,
@@ -414,71 +451,86 @@ class Harness:
         task_id: int | None = None,
         node: str | None = None,
     ) -> Any | None:
-        """Ask for a shape, and hand back only an answer that actually fits it.
+        """Ask for this agent's declared shape, and hand back only an answer
+        that actually fits it.
 
-        Returns an instance of `schema`, or `None` — and `None` means the
+        Returns an instance of `answers`, or `None` — and `None` means the
         same thing it means from `run()`: nobody got an answer, the caller
         turns that into its own kind of work. It never means "an answer with
         nothing in it", which is exactly the confusion this method exists to
-        end. The parser it replaces returned `{}` for output it could not
+        end. The parser it replaced returned `{}` for output it could not
         read, every field of a `Params` has a default, and so an unreadable
         reply arrived at the caller as a *successful* extraction of nothing.
 
-        **The shape is described in the prompt and checked in this process,
-        and never sent on the wire.** `friday/agent/structured.py` carries
-        the measurement that decided this: the configured provider accepts
-        `response_format: json_schema` and then ignores it, which is worse
-        than rejecting it — a schema nobody enforces reads exactly like a
-        schema somebody does.
+        **The answer arrives as a tool call, and that is measured rather than
+        preferred** (D3). Probed against the configured provider on
+        2026-09-11: a written answer always carries a `<think>` block, a
+        ```json fence and prose after it, so `json.loads` on the reply fails
+        every time; a tool call's arguments arrive in
+        `tool_calls[].function.arguments` — clean, and a `curl` carrying
+        `{"a":1}` came back byte for byte. Two different fields, and only one
+        of them needs reading.
 
-        **One repair turn, and the error goes back in the words the model
-        needs.** This is the guarantee the tool path has had all along and
-        the written-answer path never did: the SDK validates a tool call's
-        arguments against their schema, hands a malformed one back to the
-        model, and lets `max_turns` decide how many corrections it gets. A
-        reply that is not JSON, or is JSON of the wrong shape, gets the same
-        treatment here — once, because a model that cannot produce its own
-        declared shape twice will not on the third go, and this runs on
-        every task in a busy room.
+        **Nothing is sent on the wire to enforce the shape.** Not
+        `response_format: json_schema`: the same provider accepts it and then
+        ignores it, which is worse than rejecting it — a schema nobody
+        enforces reads exactly like a schema somebody does. The tool's
+        parameter schema goes out because that is how a tool is declared, and
+        nothing relies on the provider honouring it. What makes this safe is
+        that the arguments are validated **in this process**, every time.
 
-        The repair turn is a fresh `run()`, so it carries the original
-        prompt again: a run holds no memory of the one before it. That costs
-        a second prompt on the error path only, which is the right way round
-        — the common path pays nothing.
+        **One correction, and it is the turn budget** (D4). A call that does
+        not fit comes back to the model as the tool's own output, naming the
+        field — so the model can fix it inside the same run. `max_turns`
+        decides how many goes it gets, which is the mechanism the SDK already
+        applies to every other tool and the one CLAUDE.md documents. There is
+        no second retry loop and, unlike the method this replaced, **no second
+        run** — so a structured call is one `timeout_seconds`, not two, and
+        the pool's worst case per task is what it always was.
 
-        **And a second clock.** `timeout_seconds` bounds one `run`, retries
-        included, so a structured call that needs its correction turn can
-        take two of them — the pool's worst case per task is 2×, not 1×.
-        Said out loud because CLAUDE.md states the one-run bound as a
-        guarantee, and a second run under the same name would be exactly the
-        quiet drift this repo keeps finding in its own prose. One correction
-        and no more is what keeps the multiplier at two.
+        **A written answer is still read, and is the fallback rather than the
+        road** (D13). Forcing the tool call is not a guarantee: the probe that
+        found the clean arguments also found the model answering outside a
+        closed enum when asked not to. If a reply turns up as text anyway,
+        `friday/agent/structured.py` finds the object in it and checks it
+        against the same shape — one path in, one check, whichever surface it
+        came over.
         """
+        if self.answers is None:
+            raise ValueError(
+                f"{self._config.name} was not built with `answers=`, so there "
+                f"is no shape to ask for"
+            )
         said = await self.run(
-            prompt, context=context, extra_turns=extra_turns,
-            message_id=message_id, task_id=task_id, node=node,
+            prompt,
+            context=context,
+            # The answer is a tool call, which is the call and its result
+            # where a written answer is one turn. Added here rather than asked
+            # of callers for the reason `tool_turns` is: the harness is the
+            # only thing that knows how its own answer arrives, and three
+            # callers remembering a number is three places to forget.
+            extra_turns=extra_turns + 1,
+            message_id=message_id,
+            task_id=task_id,
+            node=node,
         )
         if said is None:
             return None
-        value, problem = _fitted(said.final_output or "", schema)
-        if problem is None:
-            return value
 
-        log.info("the reply did not fit %s (%s) — asking again", schema.__name__, problem)
-        again = await self.run(
-            _correction(prompt, problem),
-            context=context, extra_turns=extra_turns,
-            message_id=message_id, task_id=task_id, node=node,
+        answered = _instance_in(said, self.answers)
+        if answered is not None:
+            return answered
+
+        written = said.final_output
+        value, problem = _fitted(
+            written if isinstance(written, str) else "", self.answers
         )
-        if again is None:
-            return None
-        value, problem = _fitted(again.final_output or "", schema)
         if problem is None:
             return value
-        log.warning(
-            "the reply still did not fit %s after one correction (%s)",
-            schema.__name__, problem,
+        self.last_error = (
+            f"the answer did not fit {self.answers.__name__}: {problem}"
         )
+        log.warning("%s: %s", self._config.name, self.last_error)
         return None
 
     def checkpoint(self, result: Any) -> dict[str, Any]:
@@ -843,34 +895,141 @@ def _fitted(output: str, schema: type) -> tuple[Any | None, str | None]:
     return fits(data, schema)
 
 
-def _correction(prompt: str, problem: str) -> str:
-    """The repair turn's prompt: the original ask, and what was wrong.
+#: What the model calls to answer. One name for every shape, because an agent
+#: built with `answers=` has exactly one way to finish, and a name that varied
+#: per schema would be a second thing for a prompt to have to know.
+ANSWER = "answer"
 
-    **The failed reply is not quoted back**, which the first version of this
-    did, between plain `--- your previous reply ---` delimiters. Review
-    caught what that costs, and it is not theoretical here: the extractor's
-    entire job is copying a reporter's bytes out verbatim, so a reply of
-    *its* is reporter-controlled text, and a reporter who writes those
-    delimiters and a sentence after them is writing into the correction
-    prompt from outside the trust boundary the original prompt carefully put
-    them behind.
 
-    Framing it would not have fixed it either. A length-prefixed frame is
-    the move this repo already tried and recorded as decoration — a count no
-    code compares against closes nothing — and the defence that does work
-    here, escaping and flattening, would hand the model its own JSON with
-    the quotes escaped and ask it to correct that.
+def _instance_in(result: Any, schema: type) -> Any | None:
+    """The answer the tool built, taken off the run's own items.
 
-    So: say what was wrong, in the words `fits` produced, which name the
-    field and come from this process rather than from the reply. That is
-    exactly what the SDK's own tool-repair path does — a malformed tool call
-    comes back as "Invalid JSON input for tool classify", with the arguments
-    not echoed — and it is the path this method exists to give the written
-    answer.
+    **Not `result.final_output`, and the reason is a live SDK behaviour worth
+    writing down.** `tool_use_behavior` may hand back any object as the run's
+    final output — and then the runner does
+    `if agent.output_type is None or agent.output_type is str: final_output =
+    str(final_output)`, so an instance arrives at the caller as its own
+    `repr`. The fix the SDK intends is `output_type=schema`, which is the one
+    thing this design may not do: that is what emits the
+    `response_format: json_schema` envelope on every Chat Completions request
+    (D5), and it would also make the SDK validate a *written* reply itself,
+    raising where the fallback below wants to read it.
+
+    So the instance is read where it actually is: the tool's own output item.
+    Newest first, for the same reason `_answered` scans that way — a model may
+    answer and reach for a skill in the same turn.
     """
-    return (
-        f"{prompt}\n\n"
-        f"Your previous reply could not be used: {problem}.\n"
-        f"Answer again with the JSON object described above and nothing else "
-        f"— no explanation, no code fence."
+    for item in reversed(list(getattr(result, "new_items", ()) or ())):
+        output = getattr(item, "output", None)
+        if isinstance(output, schema):
+            return output
+    return None
+
+
+def _answer_tool(schema: type) -> FunctionTool:
+    """The tool an agent answers through, generated from the shape itself.
+
+    **Not in `friday/tools/`,** and that is where it would belong if it were a
+    capability. It is not: the tools in that package are doors an agent chooses
+    among — reach a skill, search memory — and answering is not a choice. It is
+    also unbuildable there, because `FunctionTool` comes from the SDK and this
+    module is the only one allowed to import it. `tests/test_tools.py` names
+    this exception out loud rather than letting its guard quietly skip a file.
+
+    **The body returns its problem; it must not raise.** A raise inside
+    `on_invoke_tool` is wrapped in `UserError` and fails the whole run, so the
+    model never gets to correct the thing it could have corrected in a turn.
+    Returning the reason puts it in the tool's output, which is where the model
+    reads it. Found by prototype rather than by reading: the SDK's own
+    `function_tool` catches exceptions for exactly this reason, and a
+    hand-built `FunctionTool` has no such wrapper around it.
+
+    **The arguments are not quoted back** in that reason, for the same reason
+    the written-answer correction this replaced stopped quoting the reply: an
+    extractor's whole job is copying a reporter's bytes out verbatim, so its
+    own arguments are reporter-controlled text, and echoing them would walk
+    that text back into the prompt outside the boundary the original put it
+    behind. `fits` produces the reason inside this process, and it names the
+    field.
+    """
+
+    async def invoke(ctx: Any, arguments: str) -> Any:
+        try:
+            data = json.loads(arguments or "{}")
+        except json.JSONDecodeError:
+            return "that was not JSON — call it again with a JSON object"
+        if not isinstance(data, dict):
+            return "that was not a JSON object — call it again with one"
+        value, problem = fits(data, schema)
+        return value if problem is None else f"that did not fit: {problem}"
+
+    return FunctionTool(
+        name=ANSWER,
+        description=(
+            f"Give your answer. Call this exactly once, with these fields:\n"
+            f"{describe(schema)}"
+        ),
+        params_json_schema=_answer_params(schema),
+        on_invoke_tool=invoke,
+        # The provider ignores the schema either way — measured — so pinning
+        # it strict buys nothing on the wire, and costs the one thing a strict
+        # schema demands: every property required, which a shape whose fields
+        # all have defaults cannot honestly say. What makes this safe is the
+        # validation in `invoke`, which runs whatever the wire did.
+        strict_json_schema=False,
     )
+
+
+def _answer_params(schema: type) -> dict[str, Any]:
+    """The tool's parameter schema, with each field's own `doc` on it.
+
+    Pydantic reads a description off `Field(description=...)` and knows
+    nothing about a dataclass field's `metadata`, which is where the meaning
+    of a field lives here — the same string `describe` renders into the prompt
+    and the extractor's own instructions read. Putting it on the parameter
+    matters for the reason `classify`'s enum descriptions do: a tool parameter
+    *is* an instruction to the model, and an undescribed one is an instruction
+    to guess. `tests/test_tools.py` requires every field of every tool to carry
+    a description; this is how these come to have one.
+    """
+    described = TypeAdapter(schema).json_schema()
+    # The class's own docstring is developer prose — `RoomSummary`'s is nine
+    # paragraphs of why it has four fields and not six — and pydantic puts it
+    # on the object as `description`, which would ship it to the provider on
+    # every call. What the model needs about the shape as a whole is on the
+    # tool's description, generated from the fields; what it needs about a
+    # field is on the field.
+    described.pop("description", None)
+    properties = described.get("properties", {})
+    for field in dataclass_fields(schema):
+        doc = field.metadata.get("doc")
+        if doc and field.name in properties:
+            properties[field.name].setdefault("description", doc)
+    return described
+
+
+def _answered(schema: type):
+    """When a run carrying an answer tool is over.
+
+    **"Answered" means the tool returned an instance, not that it returned
+    anything** — the same distinction `stop_when` draws, for the same reason:
+    the error string this tool hands back on a bad call is a tool output too,
+    and `stop_on_first_tool` cannot tell it from a success. That mistake has
+    already shipped here once, on triage: the SDK's "try again with valid
+    JSON" became the run's final answer, and the one party who could act on it
+    never saw it.
+
+    Every result is checked, newest first, rather than only the last — a model
+    may answer and reach for a skill in the same turn, and which order those
+    arrive in is not ours to assume.
+    """
+
+    def decide(ctx, results) -> ToolsToFinalOutputResult:
+        for result in reversed(list(results or ())):
+            if isinstance(result.output, schema):
+                return ToolsToFinalOutputResult(
+                    is_final_output=True, final_output=result.output
+                )
+        return ToolsToFinalOutputResult(is_final_output=False)
+
+    return decide

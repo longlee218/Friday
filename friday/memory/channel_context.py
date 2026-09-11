@@ -637,14 +637,20 @@ class ContextRebuilder:
             model=self._model,
             record=self._record,
             spent=self._spent,
+            # The shape this agent answers, declared where it is built. The
+            # harness turns it into the tool the answer arrives through and
+            # into the check it is validated by, both generated from
+            # `RoomSummary` itself — so what the model is told, what it is
+            # allowed to say, and what is stored cannot drift apart.
+            answers=RoomSummary,
         )
-        summary = await harness.run_structured(_transcript(messages), RoomSummary)
+        summary = await harness.run_structured(_transcript(messages))
         if summary is None:
-            # Nothing usable, after the correction turn `run_structured` takes
-            # on its own. The previous summary stands and the next beat tries
-            # again — the same outcome this returned when the call itself
-            # failed, and now also the outcome when the model answered with
-            # something that is not a summary. It used to store that answer.
+            # Nothing usable, after the correction turn the run takes on its
+            # own. The previous summary stands and the next beat tries again —
+            # the same outcome this returned when the call itself failed, and
+            # now also the outcome when the model answered with something that
+            # is not a summary. It used to store that answer.
             return None, None, None
         # `derived` holds plain text — see `ChannelContext`. This agent is
         # *shown* an escaped transcript, so one that quotes what it read hands

@@ -311,7 +311,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     )
     ext = build_extractor(
         params_cls=ApiIssueParams,
-        harness=StubHarness(),  # type: ignore[arg-type]
+        harness=StubHarness(answers=ApiIssueParams),  # type: ignore[arg-type]
         name="api_issue_ext",
     )
     _EXTRACTORS["api_issue"] = ext
@@ -387,6 +387,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
             ),
             instructions="extract",
             tools=[ask_for_fields_tool(ApiIssueParams)],
+            answers=ApiIssueParams,
             context_type=FieldsCapture,
             model=ScriptedModel(
                 [
@@ -1003,6 +1004,7 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
                 base_url="https://example.invalid/v1", model="test-model",
             ),
             instructions="lift the fields out",
+            answers=ApiIssueParams,
             model=ScriptedModel([[assistant_message(filled)]]),
             record=sink,
         ),
