@@ -29,6 +29,18 @@ details in a second message and nothing read it, asked what a correlationId is
 and nothing could explain, and the operator answered by hand while the agent
 went on asking. Each ticket names what blocks it; work the frontier.
 
+A fourth board, `.scratch/every-answer-has-a-shape/`, holds nine tickets.
+**01, 02, 04, 05, 06 and 08 are done**; 04 and 06 were merged, because
+replacing `MemoryScope` turned out to be eight production sites reading the
+same four fields rather than the wide refactor the board planned for. **03 is
+`ready-for-human`** — the operator fills the evaluation rows, which D18 says
+are theirs by right: a classifier scored against labels a model chose measures
+nothing. **07 and 09 are blocked on it**, and that order is the board's whole
+measurement discipline (D16): rebuild the ruler, read today's code with it,
+then change triage. What landed is one way to ask a model for a shape and one
+state travelling a message's whole journey; what has not is triage's own closed
+enum and the guard that closes the run context to state alone.
+
 A second board, `.scratch/every-task-is-a-graph/`, holds the spec and tickets
 01–13, and all thirteen are done. 01–09 folded two packages into one engine —
 every task type a graph, `prepare` as node 0, node agents reporting through
