@@ -389,23 +389,45 @@ def test_an_agent_that_acts_is_told_to_ask_first():
     assert "Never start working and clarify" in blocking.replace("\n", " ")
 
 
-def test_an_empty_extraction_is_not_a_successful_one():
+async def test_an_empty_extraction_is_not_a_successful_one():
     """The floor under the prompt fix. Whatever any prompt says, a model that
     answers nothing must not be read as having found nothing — those are
     different, and only one of them should reach the reporter as a question.
+
+    **The floor used to be lower than this test could see.** It pinned that
+    an empty parse was *falsy*, so "callers can tell" — but the caller built
+    a `Params` out of it anyway, every field defaulted, and handed that back
+    as an extraction. The distinction existed one layer below the one that
+    acted on it. It is a type distinction now: no usable answer is `None`,
+    which is not a `Params` at all and cannot be mistaken for one.
     """
-    from friday.extraction import _parse
-
-    assert _parse("") == {}, "the parse itself is honest — it found nothing"
-
-    # And what the caller does with that is the part worth pinning: an
-    # all-defaulted Params is what an empty parse produces, so a caller that
-    # cannot tell it from a real extraction will ask for what it already has.
+    from conftest import ScriptedHarness
     from friday.domain.models import ApiIssueParams
+    from friday.extraction import build_extractor
+    from tests.test_extraction import _context
 
-    empty = ApiIssueParams(**_parse(""))
-    assert empty.correlation_id is None and empty.curl is None
-    assert not _parse(""), "an empty read is falsy — callers can tell"
+    class Says(ScriptedHarness):
+        def __init__(self, answer):
+            super().__init__()
+            self.answer = answer
+
+        async def run(self, prompt, **kwargs):
+            return type("R", (), {"final_output": self.answer})()
+
+    nothing = build_extractor(
+        params_cls=ApiIssueParams, harness=Says(""), name="silent",
+    )
+    assert await nothing.run(_context("API lỗi", ApiIssueParams)) == (None, None)
+
+    found = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=Says('{"summary": "checkout 500", "correlation_id": null}'),
+        name="reads",
+    )
+    params, _ = await found.run(_context("API lỗi", ApiIssueParams))
+    assert params is not None and params.summary == "checkout 500", (
+        "a model that genuinely found one field is still a successful extraction"
+    )
 
 
 def test_only_a_prompt_whose_input_uses_the_markers_claims_them():

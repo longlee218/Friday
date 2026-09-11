@@ -7,6 +7,7 @@ import pytest
 
 from friday.config import IngestConfig
 from friday.store.db import Database
+from friday.agent.harness import Harness
 from friday.inbox import Inbox
 from friday.domain.models import InboundEvent, MentionType
 
@@ -157,3 +158,33 @@ def workflow_graphs():
         EDGE_ROUTER.pop("api_issue", None)
         DAG_DEPS_EXTRA.clear()
         DAG_SERVERS.clear()
+
+
+class ScriptedHarness(Harness):
+    """A `Harness` whose model call is scripted and whose every other seam is
+    the real one.
+
+    Subclass it and write `run()`; everything else — chiefly
+    `run_structured`'s validation and its one correction turn — is inherited
+    rather than imitated. That distinction is the point of this class
+    existing: a double that supplied its own `run_structured` would let a
+    test pass while skipping the mechanism the test is nominally about, which
+    is the failure `tests/test_dag_prepare.py`'s own extractor doubles
+    already record once.
+
+    `Harness.__init__` is deliberately not called: it builds a client and a
+    model, which is exactly what a test is here to avoid. Only the attributes
+    the inherited code actually reads are set.
+    """
+
+    def __init__(self, **attrs) -> None:
+        # `hasattr` rather than plain assignment, so a subclass that declares
+        # `refusal = "over budget"` as a class attribute keeps it: an
+        # instance attribute set here would shadow it, and the test asserting
+        # that a refusal is told apart from a failure would silently stop
+        # testing anything.
+        for name, default in (("tool_turns", 0), ("last_error", None), ("refusal", None)):
+            if not hasattr(self, name):
+                setattr(self, name, default)
+        for name, value in attrs.items():
+            setattr(self, name, value)

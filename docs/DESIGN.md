@@ -165,6 +165,32 @@ for structured output, and some OpenAI-compatible providers reject it with a
 structured output type — tool calling is the better-supported surface. Verify
 against the chosen provider before relying on either.
 
+**Verified, 2026-09-11, and the risk was the wrong one to worry about.** The
+instruction above went unfollowed for a year: ticket 04 probed the provider
+for *tool calling* and concluded the `response_format` risk "does not apply,
+because the union is expressed as tools" — which avoided the question rather
+than answering it. Probed properly now against MiniMax-M3:
+
+- It **accepts** `response_format: {"type": "json_schema", "strict": true}`.
+  No 400. The failure this paragraph was written to avoid does not happen.
+- It **ignores** it. The reply came back inside a ```json fence, after a
+  `<think>` block, with prose following, naming an enum member that was not
+  in the enum it had just been given.
+
+So the real hazard is the opposite shape of the one feared: a provider that
+rejects the parameter is one you find out about immediately; one that accepts
+and ignores it leaves a schema in the code that reads like a guarantee and
+enforces nothing. **Neither surface constrains this provider** — tool calling
+is not enforced on the wire either, and what makes the tool path safe is that
+the SDK validates arguments *client-side* with pydantic and hands a malformed
+call back for one retry.
+
+That is the mechanism generalised in `friday/agent/structured.py` and
+`Harness.run_structured`: the shape is a dataclass, it is described to the
+model in the prompt, the answer is validated in this process, and an answer
+that does not fit earns exactly one correction turn. Nothing is sent on the
+wire, because sending it buys nothing here and costs a false sense of safety.
+
 ## Triage
 
 One model call per mention. It decides three things and performs no I/O:

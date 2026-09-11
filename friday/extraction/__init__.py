@@ -23,9 +23,8 @@ is challenged with the code template whether or not the model asked about it.
 from __future__ import annotations
 
 import logging
-import re
-from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any, Literal
+from dataclasses import fields
+from typing import TYPE_CHECKING
 
 from friday.agent.harness import Harness, Refused
 from friday.extraction.clarify import Clarify, FieldsCapture
@@ -123,14 +122,15 @@ class Extractor:
         the harness, which is the only thing that knows whether it wired any.
         """
         capture = FieldsCapture()
-        result = await self._harness.run(
+        filled = await self._harness.run_structured(
             await self.would_ask(context),
+            self._params_cls,
             context=capture,
             extra_turns=1,
             task_id=task_id,
             node=node,
         )
-        if result is None:
+        if filled is None:
             if self._harness.refusal is not None:
                 # Not "the model could not answer" — we did not ask it. The
                 # difference decides what happens next: with no fields, the
@@ -139,31 +139,16 @@ class Extractor:
                 # message. Nothing they say will change a ceiling, so this
                 # goes to the operator instead.
                 raise Refused(self._harness.refusal)
-            log.warning("extractor %s returned no result", self.name)
-            return None, None
-        read = _parse(result.final_output or "")
-        known = set(self._params_cls.__dataclass_fields__)
-        unknown = sorted(set(read) - known)
-        if unknown:
-            # Dropped, not fatal. One line the model decorated or invented used
-            # to raise on the constructor and discard everything — including
-            # the fields it had read correctly, which is the opposite of what
-            # a best-effort step should do when it half succeeds.
-            log.info(
-                "extractor %s: ignoring %s", self.name, ", ".join(map(repr, unknown))
-            )
-        try:
-            filled = _hygiene(
-                self._params_cls(**{k: v for k, v in read.items() if k in known})
-            )
-        except (TypeError, ValueError) as exc:
-            log.warning(
-                "extractor %s output did not match schema: %s",
-                self.name,
-                exc,
-            )
+            # Either the model never answered, or it answered twice with
+            # something that does not fit `params_cls` — and both are "no
+            # extraction", which is what the caller acts on. They used to be
+            # told apart here and were not worth telling apart: the hand-
+            # written parser could not fail, so this branch only ever meant
+            # the first, while the second arrived silently as a *successful*
+            # extraction of nothing.
+            log.warning("extractor %s produced nothing usable", self.name)
             return None, capture.clarify
-        return filled, capture.clarify
+        return _hygiene(filled), capture.clarify
 
 
 def build_extractor(
@@ -347,80 +332,23 @@ def _hygiene(params: Params) -> Params:
     )
 
 
-def _parse(output: str) -> dict[str, Any]:
-    """Coerce a model output to a kwargs dict for the Params class.
-
-    Models produce prose like `environment: production` or JSON. We accept
-    either, and the caller keeps only the keys its schema knows — this returns
-    what it read, not what is valid.
-
-    Keys are stripped of the decoration a model puts around them. Asked for
-    JSON it frequently answers with a Markdown list, and `- environment:
-    production` was read as a field literally called `- environment`. One such
-    line raised on the dataclass constructor and lost the whole extraction,
-    including the correlationId two lines above it that had been read
-    correctly.
-    """
-    data = _json_object(output)
-    if data is not None:
-        return data
-    # Fallback: `key: value` lines. Crude but works for the small schemas we
-    # deal with; ticket 31 is a starting point, not a finished format.
-    result: dict[str, Any] = {}
-    for line in output.splitlines():
-        if ":" not in line:
-            continue
-        key, _, value = line.partition(":")
-        key = _undecorate(key)
-        value = value.strip().strip("\"'`")
-        if not key or value.lower() in ("null", "none", ""):
-            continue
-        result[key] = value
-    return result
-
-
-def _json_object(output: str) -> dict[str, Any] | None:
-    """The JSON object in the output, wherever it is. None if there is none.
-
-    Not `startswith("{")`. A model asked for JSON only routinely answers with a
-    sentence first, a fenced block, or its own reasoning — and the check used
-    to fail on all three, dropping perfectly good JSON into the line-by-line
-    fallback below, which then read `"environment": null,` as the *string*
-    `"null,"`. A truthy string in `correlation_id` passes the "is there
-    anything to trace on" gate and fails the uuid rule, so the reporter is
-    asked to resend a correlationId they already sent correctly. Observed, on
-    the real provider, exactly that way.
-
-    Braces are matched rather than searched for, because the last `}` in the
-    output may belong to prose after the object.
-    """
-    import json
-
-    start = output.find("{")
-    while start != -1:
-        depth = 0
-        for i in range(start, len(output)):
-            if output[i] == "{":
-                depth += 1
-            elif output[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        data = json.loads(output[start : i + 1])
-                    except json.JSONDecodeError:
-                        break
-                    return data if isinstance(data, dict) else None
-        start = output.find("{", start + 1)
-    return None
-
-
-#: Bullets, numbering and emphasis a model puts around a field name when it
-#: answers in Markdown instead of the JSON it was asked for.
-_DECORATION = re.compile(r"^[\s>*+-]*(?:\d+[.)]\s*)?[`*_\"']*|[`*_\"']*$")
-
-
-def _undecorate(key: str) -> str:
-    return _DECORATION.sub("", key.strip()).strip()
+#: `_parse`, `_json_object`, `_undecorate` and `_DECORATION` lived here and
+#: are gone. They turned whatever a model said into a kwargs dict by guessing
+#: — a brace scan, then a `key: value` line scraper that read a Markdown
+#: bullet as a field name — and the guess could not fail: unreadable output
+#: became `{}`, every field of a `Params` has a default, and an empty
+#: extraction arrived at the caller looking exactly like a successful one.
+#: Nothing checked the *types* either, so `environment: ["a","b"]` built a
+#: `Params` without complaint and surfaced later as `unhashable type: 'list'`
+#: from inside `validate`, as a hand-over quoting a Python error at the
+#: operator. `Harness.run_structured` replaces all of it: the shape is
+#: described to the model from the dataclass itself, the answer is validated
+#: against that dataclass in this process, and an answer that does not fit
+#: earns one correction turn instead of a guess. Finding JSON inside a
+#: fenced, `<think>`-prefixed reply is still needed and still done — that
+#: part was never guesswork, it is what the provider actually returns — and
+#: now lives in `friday/agent/structured.py` where the summariser can reach
+#: it too.
 
 
 #: Task type -> the `Params` its extractor fills. Every classifiable type is

@@ -23,6 +23,22 @@ SUMMARY_CONFIG = AgentConfig(
 )
 
 
+def _says(topic: str) -> str:
+    """A summariser answer of the right shape, carrying `topic` verbatim.
+
+    Several tests below are about what happens to a *value* — a forged
+    newline, an echoed entity, a hostile line — on its way through storage
+    and back into a prompt. They used to script the value as the model's
+    whole reply, because an unparseable reply was stored as the topic
+    anyway. That degrade is gone (it stored reasoning blocks and code fences
+    as what a room was about), so the value is carried where it was always
+    meant to be: inside the object the summariser is asked for.
+    """
+    import json
+
+    return json.dumps({"topic": topic, "facts": [], "decisions": [], "constraints": []})
+
+
 def test_the_operator_can_fill_in_a_channel_before_anything_is_learned(tmp_path):
     store = ContextStore(tmp_path)
 
@@ -133,7 +149,7 @@ async def test_a_summary_covers_the_channels_threads_too(db, tmp_path):
     rebuilder = ContextRebuilder(
         store=store, db=db,
         summary_config=SUMMARY_CONFIG,
-        model=ScriptedModel([[assistant_message("checkout is broken")]]),
+        model=ScriptedModel([[assistant_message(_says("checkout is broken"))]]),
     )
     await db.record_message(make_event(
         provider="discord", channel_id="100", thread_id="t1", message_id="m1",
@@ -172,7 +188,7 @@ async def test_a_summary_cannot_forge_a_line_of_the_section(db, tmp_path):
     rebuilder = ContextRebuilder(
         store=store, db=db,
         summary_config=SUMMARY_CONFIG,
-        model=ScriptedModel([[assistant_message(forging)]]),
+        model=ScriptedModel([[assistant_message(_says(forging))]]),
     )
     await db.record_message(make_event(
         provider="discord", channel_id="100", message_id="m1", text="api lỗi",
@@ -209,7 +225,7 @@ async def test_a_summary_is_stored_plain_even_when_the_model_echoes_entities(
     rebuilder = ContextRebuilder(
         store=store, db=db,
         summary_config=SUMMARY_CONFIG,
-        model=ScriptedModel([[assistant_message("dana bao api &lt;b&gt;loi&lt;/b&gt; &amp; cham")]]),
+        model=ScriptedModel([[assistant_message(_says("dana bao api &lt;b&gt;loi&lt;/b&gt; &amp; cham"))]]),
     )
     await db.record_message(make_event(
         provider="discord", channel_id="100", message_id="m1", text="api lỗi",
@@ -250,7 +266,7 @@ async def test_what_a_reporter_typed_survives_the_whole_round_trip(db, tmp_path)
         async def get_response(self, *a, **kw):
             seen.append(str(a) + str(kw))
             return await ScriptedModel(
-                [[assistant_message("bao api &lt;b&gt;loi&lt;/b&gt;")]]
+                [[assistant_message(_says("bao api &lt;b&gt;loi&lt;/b&gt;"))]]
             ).get_response(*a, **kw)
 
         def stream_response(self, *a, **kw):
@@ -294,7 +310,7 @@ async def test_the_seam_still_cannot_be_talked_out_of_escaping(db, tmp_path):
     rebuilder = ContextRebuilder(
         store=store, db=db,
         summary_config=SUMMARY_CONFIG,
-        model=ScriptedModel([[assistant_message(hostile)]]),
+        model=ScriptedModel([[assistant_message(_says(hostile))]]),
     )
     await db.record_message(make_event(
         provider="discord", channel_id="100", message_id="m1", text="api lỗi",
@@ -493,7 +509,11 @@ def _scripted(seen: list):
                     ResponseOutputMessage(
                         id="1", role="assistant", status="completed", type="message",
                         content=[ResponseOutputText(
-                            text="họ hay deploy vào thứ sáu",
+                            # A well-shaped answer, because this test counts
+                            # *how often the room is summarised* — prose here
+                            # would cost a correction turn per rebuild and
+                            # the count would measure the retry instead.
+                            text=_says("họ hay deploy vào thứ sáu"),
                             type="output_text", annotations=[],
                         )],
                     )
@@ -566,21 +586,14 @@ async def test_the_summary_carries_the_four_fields_it_is_asked_for(db, tmp_path)
     assert "artifacts" not in summary
 
 
-async def test_prose_where_structure_was_asked_for_is_kept_as_the_topic(db, tmp_path):
-    """A model that answers in prose has still said something true about the
-    room, and the previous behaviour of this agent was prose. Degrading to the
-    topic keeps that rather than throwing the call away."""
-    store = ContextStore(tmp_path)
-    store.init_channel("100")
-    await db.record_message(make_event(
-        provider="discord", channel_id="100", message_id="m1", text="api lỗi",
-    ))
-
-    await _rebuilder(
-        store, db, ScriptedModel([[assistant_message("checkout is broken")]])
-    ).rebuild_all()
-
-    assert store.load("100").derived["summary"] == {"topic": "checkout is broken"}
+#: `test_prose_where_structure_was_asked_for_is_kept_as_the_topic` stood
+#: here. Its name and docstring asserted the degrade this change deleted —
+#: that a model answering in prose had its whole reply stored as what the
+#: room is about — while its body, updated with the rest, scripted a properly
+#: shaped answer. So it passed, pinning a bug as the guarantee, and testing
+#: nothing the tests above do not. Found by review, deleted rather than
+#: renamed: what it would have been renamed to is
+#: `test_prose_is_refused_rather_than_stored_as_the_topic`, which exists.
 
 
 async def test_a_summary_over_the_cap_is_refused_and_the_old_one_stands(db, tmp_path):
@@ -624,15 +637,32 @@ async def test_the_state_records_the_range_the_summary_covers(db, tmp_path):
     assert covered == ("m1", "m2", 1)
 
 
-# --- _parse_summary: pure function, tested at its own seam -----------------
+# --- the summary's shape, checked at its own seam ---------------------------
+#
+# These drove `_parse_summary`, which parsed, type-checked and reduced in one
+# function. Parsing and type-checking are `Harness.run_structured`'s now, done
+# against `RoomSummary`; `_stored` is what is left. The tests that pinned
+# "output I could not read is stored whole as the topic" are inverted rather
+# than deleted — that behaviour was a bug, and these are what stop it coming
+# back.
+
+
+def _fit(raw):
+    """What the summariser's answer reduces to, through the real path:
+    find the JSON, check it against `RoomSummary`, reduce to what is stored.
+    `None` where the answer is refused."""
+    from friday.agent.structured import find_json, fits
+    from friday.memory.channel_context import RoomSummary, _stored
+
+    found = find_json(raw)
+    if found is None:
+        return None
+    summary, problem = fits(found, RoomSummary)
+    return None if problem else _stored(summary)
 
 
 def test_a_full_structured_answer_keeps_all_four_fields():
-    from friday.memory.channel_context import _parse_summary
-
-    parsed = _parse_summary(STRUCTURED)
-
-    assert parsed == {
+    assert _fit(STRUCTURED) == {
         "topic": "the reelme wrapper api",
         "facts": ["test.apero is the staging host"],
         "decisions": ["traces are looked up by x-request-id"],
@@ -640,69 +670,113 @@ def test_a_full_structured_answer_keeps_all_four_fields():
     }
 
 
-def test_prose_degrades_to_the_topic():
-    """Not valid JSON at all — the model ignored the shape entirely."""
-    from friday.memory.channel_context import _parse_summary
-
-    assert _parse_summary("checkout is broken") == {"topic": "checkout is broken"}
-
-
-def test_a_json_value_that_is_not_an_object_degrades_to_the_topic():
-    """Valid JSON, but a list or a bare string rather than the object asked
-    for — a different reachable path from prose, and mutation testing found
-    it had no test of its own: a mutation that broke only the prose path left
-    this one standing in for it by accident."""
-    from friday.memory.channel_context import _parse_summary
-
-    assert _parse_summary('["checkout", "is broken"]') == {
-        "topic": '["checkout", "is broken"]'
+def test_the_answer_the_provider_actually_returns_is_read(raw=None):
+    """The bug this change exists for, pinned. The configured provider
+    answers with a `<think>` block, then the object inside a ```json fence,
+    then prose about it — measured, not imagined. `json.loads` raises on all
+    three, and what used to happen next was that the entire blob, reasoning
+    included, became the room's `topic` and was rendered into every later
+    prompt for that room."""
+    assert _fit(
+        "<think>\nthe room is about the api\n</think>\n\n"
+        "```json\n" + STRUCTURED + "\n```\n\n**Note:** that is the summary."
+    ) == {
+        "topic": "the reelme wrapper api",
+        "facts": ["test.apero is the staging host"],
+        "decisions": ["traces are looked up by x-request-id"],
+        "constraints": ["never paste a token into the channel"],
     }
 
 
-def test_an_object_with_none_of_the_four_keys_degrades_to_the_topic():
-    """Valid JSON, a real object, and still nothing this system asked for —
-    the whole raw answer is kept as the topic rather than an empty summary
-    with no record of what the model actually said."""
-    from friday.memory.channel_context import _parse_summary
+def test_prose_is_refused_rather_than_stored_as_the_topic():
+    """Was `test_prose_degrades_to_the_topic`, and the degrade was the bug:
+    a model that ignored the shape entirely had its whole answer stored as
+    what the room is about. Refused now — the previous summary stands and the
+    next beat tries again."""
+    assert _fit("checkout is broken") is None
 
-    assert _parse_summary('{"unrelated": "value"}') == {
-        "topic": '{"unrelated": "value"}'
+
+def test_json_that_is_not_an_object_is_refused():
+    assert _fit('["checkout", "is broken"]') is None
+
+
+def test_an_object_with_none_of_the_four_keys_is_refused():
+    """Every key unknown is a *different shape*, not an empty summary — a
+    model wrapping its answer, most often. Dropping them all would leave
+    `{}`, every `RoomSummary` field has a default, and the caller would be
+    handed a successful summary of nothing: exactly the failure this whole
+    change removed from the extractor. Refused, so it earns a correction
+    turn. It used to be stored whole, as the room's topic.
+
+    Found by an adversarial review of the first version of this change,
+    which had reintroduced the bug it was written to fix."""
+    assert _fit('{"unrelated": "value"}') is None
+
+
+def test_a_literally_empty_object_is_still_an_answer():
+    """The line either side of the rule above: `{}` is a model saying it
+    found nothing to say about the room, which is an answer, and every field
+    being absent is what it means."""
+    assert _fit("{}") == {}
+
+
+def test_a_list_field_given_as_a_string_is_refused_not_wrapped():
+    """A string where a list was asked for was dropped field-by-field before,
+    keeping the rest of the answer. It fails validation now — the whole
+    answer earns one correction turn, because a model that got the shape
+    wrong is not one whose other values are trustworthy raw."""
+    assert _fit('{"topic": "x", "facts": "test.apero is staging"}') is None
+
+
+def test_every_field_is_unescaped_and_stored_not_just_the_ones_named_by_hand():
+    """`_unescaped` and `_stored` derive their field list from `RoomSummary`
+    rather than naming the four. Written after a mutation showed the gap:
+    dropping one field from the loop left every other test green, so a fifth
+    field would have been silently never unescaped and never stored — the
+    exact drift `RoomSummary`'s docstring claims to have closed.
+
+    Every field carries an entity, so losing any one of them shows up."""
+    import json
+
+    from friday.memory.channel_context import RoomSummary, _stored, _unescaped
+    from friday.agent.structured import find_json, fits
+    from dataclasses import fields as dataclass_fields
+
+    escaped = {
+        "topic": "api &lt;b&gt;loi&lt;/b&gt;",
+        "facts": ["host &amp; port"],
+        "decisions": ["dung &lt;json&gt;"],
+        "constraints": ["khong &amp; bao gio"],
     }
+    assert set(escaped) == {f.name for f in dataclass_fields(RoomSummary)}, (
+        "a field was added to RoomSummary and this test did not follow"
+    )
 
+    summary, problem = fits(find_json(json.dumps(escaped)), RoomSummary)
+    assert problem is None
 
-def test_a_list_field_given_as_a_string_is_dropped_not_wrapped():
-    """The docstring's claim, made concrete: a model that got the shape wrong
-    once is not a model whose values are trustworthy raw. A string handed
-    where a list was asked for is dropped, not silently turned into a
-    one-item list — that would store something the model never actually
-    said in that shape."""
-    from friday.memory.channel_context import _parse_summary
+    stored = _stored(_unescaped(summary))
 
-    assert _parse_summary('{"topic": "x", "facts": "test.apero is staging"}') == {
-        "topic": "x"
+    assert stored == {
+        "topic": "api <b>loi</b>",
+        "facts": ["host & port"],
+        "decisions": ["dung <json>"],
+        "constraints": ["khong & bao gio"],
     }
 
 
 def test_blank_entries_in_a_list_field_are_dropped():
-    """Mutation testing found this had no test: removing the blank filter
-    left every other assertion green, because none of them put a blank string
-    in a list."""
-    from friday.memory.channel_context import _parse_summary
-
-    assert _parse_summary(
-        '{"topic": "x", "facts": ["", "   ", "test.apero is staging"]}'
-    ) == {"topic": "x", "facts": ["test.apero is staging"]}
+    assert _fit('{"topic": "x", "facts": ["", "   ", "test.apero is staging"]}') == {
+        "topic": "x", "facts": ["test.apero is staging"],
+    }
 
 
 def test_an_empty_list_field_is_omitted_not_stored_as_empty():
-    from friday.memory.channel_context import _parse_summary
-
-    assert _parse_summary('{"topic": "x", "facts": []}') == {"topic": "x"}
+    assert _fit('{"topic": "x", "facts": []}') == {"topic": "x"}
 
 
 def test_an_unrecognised_key_is_dropped_silently():
-    """Filtered rather than trusted whole: the model can only ever add noise
-    by naming a fifth key, never a fifth field in the stored summary."""
-    from friday.memory.channel_context import _parse_summary
-
-    assert _parse_summary('{"topic": "x", "extra": "ignore me"}') == {"topic": "x"}
+    """Filtered rather than refused: the model can only ever add noise by
+    naming a fifth key, never a fifth field in the stored summary — and one
+    invented key must not throw away the four real ones beside it."""
+    assert _fit('{"topic": "x", "extra": "ignore me"}') == {"topic": "x"}

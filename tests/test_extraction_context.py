@@ -117,6 +117,7 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
         room_facts,
         user_input,
     )
+    from friday.agent.structured import describe
     from friday.extraction.prompt import build_input
     from friday.memory.channel_context import ChannelContext
 
@@ -140,13 +141,13 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
         known=known,
     )
 
-    schema_lines = []
-    for f in dataclass_fields(ApiIssueParams):
-        if getattr(known, f.name, None):
-            continue
-        doc = (f.metadata or {}).get("doc", f.name.replace("_", " "))
-        schema_lines.append(f"- {f.name}: {doc}")
-    schema = "\n".join(schema_lines) or "(no fields)"
+    # Built through `describe`, which is what `build_input` calls — the
+    # point of this test is that the prompt is assembled from the same
+    # pieces in the same order, not that the field list is rendered twice in
+    # two places. It *was* rendered twice: this rebuilt `- name: doc` by
+    # hand, and when `build_input` moved to `describe` (which also names
+    # types) the two drifted, which is how this test earned its keep.
+    schema = describe(ApiIssueParams, omit=known) or "(no fields)"
     channel_body = "\n".join(filter(None, [room_facts(room), remembered_facts(memories)]))
     by_hand = (
         f"Fields:\n{schema}\n\n"

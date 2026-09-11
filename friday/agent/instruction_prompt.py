@@ -839,9 +839,13 @@ def clarification_system(tool: str | None, *, blocking: bool = True) -> Section:
     agent that *reports* must not stop, because stopping throws away the part
     it already worked out — and the extractor did exactly that: told to "wait
     for the answer rather than proceeding", it could call its ask tool and
-    return no JSON at all, which `_parse` reads as `{}` and every field of a
-    `Params` defaults, so an empty extraction came back as a *successful* one
-    and the reporter was asked for everything they had just written.
+    return no JSON at all, which the parser of the day read as `{}` and every
+    field of a `Params` defaults, so an empty extraction came back as a
+    *successful* one and the reporter was asked for everything they had just
+    written. `Harness.run_structured` closed the second half of that — no
+    usable answer is `None` now, not an all-defaulted `Params` — and this
+    flag still closes the first: an agent that stops after asking has thrown
+    away the fields it had already worked out.
     """
     if not tool:
         return Section("clarification_system")

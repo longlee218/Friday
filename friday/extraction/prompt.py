@@ -15,9 +15,12 @@ why the clarification section is rendered here and not for triage: the door is
 actually in the room. It is rendered `blocking=False`, and that flag is the
 whole difference between this prompt working and this prompt silently
 breaking: told to wait for an answer before proceeding, the model can call the
-tool and return no JSON, `_parse` reads that as `{}`, every field of a `Params`
-has a default, and an empty extraction comes back as a *successful* one — so
-the reporter is asked for everything they just wrote.
+tool and return no JSON at all — and the parser of the day read that as
+`{}`, every field of a `Params` has a default, and an empty extraction came
+back as a *successful* one, so the reporter was asked for everything they
+just wrote. `Harness.run_structured` means an unreadable answer is `None`
+rather than an empty success now; this flag is still what stops the model
+throwing away fields it had already read.
 """
 
 from __future__ import annotations
@@ -41,12 +44,15 @@ from friday.agent.instruction_prompt import (
     trust_boundary,
     user_input,
 )
+from friday.agent.structured import describe
 from friday.extraction.context import FullContext
 
 __all__ = ["build_input", "build_instructions"]
 
 #: The job. "Reply in JSON only, with the schema fields as keys" is a contract
-#: with `_parse` in this package — reworded freely, but the JSON promise stays.
+#: with `Harness.run_structured`, which checks the answer against the params
+#: dataclass and asks again once if it does not fit — reworded freely, but the
+#: JSON promise stays.
 JOB = """You fill structured fields from what someone wrote.
 
 You are shown the field schema — the names and what each one is for — and
@@ -171,18 +177,17 @@ def build_input(context: FullContext) -> str:
     own section into this prompt, and the extractor is the agent most worth
     aiming that at — it is the one that decides what a task knows.
     """
-    params_cls = type(context.known)
-    schema_lines = []
-    for f in dataclass_fields(params_cls):
-        # Truthy, not merely non-`None` — the same rule `_fill` already
-        # applies (`dag/prepare.py::_fill`'s own "an empty string is not a
-        # value someone supplied"). A field a model once wrote `""` for is
-        # still blank and still worth asking the schema to name.
-        if getattr(context.known, f.name, None):
-            continue
-        doc = (f.metadata or {}).get("doc", f.name.replace("_", " "))
-        schema_lines.append(f"- {f.name}: {doc}")
-    schema = "\n".join(schema_lines) or "(no fields)"
+    # Generated from the params dataclass, by the same function that
+    # generates the summariser's — so the shape the model is told is the
+    # shape `Harness.run_structured` checks its answer against. This built
+    # its own `- name: doc` lines until review found what that cost: the
+    # description named no *types*, while the validation refuses a wrong one,
+    # so the highest-volume structured path was refusing answers it had never
+    # told the model how to avoid.
+    #
+    # `omit=context.known` is ticket 08's D8 — a field already in the task's
+    # parameters drops out of the schema, on the truthy test `_fill` uses.
+    schema = describe(type(context.known), omit=context.known) or "(no fields)"
     channel_body = "\n".join(
         filter(
             None,

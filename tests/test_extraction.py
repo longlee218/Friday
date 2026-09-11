@@ -18,12 +18,12 @@ import asyncio
 
 import pytest
 
-from friday.agent.harness import Refused
+from conftest import ScriptedHarness
+from friday.agent.harness import Harness, Refused
 from dataclasses import dataclass
 from typing import Optional
 
 from friday.extraction import (
-    _parse,
     build_extractor,
     extract,
     registered,
@@ -43,26 +43,15 @@ def _context(text="", params_cls=None, *, room=None, asked=(), memories=(), know
     )
 
 
-# --- parse helpers ----------------------------------------------------
-
-
-def test_parse_handles_json_output():
-    assert _parse('{"environment": "production"}') == {"environment": "production"}
-
-
-def test_parse_handles_key_value_lines():
-    assert _parse("environment: production\ncurl: https://example.com") == {
-        "environment": "production",
-        "curl": "https://example.com",
-    }
-
-
-def test_parse_treats_null_values_as_absent():
-    assert _parse("environment: null\ncurl: none") == {}
-
-
-def test_parse_strips_quotes():
-    assert _parse('environment: "production"') == {"environment": "production"}
+#: The four `_parse` tests that lived here are gone with the parser they
+#: covered. Two of them pinned the `key: value` line scraper — reading
+#: `environment: production` out of prose the model wrote instead of the JSON
+#: it was asked for — which is the guessing this change removes: an answer
+#: that is not the declared shape earns one correction turn now, not an
+#: interpretation. What remains of the old `_json_object` is
+#: `friday/agent/structured.py`'s `find_json`, covered by
+#: `tests/test_structured.py`, because a fenced reply after a `<think>` block
+#: is what the provider actually returns and reading that is not guesswork.
 
 
 # --- registration -----------------------------------------------------
@@ -73,7 +62,7 @@ def test_extractor_decorator_registers_under_task_type():
     class FakeParams:
         environment: Optional[str] = None
 
-    class StubHarness:
+    class StubHarness(ScriptedHarness):
         #: What a real `Harness` with no skill library has. A stub with
         #: fewer attributes than the type it stands in for passes and is
         #: describing itself.
@@ -138,13 +127,12 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
     class StubResult:
         final_output = '{"environment": "production"}'
 
-    class StubHarness:
+    class StubHarness(ScriptedHarness):
         tool_turns = 0
 
         last_error = None
 
-        async def run(self, prompt, *, context=None, extra_turns=0,
-                      task_id=None, node=None):
+        async def run(self, prompt, **kwargs):
             return StubResult()
 
     ext = build_extractor(
@@ -164,7 +152,7 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
 
 
 def test_an_extractor_returns_none_when_harness_fails():
-    class FailingHarness:
+    class FailingHarness(ScriptedHarness):
         tool_turns = 0
 
         last_error = "boom"
@@ -172,8 +160,7 @@ def test_an_extractor_returns_none_when_harness_fails():
         #: not asking it — see `Refused`. This is the first of the two.
         refusal = None
 
-        async def run(self, prompt, *, context=None, extra_turns=0,
-                      task_id=None, node=None):
+        async def run(self, prompt, **kwargs):
             return None
 
     @dataclass
@@ -197,11 +184,10 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
     class StubResult:
         final_output = "not even close to JSON"
 
-    class StubHarness:
+    class StubHarness(ScriptedHarness):
         tool_turns = 0
 
-        async def run(self, prompt, *, context=None, extra_turns=0,
-                      task_id=None, node=None):
+        async def run(self, prompt, **kwargs):
             return StubResult()
 
     @dataclass
@@ -241,7 +227,7 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
     intent, not words: which of the type's own fields, and why."""
     from agents.testing import ScriptedModel, assistant_message, function_call
 
-    from friday.agent.harness import Harness
+    from conftest import ScriptedHarness
     from friday.config import AgentConfig
     from friday.domain.models import ApiIssueParams
     from friday.extraction.clarify import Clarify, FieldsCapture
@@ -470,14 +456,13 @@ async def test_a_model_that_could_not_answer_is_not_a_refusal():
 
     from friday.extraction import build_extractor
 
-    class Refuses:
+    class Refuses(ScriptedHarness):
         tool_turns = 0
 
         last_error = "over budget"
         refusal = "an-agent has spent 999 of its 10 tokens today"
 
-        async def run(self, prompt, *, context=None, extra_turns=0,
-                      task_id=None, node=None):
+        async def run(self, prompt, **kwargs):
             return None
 
     @_dataclass

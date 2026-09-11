@@ -58,6 +58,7 @@ from openai import (
     RateLimitError,
 )
 
+from friday.agent.structured import find_json, fits
 from friday.config import AgentConfig
 from friday.ops.redact import scrub
 
@@ -401,6 +402,84 @@ class Harness:
             max_turns=self._config.max_turns + self.tool_turns + extra_turns,
             about=_About(message_id=message_id, task_id=task_id, node=node),
         )
+
+    async def run_structured(
+        self,
+        prompt: str,
+        schema: type,
+        *,
+        context: Any = None,
+        extra_turns: int = 0,
+        message_id: str | None = None,
+        task_id: int | None = None,
+        node: str | None = None,
+    ) -> Any | None:
+        """Ask for a shape, and hand back only an answer that actually fits it.
+
+        Returns an instance of `schema`, or `None` — and `None` means the
+        same thing it means from `run()`: nobody got an answer, the caller
+        turns that into its own kind of work. It never means "an answer with
+        nothing in it", which is exactly the confusion this method exists to
+        end. The parser it replaces returned `{}` for output it could not
+        read, every field of a `Params` has a default, and so an unreadable
+        reply arrived at the caller as a *successful* extraction of nothing.
+
+        **The shape is described in the prompt and checked in this process,
+        and never sent on the wire.** `friday/agent/structured.py` carries
+        the measurement that decided this: the configured provider accepts
+        `response_format: json_schema` and then ignores it, which is worse
+        than rejecting it — a schema nobody enforces reads exactly like a
+        schema somebody does.
+
+        **One repair turn, and the error goes back in the words the model
+        needs.** This is the guarantee the tool path has had all along and
+        the written-answer path never did: the SDK validates a tool call's
+        arguments against their schema, hands a malformed one back to the
+        model, and lets `max_turns` decide how many corrections it gets. A
+        reply that is not JSON, or is JSON of the wrong shape, gets the same
+        treatment here — once, because a model that cannot produce its own
+        declared shape twice will not on the third go, and this runs on
+        every task in a busy room.
+
+        The repair turn is a fresh `run()`, so it carries the original
+        prompt again: a run holds no memory of the one before it. That costs
+        a second prompt on the error path only, which is the right way round
+        — the common path pays nothing.
+
+        **And a second clock.** `timeout_seconds` bounds one `run`, retries
+        included, so a structured call that needs its correction turn can
+        take two of them — the pool's worst case per task is 2×, not 1×.
+        Said out loud because CLAUDE.md states the one-run bound as a
+        guarantee, and a second run under the same name would be exactly the
+        quiet drift this repo keeps finding in its own prose. One correction
+        and no more is what keeps the multiplier at two.
+        """
+        said = await self.run(
+            prompt, context=context, extra_turns=extra_turns,
+            message_id=message_id, task_id=task_id, node=node,
+        )
+        if said is None:
+            return None
+        value, problem = _fitted(said.final_output or "", schema)
+        if problem is None:
+            return value
+
+        log.info("the reply did not fit %s (%s) — asking again", schema.__name__, problem)
+        again = await self.run(
+            _correction(prompt, problem),
+            context=context, extra_turns=extra_turns,
+            message_id=message_id, task_id=task_id, node=node,
+        )
+        if again is None:
+            return None
+        value, problem = _fitted(again.final_output or "", schema)
+        if problem is None:
+            return value
+        log.warning(
+            "the reply still did not fit %s after one correction (%s)",
+            schema.__name__, problem,
+        )
+        return None
 
     def checkpoint(self, result: Any) -> dict[str, Any]:
         """A run's pending tool approvals, serialized. `result.interruptions`
@@ -749,3 +828,49 @@ def _chat_model(config: AgentConfig) -> OpenAIChatCompletionsModel:
         max_retries=0,
     )
     return OpenAIChatCompletionsModel(model=config.model, openai_client=client)
+
+
+def _fitted(output: str, schema: type) -> tuple[Any | None, str | None]:
+    """`(instance, None)`, or `(None, what to tell the model)`.
+
+    Two failures, one shape of answer: no JSON at all, and JSON that does
+    not fit. They are told apart here because the correction differs — one
+    asks for JSON, the other names the field that was wrong.
+    """
+    data = find_json(output)
+    if data is None:
+        return None, "there was no JSON object in the reply"
+    return fits(data, schema)
+
+
+def _correction(prompt: str, problem: str) -> str:
+    """The repair turn's prompt: the original ask, and what was wrong.
+
+    **The failed reply is not quoted back**, which the first version of this
+    did, between plain `--- your previous reply ---` delimiters. Review
+    caught what that costs, and it is not theoretical here: the extractor's
+    entire job is copying a reporter's bytes out verbatim, so a reply of
+    *its* is reporter-controlled text, and a reporter who writes those
+    delimiters and a sentence after them is writing into the correction
+    prompt from outside the trust boundary the original prompt carefully put
+    them behind.
+
+    Framing it would not have fixed it either. A length-prefixed frame is
+    the move this repo already tried and recorded as decoration — a count no
+    code compares against closes nothing — and the defence that does work
+    here, escaping and flattening, would hand the model its own JSON with
+    the quotes escaped and ask it to correct that.
+
+    So: say what was wrong, in the words `fits` produced, which name the
+    field and come from this process rather than from the reply. That is
+    exactly what the SDK's own tool-repair path does — a malformed tool call
+    comes back as "Invalid JSON input for tool classify", with the arguments
+    not echoed — and it is the path this method exists to give the written
+    answer.
+    """
+    return (
+        f"{prompt}\n\n"
+        f"Your previous reply could not be used: {problem}.\n"
+        f"Answer again with the JSON object described above and nothing else "
+        f"— no explanation, no code fence."
+    )

@@ -168,7 +168,7 @@ What is actually on disk.
 | `friday/config.py` | Loads `config.yaml` and resolves `${VAR}`. Outside the packages because it is read before any of them |
 | **`friday/domain/`** | The vocabulary, and nothing else: `models.py` (every dataclass), `conversation.py` (what counts as one exchange), `states.py` (`TaskState`, `OutboundState`, and the legal transitions), `actions.py` (`Ask`/`Reply`/`HandOver`, what a decision about a task comes to), `validation.py` (the rule engine, one call site), `memory_guard.py` (ticket 11: whether a line reads as an instruction at this system's own mechanism rather than a fact, checked at every memory write path) |
 | **`friday/store/`** | `schema.py` holds the mapped classes, `db.py` is the only store and converts at the edge — nothing above it knows SQLAlchemy exists |
-| **`friday/agent/`** | What it takes to call a model, and nothing about what to call it for: `harness.py` (the only module that may import the SDK), `instruction_prompt.py`, `skills.py`, `mcp.py`, `llm_log.py` |
+| **`friday/agent/`** | What it takes to call a model, and nothing about what to call it for: `harness.py` (the only module that may import the SDK), `structured.py` (asking for a shape and checking what comes back against it), `instruction_prompt.py`, `skills.py`, `mcp.py`, `llm_log.py` |
 | **`friday/memory/`** | What is kept between tasks, in tiers that never mix: `channel_context.py` (per-channel YAML), `verdicts.py` (the operator marking a classification right). There was a third — `observations.py`/`notes.py`, staged guesses promoted once an approved outcome corroborated them — dropped once it had gone months with no producer (ticket 09's D9); an agent's own memory is a tool now, `friday/tools/memory.py`, not a tier here |
 | **`friday/ops/`** | Alive and safe, deciding nothing: `liveness.py`, `redact.py`, `api.py` |
 | **`friday/text/`** | `transform.py` splits code out before cleaning the prose; `param_hygiene.py` cleans one value. Decides nothing |
@@ -362,6 +362,54 @@ not an implementation detail:
   a call was about, and forgetting *that* loses a correlation key rather than
   the record. `AgentHooks` cannot do this job — `on_llm_start` fires after the
   decision to spend and `on_llm_end` after the money is gone.
+- **An answer that is not a tool call is checked against a declared shape, in
+  this process, and gets exactly one correction turn.**
+  `Harness.run_structured(prompt, schema)` is that seam: the schema is a
+  dataclass, `friday/agent/structured.py`'s `describe` generates the prompt
+  text from it so the shape the model is told is the shape the answer is
+  checked against, `find_json` reads the object out of what the provider
+  actually returns (a ```json fence, after a `<think>` block, with prose
+  following), and `fits` validates it with pydantic. An answer that does not
+  fit is handed back with the field named and asked for again — once. No
+  usable answer is `None`, which is not an empty result and cannot be
+  mistaken for one. **The failed reply is not quoted back to the model**:
+  the extractor copies a reporter's bytes verbatim, so its own reply is
+  reporter-controlled text, and echoing it would walk that text back into
+  the prompt outside the boundary the original put it behind. The SDK's tool
+  repair says "Invalid JSON input for tool X" and echoes nothing either.
+
+  **A correction turn is a second run, so it is a second `timeout_seconds`.**
+  A structured call's worst case is two runs, and the pool's worst case per
+  task doubles with it. That is the cost of the guarantee and it is bounded
+  at two by there being exactly one correction.
+
+  **What it replaced could not fail, and that was the bug.** Two hand-written
+  parsers turned whatever a model said into structure by guessing:
+  `friday/extraction/`'s brace scan plus a `key: value` line scraper, and
+  `channel_context`'s bare `json.loads`. Neither checked a single type. A
+  dataclass constructor accepts `environment=["a","b"]` without complaint, so
+  a wrong-typed answer built a `Params`, reached `validate`, and surfaced as
+  `unhashable type: 'list'` quoted at the operator inside a hand-over. An
+  unreadable answer became `{}`, and since every `Params` field has a
+  default, **an empty extraction was indistinguishable from a successful
+  one** — the reporter was asked for what they had already written. And the
+  summariser's `json.loads` raises on every reply the configured provider
+  actually sends, so the fallback fired every time: the whole blob, `<think>`
+  block included, was stored as what the room was about and rendered into
+  every later prompt for that room.
+
+  **Not `response_format: json_schema`, and the reason is measured rather
+  than assumed** — see `docs/DESIGN.md`, where the year-old instruction to
+  verify this against the provider finally was. MiniMax-M3 accepts that
+  parameter and ignores it, answering outside the schema it was just given.
+  A provider that rejects it is one you find out about; one that accepts and
+  ignores it leaves a schema in the code that reads like a guarantee. The
+  SDK's own `output_type` cannot be used either: it emits exactly that
+  envelope for Chat Completions with no prompt-only mode, and its validation
+  is gated behind the same flag as the wire format. **Tools keep their own
+  path**, unchanged — the SDK already validates a tool call's arguments
+  client-side and gives it a retry, which is the same guarantee under a
+  different name, and is why triage was never the part that was broken.
 - **What an agent reached for is written down beside what it was asked.** A
   prompt says what an agent was *told* and nothing about what it did — so
   which of the four skill tools it actually reaches for was a question nothing

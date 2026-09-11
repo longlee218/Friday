@@ -198,6 +198,7 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
     proves the first, through a real `Extractor.run()` and a real `Params`
     instance, the same seam `tests/test_extraction.py` drives its own
     end-to-end tests through."""
+    from conftest import ScriptedHarness
     from friday.domain.models import ApiIssueParams
     from friday.extraction import build_extractor
     from tests.test_extraction import _context
@@ -223,12 +224,11 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
         # character for character.
         final_output = '{"correlation_id": "c0rr3l4t10n"}'
 
-    class StubHarness:
+    class StubHarness(ScriptedHarness):
         tool_turns = 0
         last_error = None
 
-        async def run(self, prompt, *, context=None, extra_turns=0,
-                      task_id=None, node=None):
+        async def run(self, prompt, **kwargs):
             seen_prompts.append(prompt)
             return StubResult()
 

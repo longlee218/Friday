@@ -9,7 +9,7 @@ import pytest
 from friday.domain.models import Task
 from datetime import datetime, timezone
 
-from conftest import make_event
+from conftest import ScriptedHarness, make_event
 from friday.domain.conversation import ConversationId
 from friday.tasks.pool import ASKED, Pool
 from friday.domain.states import TaskState
@@ -291,14 +291,14 @@ async def test_extraction_runs_when_a_message_is_linked(db):
 
     prompts_seen: list[str] = []
 
-    class StubHarness:
-        #: What a real `Harness` with no skill library has. A stub with
-        #: fewer attributes than the type it stands in for passes and is
-        #: describing itself.
+    class StubHarness(ScriptedHarness):
+        #: Subclassed rather than written from scratch, so `run_structured`
+        #: — the validation and its correction turn — is the real one. A
+        #: stub that supplied its own would let this pass while skipping the
+        #: mechanism the extraction actually goes through.
         tool_turns = 0
 
-        async def run(self, prompt, *, context=None, extra_turns=0,
-                      task_id=None, node=None):
+        async def run(self, prompt, **kwargs):
             prompts_seen.append(prompt)
             return StubResult()
 
