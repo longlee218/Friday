@@ -11,6 +11,8 @@ import json
 
 from pathlib import Path
 
+from friday.domain.models import DECISIONS
+
 from evals.dataset import Example, build_frozen_set, load_jsonl, write_jsonl
 
 
@@ -157,3 +159,86 @@ def test_a_plain_seed_row_still_works_alongside_a_turn_row():
     assert {e.text: e.turn for e in frozen} == {
         "the api is down": (), "anyone want lunch": (),
     }
+
+
+# --- the set has to be fit to score against (board `every-answer-has-a-shape`,
+# --- ticket 02, D17/D18) ----------------------------------------------------
+
+
+def test_a_real_verdict_beats_a_seed_row_saying_the_same_thing():
+    """D19: the seed is kept only where nothing real yet says the same thing.
+    It was the other way round — `confirmed` and `seed` were concatenated and
+    written into one dict by text, so the seed row overwrote the operator's
+    own marked verdict whenever both existed. Invisible, because the two
+    agree on the label in the case that made anyone write both.
+    """
+    frozen = build_frozen_set(
+        confirmed=[("the api is down", "api_issue")],
+        seed=[("the api is down", "skip")],
+    )
+
+    (example,) = frozen
+    assert example.expected == "api_issue", "the seed overwrote a real verdict"
+
+
+def test_a_set_missing_a_decision_says_which_one():
+    from evals.dataset import unfit
+
+    said = unfit([Example(text="the api is down", expected="api_issue")])
+
+    assert any("skip" in line for line in said)
+    assert any("access_request" in line for line in said)
+
+
+def test_a_set_with_no_multi_message_turn_says_so():
+    """A turn is what the classifier is actually shown (D17). A set of single
+    strings scores it on a shape it never meets in the channel."""
+    from evals.dataset import unfit
+
+    every_decision = [
+        Example(text=f"about {decision}", expected=decision) for decision in DECISIONS
+    ]
+
+    assert any("turn" in line for line in unfit(every_decision))
+
+
+def test_a_duplicated_text_is_reported_because_it_doubles_its_own_weight():
+    from evals.dataset import unfit
+
+    twice = [
+        Example(text="the api is down", expected="api_issue"),
+        Example(text="the api is down", expected="api_issue"),
+    ]
+
+    assert any("the api is down" in line for line in unfit(twice))
+
+
+def test_a_set_that_covers_everything_is_reported_as_fit():
+    from evals.dataset import unfit
+
+    covering = [
+        Example(text=f"about {decision}", expected=decision) for decision in DECISIONS
+    ]
+    covering.append(
+        Example(
+            text="a burst",
+            expected="api_issue",
+            turn=(("api lỗi rồi", False), ("correlationId là 3f7a1e22", False)),
+        )
+    )
+
+    assert unfit(covering) == []
+
+
+def test_the_frozen_set_this_repo_ships_is_fit_to_score_against():
+    """The guard over the file itself, not over the function — which is the
+    point of it. `build_frozen_set` is run by hand and its output is committed,
+    so nothing else notices the day a refresh drops every `skip` row or the
+    day a fourth task type is added and nothing scores it.
+
+    D17: a value nothing is scored against is a value nothing protects.
+    """
+    from evals.dataset import unfit
+    from evals.run_triage_eval import DATASET
+
+    assert unfit(load_jsonl(DATASET)) == []

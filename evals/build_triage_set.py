@@ -9,16 +9,26 @@ in the same number with no way to tell which moved it.
     uv run python -m evals.build_triage_set
     FRIDAY_DB=/path/to/db uv run python -m evals.build_triage_set
 
-As of this ticket the shipped database has no marked verdicts yet —
-`db.confirmed_classifications()` returns nothing until the operator starts
-reacting ✅ to real classifications — so today's file is entirely `SEED`
-below. Delete a seed row once a real marked verdict says the same thing; it
-exists to unblock this ticket, not to be defended forever.
+`SEED` is the floor, not the set. A real marked verdict **overwrites** the
+seed row that says the same thing — `build_frozen_set` puts the seed in first
+and the confirmed rows on top, which is D19's rule in one line: the seed is
+kept only where nothing real yet says the same thing. It read the other way
+round until board `every-answer-has-a-shape`, ticket 02, and the seed quietly
+won every collision.
+
+**A refresh reports what it produced, and says so when the result is not fit
+to score against.** `unfit` is the same check the suite runs over the
+committed file, run here as well because this is the moment coverage is lost:
+a refresh that drops every `skip` row leaves an accuracy figure that looks
+perfectly healthy while the value it stopped measuring goes unprotected. It
+warns and still writes — an operator mid-rebuild needs the file to look at,
+not a refusal.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -27,9 +37,11 @@ from dotenv import load_dotenv
 from friday.config import Config, load_config
 from friday.store.db import Database
 
-from evals.dataset import build_frozen_set, write_jsonl
+from evals.dataset import Example, build_frozen_set, unfit, write_jsonl
 
 __all__ = ["SEED", "build_and_write", "main"]
+
+log = logging.getLogger(__name__)
 
 OUT = Path(__file__).parent / "triage.jsonl"
 
@@ -100,29 +112,44 @@ SEED: list[tuple[str, str] | tuple[str, str, tuple]] = [
 ]
 
 
-async def build_and_write(db: Database, config: Config, *, out: Path = OUT) -> int:
+async def build_and_write(
+    db: Database, config: Config, *, out: Path = OUT
+) -> list[Example]:
     """Read what a real deploy would show `run_triage_eval.py`'s frozen set,
-    write it, and return how many rows landed. Split from `main` so a test
-    can supply an in-memory `db` and a throwaway `out` — no real database,
-    no touching the committed file."""
+    write it, and hand back the rows that landed.
+
+    Split from `main` so a test can supply an in-memory `db` and a throwaway
+    `out` — no real database, no touching the committed file. Returns the rows
+    rather than a count so a caller can say something about *which* ones, which
+    is what the warning below needs and what a count could never carry.
+    """
     confirmed = await db.confirmed_classifications(limit=1000)
     frozen = build_frozen_set(
         confirmed=confirmed, seed=SEED, excluded=list(config.triage_examples)
     )
     write_jsonl(out, frozen)
-    return len(frozen)
+
+    from_verdicts = {text for text, _ in confirmed} & {e.text for e in frozen}
+    log.info(
+        "%d rows: %d from marked verdicts, %d from the seed",
+        len(frozen), len(from_verdicts), len(frozen) - len(from_verdicts),
+    )
+    for problem in unfit(frozen):
+        log.warning("this set is not fit to score a classifier against: %s", problem)
+    return frozen
 
 
 async def main() -> None:
     load_dotenv()  # `run_agent.py`'s own first step — secrets from .env, never config.yaml.
     config = load_config()
     db_path = os.environ.get("FRIDAY_DB") or config.database_path
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     db = await Database.connect(db_path)
     try:
-        count = await build_and_write(db, config)
+        frozen = await build_and_write(db, config)
     finally:
         await db.close()
-    print(f"wrote {count} examples to {OUT}")
+    print(f"wrote {len(frozen)} examples to {OUT}")
 
 
 if __name__ == "__main__":

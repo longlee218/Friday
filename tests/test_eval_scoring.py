@@ -54,7 +54,7 @@ def test_confusion_matrix_gives_a_label_a_row_even_at_zero():
 
 
 def test_a_label_only_ever_predicted_still_gets_a_column():
-    """`needs_human` — the eval set never expects it (`CLASSIFIABLE` excludes
+    """`needs_human` — the eval set never expects it (`DECISIONS` excludes
     it), but the classifier can still produce it. A matrix built only from
     the expected labels would raise on this row rather than show it."""
     predictions = [

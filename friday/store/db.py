@@ -47,6 +47,7 @@ from friday.domain.models import (
     Memory,
     MemoryCandidate,
     MemoryKind,
+    DECISIONS,
     MemoryScope,
     MemoryStatus,
     InboundEvent,
@@ -68,9 +69,6 @@ __all__ = ["Database", "estimated_tokens"]
 
 log = logging.getLogger(__name__)
 
-#: The types the classifier can actually produce — one per tool it has.
-#: Anything else in `decision_type` is a state, not a classification.
-CLASSIFIABLE = ("api_issue", "access_request", "doc_question", "skip")
 
 
 def estimated_tokens(text: str) -> int:
@@ -2565,7 +2563,7 @@ class Database:
                     # marking that right is a perfectly sensible thing for
                     # the operator to do. Showing it back as an example
                     # would teach the classifier a label it has no tool for.
-                    schema.Message.decision_type.in_(CLASSIFIABLE),
+                    schema.Message.decision_type.in_(DECISIONS),
                 )
                 .order_by(schema.Verdict.marked_at.desc())
                 # Deeper than `limit`, because the balancing below picks from

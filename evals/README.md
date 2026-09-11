@@ -26,11 +26,17 @@ is that, built for ticket 06 on `.scratch/nothing-runs-unmeasured/`.
   `config.yaml`'s `triage_examples` — an example already shown to the model
   as a few-shot cannot also be something the model is scored against.
 
-  **As shipped, `triage.jsonl` is entirely `SEED`.** The real database has
-  zero marked verdicts as of this ticket — nobody has reacted ✅ to a
-  classification yet — so there is nothing real to freeze in. Delete a seed
-  row once a real marked verdict says the same thing; the seed exists to
-  give this tool something to score on day one, not to be defended forever.
+  **A real marked verdict overwrites the seed row that says the same thing.**
+  The seed is the floor, not the set: it exists to give this tool something to
+  score on day one, and a refresh is the moment it stops being the only thing
+  there. (It read the other way round until board `every-answer-has-a-shape`,
+  ticket 02 — the seed silently won every collision, which is exactly backwards
+  from what the refresh is for.)
+
+  A refresh also reports what it produced and warns when the result is not fit
+  to score against, by the rule in the next section. It still writes the file:
+  an operator halfway through a rebuild needs something to look at, not a
+  refusal.
 
 - **`run_triage_eval.py`** — scores the live classifier against
   `triage.jsonl`:
@@ -45,6 +51,45 @@ is that, built for ticket 06 on `.scratch/nothing-runs-unmeasured/`.
   matrix, and how many rows each confidence threshold from 0.5 to 0.9 would
   escalate to a human, which is what `confidence_threshold` in `config.yaml`
   is checked against.
+
+## What the set has to cover
+
+`evals/dataset.py`'s `unfit` is the guard, and
+`tests/test_eval_dataset.py::test_the_frozen_set_this_repo_ships_is_fit_to_score_against`
+runs it against the committed file. Three things it can decide for itself, and
+a failure names which:
+
+- **Every decision triage may reach has at least one row** — the members of
+  `friday.domain.models.DECISIONS`, which is every task type plus `skip`. A
+  value nothing is scored against is a value nothing protects, and the day a
+  fourth task type is registered this is what says the set has not caught up.
+- **At least one row carries a turn of more than one message.** A turn is what
+  the classifier is actually shown; a set of single strings scores it on a
+  shape it never meets in a real channel.
+- **No text appears twice.** A duplicate doubles its own weight in the accuracy
+  figure without saying it does.
+
+Three more are asked of the set and **cannot be checked by code**, because
+each is a judgement about a row's content. They are the operator's, and they
+are the difference between a number that means something and a number that
+only looks healthy:
+
+- **Rows near the boundary between two task types.** "Xin quyền vào repo để
+  fix cái lỗi 500" is both an access request and an API issue depending on
+  what the team means by it. Accuracy on obvious rows says nothing about the
+  decisions that are actually hard.
+- **Rows a correct classifier should call `skip`.** A change that makes the
+  model eager to open work has no other detector — it shows up as tasks nobody
+  wanted, weeks later, rather than as a number.
+- **Rows that read like the channel does.** Vietnamese, a pasted stack trace,
+  a `curl`, a correlationId — not an English summary of one. The set is
+  supposed to resemble the traffic.
+
+**The rows are the operator's to write** (board `every-answer-has-a-shape`,
+D18). A classifier scored against labels a model chose is measuring nothing:
+the labels have to be somebody's judgement. What the code here delivers is the
+shape, the tooling and the coverage requirement — filling the set in is a data
+change to `triage.jsonl`, not a code change.
 
 ## What a run costs
 

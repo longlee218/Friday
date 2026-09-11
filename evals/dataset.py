@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["Example", "build_frozen_set", "load_jsonl", "write_jsonl"]
+__all__ = ["Example", "build_frozen_set", "load_jsonl", "unfit", "write_jsonl"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +55,15 @@ def build_frozen_set(
     """
     excluded_text = {text for text, _ in excluded}
     seen: dict[str, Example] = {}
-    for row in [*confirmed, *seed]:
+    # Seed first, confirmed second, so a real verdict *overwrites* the seed row
+    # that stood in for it. This read the other way round — both lists
+    # concatenated with `confirmed` in front — and the seed won every
+    # collision, which is D19 backwards: the seed exists only where nothing
+    # real yet says the same thing. Invisible in the case that made anyone
+    # write both, because there the two agree on the label; loud the day the
+    # operator marks a seed row's own sentence as something else, which is
+    # exactly the correction the refresh exists to carry.
+    for row in [*seed, *confirmed]:
         text, kind, turn = row if len(row) == 3 else (*row, ())
         if text in excluded_text:
             continue
@@ -94,3 +102,57 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
             row["turn"] = [list(pair) for pair in e.turn]
         rows.append(json.dumps(row, ensure_ascii=False))
     path.write_text("\n".join(rows) + "\n" if rows else "")
+
+
+def unfit(examples: Sequence[Example]) -> list[str]:
+    """Why this set is not fit to score a classifier against — empty if it is.
+
+    **A guard over the committed file, not over the builder** (D17). The file
+    is written by hand, by somebody running `build_triage_set.py` when there
+    is new data worth freezing in, and then committed. Nothing else notices
+    the day a refresh drops every `skip` row, or the day a fourth task type is
+    registered and the set goes on scoring three — the accuracy figure stays
+    perfectly healthy while the thing it is measuring has changed underneath
+    it. A value nothing is scored against is a value nothing protects.
+
+    Sentences rather than a boolean, because the caller is a person reading a
+    failed assertion and "unfit" tells them nothing they can act on.
+
+    **What is checked is what D17 asks for and no more.** Rows at the boundary
+    between two types, and rows a correct classifier should call `skip`, are
+    also required of the set — but "is this row near a boundary" is a
+    judgement, and a check that guessed at it would either pass everything or
+    refuse rows the operator meant. Those stay the operator's, stated in
+    `evals/README.md`. What is here is what code can actually decide: a
+    decision with no row at all, a set that never shows the classifier a turn,
+    and a row that counts twice.
+    """
+    from friday.domain.models import DECISIONS
+
+    problems = []
+
+    scored = {e.expected for e in examples}
+    for missing in sorted(set(DECISIONS) - scored):
+        problems.append(
+            f"no row expects {missing!r} — it is one of the decisions triage "
+            f"may reach, so nothing is scoring it"
+        )
+
+    if not any(len(e.turn) > 1 for e in examples):
+        problems.append(
+            "no row carries a turn of more than one message — a turn is what "
+            "the classifier is actually shown, and a set of single strings "
+            "scores it on a shape it never meets in a real channel"
+        )
+
+    counts: dict[str, int] = {}
+    for example in examples:
+        counts[example.text] = counts.get(example.text, 0) + 1
+    for text, count in counts.items():
+        if count > 1:
+            problems.append(
+                f"{text!r} appears {count} times — a duplicate doubles its own "
+                f"weight in the accuracy figure without saying it does"
+            )
+
+    return problems
