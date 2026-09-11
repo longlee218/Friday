@@ -142,6 +142,22 @@ Probed against the configured provider (MiniMax-M3, `api.minimax.io/v1`), on
 38. As the operator, I want a correction turn counted against the run's turn budget, so that "ask again once" cannot quietly become "ask again forever".
 39. As the operator, I want the worst-case cost of a structured call stated plainly, so that a doubled timeout is a decision rather than a surprise.
 40. As a developer, I want the responder's free-text answer left alone, because prose is its actual output and a shape would be a lie about it.
+41. As the operator, I want the frozen evaluation set rebuilt before this change lands, so that the net that has to catch a regression is not the thinnest it has ever been at the moment it matters most.
+42. As the operator, I want the set rebuilt and frozen *first*, and the baseline taken on the current code against that same rebuilt set, so that before and after are two readings of one ruler rather than a new ruler and a new answer.
+43. As the operator, I want the rebuilt set to hold every member of the closed decision set, `skip` included, so that the enum this change introduces is actually exercised.
+44. As the operator, I want rows that sit near the boundary between two task types, so that the number says something about the decisions that are actually hard rather than only the obvious ones.
+45. As the operator, I want rows that a correct classifier should call `skip`, so that a change that makes the model eager to open work shows up as a number instead of as tasks nobody wanted.
+46. As the operator, I want rows whose turn is several messages, so that what the classifier is actually shown — a turn, not a line — is what it is scored on.
+47. As the operator, I want rows carrying what a reporter really types — Vietnamese, a pasted stack trace, a `curl`, a correlationId — so that the set resembles the traffic rather than an English summary of it.
+48. As the operator, I want the set refreshed from classifications I have actually marked ✅, so that it stops being entirely hand-written the moment there is real evidence to freeze in.
+49. As the operator, I want anything already shown to the model as a few-shot example kept out of the set, so that the score is never the classifier reading back its own instructions.
+50. As the operator, I want to fill in the rows myself, so that what the system is measured against is a judgement I made rather than one a model made about its own behaviour.
+51. As a developer, I want the tooling, the format and the coverage requirement delivered with empty room for those rows, so that filling them in is a data change and not a code change.
+52. As the operator, I want the evaluation runner to follow the new answer shape, so that scoring keeps working when triage stops answering through two tools.
+53. As the operator, I want a run against the set to report accuracy, a confusion matrix and the threshold table, so that "it got worse" can be attributed to a label rather than felt in general.
+54. As the operator, I want a decision the model returns outside the closed set to be counted and reported rather than silently scored as wrong, so that "it invented a type" and "it chose the wrong type" are two different numbers.
+55. As the operator, I want the cost of one evaluation run written down beside it, so that running it is a decision I make with the price in front of me.
+56. As the operator, I want the before and after numbers recorded with the change, so that the next person can see what it cost rather than take my word for it.
 
 ## Implementation Decisions
 
@@ -261,6 +277,52 @@ by the runtime and never named by the model; a channel's memory is still
 invisible to a run in another one. This work changes the object that carries
 the scope, not the rule.
 
+**D16 — The frozen set is rebuilt before the change, not after.** The order is
+the decision, and getting it wrong makes the measurement worthless: rebuild and
+freeze the set, take the baseline on **today's** code against that set, then
+make the change and score against the same file. Rebuilding and changing at
+once would move the ruler and the thing being measured together, and the
+difference would mean nothing. The set as it stands is 18 rows, every one of
+them hand-written `SEED` — the README says why, and the reason has expired:
+this is the thinnest that net has ever been, and it is about to be asked to
+catch a regression in the highest-volume prompt in the system.
+
+**D17 — The set must cover the closed decision set, at its edges.** Every
+member appears, `skip` included — that is the enum this work introduces, and a
+value nothing is scored against is a value nothing protects. Beyond coverage,
+three kinds of row earn their place: ones sitting near the boundary between two
+task types, ones a correct classifier should call `skip` (the eager-to-open-
+work failure has no other detector), and ones whose turn is several messages,
+because a turn is what the classifier is actually shown. Rows should read like
+the channel does — Vietnamese, a pasted `curl`, a correlationId, a stack trace
+— rather than like an English description of it.
+
+**D18 — The rows are the operator's to write; this work delivers the room for
+them.** What is built here is the shape, the tooling and the coverage
+requirement — an `Example` that carries what a row needs, a builder that
+refreshes from marked verdicts and excludes anything the live prompt already
+shows as a few-shot, and a stated minimum of what must be represented. The
+contents are filled in by the operator afterwards, as a data change. A
+classifier scored against labels a model chose is measuring nothing; the
+labels have to be somebody's judgement.
+
+**D19 — Refresh from real verdicts as part of the rebuild.** The set is
+entirely seed because, when it was built, no classification had been marked ✅.
+That may no longer be true — and the same reaction now also resolves candidate
+memories, so the gesture has a second reason to have been used. The rebuild
+runs the existing builder against the live database, takes whatever confirmed
+classifications exist, and keeps the seed only where nothing real yet says the
+same thing. The exclusion rule stands unchanged and is not cosmetic: scoring
+the classifier against a sentence it was told the answer to measures nothing.
+
+**D20 — The runner follows the new shape, and reports an invented decision
+separately.** Scoring reads whatever triage now returns rather than the two
+tools it used to call. One new number is owed: a decision outside the closed
+set is not the same failure as the wrong member of it, and counting them
+together would hide the failure this change is meant to make impossible. The
+existing accuracy, confusion matrix and threshold table stay, and the run's
+cost stays written down beside it.
+
 ## Testing Decisions
 
 **A good test here asserts what a caller observes** — the value returned, the
@@ -311,11 +373,27 @@ work reintroduced the exact bug it was written to delete — an object of
 entirely unknown keys filtered down to `{}` and validated as a success — and
 the tests as written did not catch it.
 
-**The classifier evaluation is owed.** Triage's prompt and the shape of its
-answer both change, so `evals/run_triage_eval.py` runs against
-`evals/triage.jsonl` before and after, with the accuracy, confusion matrix and
-threshold table reported. CLAUDE.md's verifying-a-change rule names this
-explicitly, and this is the first work in a while that genuinely triggers it.
+**The classifier evaluation is owed, and it is the one test here that costs
+money.** Triage's prompt and the shape of its answer both change, so
+`evals/run_triage_eval.py` runs against the frozen set before and after, with
+accuracy, confusion matrix, threshold table and the count of out-of-set
+decisions reported. CLAUDE.md's verifying-a-change rule names this explicitly,
+and this is the first work in a while that genuinely triggers it.
+
+**The order is part of the test** (D16): rebuild and freeze the set, baseline
+today's code against it, then change. A rebuilt set and a changed classifier
+measured in one step is two variables and one number.
+
+**The set's own tooling is unit-tested without the network.** `dataset.py` and
+`scoring.py` are pure functions with existing tests
+(`tests/test_eval_dataset.py`, `tests/test_eval_scoring.py`), and those are
+where the rebuild's mechanics belong: that a row carrying a multi-message turn
+round-trips through the file, that the few-shot exclusion actually excludes,
+that deduplication by text holds, that every member of the closed decision set
+is represented, and that an out-of-set decision scores as its own outcome
+rather than as a wrong label. None of that needs a provider. **A coverage
+assertion over the frozen file is a test, not a lint**: it is what stops the
+set quietly losing `skip` rows the next time somebody refreshes it.
 
 ## Out of Scope
 
@@ -333,6 +411,14 @@ explicitly, and this is the first work in a while that genuinely triggers it.
 - **Any new task type, graph node, or memory kind.** This work changes how an
   answer is obtained and how state travels, and must change nothing about what
   the system decides.
+- **The evaluation rows themselves.** The shape, the tooling, the coverage
+  requirement and the runner are in scope; writing the rows is the operator's,
+  afterwards, as a data change (D18). A row invented here to make a number look
+  healthy would be the measurement marking its own homework.
+- **Scoring anything but triage.** The extractor and the summariser change
+  shape too, and neither has a frozen set. Building one is real work with its
+  own design questions — what a correct extraction even is, when half the
+  fields are legitimately absent — and it is not this spec's.
 - **The board UI.** No route's response shape changes.
 
 ## Further Notes
@@ -356,7 +442,10 @@ can both fit inside one extraction is the thing to watch when this lands; the
 answer may be that the extractor's budget needs a number of its own, and that
 should be a decision taken on evidence rather than pre-emptively.
 
-**The second-largest is the evaluation.** Triage is the highest-volume path
-here, and this changes both its prompt and the shape it answers in. The eval
-exists for exactly this; a regression in it is a reason to stop, not a detail
-to note.
+**The second-largest is the evaluation, and it is also the least ready.**
+Triage is the highest-volume path here, and this changes both its prompt and
+the shape it answers in. The eval exists for exactly this — but it is 18
+hand-written rows, which is a net wide enough to catch a prompt that broke and
+not one that merely got worse. Hence D16–D20: rebuild it first, baseline
+against it, then change. A regression in it is a reason to stop, not a detail
+to note; and a set too thin to show one is a reason to stop earlier.
