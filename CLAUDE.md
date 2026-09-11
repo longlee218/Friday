@@ -178,7 +178,7 @@ What is actually on disk.
 | `friday/extraction/` | Everything a task knows, lifted out of what the reporter wrote. One extractor per task type, each owning its prompt and its `Params` schema; **one `extractor` block in `config.yaml` serves all of them** — it was one block per type, and all three held identical values for as long as they existed, so what the split bought was one configuration written three times. `context.py` is node 0's own gather function (ticket 15, D26): the transcript, the room, the domain memories, the outstanding questions and `known`, one call, one frozen `FullContext` |
 | `friday/dag/` | `engine.py` is the graph framework — nodes, edges, checkpointed resume — and `state.py` what a run accumulates; the package's `__init__.py` is empty on purpose. `dag/prepare.py` builds the entry node every graph shares and holds the fill-and-validate mechanism it runs. `dag/router.py` maps a task type to a graph. **Every type now gets the same one-node graph** |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs. Stand down, announce, host the graph, act on the outcome — nothing about what a graph decides |
-| `friday/tools/` | Every tool an agent may call, one module per subject — asking (`clarify`, `ask_for_fields`), classifying (`classify`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), remembering (`memory` — `memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder; ticket 09's D9, `memory_propose` ticket 12's D19) — all thirteen. A test asserts the list, factories built rather than skipped, and forbids declaring one anywhere else |
+| `friday/tools/` | Every tool an agent may call, one module per subject — classifying (`classify`, `skip`), reaching a skill (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), remembering (`memory` — `memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder; ticket 09's D9, `memory_propose` ticket 12's D19). **Do not trust this sentence's count** — `tests/test_tools.py` writes the list out and asserts it, and that is the one place that cannot be wrong. The two asking tools went on board `every-answer-has-a-shape`: `ask_clarification` had no caller and never had one, and `ask_for_fields` became a field of the extractor's own answer. A test asserts the list, factories built rather than skipped, and forbids declaring one anywhere but here and `agent/harness.py`'s answer tool |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `web/` | The operator monitor, on `:8086`. A React + Vite SPA built to static files and served by `ops/api.py`'s app — one process, one container, no Node at runtime. The current shape is the monitor dashboard described in `.scratch/a-monitor-on-the-whole-path/spec.md`: a live feed driven by SSE (`/api/events`), running tasks, drill-down to the Flow screen, breadcrumbs, the Agent vs Reporter marker on Rooms rows. The dark palette and motion tokens live in `web/src/index.css` under `:root` — no component file carries a hex literal or an inline `style={{}}` (`tests/test_web_tokens.py` enforces this). Keyboard shortcuts (`g m`, `g b`, `g r`, `?`, `/`, `r`, `esc`) are wired in `web/src/keyboard.ts`; `?` opens the overlay. Replaced `friday/board/`, 196 lines of f-string HTML and HTMX polling, which was deleted rather than ported: it rendered the same prompts and provider errors as the JSON API while running none of them through `redact.scrub`, which is the two-renderers failure this file already records once for escaping |
@@ -217,9 +217,18 @@ So **every tool lives in `friday/tools/`**, one module per subject, and
 `tests/test_tools.py` enforces both halves of that: the list of tools is
 asserted rather than described, and no tool may be declared anywhere else.
 Both spellings are checked by reading the syntax, since grep sees only one of
-them. A tool that needs something injected — `fetch_skill` a skill library,
-`ask_for_fields` one type's field names — stays a factory; that is a
-different thing from living somewhere else.
+them. A tool that needs something injected — `fetch_skill` a skill library —
+stays a factory; that is a different thing from living somewhere else.
+
+**One exemption, and it is one file rather than a rule.** The harness builds
+the tool an agent with a declared shape answers through. It cannot live in the
+package — `FunctionTool` comes from the SDK, which only that module may import
+— and it is not a capability, since answering is not a door an agent chooses
+among. Both guards skip that path, matched as a whole path rather than by
+basename: the basename form exempted *any* file called `harness.py` anywhere
+under `friday/`, which is a hole nobody meant to open and nobody would have
+noticed. `test_the_one_tool_outside_the_package_is_the_answer_tool` asserts
+what lives there, so the exemption cannot grow a second occupant.
 
 **The listing builds the factories rather than skipping them**, and that is
 the second time this test has had to learn the same lesson. It scanned
@@ -362,26 +371,65 @@ not an implementation detail:
   a call was about, and forgetting *that* loses a correlation key rather than
   the record. `AgentHooks` cannot do this job — `on_llm_start` fires after the
   decision to spend and `on_llm_end` after the money is gone.
-- **An answer that is not a tool call is checked against a declared shape, in
-  this process, and gets exactly one correction turn.**
-  `Harness.run_structured(prompt, schema)` is that seam: the schema is a
-  dataclass, `friday/agent/structured.py`'s `describe` generates the prompt
-  text from it so the shape the model is told is the shape the answer is
-  checked against, `find_json` reads the object out of what the provider
-  actually returns (a ```json fence, after a `<think>` block, with prose
-  following), and `fits` validates it with pydantic. An answer that does not
-  fit is handed back with the field named and asked for again — once. No
-  usable answer is `None`, which is not an empty result and cannot be
-  mistaken for one. **The failed reply is not quoted back to the model**:
-  the extractor copies a reporter's bytes verbatim, so its own reply is
-  reporter-controlled text, and echoing it would walk that text back into
-  the prompt outside the boundary the original put it behind. The SDK's tool
-  repair says "Invalid JSON input for tool X" and echoes nothing either.
+- **An agent that answers a shape declares it at construction, answers through
+  a tool generated from it, and is believed only after the arguments are
+  checked in this process.** `Harness(answers=<dataclass>)` is the
+  declaration; `run_structured(prompt)` returns an instance of it or `None`.
+  One dataclass is the only source: `friday/agent/structured.py`'s `describe`
+  writes the prompt text and the tool's description from it, `_answer_params`
+  puts each field's own `doc` on the matching parameter, and `fits` validates
+  the arguments with pydantic. No usable answer is `None`, which is not an
+  empty result and cannot be mistaken for one.
 
-  **A correction turn is a second run, so it is a second `timeout_seconds`.**
-  A structured call's worst case is two runs, and the pool's worst case per
-  task doubles with it. That is the cost of the guarantee and it is bounded
-  at two by there being exactly one correction.
+  **Declared per agent, not per call**, because an answer shape does not vary
+  between calls — the summariser always answers a `RoomSummary`, each
+  extractor always its own type's `Params` — so the tool, its terminator and
+  its `tool_choice` are built once rather than on every call.
+
+  **A tool call rather than a written answer, and that is measured.** Every
+  written answer the configured provider sends carries a `<think>` block, a
+  ```json fence and prose after it, so `json.loads` on the reply fails every
+  time; a tool call's arguments arrive in their own protocol field, and a
+  `curl` carrying `{"a":1}` came back byte for byte.
+
+  **A written answer is still read, as the fallback.** Forcing the call is not
+  a guarantee — the probe that found the clean arguments also found this model
+  answering outside a closed enum it had just been given — so prose that turns
+  up anyway goes through `find_json` and the same `fits`.
+
+  **One correction, and it is the turn budget.** A call that does not fit
+  comes back as the tool's *own output*, naming the field, so the model fixes
+  it inside the same run and `max_turns` decides how many goes it gets. There
+  is no second retry loop and **no second run**: a structured call is one
+  `timeout_seconds`, which is what makes the one-run bound above true for it
+  too. This paragraph said the opposite — "a correction turn is a second run,
+  so it is a second `timeout_seconds`" — and that was true of the
+  written-answer version it replaced.
+
+  **The failed arguments are not quoted back.** The extractor copies a
+  reporter's bytes verbatim, so its own arguments are reporter-controlled
+  text; the reason comes from `fits`, in this process, and names the field.
+  A test forges a delimiter inside a refused value and checks the reason
+  carries none of it, because pydantic keeps the offending value on a
+  neighbouring key of the same error object and a release that folded one
+  into the other would open this quietly.
+
+  **Three mechanics that are not obvious and decide the design**, each found
+  by prototype or by a failing test rather than by reading: the tool body
+  **returns** its problem, since a raise inside `on_invoke_tool` is wrapped in
+  `UserError` and fails the whole run; "answered" means the tool returned an
+  **instance**, since an error string is a tool output too; and the instance
+  is read off the run's **items**, since the SDK stringifies a tool-supplied
+  final output unless the agent has an `output_type` — and setting one is the
+  single thing this design may not do, because that is what emits the
+  `response_format` envelope.
+
+  **The answer tool is the one tool outside `friday/tools/`.** It cannot live
+  there: `FunctionTool` comes from the SDK and `harness.py` is the only module
+  that may import it. It is also not a capability — answering is not a door an
+  agent chooses among. `tests/test_tools.py` asserts there is exactly one such
+  function in exactly that file, matched by its full path, so the exemption
+  cannot grow a second occupant.
 
   **What it replaced could not fail, and that was the bug.** Two hand-written
   parsers turned whatever a model said into structure by guessing:
@@ -406,10 +454,12 @@ not an implementation detail:
   ignores it leaves a schema in the code that reads like a guarantee. The
   SDK's own `output_type` cannot be used either: it emits exactly that
   envelope for Chat Completions with no prompt-only mode, and its validation
-  is gated behind the same flag as the wire format. **Tools keep their own
-  path**, unchanged — the SDK already validates a tool call's arguments
-  client-side and gives it a retry, which is the same guarantee under a
-  different name, and is why triage was never the part that was broken.
+  is gated behind the same flag as the wire format. The tool's parameter
+  schema *is* sent, because that is how a tool is declared, and nothing
+  relies on the provider honouring it. **A shape's own docstring is not
+  sent**: pydantic puts it on the object as `description`, and these
+  docstrings are developer prose — `RoomSummary`'s runs to nine paragraphs
+  about why it has four fields and not six.
 - **What an agent reached for is written down beside what it was asked.** A
   prompt says what an agent was *told* and nothing about what it did — so
   which of the four skill tools it actually reaches for was a question nothing
@@ -1040,16 +1090,19 @@ The five canonical roles, unchanged (`needs-triage`, `needs-info`, `ready-for-ag
 ### Domain docs
 
 Single-context: **`CONTEXT.md`** at the repo root holds the domain vocabulary —
-25 terms as of this file's own count (`grep -c "^## " CONTEXT.md`, not
+26 terms as of this file's own count (`grep -c "^## " CONTEXT.md`, not
 retyped by hand here for that reason), from Message and Conversation through
-Task, Triage, Extraction, Graph, Tool server, Harness and Memory to Outbox,
-Approval, Provider and Sweep. Read it before naming anything, and add the
-term there when you name something new. `docs/adr/` does not exist yet. See
-`docs/agents/domain.md`.
+Task, Triage, Extraction, Graph, Tool server, Harness, Friday state and Memory
+to Outbox, Approval, Provider and Sweep. Read it before naming anything, and
+add the term there when you name something new. `docs/adr/` does not exist
+yet. See `docs/agents/domain.md`.
 
 This sentence has drifted from the file it describes before, silently, which
 is the reason to prefer a command over a number the next time this goes
 stale: "Workflow" and "Persona" were named here as terms with no matching
 heading before this edit and are left that way — pre-existing and not this
 ticket's to chase — while "Observation" is the one this ticket's own change
-made wrong, since the term is `Memory` now.
+made wrong, since the term is `Memory` now. The count moved to 26 on board
+`every-answer-has-a-shape`, which added **Friday state** — and which is a
+reminder that the number above is the part of this paragraph to re-run rather
+than to read.

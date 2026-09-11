@@ -7,8 +7,15 @@ removed rather than kept as an alias.
 
 **Blocked by:** 04.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The old name appears nowhere in production code or tests.
-- [ ] Every memory write and search reaches the store through the state.
-- [ ] The suite is green, and the memory-guard and responder tests still assert what they asserted before.
+- [x] The old name appears nowhere in production code or tests.
+- [x] Every memory write and search reaches the store through the state.
+- [x] The suite is green, and the memory-guard and responder tests still assert what they asserted before.
+
+## Comments
+
+Folded into ticket 04 — see its Comments for why. `friday/tools/memory.py`’s
+`_scope` is `_state`, named for what it returns; the store’s parameter stays
+`scope: FridayState`, where it really is the state *used as* a scope and the
+name says which of its jobs that call is asking for.

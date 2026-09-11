@@ -1127,7 +1127,7 @@ class Database:
     TEXT_CHARS = 500
 
     async def memory_search(
-        self, scope: FridayState, query: str, *, kind: str, limit: int
+        self, state: FridayState, query: str, *, kind: str, limit: int
     ) -> list[Memory]:
         """Every active match of this kind in this channel, newest first —
         not ranked by how well it matches, only by when it was written.
@@ -1158,7 +1158,7 @@ class Database:
             rows = await session.scalars(
                 select(schema.Memory)
                 .where(
-                    schema.Memory.channel_id == scope.channel_id,
+                    schema.Memory.channel_id == state.channel_id,
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
                     schema.Memory.kind == kind,
@@ -1199,7 +1199,7 @@ class Database:
             return [_memory(row) for row in rows]
 
     async def memory_add(
-        self, scope: FridayState, text: str, *, kind: str = MemoryKind.VOICE
+        self, state: FridayState, text: str, *, kind: str = MemoryKind.VOICE
     ) -> Memory | None:
         """Write a new memory, or refuse if the channel is already full.
 
@@ -1236,7 +1236,7 @@ class Database:
         async with self._sessions.begin() as session:
             count = await session.scalar(
                 select(func.count()).select_from(schema.Memory).where(
-                    schema.Memory.channel_id == scope.channel_id,
+                    schema.Memory.channel_id == state.channel_id,
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
                 )
@@ -1246,14 +1246,14 @@ class Database:
             now = _now()
             row = schema.Memory(
                 id=_memory_id(),
-                channel_id=scope.channel_id,
-                agent=scope.agent,
+                channel_id=state.channel_id,
+                agent=state.agent,
                 text=text[: self.TEXT_CHARS],
                 kind=kind,
-                task_id=scope.task_id,
+                task_id=state.task_id,
                 # The message that produced this memory, when the caller
                 # supplies one. The Rooms screen joins on it.
-                source_message_id=scope.message_id,
+                source_message_id=state.message_id,
                 created_at=now,
                 updated_at=now,
             )
@@ -1262,7 +1262,7 @@ class Database:
             return _memory(row)
 
     async def memory_update(
-        self, scope: FridayState, memory_id: str, text: str
+        self, state: FridayState, memory_id: str, text: str
     ) -> Memory | None:
         """Correct a memory's wording in place — the same claim, said
         better — or `None` if this scope has no such (live, active) memory by
@@ -1279,7 +1279,7 @@ class Database:
         """
         check_not_instruction_shaped(text)
         async with self._sessions.begin() as session:
-            row = await self._live_memory(session, scope, memory_id)
+            row = await self._live_memory(session, state, memory_id)
             if row is None:
                 return None
             row.text = text[: self.TEXT_CHARS]
@@ -1288,7 +1288,7 @@ class Database:
             return _memory(row)
 
     async def memory_supersede(
-        self, scope: FridayState, memory_id: str, text: str
+        self, state: FridayState, memory_id: str, text: str
     ) -> Memory | None:
         """Replace what a memory claims, rather than correcting how it is
         worded (D16) — the operation `memory_update` deliberately is not.
@@ -1316,18 +1316,18 @@ class Database:
         """
         check_not_instruction_shaped(text)
         async with self._sessions.begin() as session:
-            old = await self._live_memory(session, scope, memory_id)
+            old = await self._live_memory(session, state, memory_id)
             if old is None:
                 return None
             now = _now()
             new_row = schema.Memory(
                 id=_memory_id(),
-                channel_id=scope.channel_id,
-                agent=scope.agent,
+                channel_id=state.channel_id,
+                agent=state.agent,
                 text=text[: self.TEXT_CHARS],
                 kind=old.kind,
-                task_id=scope.task_id,
-                source_message_id=scope.message_id,
+                task_id=state.task_id,
+                source_message_id=state.message_id,
                 created_at=now,
                 updated_at=now,
                 status=MemoryStatus.ACTIVE,
@@ -1339,16 +1339,16 @@ class Database:
             await session.flush()
             return _memory(new_row)
 
-    async def memory_delete(self, scope: FridayState, memory_id: str) -> bool:
+    async def memory_delete(self, state: FridayState, memory_id: str) -> bool:
         """Soft-delete: the row survives with who removed it and when, so an
         operator can see what a line said after it is gone. `False` for the
         same cases `memory_update` treats alike."""
         async with self._sessions.begin() as session:
-            row = await self._live_memory(session, scope, memory_id)
+            row = await self._live_memory(session, state, memory_id)
             if row is None:
                 return False
             row.deleted_at = _now()
-            row.deleted_by = scope.agent
+            row.deleted_by = state.agent
             return True
 
     async def full_memory_channels(self) -> list[str]:
@@ -1394,7 +1394,7 @@ class Database:
             )
             return [_memory(row) for row in rows]
 
-    async def _live_memory(self, session, scope: FridayState, memory_id: str):
+    async def _live_memory(self, session, state: FridayState, memory_id: str):
         """The row, if it exists, belongs to this scope, is not deleted, and
         is still active — the one query `memory_update`, `memory_supersede`
         and `memory_delete` share, so the reasons an id can fail to resolve
@@ -1403,7 +1403,7 @@ class Database:
         return await session.scalar(
             select(schema.Memory).where(
                 schema.Memory.id == memory_id,
-                schema.Memory.channel_id == scope.channel_id,
+                schema.Memory.channel_id == state.channel_id,
                 schema.Memory.deleted_at.is_(None),
                 schema.Memory.status == MemoryStatus.ACTIVE,
             )
@@ -1419,7 +1419,7 @@ class Database:
     # exclude a pending row — the guarantee D20 asks to hold structurally.
 
     async def propose_memory(
-        self, scope: FridayState, text: str, *, kind: str = MemoryKind.VOICE
+        self, state: FridayState, text: str, *, kind: str = MemoryKind.VOICE
     ) -> MemoryCandidate:
         """Stage a memory for the operator's mark rather than writing it.
 
@@ -1428,7 +1428,7 @@ class Database:
         is enforced once, when `resolve_candidates_for_message` accepts one
         and calls `memory_add` for real.
 
-        If `scope.message_id` already carries a verdict — the operator
+        If `state.message_id` already carries a verdict — the operator
         marked this task's classification before this call ran — resolved
         immediately rather than left `PENDING` with no future reaction to
         ever trigger it: the reaction that would have resolved it already
@@ -1439,12 +1439,12 @@ class Database:
         async with self._sessions.begin() as session:
             row = schema.MemoryCandidate(
                 id=candidate_id,
-                channel_id=scope.channel_id,
-                agent=scope.agent,
+                channel_id=state.channel_id,
+                agent=state.agent,
                 text=text[: self.TEXT_CHARS],
                 kind=kind,
-                task_id=scope.task_id,
-                source_message_id=scope.message_id,
+                task_id=state.task_id,
+                source_message_id=state.message_id,
                 status=CandidateStatus.PENDING,
                 proposed_at=now,
             )
@@ -1452,10 +1452,10 @@ class Database:
             await session.flush()
             candidate = _candidate(row)
 
-        if scope.message_id is None:
+        if state.message_id is None:
             return candidate
         verdict = await self.verdict_for(
-            provider="discord", provider_message_id=scope.message_id
+            provider="discord", provider_message_id=state.message_id
         )
         if verdict is None:
             return candidate
@@ -1498,14 +1498,14 @@ class Database:
         accepted = mark == "right"
         memory_id = None
         if accepted:
-            scope = FridayState(
+            state = FridayState(
                 channel_id=candidate.channel_id,
                 task_id=candidate.task_id,
                 agent=candidate.agent,
                 message_id=candidate.source_message_id,
             )
             try:
-                written = await self.memory_add(scope, candidate.text, kind=candidate.kind)
+                written = await self.memory_add(state, candidate.text, kind=candidate.kind)
             except InstructionShaped as refused:
                 log.warning(
                     "candidate %s accepted but refused at the write: %s",

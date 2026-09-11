@@ -283,12 +283,17 @@ class Harness:
         #: `clarification_system` and `memory_tool_system` already follow.
         skills=None,
         #: The shape this agent's answer has, when it has one — a dataclass.
-        #: Declared here rather than passed to `run_structured`, because an
-        #: agent's answer shape does not vary per call: the summariser always
-        #: answers a `RoomSummary`, each extractor always answers its own
-        #: type's `Params`. Declaring it here builds the answer tool, its
-        #: terminator and its `tool_choice` exactly once instead of on every
-        #: call, and puts the agent's contract where the agent is built.
+        #:
+        #: **This reverses D1's wording, and deliberately.** The spec says the
+        #: method "takes the prompt, the shape, and the state". It takes the
+        #: prompt and the state; the shape is declared here, because an
+        #: agent's answer shape does not vary per call — the summariser always
+        #: answers a `RoomSummary`, each extractor always its own type's
+        #: `Params`. Declaring it here builds the answer tool, its terminator
+        #: and its `tool_choice` exactly once instead of on every call, and
+        #: puts the agent's contract where the agent is built. D1's substance
+        #: — one method asks for a shape and hands back an instance of it — is
+        #: unchanged.
         answers: type | None = None,
         context_type: type | None = None,
         **agent_options: Any,
@@ -367,9 +372,19 @@ class Harness:
             # also measured the model answering outside a closed enum — which
             # is why `run_structured` still validates, and still reads a
             # written answer if one turns up anyway.
-            agent_options.setdefault("model_settings", {}).setdefault(
-                "tool_choice", "required"
-            )
+            #
+            # **And it forces the first call only.** `Agent.reset_tool_choice`
+            # defaults to `True`, so the SDK drops back to `auto` once a tool
+            # has been called — which means the *correction* turn is not
+            # forced. That is the SDK's own guard against a model that cannot
+            # stop calling tools, it is the right default, and D3's "the model
+            # is required to call it" is therefore true of the first turn and
+            # not of the repair. The written-answer fallback is what covers
+            # the difference, which is one more reason it is not dead code.
+            agent_options["model_settings"] = {
+                "tool_choice": "required",
+                **agent_options.get("model_settings", {}),
+            }
 
         agent_class = Agent[context_type] if context_type else Agent
         self.agent = agent_class(
@@ -378,9 +393,17 @@ class Harness:
             model=model or _chat_model(config),
             tools=tools or [],
             mcp_servers=mcp_servers or [],
-            model_settings=ModelSettings(**config.settings, **agent_options.pop(
-                "model_settings", {}
-            )),
+            # **Merged, not two splats.** These were `**config.settings,
+            # **model_settings` side by side, which is a `TypeError: got
+            # multiple values` the moment one key appears in both — and
+            # `answers=` put `tool_choice` in the second while `settings:` in
+            # `config.yaml` can put it in the first. A crash at construction
+            # is a boot loop, and the operator's only clue would be a keyword
+            # name. The per-agent value wins, which is the direction every
+            # other override here runs.
+            model_settings=ModelSettings(
+                **{**config.settings, **agent_options.pop("model_settings", {})}
+            ),
             **agent_options,
         )
 
@@ -433,12 +456,21 @@ class Harness:
         a graph that asked. A caller supplies whichever it knows. Forgetting
         one loses a correlation key; it does not lose the record — which is the
         whole difference between these and the `calls=` list they replaced.
+
+        **A caller passing a `FridayState` as `context` need not name the
+        message or the task at all** (D8): the state already knows both, and
+        `_About.of` reads them off it. An explicit argument still wins, for a
+        caller that knows better than the state it was handed. `node` stays
+        explicit because it is not a fact about the message — it is which step
+        of a graph asked.
         """
         return await self._settle(
             prompt,
             context=context,
             max_turns=self._config.max_turns + self.tool_turns + extra_turns,
-            about=_About(message_id=message_id, task_id=task_id, node=node),
+            about=_About.of(
+                context, message_id=message_id, task_id=task_id, node=node
+            ),
         )
 
     async def run_structured(
@@ -774,6 +806,43 @@ class _About:
     task_id: int | None = None
     node: str | None = None
 
+    @classmethod
+    def of(
+        cls,
+        context: Any,
+        *,
+        message_id: str | None = None,
+        task_id: int | None = None,
+        node: str | None = None,
+    ) -> "_About":
+        """What this call was about, read off the run's state where there is
+        one (D8) and named explicitly where there is not.
+
+        The state already knows which message and which task a run is about —
+        that is most of what it is for — so a caller carrying one should not
+        have to say it again. `Pool._say` did exactly that: it built a state
+        and then unpacked `state.task_id` straight back out to hand the
+        harness separately.
+
+        **`node` is never on the state**, because it is not a fact about the
+        message. It is which step of a graph asked, which the graph knows and
+        the journey does not.
+
+        An explicit argument still wins, for a caller that knows better than
+        the state it was handed — a run about a different message than the one
+        the state carries, which is what `about_message` exists for on the
+        other side of the same question.
+        """
+        # Imported here rather than at module scope: `friday.domain.models`
+        # does not import this module and must not start, but the seam rule
+        # keeps every SDK name in here, so the cycle is only ever one way.
+        from friday.domain.models import FridayState
+
+        if isinstance(context, FridayState):
+            message_id = message_id or context.message_id
+            task_id = task_id if task_id is not None else context.task_id
+        return cls(message_id=message_id, task_id=task_id, node=node)
+
     def stamp(self, call):
         """The call with what the caller knew about it, and nothing else
         overwritten: `latency_ms` was measured by the hook and is not ours."""
@@ -901,6 +970,22 @@ def _fitted(output: str, schema: type) -> tuple[Any | None, str | None]:
 ANSWER = "answer"
 
 
+def _newest_instance(candidates, schema: type) -> Any | None:
+    """The last thing in `candidates` that is an instance of `schema`.
+
+    Both places that need this scan newest-first for the same reason — a model
+    may answer and reach for a skill in the same turn, and which order those
+    arrive in is not ours to assume — so they share the scan rather than
+    each carrying their own copy of the loop and their own chance to forget
+    the direction.
+    """
+    for candidate in reversed(list(candidates or ())):
+        output = getattr(candidate, "output", None)
+        if isinstance(output, schema):
+            return output
+    return None
+
+
 def _instance_in(result: Any, schema: type) -> Any | None:
     """The answer the tool built, taken off the run's own items.
 
@@ -919,11 +1004,7 @@ def _instance_in(result: Any, schema: type) -> Any | None:
     Newest first, for the same reason `_answered` scans that way — a model may
     answer and reach for a skill in the same turn.
     """
-    for item in reversed(list(getattr(result, "new_items", ()) or ())):
-        output = getattr(item, "output", None)
-        if isinstance(output, schema):
-            return output
-    return None
+    return _newest_instance(getattr(result, "new_items", ()), schema)
 
 
 def _answer_tool(schema: type) -> FunctionTool:
@@ -1025,11 +1106,9 @@ def _answered(schema: type):
     """
 
     def decide(ctx, results) -> ToolsToFinalOutputResult:
-        for result in reversed(list(results or ())):
-            if isinstance(result.output, schema):
-                return ToolsToFinalOutputResult(
-                    is_final_output=True, final_output=result.output
-                )
-        return ToolsToFinalOutputResult(is_final_output=False)
+        answered = _newest_instance(results, schema)
+        if answered is None:
+            return ToolsToFinalOutputResult(is_final_output=False)
+        return ToolsToFinalOutputResult(is_final_output=True, final_output=answered)
 
     return decide

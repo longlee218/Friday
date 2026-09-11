@@ -14,3 +14,14 @@ a context takes the state.
 - [ ] Every agent built with a context type is built with the state's type.
 - [ ] The capture classes are gone, along with the tests that knew how an answer travelled.
 - [ ] CLAUDE.md describes the one meaning the slot now has.
+
+## Comments
+
+**Not started — blocked.** Ticket 07 needs ticket 03’s baseline (D16: rebuild
+the ruler, read today’s code with it, then change the code), and this one needs
+07.
+
+Half of what it guards is already true: the extractor stopped using a capture
+in ticket 08, and the responder carries `FridayState`. What is left is triage’s
+`ClassifyCapture` — the last thing riding the run context that is not state —
+and the `ast` guard that says no tool writes into `ctx.context`.

@@ -558,8 +558,8 @@ class FridayState:
     operator's board exists to answer about a line an agent is now acting on.
     Everything else is a fact the journey supplies when it has it, which is
     what `None` already meant on `task_id`: a run that belongs to no task says
-    so. `for_event` is the full-fidelity constructor and fills seven of them
-    at once.
+    so. `for_conversation` fills the four a task's conversation already knows,
+    and the named methods below add the rest as the journey learns them.
     """
 
     channel_id: str

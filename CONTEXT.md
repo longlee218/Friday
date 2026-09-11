@@ -92,12 +92,16 @@ run may fill what is still blank and may not revise what it already said,
 because a model asked the same question twice does not give the same answer,
 and a reworded value is indistinguishable from a changed one.
 
-An extractor may also call **`ask_clarification`** (ticket 05): it just read
-the whole thread and may catch something no structural rule does. It names
-which of its own fields, closed to that type's own dataclass fields, and
-why — intent, never words, so the tool cannot be argued into phrasing that
-bypasses the Responder's voice. Code stays the floor: a value the type's own
-rules reject is challenged with the code template regardless of what was
+An extraction is **one validated object**: that type's own parameters plus
+**`ask_about`** and **`because`** — which of its own fields the extractor wants
+the reporter asked about, and why. It just read the whole thread and may catch
+something no structural rule does. The field names are closed to that type's
+own dataclass fields, and it names fields rather than words, so it cannot be
+argued into phrasing that bypasses the Responder's voice. (Two tools carried
+this before board `every-answer-has-a-shape`: `ask_clarification`, which
+nothing ever called, and `ask_for_fields`, whose enum is what `ask_about`
+inherited.) Code stays the floor: a value the type's own rules reject is
+challenged with the code template regardless of what was
 asked instead, and a field the model names that turns out already filled is
 not asked about again.
 
@@ -232,9 +236,12 @@ a special case. `PauseForHuman`, raised rather than returned, used to be a
 second way to do this; it dissolved (ticket 04) once new reporter text
 re-running from node 1 reached everywhere "resume from the paused node" did.
 
-The composing node's agent reports its conclusion by calling a tool —
+The composing node's agent reported its conclusion by calling a tool —
 `answer(text)` or `hand_over(reason)` (ticket 06) — rather than by writing
-prose a node function then parses; `hand_over` alone is any node's, `fix_bug`
+prose a node function then parses. Both went with the five-node `api_issue`
+graph; the argument is why an agent with a declared shape answers through a
+generated tool (see **Harness**), which is a different `answer` from that one
+and worth not confusing with it; `hand_over` alone is any node's, `fix_bug`
 included, to call when it cannot conclude. `CANNOT FIX`, `NOT FOUND`, a stray
 Markdown fence: a sentinel is a private protocol between a prompt and the
 function reading it, and a model that wanders off it fails silently, its
@@ -363,6 +370,32 @@ A model that answers in prose rather than the four fields asked for still said
 something true about the room; that answer is kept as `topic` rather than
 discarded, because the alternative to an imperfect fact is no fact at all.
 
+## Friday state
+
+What one message's journey knows about itself, carried the whole way down. The
+room and the agent now running, and — as the journey supplies them — the
+provider, thread, message, author, reply and task. It is what the SDK's per-run
+`context` carries, and the only thing it carries: that slot used to mean "who
+is this run about" for one agent and "where the answer will appear" for
+another, which is two mechanisms sharing one parameter.
+
+Its fields are read-only, and every change goes through a named method that
+returns a *new* state — `as_agent`, `for_task`, `about_message`. Not a style
+choice: one value reaches a tool, the store and the recording sink inside a
+single run, and a field anything could assign makes "what can change this, and
+where" unanswerable, which is the question it exists to keep answerable. There
+is deliberately no general setter.
+
+Only the room and the agent are required. Those two are the boundary and the
+provenance — a memory written without a room has nowhere safe to live, one
+written without an author loses who wrote it and while doing what. The rest are
+absent until the journey supplies them, the way a task id already meant "this
+run belongs to no task".
+
+Three readers so far: the memory tools take it as their scope, the recording
+sink reads the message and the task off it, and the responder stamps its own
+name on it before writing anything down.
+
 ## Memory
 
 Something an agent chose to write down, scoped to one channel, reached through
@@ -380,9 +413,12 @@ A memory trades that floor for three narrower guarantees instead. It reaches a
 model **only as a tool result**, never appended to an agent's instructions —
 closed by construction, not by escaping, since a tool result cannot rewrite the
 prompt of every later call the way `instructions` can. **Scope is
-runtime-supplied**, carried on `MemoryScope` and read off the run's context
+runtime-supplied**, carried on **`FridayState`** and read off the run's context
 rather than named by the model: a channel's memory is invisible to a run in
-another one. **Ids are opaque and sparse**, so a model that invents one fails
+another one. (It was its own `MemoryScope` until board
+`every-answer-has-a-shape`, which is the same four facts under a second name —
+deleted rather than aliased, because a second name for one thing is how two
+things drift.) **Ids are opaque and sparse**, so a model that invents one fails
 rather than landing on a neighbouring row.
 
 Drift is possible now and is bounded differently: by the channel scope, by the

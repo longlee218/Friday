@@ -1028,3 +1028,111 @@ def test_run_owns_the_turns_for_its_own_tools():
     # 1 from max_turns, +1 tool turn for the harness that wired skill tools.
     # The bare harness has no skill tools and so no tool turn.
     assert asked == [3, 1]
+
+
+def test_an_agent_can_declare_both_a_shape_and_its_own_tool_choice():
+    """`answers=` sets `tool_choice: required`, and `config.yaml`'s `settings:`
+    block can set one too. These reached `ModelSettings` as two splats side by
+    side — `**config.settings, **model_settings` — which is a `TypeError: got
+    multiple values` the moment a key appears in both. At construction, in a
+    process that migrates and builds its agents before it serves anything, that
+    is a boot loop whose only clue is a keyword name.
+
+    The per-agent value wins, which is the direction every other override in
+    this constructor runs.
+    """
+    from dataclasses import dataclass
+
+    from agents.testing import ScriptedModel
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+
+    @dataclass
+    class Shape:
+        value: str = ""
+
+    harness = Harness(
+        config=AgentConfig(
+            name="both", api_key="k", base_url="http://x/v1", model="m",
+            settings={"tool_choice": "auto", "max_tokens": 64},
+        ),
+        instructions="i",
+        answers=Shape,
+        model=ScriptedModel([]),
+    )
+
+    assert harness.agent.model_settings.tool_choice == "required"
+    assert harness.agent.model_settings.max_tokens == 64, (
+        "the rest of the configured settings survived the merge"
+    )
+
+
+async def test_a_run_carrying_state_does_not_have_to_name_its_own_message():
+    """D8: the recording sink reads the message and the task off the run's
+    state. The state already knows both — that is most of what it is for — so
+    a caller carrying one should not have to say it again, and `Pool._say` was
+    doing exactly that: building a state and unpacking `task_id` straight back
+    out one line later.
+
+    `node` stays explicit, because it is not a fact about the message. It is
+    which step of a graph asked, which the graph knows and the journey does
+    not.
+    """
+    from agents.testing import ScriptedModel, assistant_message
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.domain.models import FridayState
+
+    written: list = []
+
+    async def sink(call):
+        written.append(call)
+
+    harness = Harness(
+        config=AgentConfig(name="a", api_key="k", base_url="http://x/v1", model="m"),
+        instructions="i",
+        model=ScriptedModel([[assistant_message("ok")]]),
+        record=sink,
+    )
+
+    await harness.run(
+        "ask",
+        context=FridayState(channel_id="c1", agent="a", message_id="m1").for_task(7),
+        node="prepare",
+    )
+
+    (call,) = written
+    assert (call.message_id, call.task_id, call.node) == ("m1", 7, "prepare")
+
+
+async def test_a_caller_that_knows_better_than_its_state_still_wins():
+    """A run about a different message than the one the state carries — which
+    is what `about_message` exists for on the other side of the same
+    question."""
+    from agents.testing import ScriptedModel, assistant_message
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+    from friday.domain.models import FridayState
+
+    written: list = []
+
+    async def sink(call):
+        written.append(call)
+
+    harness = Harness(
+        config=AgentConfig(name="a", api_key="k", base_url="http://x/v1", model="m"),
+        instructions="i",
+        model=ScriptedModel([[assistant_message("ok")]]),
+        record=sink,
+    )
+
+    await harness.run(
+        "ask",
+        context=FridayState(channel_id="c1", agent="a", message_id="m1"),
+        message_id="m9",
+    )
+
+    assert written[0].message_id == "m9"

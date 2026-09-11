@@ -314,3 +314,43 @@ def test_a_responder_with_no_skills_says_nothing_about_them():
     from friday.responder.prompt import build_instructions
 
     assert "fetch_skill" not in build_instructions()
+
+
+async def test_a_memory_is_attributed_to_the_responder_whoever_handed_the_state_over():
+    """Provenance is "who wrote this, and while doing what", and `draft` is
+    where the answer is known for certain.
+
+    It used to be a guarantee by construction — the scope was built inside this
+    method with `agent="responder"` written into it. Board
+    `every-answer-has-a-shape` moved the state in from the pool, and taking the
+    caller's word for the agent would mean a memory written during a draft
+    could be attributed to whoever ran before: the state travels a whole
+    message's journey, and triage is at the front of it.
+    """
+    from agents.testing import function_call
+
+    from friday.domain.models import FridayState
+
+    seen = {}
+
+    class Store:
+        async def memory_search(self, scope, query, kind, limit):
+            seen["scope"] = scope
+            return []
+
+    responder = Responder(
+        config=CONFIG,
+        model=ScriptedModel([
+            [function_call("memory_search", {"query": "tone"}, call_id="1")],
+            [assistant_message("cho anh xin correlationId nhé")],
+        ]),
+        db=Store(),
+    )
+
+    await responder.draft(
+        asking="ask", context=(), tone=TONE,
+        state=FridayState(channel_id="c1", agent="triage").for_task(42),
+    )
+
+    assert seen["scope"].agent == "responder"
+    assert seen["scope"].task_id == 42, "the rest of the state came through"

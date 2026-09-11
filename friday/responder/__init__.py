@@ -218,20 +218,35 @@ class Responder:
             tone=tone,
             context=context,
         )
-        # `None` when there is no state to scope a memory by, or no memory
-        # tools to scope it for — a memory tool called with no state reports
-        # "unavailable" rather than crashing, but the ordinary case is that a
-        # real task always has one.
-        scope = state if self._has_memory else None
+        # **The state travels whether or not this agent has memory tools**, and
+        # that took a review to get right: it was also gated on `_has_memory`,
+        # which reads sensible — no tools, nothing to scope — and quietly cost
+        # every memory-less responder its own correlation, since the recording
+        # sink reads the message and the task off this same context (D8). What
+        # the tools' absence changes is which tools exist, not what the run is
+        # about. `None` only when there is no state at all, which is a test
+        # and not a real task; a memory tool run without one reports
+        # "unavailable" rather than crashing.
+        #
+        # **`as_agent` rather than the state as handed in**, and it is a
+        # guarantee rather than a tidy-up: a memory's provenance is "who wrote
+        # this, and while doing what", and this method is where the answer is
+        # known for certain. Taking the caller's word for it means a memory
+        # written during a draft can be attributed to whoever ran before —
+        # the state travels a whole message's journey, and triage is at the
+        # front of it.
+        scope = state.as_agent("responder") if state is not None else None
         # Room for every tool call it might make before the reply is
         # written. A ceiling, not a target: it costs nothing to a run that
         # answers in one turn, and without it an agent that reaches for a
         # skill spends its only turn on the fetch and returns nothing.
+        # No `task_id=` here: the state carries it, and `_About.of` reads it
+        # off the context (D8). Naming it again was the state being unpacked
+        # one line after being bundled.
         result = await self._run.run(
             said,
             context=scope,
             extra_turns=self._tool_turns,
-            task_id=state.task_id if state is not None else None,
         )
         if result is None:
             log.warning("falling back to the template")

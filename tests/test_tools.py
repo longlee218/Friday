@@ -24,6 +24,14 @@ import friday.tools
 REPO = Path(__file__).resolve().parents[1]
 TOOLS = REPO / "friday" / "tools"
 
+#: The one file outside the package that may hold a tool, and it is *this* file
+#: — matched whole, not by basename. `path.name == "harness.py"` exempted any
+#: `friday/**/harness.py`, so the day somebody adds a second one the guard is
+#: off there too, silently and for a file nobody meant to exempt.
+#: `test_the_one_tool_outside_the_package_is_the_answer_tool` pins what lives
+#: here.
+HARNESS = REPO / "friday" / "agent" / "harness.py"
+
 
 def _factories() -> dict[str, object]:
     """Every tool that only exists once something is injected into it.
@@ -178,7 +186,7 @@ def test_no_tool_is_declared_outside_the_tools_package():
     """
     offenders: dict[str, list[int]] = {}
     for path in (REPO / "friday").rglob("*.py"):
-        if path.is_relative_to(TOOLS) or path.name == "harness.py":
+        if path.is_relative_to(TOOLS) or path == HARNESS:
             continue
         tree = ast.parse(path.read_text())
         lines = []
@@ -220,7 +228,7 @@ def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
     root = Path(__file__).resolve().parents[1] / "friday"
     offenders = {}
     for path in root.rglob("*.py"):
-        if path.is_relative_to(TOOLS) or path.name == "harness.py":
+        if path.is_relative_to(TOOLS) or path == HARNESS:
             continue
         named = [
             node.name
