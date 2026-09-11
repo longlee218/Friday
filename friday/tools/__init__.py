@@ -20,10 +20,16 @@ after `__doc__` is assigned.
 `tests/test_tools.py` asserts the list and forbids declaring a tool anywhere
 else, reading the syntax rather than grepping so both spellings are caught.
 
-**`ask_clarification` has no caller yet**, and is kept for one. `answer`,
+**Nothing here is kept for a caller that has not arrived.** `answer`,
 `hand_over` and `apply_fix` went with the five-node `api_issue` graph that was
 their only user; `remember` went because nothing gave it to an agent and it
-was not a tool at all — a factory returning a plain async function.
+was not a tool at all — a factory returning a plain async function; and
+`ask_clarification` went for the reason it should have gone sooner. It took a
+question in words, it was written for an agent that never got it, and this
+docstring said "kept for one" for months — so every reader who met it had to
+work out for themselves that nothing called it. Board
+`every-answer-has-a-shape`, ticket 01, D14: a door that is not in the room is
+deleted rather than described.
 
 Empty of code on purpose: importing any submodule runs this first.
 """

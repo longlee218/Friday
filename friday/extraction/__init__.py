@@ -11,7 +11,7 @@ called by `prepare()`, which is node 0 of every graph. Adding one is an entry
 in `EXTRACTS` and a block in `config.yaml`, not a change to the composition
 root.
 
-An extractor also carries `ask_clarification` (ticket 05): the model has just
+An extractor also carries `ask_for_fields` (ticket 05): the model has just
 read everything the reporter said, and may know something is missing that no
 structural rule catches. It names *which* of its own fields, and why — never
 words, so the tool cannot be argued into phrasing that bypasses the operator's
@@ -114,7 +114,7 @@ class Extractor:
         `None` params here means "the model could not answer" — the workflow
         falls back to the structural check, which is the right behaviour:
         nothing to hallucinate means nothing to validate. Whether the model
-        also called `ask_clarification` is independent of that — one extra
+        also called `ask_for_fields` is independent of that — one extra
         turn covers the tool call landing before or after the field text.
 
         `Harness.run` adds its own `tool_turns` on top, so this line owns

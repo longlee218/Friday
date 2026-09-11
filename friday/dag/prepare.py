@@ -163,7 +163,7 @@ async def prepare(
     produced and not only what triage wrote.
 
     **Code is still the floor** (D12). The extractor may call
-    `ask_clarification` — it just read the whole thread, and may catch an
+    `ask_for_fields` — it just read the whole thread, and may catch an
     ambiguity no structural rule does — but a value the type's own rules
     reject is challenged with the code template regardless of what the model
     asked about instead. A model's question is honoured only once code has

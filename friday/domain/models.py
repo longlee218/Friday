@@ -533,8 +533,8 @@ class MemoryScope:
     root, reused for every task in every channel — so a scope captured when the
     tools were made would pin every room's memory to whichever room happened to
     be first. It arrives per call instead, as `Harness.run(context=...)`, the
-    way `ClarifyCapture` and `FieldsCapture` already do. The model still cannot
-    name it, which was the point.
+    way `FieldsCapture` already does. The model still cannot name it, which
+    was the point.
     """
 
     channel_id: str

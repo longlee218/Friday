@@ -827,8 +827,8 @@ def clarification_system(tool: str | None, *, blocking: bool = True) -> Section:
     `tool` is the name of the call this agent makes to ask, and `None` means
     it has none. That is not a detail: most agents here cannot ask. Triage
     picks one of two tools and stops; an extractor copies values. Telling
-    either to "call ask_clarification immediately" describes a door that is
-    not in the room, and an agent told about a door it cannot find improvises.
+    either to "call the asking tool immediately" describes a door that is not
+    in the room, and an agent told about a door it cannot find improvises.
 
     The agents that *can* ask do it by their own name — the graph's composer
     hands over, node 0 returns a question — so the name is passed in rather

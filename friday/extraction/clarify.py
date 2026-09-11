@@ -27,9 +27,9 @@ class Clarify:
 
 @dataclass
 class FieldsCapture:
-    """Per-run scratch space for `ask_clarification`, same pattern as
-    triage's — the tool writes here rather than to a module global, so
-    concurrent runs cannot overwrite each other."""
+    """Per-run scratch space for `ask_for_fields`, same pattern as triage's —
+    the tool writes here rather than to a module global, so concurrent runs
+    cannot overwrite each other."""
 
     clarify: Clarify | None = None
 

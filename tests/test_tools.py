@@ -81,7 +81,6 @@ def test_the_tools_this_system_has_are_all_in_one_place():
     and nothing else — which is the point: the question "what can the agents
     do?" has one answer with one place to read it."""
     assert set(_tool_objects()) == {
-        "ask_clarification",
         "classify",
         "skip",
         "fetch_skill",
@@ -254,21 +253,23 @@ def test_the_skill_tools_ask_the_model_for_what_their_names_promise():
     assert schema(read_skill_file_tool(library)) == {"name", "file_path"}
 
 
-def test_the_two_asking_tools_are_not_the_same_tool():
-    """They answer different questions, and collapsing them would trade a
-    constraint the code can check for a shorter list. `ask_for_fields` offers
-    a closed enum of one type's own fields, so the model cannot name one that
-    does not exist; `ask_clarification` takes a question in words, which is
-    right when nobody knows in advance what might be unclear."""
+def test_the_field_names_an_extractor_may_ask_about_are_a_closed_set():
+    """The constraint the code can check, and the reason this tool is a
+    factory: the enum is one type's own fields, so a model cannot ask the
+    reporter about a field that does not exist.
+
+    This was `test_the_two_asking_tools_are_not_the_same_tool`, contrasting
+    this tool with `ask_clarification` — which took a question in words and
+    which nothing ever called. Board `every-answer-has-a-shape`, ticket 01
+    deleted that one (D14), so what is left here is the half that was always
+    load-bearing.
+    """
     from friday.domain.models import ApiIssueParams
     from friday.tools.ask_for_fields import ask_for_fields_tool
-    from friday.tools.clarify import ask_clarification
 
     fields = ask_for_fields_tool(ApiIssueParams).params_json_schema["properties"]
-    words = ask_clarification.params_json_schema["properties"]
 
     assert "fields" in fields and "question" not in fields
-    assert "question" in words and "fields" not in words
     assert fields["fields"]["items"]["enum"], "the field names are a closed set"
 
 

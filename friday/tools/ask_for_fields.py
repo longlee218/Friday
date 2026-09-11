@@ -1,14 +1,14 @@
 """Asking about *named fields*, when the fields are known in advance.
 
-The sibling of `ask_clarification`, and deliberately not the same tool. That
-one takes a question in words, which is right when nobody knows in advance
-what might be unclear. This one takes a closed enum of one type's own askable
-fields, so the model **cannot** name a field that does not exist — the same
-property that makes `classify` safe.
+The enum is the whole point: a closed set of one type's own askable fields,
+so the model **cannot** name a field that does not exist — the same property
+that makes `classify` safe. An extractor that invents a field name asks the
+reporter a question about nothing.
 
-Collapsing the two into one tool would trade a constraint the code can check
-for a shorter list, which is the wrong direction: an extractor that invents a
-field name asks the reporter a question about nothing.
+It had a sibling, `ask_clarification`, which took a question in words instead;
+nothing ever called it and ticket 01 of `every-answer-has-a-shape` deleted it.
+The constraint is what survived, and it is the part to keep when this tool's
+own shape moves into the extraction schema (D7).
 
 A factory, because the enum differs per type. What is shared is the shape.
 """
