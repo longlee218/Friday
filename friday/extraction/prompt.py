@@ -10,12 +10,13 @@ value fails its rule, and the reporter is asked to confirm what they already
 said. So there is no `soul` in this prompt and there should not be one.
 
 **It can ask, so it is told how — but asking here does not stop the work.**
-`ask_for_fields` offers a closed enum of this type's own field names, which is
-why the clarification section is rendered here and not for triage: the door is
-actually in the room. It is rendered `blocking=False`, and that flag is the
-whole difference between this prompt working and this prompt silently
-breaking: told to wait for an answer before proceeding, the model can call the
-tool and return no JSON at all — and the parser of the day read that as
+`ask_about` is a field of the answer itself, holding a closed set of this
+type's own field names, which is why the clarification section is rendered here
+and not for triage: the door is actually in the room. It is rendered
+`blocking=False`, and that flag is the whole difference between this prompt
+working and this prompt silently breaking: told to wait for an answer before
+proceeding, the model can ask and return no fields at all — and the parser of
+the day read that as
 `{}`, every field of a `Params` has a default, and an empty extraction came
 back as a *successful* one, so the reporter was asked for everything they
 just wrote. `Harness.run_structured` means an unreadable answer is `None`
@@ -96,7 +97,10 @@ def build_instructions(
         trust_boundary(),
         job(JOB),
         thinking_style(THINKING),
-        clarification_system("ask_for_fields", blocking=False),
+        clarification_system(
+            "naming those fields in `ask_about`, and why in `because`",
+            blocking=False,
+        ),
         # Skills reach every agent now (the operator's call, 2026-09-07).
         # For an extractor the case is direct: a skill saying where a
         # correlationId lives is the difference between lifting one out of a

@@ -132,9 +132,12 @@ def test_nothing_promises_a_tool_the_agent_does_not_have():
 
 
 def test_the_asking_section_names_the_call_this_agent_actually_makes():
-    """Agents ask by different names — the composer hands over, node 0
-    returns a question — so the name is passed in rather than assumed."""
-    said = ip.clarification_system("hand_over").render()
+    """Agents ask by different means — one hands over, the extractor names
+    fields in the answer it was already giving — so *how* is passed in rather
+    than assumed. A phrase since board `every-answer-has-a-shape`, ticket 08:
+    "Ask by calling `ask_about`" would have been an instruction to call
+    something that is a field."""
+    said = ip.clarification_system("calling `hand_over`").render()
 
     assert "hand_over" in said
     assert "CLARIFY -> PLAN -> ACT" in said
@@ -329,15 +332,23 @@ def test_the_agents_that_cannot_ask_are_not_told_how_to():
         assert "<memory_tool_system>" not in built
 
 
-def test_the_agent_that_can_ask_is_told_which_call_makes_the_ask():
-    """The extractor has `ask_for_fields` — a closed enum of this type's own
-    field names — so the door really is in the room."""
+def test_the_agent_that_can_ask_is_told_how_the_ask_is_made():
+    """The extractor can ask — by naming fields in `ask_about` on the answer it
+    was already giving, a closed set of this type's own field names — so the
+    door really is in the room.
+
+    It named a second tool until board `every-answer-has-a-shape`, ticket 08
+    (D7). What the section has to stay true to is *how*, not which tool: an
+    agent told to call something that is a field goes looking for a door that
+    is not there, which is the failure this whole section exists to avoid.
+    """
     from friday.extraction.prompt import build_instructions
 
     built = build_instructions()
 
     assert "<clarification_system>" in built
-    assert "ask_for_fields" in built
+    assert "ask_about" in built
+    assert "ask_for_fields" not in built
 
 
 def test_only_the_agents_that_speak_for_the_operator_carry_a_voice():
@@ -383,7 +394,7 @@ def test_an_agent_that_acts_is_told_to_ask_first():
     afterwards."""
     from friday.agent.instruction_prompt import clarification_system
 
-    blocking = clarification_system("hand_over").render()
+    blocking = clarification_system("calling `hand_over`").render()
 
     assert "CLARIFY -> PLAN -> ACT" in blocking
     assert "Never start working and clarify" in blocking.replace("\n", " ")
@@ -404,11 +415,12 @@ async def test_an_empty_extraction_is_not_a_successful_one():
     from conftest import ScriptedHarness
     from friday.domain.models import ApiIssueParams
     from friday.extraction import build_extractor
+    from friday.extraction.answer import answer_shape
     from tests.test_extraction import _context
 
     class Says(ScriptedHarness):
         def __init__(self, answer):
-            super().__init__(answers=ApiIssueParams)
+            super().__init__(answers=answer_shape(ApiIssueParams))
             self.answer = answer
 
         async def run(self, prompt, **kwargs):

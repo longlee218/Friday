@@ -35,8 +35,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import fields as dataclass_fields
-from typing import Any, get_args, get_origin, get_type_hints
+from typing import Any, Literal, get_args, get_origin, get_type_hints
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -256,15 +257,27 @@ def _type_name(annotation: Any) -> str:
     if isinstance(annotation, str):
         # The unresolved fallback above. Read as source text, which is all
         # there is: good enough to tell a model "string or null".
-        return (
-            annotation.replace("Optional[str]", "string or null")
-            .replace("str", "string")
-            .replace("| None", "or null")
-            .strip()
-        )
+        #
+        # **Whole words.** A plain `.replace("str", "string")` rewrites any
+        # `str` it finds, including one inside a name the model is meant to
+        # write back — `Literal["strict", "loose"]` came out as `stringict`,
+        # which is a closed-set member nobody can name. Found by the test that
+        # declares its schema inside a function, which is the case that
+        # reaches this branch at all.
+        rewritten = re.sub(r"\bOptional\[str\]", "string or null", annotation)
+        rewritten = re.sub(r"\bstr\b", "string", rewritten)
+        return rewritten.replace("| None", "or null").strip()
     if annotation in plain:
         return plain[annotation]
     origin = get_origin(annotation)
+    if origin is Literal:
+        # Quoted, and handled before the branch below rather than falling into
+        # it. A `Literal`'s arguments are *values*, not types, so the generic
+        # path recursed into them as annotations and ran the source-text
+        # fallback's replacements over each one — which leaves
+        # `correlation_id` alone by luck and would turn a member named
+        # `strict` into `stringict`.
+        return " or ".join(f'"{value}"' for value in get_args(annotation))
     if origin is not None:
         args = get_args(annotation)
         nullable = type(None) in args

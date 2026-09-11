@@ -126,7 +126,7 @@ async def test_a_path_reaches_through_the_task_to_what_it_reached_for(db):
         task_id=task.id,
         node="prepare",
         agent="extractor",
-        tool="ask_for_fields",
+        tool="memory_search",
         arguments='{"missing": ["correlation_id"]}',
         result="asked",
         failed=False,
@@ -136,7 +136,7 @@ async def test_a_path_reaches_through_the_task_to_what_it_reached_for(db):
 
     assert flow.task.id == task.id
     assert [c.agent for c in flow.model_calls] == ["extractor"]
-    assert [t.tool for t in flow.tool_calls] == ["ask_for_fields"]
+    assert [t.tool for t in flow.tool_calls] == ["memory_search"]
 
 
 async def test_a_path_ends_at_what_was_sent(db):
@@ -291,7 +291,7 @@ async def test_a_call_naming_both_a_message_and_its_task_is_listed_once(db):
         message_id="m1",
         task_id=task.id,
         agent="extractor",
-        tool="ask_for_fields",
+        tool="memory_search",
         arguments="{}",
         result="asked",
         failed=False,

@@ -28,6 +28,7 @@ from friday.extraction import (
     extract,
     registered,
 )
+from friday.extraction.answer import answer_shape
 from friday.extraction.context import FullContext
 from friday.domain.validation import Matches
 
@@ -73,7 +74,7 @@ def test_extractor_decorator_registers_under_task_type():
 
     ext = build_extractor(
         params_cls=FakeParams,
-        harness=StubHarness(answers=FakeParams),  # type: ignore[arg-type]
+        harness=StubHarness(answers=answer_shape(FakeParams)),  # type: ignore[arg-type]
         name="fake_test_type_31",
     )
     _install("fake_test_type_31", ext)
@@ -99,7 +100,7 @@ def test_registering_twice_replaces_rather_than_raises():
         environment: Optional[str] = None
 
     class Silent:
-        answers = Fake
+        answers = answer_shape(Fake)
 
         async def run(self, *a, **kw):
             return None
@@ -138,7 +139,7 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
             return StubResult()
 
     ext = build_extractor(
-        params_cls=ParamsWithRules, harness=StubHarness(answers=ParamsWithRules), name="stub"  # type: ignore[arg-type]
+        params_cls=ParamsWithRules, harness=StubHarness(answers=answer_shape(ParamsWithRules)), name="stub"  # type: ignore[arg-type]
     )
     _install("stub_test_31", ext)
 
@@ -170,7 +171,7 @@ def test_an_extractor_returns_none_when_harness_fails():
         environment: Optional[str] = None
 
     ext = build_extractor(
-        params_cls=Params, harness=FailingHarness(answers=Params), name="fail"  # type: ignore[arg-type]
+        params_cls=Params, harness=FailingHarness(answers=answer_shape(Params)), name="fail"  # type: ignore[arg-type]
     )
     _install("failing_test_31", ext)
 
@@ -197,7 +198,7 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
         required_id: str  # not Optional - missing raises TypeError
 
     ext = build_extractor(
-        params_cls=StrictParams, harness=StubHarness(answers=StrictParams), name="bad"  # type: ignore[arg-type]
+        params_cls=StrictParams, harness=StubHarness(answers=answer_shape(StrictParams)), name="bad"  # type: ignore[arg-type]
     )
     _install("bad_output_test_31", ext)
 
@@ -220,50 +221,41 @@ async def test_extract_returns_none_for_unregistered_task_type():
     ) == (None, None)
 
 
-# --- ask_clarification --------------------------------------------------
+# --- what it wants to ask about is part of the answer (D7) ------------------
 
 
 async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
-    """The scripted-model seam: the model calls `ask_clarification` instead
-    of writing field text. `Extractor.run` surfaces it as a `Clarify` —
-    intent, not words: which of the type's own fields, and why."""
-    from agents.testing import ScriptedModel, assistant_message, function_call
+    """The scripted-model seam: one tool call carries the fields it read *and*
+    the fields it wants the reporter asked about. `Extractor.run` splits that
+    into the pair the graph acts on — intent, not words: which of the type's
+    own fields, and why.
 
-    from conftest import ScriptedHarness
+    Two mechanisms until ticket 08 (D7): the field text was scraped out of a
+    written reply, and the request was a second tool writing into a per-run
+    capture the caller read back afterwards — so neither half was the return
+    value of anything.
+    """
+    from agents.testing import ScriptedModel, function_call
+
     from friday.config import AgentConfig
     from friday.domain.models import ApiIssueParams
-    from friday.extraction.clarify import Clarify, FieldsCapture
-    from friday.tools.ask_for_fields import ask_for_fields_tool
+    from friday.extraction.answer import Clarify, answer_shape
 
-    config = AgentConfig(
-        name="api_issue_ext",
-        api_key="k",
-        base_url="https://example.invalid/v1",
-        model="test-model",
-    )
     ext = build_extractor(
         params_cls=ApiIssueParams,
         harness=Harness(
-            config=config,
-            instructions="extract",
-            tools=[ask_for_fields_tool(ApiIssueParams)],
-            context_type=FieldsCapture,
-            model=ScriptedModel(
-                [
-                    [
-                        function_call(
-                            "ask_for_fields",
-                            {
-                                "fields": ["correlation_id"],
-                                "because": "no id or curl anywhere in the report",
-                            },
-                            call_id="1",
-                        )
-                    ],
-                    [function_call("answer", {}, call_id="2")],
-                ]
+            config=AgentConfig(
+                name="api_issue_ext", api_key="k",
+                base_url="https://example.invalid/v1", model="test-model",
             ),
-            answers=ApiIssueParams,
+            instructions="extract",
+            answers=answer_shape(ApiIssueParams),
+            model=ScriptedModel([[function_call("answer", {
+                "summary": "api trả 500",
+                "environment": "production",
+                "ask_about": ["correlation_id"],
+                "because": "no id or curl anywhere in the report",
+            }, call_id="1")]]),
         ),
         name="api_issue_ext",
     )
@@ -273,6 +265,9 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
         params, clarify = await extract(
             "clarify_test_31", _context("the api is broken", ApiIssueParams)
         )
+        assert params.environment == "production", (
+            "the fields it did read came back in the same answer"
+        )
         assert clarify == Clarify(
             fields=("correlation_id",), because="no id or curl anywhere in the report"
         )
@@ -280,18 +275,70 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
         registered().pop("clarify_test_31", None)
 
 
-def test_ask_clarification_cannot_name_a_field_that_does_not_exist():
-    """The closed enum is the enforcement — `fields` is generated from the
-    type's own dataclass fields, `summary` (model-authored) excluded, so the
-    schema itself is what stops the model asking about something that is
-    not there or that it writes itself."""
+async def test_asking_about_nothing_is_not_a_request_with_no_fields_in_it():
+    """An empty `ask_about` is the model saying there is nothing worth asking,
+    which the graph must not turn into a question. `because` on its own is not
+    a request either — the fields are what a question gets built from."""
+    from agents.testing import ScriptedModel, function_call
+
+    from friday.config import AgentConfig
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.answer import answer_shape
+
+    ext = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=Harness(
+            config=AgentConfig(
+                name="api_issue_ext", api_key="k",
+                base_url="https://example.invalid/v1", model="test-model",
+            ),
+            instructions="extract",
+            answers=answer_shape(ApiIssueParams),
+            model=ScriptedModel([[function_call("answer", {
+                "summary": "api trả 500", "because": "everything was there",
+            }, call_id="1")]]),
+        ),
+        name="quiet",
+    )
+    _install("quiet_test", ext)
+
+    try:
+        _, clarify = await extract("quiet_test", _context("x", ApiIssueParams))
+        assert clarify is None
+    finally:
+        registered().pop("quiet_test", None)
+
+
+def test_an_extractor_cannot_ask_about_a_field_that_does_not_exist():
+    """The closed set is the enforcement, and it survived the move off the
+    tool: `ask_about` is generated from the type's own dataclass fields,
+    `summary` (model-authored) excluded, so the schema itself is what stops
+    the model asking about something that is not there or that it writes
+    itself."""
+    from friday.agent.harness import _answer_tool
     from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
-    from friday.tools.ask_for_fields import ask_for_fields_tool
+    from friday.extraction.answer import answer_shape
 
     for params_cls in (ApiIssueParams, AccessRequestParams, DocQuestionParams):
-        schema = ask_for_fields_tool(params_cls).params_json_schema
-        enum = set(schema["properties"]["fields"]["items"]["enum"])
+        schema = _answer_tool(answer_shape(params_cls)).params_json_schema
+        enum = set(schema["properties"]["ask_about"]["items"]["enum"])
         assert enum == set(params_cls.__dataclass_fields__) - {"summary"}
+
+
+async def test_a_field_the_type_does_not_have_is_refused_rather_than_asked_about():
+    """Not only declared closed — checked. The provider is measured to ignore
+    a schema it has just been given, so the enum on the wire is a suggestion;
+    what makes this safe is that the arguments are validated in this process,
+    and an invented name costs the model its correction turn rather than
+    costing the reporter a question about nothing."""
+    from friday.agent.structured import fits
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.answer import answer_shape
+
+    value, problem = fits({"ask_about": ["deployment_colour"]}, answer_shape(ApiIssueParams))
+
+    assert value is None
+    assert "ask_about" in problem
 
 
 # --- triage classifies; extraction is the only producer ---------------------
@@ -455,7 +502,6 @@ async def test_a_model_that_could_not_answer_is_not_a_refusal():
     told apart by which of them we caused. A model that failed is worth asking
     the reporter about; a call we declined to make is not."""
     from dataclasses import dataclass as _dataclass
-    from typing import Optional as _Optional
 
     from friday.extraction import build_extractor
 
@@ -470,9 +516,9 @@ async def test_a_model_that_could_not_answer_is_not_a_refusal():
 
     @_dataclass
     class Params:
-        environment: _Optional[str] = None
+        environment: str | None = None
 
-    ext = build_extractor(params_cls=Params, harness=Refuses(answers=Params), name="refuses")
+    ext = build_extractor(params_cls=Params, harness=Refuses(answers=answer_shape(Params)), name="refuses")
 
     with pytest.raises(Refused, match="tokens today"):
         await ext.run(_context("anything", Params))
@@ -673,6 +719,6 @@ def test_an_extractor_whose_harness_answers_a_different_shape_is_refused():
     with pytest.raises(ValueError, match="ApiIssueParams"):
         build_extractor(
             params_cls=ApiIssueParams,
-            harness=ScriptedHarness(answers=AccessRequestParams),  # type: ignore[arg-type]
+            harness=ScriptedHarness(answers=answer_shape(AccessRequestParams)),  # type: ignore[arg-type]
             name="mismatched",
         )

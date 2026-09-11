@@ -18,6 +18,7 @@ out about; one that accepts and ignores it is one you do not.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 import pytest
 
@@ -26,6 +27,16 @@ from agents.testing import ScriptedModel, assistant_message, function_call
 from friday.agent.harness import Harness
 from friday.agent.structured import describe, find_json, fits
 from friday.config import AgentConfig
+
+
+@dataclass
+class Picks:
+    """A shape whose fields are closed sets — module-level on purpose, so its
+    annotations resolve and `describe` reads the real `Literal` rather than
+    the source-text fallback (which the test below covers instead)."""
+
+    mode: Literal["strict", "loose"] = "strict"
+    many: list[Literal["strict", "loose"]] = field(default_factory=list)
 
 
 @dataclass
@@ -394,3 +405,34 @@ def test_the_shapes_own_docstring_does_not_go_on_the_wire():
 
     assert "description" not in described
     assert described["properties"]["topic"]["description"]
+
+
+def test_a_closed_set_is_described_by_its_values_not_by_its_types():
+    """A `Literal`'s arguments are *values*, not types. The generic branch
+    recursed into them as annotations, which is wrong in principle and wrong
+    in practice: the model reads this line, and a member it cannot name is a
+    member it cannot pick."""
+    said = describe(Picks)
+
+    assert '- mode: "strict" or "loose"' in said
+    assert '- many: list["strict" or "loose"]' in said
+
+
+def test_a_closed_set_survives_the_unresolved_fallback_too():
+    """The other path to the same line. A schema whose annotations cannot be
+    resolved is described from its source text, and that read `str` as a
+    substring — so `Literal["strict", "loose"]` came out as `stringict`, a
+    member of a closed set that does not exist. Declared inside a function
+    against a locally aliased import, which is what makes `get_type_hints`
+    fail and this branch run."""
+    from dataclasses import dataclass as _dataclass
+    from typing import Literal as _Literal
+
+    @_dataclass
+    class Local:
+        mode: _Literal["strict", "loose"] = "strict"
+
+    said = describe(Local)
+
+    assert "stringict" not in said
+    assert "strict" in said

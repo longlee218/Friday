@@ -99,7 +99,7 @@ async def test_the_page_and_the_flow_route_agree(client, inbox, provider, db):
         prompt="p", output="o", input_tokens=1, output_tokens=1,
     )
     await db.record_tool_call(
-        task_id=task.id, agent="extractor", tool="ask_for_fields",
+        task_id=task.id, agent="extractor", tool="memory_search",
         arguments="{}", result="ok", failed=False,
     )
     await db.mark_triaged(
@@ -356,14 +356,14 @@ async def test_a_tasks_tool_calls_are_reachable_beside_its_prompts(client, db):
     )
     await db.record_tool_call(
         task_id=task.id, node="prepare", agent="extractor",
-        tool="ask_for_fields", arguments="{}", result="asked", failed=False,
+        tool="memory_search", arguments="{}", result="asked", failed=False,
     )
 
     calls = client.get(f"/api/tasks/{task.id}/calls").json()
 
     assert set(calls) == declared("TaskCalls")
     assert [c["agent"] for c in calls["model_calls"]] == ["extractor"]
-    assert [t["tool"] for t in calls["tool_calls"]] == ["ask_for_fields"]
+    assert [t["tool"] for t in calls["tool_calls"]] == ["memory_search"]
     assert calls["spent"] == 5
 
 

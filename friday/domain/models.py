@@ -313,8 +313,9 @@ MODEL_AUTHORED = frozenset({"summary"})
 def askable_fields(params_cls: type) -> tuple[str, ...]:
     """The fields of one type a reporter can be asked about.
 
-    One definition, because two disagreed. `ask_for_fields` built the model's
-    closed enum from `__dataclass_fields__`, and ticket 13's guard checked
+    One definition, because two disagreed. The closed set an extractor may
+    ask about was built from `__dataclass_fields__`, and ticket 13's guard
+    checked
     `dataclasses.fields()` — the same set today and not the same set in
     general: `__dataclass_fields__` keeps `ClassVar` and `InitVar` entries as
     pseudo-fields, so annotating `_RULES` as a `ClassVar` would have offered

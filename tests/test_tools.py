@@ -34,8 +34,6 @@ def _factories() -> dict[str, object]:
     of this system's tools go unlisted by the assertion below.
     """
     from friday.agent.skills import SkillLibrary
-    from friday.domain.models import ApiIssueParams
-    from friday.tools.ask_for_fields import ask_for_fields_tool
     from friday.tools.describe_skill import describe_skill_tool
     from friday.tools.fetch_skill import fetch_skill_tool
     from friday.tools.memory import memory_tools
@@ -48,7 +46,6 @@ def _factories() -> dict[str, object]:
         search_skills_tool(library),
         describe_skill_tool(library),
         read_skill_file_tool(library),
-        ask_for_fields_tool(ApiIssueParams),
         *memory_tools(object()),
     ]
     return {tool.name: tool for tool in built}
@@ -87,7 +84,6 @@ def test_the_tools_this_system_has_are_all_in_one_place():
         "search_skills",
         "describe_skill",
         "read_skill_file",
-        "ask_for_fields",
         "memory_search",
         "memory_add",
         "memory_propose",
@@ -303,23 +299,27 @@ def test_the_skill_tools_ask_the_model_for_what_their_names_promise():
 
 
 def test_the_field_names_an_extractor_may_ask_about_are_a_closed_set():
-    """The constraint the code can check, and the reason this tool is a
-    factory: the enum is one type's own fields, so a model cannot ask the
-    reporter about a field that does not exist.
+    """The constraint the code can check: the names an extractor may ask about
+    are that type's own askable fields, so it cannot ask the reporter about a
+    field that does not exist.
 
-    This was `test_the_two_asking_tools_are_not_the_same_tool`, contrasting
-    this tool with `ask_clarification` — which took a question in words and
-    which nothing ever called. Board `every-answer-has-a-shape`, ticket 01
-    deleted that one (D14), so what is left here is the half that was always
-    load-bearing.
+    **This property has now outlived two homes.** It was the argument for
+    `ask_clarification` and `ask_for_fields` being different tools (ticket 01
+    deleted the first), then it was `ask_for_fields`'s own enum, and since
+    ticket 08 it is a field of the extractor's one answer shape (D7). The
+    tools went; this is the half that was always load-bearing, and a move that
+    lost it would have cost more than it saved — an extractor that invents a
+    field name asks the reporter a question about nothing.
     """
-    from friday.domain.models import ApiIssueParams
-    from friday.tools.ask_for_fields import ask_for_fields_tool
+    from friday.agent.harness import _answer_tool
+    from friday.domain.models import ApiIssueParams, askable_fields
+    from friday.extraction.answer import answer_shape
 
-    fields = ask_for_fields_tool(ApiIssueParams).params_json_schema["properties"]
+    asked = _answer_tool(answer_shape(ApiIssueParams)).params_json_schema[
+        "properties"
+    ]["ask_about"]
 
-    assert "fields" in fields and "question" not in fields
-    assert fields["fields"]["items"]["enum"], "the field names are a closed set"
+    assert asked["items"]["enum"] == list(askable_fields(ApiIssueParams))
 
 
 async def test_a_tool_that_raises_tells_the_model_nothing_it_should_not_see():

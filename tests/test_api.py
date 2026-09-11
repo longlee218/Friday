@@ -378,7 +378,7 @@ async def test_a_messages_whole_path_arrives_in_one_request(client, inbox, provi
         prompt="p", output="o", input_tokens=10, output_tokens=2,
     )
     await db.record_tool_call(
-        task_id=task.id, node="prepare", agent="extractor", tool="ask_for_fields",
+        task_id=task.id, node="prepare", agent="extractor", tool="memory_search",
         arguments='{"missing": []}', result="asked", failed=False,
     )
     await db.mark_triaged(
@@ -392,7 +392,7 @@ async def test_a_messages_whole_path_arrives_in_one_request(client, inbox, provi
     assert flow["decision"]["type"] == "api_issue"
     assert flow["task"]["id"] == task.id
     assert [c["agent"] for c in flow["model_calls"]] == ["triage"]
-    assert [t["tool"] for t in flow["tool_calls"]] == ["ask_for_fields"]
+    assert [t["tool"] for t in flow["tool_calls"]] == ["memory_search"]
 
 
 async def test_a_skipped_message_still_has_a_path(client, inbox, provider, db):

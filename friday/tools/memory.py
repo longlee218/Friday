@@ -284,7 +284,7 @@ def memory_tools(db):
     # The numbers the prose quotes are the numbers the code enforces, because
     # they are the same object. A docstring cannot be an f-string and these two
     # are the schema the model reads, so they are written in here — the shape
-    # `classify` and `ask_for_fields` already use, for the same reason.
+    # `classify` already uses, for the same reason.
     # `replace` rather than `format`: a docstring is prose and may hold a brace.
     memory_search.__doc__ = memory_search.__doc__.replace("{RESULTS}", str(RESULTS))
     memory_add.__doc__ = memory_add.__doc__.replace("{TEXT_CHARS}", str(TEXT_CHARS))

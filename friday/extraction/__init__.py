@@ -11,13 +11,21 @@ called by `prepare()`, which is node 0 of every graph. Adding one is an entry
 in `EXTRACTS` and a block in `config.yaml`, not a change to the composition
 root.
 
-An extractor also carries `ask_for_fields` (ticket 05): the model has just
-read everything the reporter said, and may know something is missing that no
-structural rule catches. It names *which* of its own fields, and why — never
-words, so the tool cannot be argued into phrasing that bypasses the operator's
-voice — and `friday.dag.prepare.prepare` turns that into an `Ask` the Responder
-writes. Code stays the floor regardless: a field the structural rules reject
-is challenged with the code template whether or not the model asked about it.
+An extraction is **one validated object** (board `every-answer-has-a-shape`,
+D7): that type's own parameters, plus which of its own fields the extractor
+wants the reporter asked about and why. The model has just read everything the
+reporter said, and may know something is missing that no structural rule
+catches. It names *which* fields, and why — never words, so it cannot be argued
+into phrasing that bypasses the operator's voice — and
+`friday.dag.prepare.prepare` turns that into an `Ask` the Responder writes. Code
+stays the floor regardless: a field the structural rules reject is challenged
+with the code template whether or not the model asked about it.
+
+That request used to be a second tool, `ask_for_fields`, writing into a per-run
+capture the caller read back afterwards — so one extraction produced two
+answers by two mechanisms and neither was the return value of anything. The
+shape is in `friday/extraction/answer.py` now, and the closed set of field
+names the tool's enum gave is still closed.
 """
 
 from __future__ import annotations
@@ -27,9 +35,8 @@ from dataclasses import fields
 from typing import TYPE_CHECKING
 
 from friday.agent.harness import Harness, Refused
-from friday.extraction.clarify import Clarify, FieldsCapture
+from friday.extraction.answer import Clarify, answer_shape, split
 from friday.extraction.context import FullContext
-from friday.tools.ask_for_fields import ask_for_fields_tool
 from friday.domain.models import MODEL_AUTHORED, PARAMS, Params
 from friday.extraction.prompt import build_input, build_instructions
 
@@ -114,22 +121,20 @@ class Extractor:
         `None` params here means "the model could not answer" — the workflow
         falls back to the structural check, which is the right behaviour:
         nothing to hallucinate means nothing to validate. Whether the model
-        also called `ask_for_fields` is independent of that — one extra
+        also asked about a field is independent of that — one extra
         turn covers the tool call landing before or after the field text.
 
         `Harness.run` adds its own `tool_turns` on top, so this line owns
         only what it has to: the one retry. The skill tools' turns come from
         the harness, which is the only thing that knows whether it wired any.
         """
-        capture = FieldsCapture()
-        filled = await self._harness.run_structured(
+        answered = await self._harness.run_structured(
             await self.would_ask(context),
-            context=capture,
             extra_turns=1,
             task_id=task_id,
             node=node,
         )
-        if filled is None:
+        if answered is None:
             if self._harness.refusal is not None:
                 # Not "the model could not answer" — we did not ask it. The
                 # difference decides what happens next: with no fields, the
@@ -146,8 +151,14 @@ class Extractor:
             # the first, while the second arrived silently as a *successful*
             # extraction of nothing.
             log.warning("extractor %s produced nothing usable", self.name)
-            return None, capture.clarify
-        return _hygiene(filled), capture.clarify
+            # **Nothing, not "nothing plus a question".** The request for more
+            # detail is part of the answer now, so an answer that did not
+            # arrive carries no question either — where the capture this
+            # replaced could survive a failed extraction and hand back a
+            # half-run's worth of asking.
+            return None, None
+        filled, clarify = split(answered, self._params_cls)
+        return _hygiene(filled), clarify
 
 
 def build_extractor(
@@ -179,7 +190,7 @@ def build_extractor(
     at runtime, in the middle of a task, where the only symptom is fields
     that never fill in. Refusing here costs a restart.
     """
-    if getattr(harness, "answers", None) is not params_cls:
+    if getattr(harness, "answers", None) is not answer_shape(params_cls):
         raise ValueError(
             f"the {name} extractor fills {params_cls.__name__}, but its "
             f"harness answers {getattr(harness, 'answers', None)}"
@@ -312,13 +323,12 @@ def register(
             instructions=build_instructions(
                 skills_meta=skills_meta,
             ),
-            tools=[ask_for_fields_tool(params_cls)],
             skills=skills,
-            # The shape this extractor answers, declared where it is built.
-            # The harness generates the tool the answer arrives through and
-            # the check it is validated by from this one class.
-            answers=params_cls,
-            context_type=FieldsCapture,
+            # The shape this extractor answers, declared where it is built:
+            # the type's own parameters *and* what it wants to ask about. The
+            # harness generates the tool the answer arrives through and the
+            # check it is validated by from this one class.
+            answers=answer_shape(params_cls),
             record=record,
             spent=spent,
         ),

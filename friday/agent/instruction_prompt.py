@@ -821,18 +821,20 @@ A value you are unsure of is not the same as a value that is absent. Say what
 is absent, ask about what is unclear, and hand back both."""
 
 
-def clarification_system(tool: str | None, *, blocking: bool = True) -> Section:
+def clarification_system(by: str | None, *, blocking: bool = True) -> Section:
     """Ask before acting — rendered only for an agent that has a way to ask.
 
-    `tool` is the name of the call this agent makes to ask, and `None` means
-    it has none. That is not a detail: most agents here cannot ask. Triage
-    picks one of two tools and stops; an extractor copies values. Telling
-    either to "call the asking tool immediately" describes a door that is not
-    in the room, and an agent told about a door it cannot find improvises.
+    `by` is how this agent asks, as the phrase that finishes "Ask by …" —
+    "calling `hand_over`", "naming the fields in `ask_about`" — and `None`
+    means it has no way to. That is not a detail: most agents here cannot ask.
+    Triage names a type and stops. Telling it to ask describes a door that is
+    not in the room, and an agent told about a door it cannot find improvises.
 
-    The agents that *can* ask do it by their own name — the graph's composer
-    hands over, node 0 returns a question — so the name is passed in rather
-    than assumed.
+    **A phrase rather than a tool name**, since board
+    `every-answer-has-a-shape` — the extractor asks by filling a field of the
+    answer it was already going to give, not by calling a second tool, and
+    "Ask by calling `ask_about`" would have been an instruction to call
+    something that does not exist.
 
     **`blocking` is not a style choice.** An agent that *acts* must ask before
     acting: a patch applied on a guess is not undone by asking afterwards. An
@@ -847,10 +849,10 @@ def clarification_system(tool: str | None, *, blocking: bool = True) -> Section:
     flag still closes the first: an agent that stops after asking has thrown
     away the fields it had already worked out.
     """
-    if not tool:
+    if not by:
         return Section("clarification_system")
     priority = _CLARIFY_PRIORITY if blocking else _CLARIFY_ALONGSIDE
-    body = f"{priority}\n\nAsk by calling `{_escape(tool)}`."
+    body = f"{priority}\n\nAsk by {_escape(by)}."
     return Section("clarification_system", body)
 
 

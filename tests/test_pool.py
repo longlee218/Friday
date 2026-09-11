@@ -276,6 +276,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     from friday.config import AgentConfig
     from friday.domain.conversation import ConversationId
     from friday.extraction import _EXTRACTORS, build_extractor
+    from friday.extraction.answer import answer_shape
     from friday.agent.harness import Harness
     from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
 
@@ -311,7 +312,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     )
     ext = build_extractor(
         params_cls=ApiIssueParams,
-        harness=StubHarness(answers=ApiIssueParams),  # type: ignore[arg-type]
+        harness=StubHarness(answers=answer_shape(ApiIssueParams)),  # type: ignore[arg-type]
         name="api_issue_ext",
     )
     _EXTRACTORS["api_issue"] = ext
@@ -362,10 +363,10 @@ async def test_extraction_runs_when_a_message_is_linked(db):
 async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db):
     """Ticket 05, end to end: the report already has a curl, so the
     structural floor (`_traceable`) finds nothing wrong — the only reason an
-    `Ask` exists at all is the extractor calling `ask_clarification` about a
-    field code does not require. The sentence that reaches the reporter is
-    the Responder's, not the template `_question_from_clarify` builds for it
-    to write from.
+    `Ask` exists at all is the extractor naming a field in `ask_about` that
+    code does not require. The sentence that reaches the reporter is the
+    Responder's, not the template `_question_from_clarify` builds for it to
+    write from.
     """
     from agents.testing import ScriptedModel, assistant_message, function_call
     from sqlalchemy import update as sa_update
@@ -374,8 +375,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
     from friday.config import AgentConfig
     from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
     from friday.extraction import _EXTRACTORS, build_extractor
-    from friday.extraction.clarify import FieldsCapture
-    from friday.tools.ask_for_fields import ask_for_fields_tool
+    from friday.extraction.answer import answer_shape
     from friday.store import schema
 
     ext = build_extractor(
@@ -386,24 +386,11 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
                 base_url="https://example.invalid/v1", model="test-model",
             ),
             instructions="extract",
-            tools=[ask_for_fields_tool(ApiIssueParams)],
-            answers=ApiIssueParams,
-            context_type=FieldsCapture,
-            model=ScriptedModel(
-                [
-                    [
-                        function_call(
-                            "ask_for_fields",
-                            {
-                                "fields": ["environment"],
-                                "because": "the curl doesn't say which server",
-                            },
-                            call_id="1",
-                        )
-                    ],
-                    [assistant_message("{}")],
-                ]
-            ),
+            answers=answer_shape(ApiIssueParams),
+            model=ScriptedModel([[function_call("answer", {
+                "ask_about": ["environment"],
+                "because": "the curl doesn't say which server",
+            }, call_id="1")]]),
         ),
         name="api_issue_ext",
     )
@@ -985,6 +972,7 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
     from friday.config import AgentConfig
     from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
     from friday.extraction import _EXTRACTORS, build_extractor
+    from friday.extraction.answer import answer_shape
     from friday.store import schema
 
     recorded: list = []
@@ -1004,7 +992,7 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
                 base_url="https://example.invalid/v1", model="test-model",
             ),
             instructions="lift the fields out",
-            answers=ApiIssueParams,
+            answers=answer_shape(ApiIssueParams),
             model=ScriptedModel([[assistant_message(filled)]]),
             record=sink,
         ),

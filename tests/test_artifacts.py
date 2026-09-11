@@ -201,6 +201,7 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
     from conftest import ScriptedHarness
     from friday.domain.models import ApiIssueParams
     from friday.extraction import build_extractor
+    from friday.extraction.answer import answer_shape
     from tests.test_extraction import _context
 
     conversation = ConversationId("fake", "watched")
@@ -234,7 +235,7 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
 
     ext = build_extractor(
         params_cls=ApiIssueParams,
-        harness=StubHarness(answers=ApiIssueParams),  # type: ignore[arg-type]
+        harness=StubHarness(answers=answer_shape(ApiIssueParams)),  # type: ignore[arg-type]
         name="stub",
     )
     filled, _ = await ext.run(_context(text, ApiIssueParams), task_id=task.id)

@@ -332,7 +332,8 @@ def test_the_tool_context_alias_keeps_ctx_out_of_the_model_s_schema():
     # `from __future__ import annotations` stringifies the signature below, and
     # the SDK resolves it with `get_type_hints` against *this module's*
     # globals. A function-local import leaves it a name nothing can resolve —
-    # the same trap `ask_for_fields` documents for its own `Literal`.
+    # the same trap `friday/extraction/answer.py` documents for the
+    # `Literal` it generates.
 
     @tool
     def probe(ctx: ToolContext[object], x: str) -> str:
