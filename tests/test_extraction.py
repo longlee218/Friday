@@ -722,3 +722,51 @@ def test_an_extractor_whose_harness_answers_a_different_shape_is_refused():
             harness=ScriptedHarness(answers=answer_shape(AccessRequestParams)),  # type: ignore[arg-type]
             name="mismatched",
         )
+
+
+async def test_a_skill_fetch_and_a_correction_both_fit_in_one_extraction():
+    """The spec named this as the largest risk of the move (`Further Notes`):
+    the extractor runs on one turn plus one, and a correction now spends a turn
+    inside the run rather than buying a second run. Whether a correction and a
+    skill fetch can both fit was a thing to watch, so it is measured here
+    rather than reasoned about.
+
+    Three model calls: reach for a skill, answer wrongly, answer again. All
+    three land inside one run.
+    """
+    from agents.testing import ScriptedModel, function_call
+
+    from friday.agent.skills import SkillLibrary
+    from friday.config import AgentConfig
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.answer import answer_shape
+    from pathlib import Path
+
+    library = SkillLibrary(Path(__file__).resolve().parents[1] / "skills").load()
+    catalogue = list(library.catalogue())
+    assert catalogue, "this repo ships skills; without one the harness grants no turns"
+
+    model = ScriptedModel([
+        [function_call("search_skills", {"query": "correlation"}, call_id="1")],
+        [function_call("answer", {"correlation_id": ["not", "a", "string"]}, call_id="2")],
+        [function_call("answer", {"correlation_id": "3f7a1e22"}, call_id="3")],
+    ])
+    ext = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=Harness(
+            config=AgentConfig(
+                name="api_issue_ext", api_key="k",
+                base_url="https://example.invalid/v1", model="test-model",
+            ),
+            instructions="extract",
+            answers=answer_shape(ApiIssueParams),
+            skills=library,
+            model=model,
+        ),
+        name="budgeted",
+    )
+
+    params, _ = await ext.run(_context("api lỗi", ApiIssueParams))
+
+    assert params is not None and params.correlation_id == "3f7a1e22"
+    assert len(model.calls) == 3
