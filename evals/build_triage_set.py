@@ -109,6 +109,58 @@ SEED: list[tuple[str, str] | tuple[str, str, tuple]] = [
             ),
         ),
     ),
+    # --- The operator's own channel, 2026-09-14 -----------------------------
+    #
+    # Seventeen reports the operator supplied verbatim from the traffic this
+    # system actually reads, labelled by them. The sixteen rows above were
+    # written to unblock ticket 06 and read like an English textbook — full
+    # sentences, no mentions, no abbreviations. The channel does not: it is
+    # Vietnamese, it drops pronouns to `a`/`e`, it says `mí` and `th`, and the
+    # detail usually arrives as a `curl` in the next message rather than in the
+    # sentence. A set that does not resemble the traffic measures a classifier
+    # nobody is running.
+    #
+    # **Several of these are the first half of a turn.** The operator marked
+    # them "(có CURL bên dưới)" — the note is theirs, describing what follows,
+    # and it is not part of what anybody typed, so it is not in the text. Those
+    # rows are therefore *harder* than reality: the classifier sees the ask
+    # without the evidence. Left that way deliberately until the real `curl`
+    # bodies can be pasted in, because inventing one would be putting traffic
+    # in a reporter's mouth to make a number look better.
+    ("e đang gen template mà toàn bị failed, a check giúp e với", "api_issue"),
+    ("lỗi này là sao a nhỉ", "api_issue"),
+    ("a ơi check e với model inhouse có vấn đề ạ", "api_issue"),
+    ("request success mà trên app báo fail ạ", "api_issue"),
+    ("e check api content pack chưa thấy có countdown thời gian a ạ", "api_issue"),
+    ("có vấn đề như sau", "api_issue"),
+    ("a ơi service qwen bị limit á a", "api_issue"),
+    ("a check hộ e cái này là sao nhỉ", "api_issue"),
+    (
+        "SOS, check giúp a Về lỗi 400 Aspect ratio for file ... is invalid "
+        "khi tạo đơn Printful (cốc + áo)",
+        "api_issue",
+    ),
+    (
+        "em init order bằng ảnh user tự up, không phải bằng runId thì bị lỗi "
+        "như này",
+        "api_issue",
+    ),
+    ("a ơi check gấp cho e tại sao node asset fail với ạ", "api_issue"),
+    ("a check hộ e cái này với", "api_issue"),
+    ("api catalog bị rỗng a ơi", "api_issue"),
+    (
+        "nguyên nhân thật - bẫy region interfence của API v2: GET "
+        "/v2/catalog-vartians/{id}/avaibility mà không truyền "
+        "selling_region_name thì Printful tự suy region theo nơi gọi request",
+        "api_issue",
+    ),
+    ("hình như có bug khác a ơi", "api_issue"),
+    (
+        "e đang gọi animate image thấy log thế này cho một số template thì là "
+        "chưa có workflow hả a",
+        "api_issue",
+    ),
+    ("cứu th em", "api_issue"),
 ]
 
 
