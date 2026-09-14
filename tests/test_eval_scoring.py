@@ -100,3 +100,38 @@ def test_threshold_table_does_not_care_whether_the_guess_was_right():
     ]
 
     assert threshold_table(predictions, thresholds=(0.5,))[0.5] == 1
+
+
+# --- board `every-answer-has-a-shape`, ticket 07: D20's own number ----------
+
+
+def test_a_decision_outside_the_closed_set_is_counted_as_its_own_outcome():
+    """D20: "it invented a type" and "it chose the wrong type" are two
+    different failures, and counting them together would hide the one this
+    board exists to make impossible.
+
+    It lands as `needs_human` in the matrix, like every other row triage
+    declined to decide, because that *is* the outcome the row produced — the
+    mention goes to a person either way. What this adds is the separate count
+    beside it, so a change that starts making the model invent labels shows up
+    as a number instead of as a slightly worse accuracy figure.
+    """
+    from evals.scoring import out_of_set
+
+    predictions = [
+        Prediction(expected="api_issue", predicted="needs_human", confidence=0.0,
+                   out_of_set=True),
+        Prediction(expected="api_issue", predicted="needs_human", confidence=0.0),
+        Prediction(expected="api_issue", predicted="skip", confidence=0.8),
+    ]
+
+    assert out_of_set(predictions) == 1
+
+
+def test_a_row_nobody_invented_a_type_for_counts_zero():
+    """The healthy case has to read as zero rather than as an absent number,
+    because a report that only mentions this when it happens is a report whose
+    silence means two things."""
+    from evals.scoring import out_of_set
+
+    assert out_of_set([Prediction(expected="skip", predicted="skip", confidence=0.9)]) == 0

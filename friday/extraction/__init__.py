@@ -124,13 +124,18 @@ class Extractor:
         also asked about a field is independent of that — one extra
         turn covers the tool call landing before or after the field text.
 
-        `Harness.run` adds its own `tool_turns` on top, so this line owns
-        only what it has to: the one retry. The skill tools' turns come from
-        the harness, which is the only thing that knows whether it wired any.
+        The turn budget is entirely the harness's now: one turn to answer,
+        one that `run_structured` adds for the correction, and `tool_turns`
+        for the skill tools where this extractor has any. Nothing is asked for
+        here, which is what stops this line and the harness both adding one.
         """
+        # No `extra_turns`: the one correction is `run_structured`'s own, and
+        # the turns a skill fetch needs come from the harness, which is the
+        # only thing that knows whether it wired any. This line used to add
+        # one on top of both, which bought a second correction nobody decided
+        # on.
         answered = await self._harness.run_structured(
             await self.would_ask(context),
-            extra_turns=1,
             task_id=task_id,
             node=node,
         )

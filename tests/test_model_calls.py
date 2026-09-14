@@ -23,7 +23,7 @@ CONFIG = AgentConfig(
 
 def api_issue_call():
     return function_call(
-        "classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1"
+        "answer", {"type": "api_issue", "confidence": 0.9}, call_id="1"
     )
 
 
@@ -39,14 +39,14 @@ async def test_a_run_reports_both_sides_of_the_call():
 
     await triage.decide(make_event(text="checkout is 500ing"))
 
-    # Two entries now: the prompt, and the `classify` call the answer arrives
-    # as. This test is about the first.
+    # Two entries now: the prompt, and the `answer` call the classification
+    # arrives as. This test is about the first.
     (call,) = [c for c in calls if getattr(c, "prompt", None) is not None]
     assert call.agent == "triage"
     assert call.model == "test-model"
     assert "You decide what a chat message is" in call.system_prompt
     assert "checkout is 500ing" in call.prompt
-    assert "classify" in call.output
+    assert "api_issue" in call.output
     # ScriptedModel reports no usage; the plumbing is what is pinned here.
     # A live run fills these in — verified against MiniMax at 1037 in / 171 out.
     assert isinstance(call.input_tokens, int)
@@ -100,7 +100,7 @@ async def test_a_decision_can_be_traced_back_to_the_call_that_made_it(
     (decision,) = await db.decisions()
     (call,) = await db.model_calls(message_id=decision["message_id"])
     assert "checkout is 500ing" in call.prompt
-    assert "classify" in call.output
+    assert "api_issue" in call.output
 
 
 async def test_a_credential_never_reaches_storage(inbox, provider, db):

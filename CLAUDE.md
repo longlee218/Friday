@@ -264,22 +264,32 @@ is the one failure the model can fix: bad JSON and schema violations are
 raised before the body runs, so nothing was written and the only recovery is
 to emit the call again correctly.
 
-**Triage stops on what it recorded, not on the first tool output.**
-`stop_on_first_tool` looks right for an agent whose answer is a tool call and
-is not: it ends the run at the first tool's *output*, and a
-`failure_error_function` return value is a tool output the SDK cannot tell
-from a success. So the "try again with valid JSON" the exemption above exists
-to deliver became the run's final answer, and the one party who could act on
-it never saw it — a mention the model had all but classified became work for a
-person. `harness.stop_when(predicate)` moves the terminator to what actually
-means answered: `capture.decided is not None`.
+**An agent whose answer is a tool call stops on the answer, not on the first
+tool output.** `stop_on_first_tool` looks right and is not: it ends the run at
+the first tool's *output*, and a failure string is a tool output the SDK
+cannot tell from a success. So the "try again with valid JSON" the exemption
+above exists to deliver became the run's final answer, and the one party who
+could act on it never saw it — a mention the model had all but classified
+became work for a person. An agent built with `answers=` gets a terminator
+that checks for an *instance* of the shape. `harness.stop_when(predicate)` was
+the general version, parameterised by a predicate over the run context; it went
+when triage — its only caller — stopped needing a predicate at all, rather than
+being kept for the caller that would have justified it.
 
 **The correction budget is one turn, and it is `max_turns`.** A bad call
-spends a turn, so `max_turns: 1` plus the one `run(extra_turns=1)` adds gives
+spends a turn, so `max_turns: 1` plus the one `run_structured` adds gives
 exactly one retry; a second bad call overruns, the harness turns that into a
 `last_error`, and the mention lands where every other triage failure lands. A
 model that cannot get its own schema right twice will not on the third go, and
 this is the highest-volume path in the system.
+
+**That turn is added by the harness, not asked for by callers**, and the
+reason is arithmetic nobody should have to redo. A run whose answer fits ends
+on its *first* turn — the terminator finishes it the moment the tool returns
+an instance — so the call and its result are not two turns here. Triage and
+the extractor each passed `extra_turns=1` on top of the one `run_structured`
+adds, which bought a second correction nobody decided on; both now pass
+nothing.
 
 **`docstring_style` is deliberately not pinned**, which is the opposite of
 what this file said for one afternoon. Detection returns google for every
@@ -672,22 +682,53 @@ not an implementation detail:
   prompt are the ones a provider's cache reuses across calls. The two agents
   that share it hold two copies, deliberately: different jobs diverge, and
   sharing the text only postpones that.
-- **Triage classifies and nothing else.** No parameters, no summary — a type
-  and a confidence, through one `classify(task_type, confidence)` tool with
-  a closed enum of types (`skip` stays its own tool: everything `classify`
-  names opens work, and `skip` names the absence of it). It was
-  `create_task`, and it creates nothing — it records a `Decided`; the task is
-  opened by `TriageRunner._apply` and only sometimes. A tool name is an
-  instruction to the model, so a model told to "create a task" believed it
+- **Triage classifies and nothing else, and it answers one closed set.** No
+  parameters, no summary — a `Decided`: a member of `models.DECISIONS`, which
+  is every task type plus `skip`, and a confidence. It arrives through the
+  tool `Harness(answers=Decided)` generates, and the arguments are validated
+  in this process before anything acts on them. `Decided` *is* the shape, so
+  there is no second declaration of what triage may say.
+
+  **This reverses the `classify`/`skip` split**, whose recorded argument was
+  that everything `classify` names opens work while `skip` names the absence
+  of it. That is true, and it is `TriageRunner._apply`'s business, where it
+  stays. What the split actually bought was two validations of one question:
+  an invented type could reach `_apply` and open a task the pool then
+  discovers has no graph, and "there is no work here" was checked less
+  strictly than "there is". Measured, the wire closes nothing — asked for that
+  exact enum, the configured provider answered `hardware_issue`.
+
+  **An invented type and an outage are different failures, counted
+  separately.** `NeedsHuman.out_of_set` says which, `Harness.unfit` is where
+  it comes from, and `evals/run_triage_eval.py` prints the count beside the
+  accuracy — always, including as zero, since a line that appears only when
+  it is non-zero is a line whose absence means both "none" and "not
+  measured". One says a prompt or a model is wrong; the other says the
+  network was.
+
+  The signal is raised by the answer tool's own body rather than by the run,
+  because the run may never get back to raise it: a model that answers wrongly
+  twice overruns `max_turns` and `run_structured` returns `None` having seen
+  no reply at all. Arguments that are not a JSON object do **not** raise it —
+  that is the model saying nothing, not naming something.
+
+  It was `create_task`, and it creates nothing — it records a `Decided`; the
+  task is opened by `TriageRunner._apply` and only sometimes. A tool name is
+  an instruction to the model, so a model told to "create a task" believed it
   was doing something it was not.
+
   Everything a task knows is lifted out of the message by `friday/extraction/`,
   one extractor per task type, reading every message linked to the task. The
   tool schema is the enforcement: a tool parameter is an instruction to the
   model, so `correlation_id` in the schema *is* triage extracting whatever the
-  prompt says, and a test pins that no triage tool asks for anything but a
-  type and a `confidence`. Each type's description in the enum is read from
-  its own `Params` class's docstring, so a fourth type is a fourth class, not
-  a fourth tool.
+  prompt says, and a test pins that nothing triage was handed asks for
+  anything but a type and a `confidence`. Each type's description in the enum
+  is read from its own `Params` class's docstring, so a fourth type is a
+  fourth class and not a second description of it. **A class that never wrote
+  one is refused at import** — and the check is not "is it empty", because a
+  `@dataclass` always has a docstring: absent its own, Python synthesises the
+  constructor signature, and `ApiIssueParams(summary: str = '', ...)` reads
+  like a description to everything except a person.
 - **A classifiable task type without a configured extractor is broken**, not
   degraded: it opens tasks with no parameters and asks the reporter for what
   they already said. `friday/extraction/`'s `EXTRACTS` and `PARAMS` must

@@ -86,8 +86,6 @@ def test_the_tools_this_system_has_are_all_in_one_place():
     and nothing else — which is the point: the question "what can the agents
     do?" has one answer with one place to read it."""
     assert set(_tool_objects()) == {
-        "classify",
-        "skip",
         "fetch_skill",
         "search_skills",
         "describe_skill",

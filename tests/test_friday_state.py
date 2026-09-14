@@ -97,3 +97,25 @@ def test_a_state_is_built_from_the_conversation_the_work_is_about():
     assert state.thread_id == "t1"
     assert state.agent == "responder"
     assert state.task_id is None, "a conversation does not know about a task"
+
+
+def test_a_state_is_built_from_the_message_that_started_the_journey():
+    """Seven facts the inbound message already carries, copied once. They used
+    to be named again, as a different subset, by every layer that needed any of
+    them — so adding one more fact meant threading one more parameter through
+    five signatures."""
+    from conftest import make_event
+
+    event = make_event(message_id="m1", text="api lỗi rồi")
+
+    state = FridayState.for_event(event, agent="triage")
+
+    assert state.provider == event.provider
+    assert state.channel_id == event.channel_id
+    assert state.message_id == event.provider_message_id
+    assert state.author_id == event.author_id
+    assert state.author_name == event.author_name
+    assert state.thread_id == event.thread_id
+    assert state.reply_to == event.reply_to
+    assert state.agent == "triage"
+    assert state.task_id is None, "a message has not become a task yet"

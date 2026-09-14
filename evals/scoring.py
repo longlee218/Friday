@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["Prediction", "accuracy", "confusion_matrix", "threshold_table"]
+__all__ = [
+    "Prediction", "accuracy", "confusion_matrix", "out_of_set", "threshold_table",
+]
 
 #: The values `run_triage_eval.report` prints a row for. `0.5` is not a
 #: number anyone has settled on; it is the low end of the range
@@ -32,6 +34,13 @@ class Prediction:
     expected: str
     predicted: str
     confidence: float
+    #: The model named something outside the closed decision set (D20). Such a
+    #: row is `needs_human` like any other triage declined to decide — that is
+    #: the outcome it produced, and the mention reaches a person either way —
+    #: so without this the matrix cannot tell it from a provider outage. The
+    #: two lead different places: one says a prompt or a model is wrong, the
+    #: other says the network was.
+    out_of_set: bool = False
 
 
 def accuracy(predictions: list[Prediction]) -> float:
@@ -77,3 +86,19 @@ def threshold_table(
         threshold: sum(1 for p in predictions if p.confidence < threshold)
         for threshold in thresholds
     }
+
+
+def out_of_set(predictions: list[Prediction]) -> int:
+    """How many rows the model answered with a decision that does not exist.
+
+    Its own number rather than a share of the accuracy figure, because the two
+    failures it separates are not the same size of problem. A classifier that
+    picks the wrong real type is wrong about this message; one that invents a
+    type has stopped answering the question it was asked, and before board
+    `every-answer-has-a-shape` it could open a task the pool then discovered
+    had no graph.
+
+    Zero is a reading, not a silence: a report that mentions this only when it
+    is non-zero is a report whose absence means both "none" and "not measured".
+    """
+    return sum(1 for p in predictions if p.out_of_set)

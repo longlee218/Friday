@@ -75,6 +75,19 @@ The tool schema is what holds the line, because a tool parameter is an
 instruction: a schema with `correlation_id` in it *is* triage extracting,
 whatever the prompt says.
 
+The type is a member of one **closed decision set** — every task type, plus
+`skip` for a message that needs no action — checked in this process before
+anything acts on it. Two tools carried this, one naming work and one naming
+the absence of it, until board `every-answer-has-a-shape` found that the split
+meant two validations of one question: an invented type could open a task the
+pool then discovered had no graph, and "there is no work here" was checked less
+strictly than "there is".
+
+So a `NeedsHuman` now says *which* failure it was. A model that named something
+outside the set is not a provider that never answered: one says a prompt or a
+model is wrong, the other says the network was, and the classifier's own
+evaluation reports them as two numbers.
+
 ## Extraction
 
 Lifting the values a task needs out of what the reporter wrote. One extractor

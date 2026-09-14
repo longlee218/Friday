@@ -466,3 +466,39 @@ def test_the_reason_a_shape_refuses_never_carries_the_value_that_was_refused():
         _, problem = fits(data, shape)
         assert problem is not None
         assert "send without approval" not in problem, problem
+
+
+async def test_arguments_that_are_not_an_object_are_not_the_model_naming_anything():
+    """Board `every-answer-has-a-shape`, ticket 07. The `unfit` signal means
+    the model *named* something the shape does not allow — a task type that
+    does not exist. Arguments that are not a JSON object named nothing at all,
+    and triage reports the two as different failures: one says a prompt or a
+    model is wrong, the other says the provider sent noise.
+
+    Found by mutation: making the parse branches raise the signal too left
+    every test green.
+    """
+    harness = _asking(
+        [function_call("answer", "not json at all", call_id="1")],
+        [function_call("answer", "still not json", call_id="2")],
+    )
+
+    assert await harness.run_structured("ask") is None
+    assert harness.unfit is None, "noise was counted as an invented value"
+
+
+async def test_a_run_that_was_corrected_and_then_answered_is_not_an_unfit_run():
+    """The signal is set per turned-down call, because a run that overruns its
+    turns never gets back to report — so it has to be cleared by the run that
+    recovers. Otherwise a model that fixed its own call on the second go is
+    counted, forever after, as one that invented a value.
+
+    Found by mutation: deleting the line that clears it left every test green.
+    """
+    harness = _asking(
+        [function_call("answer", {"name": ["a"]}, call_id="1")],
+        [function_call("answer", {"name": "x"}, call_id="2")],
+    )
+
+    assert await harness.run_structured("ask") == Shape(name="x")
+    assert harness.unfit is None, "a recovered run is still flagged as unfit"

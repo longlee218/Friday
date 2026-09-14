@@ -7,10 +7,9 @@ from dataclasses import dataclass
 from friday.triage.context import build_light_context
 from friday.triage.prompt import build_input, build_instructions
 from friday.config import AgentConfig
-from friday.agent.harness import Harness, stop_when
+from friday.agent.harness import Harness
 from friday.domain.actions import Decided, NeedsHuman, TriageOutcome
-from friday.domain.models import InboundEvent
-from friday.tools.classify import TOOLS, ClassifyCapture
+from friday.domain.models import FridayState, InboundEvent
 from friday.triage.prefilter import Sensitive
 
 __all__ = ["Decided", "NeedsHuman", "Triage", "TriageOutcome"]
@@ -25,11 +24,16 @@ INSTRUCTIONS = build_instructions()
 class Triage:
     """Decides what a mention is. Performs no writes.
 
-    `classify` takes the type as a closed-enum argument rather than being
-    one tool per type: the type still comes from the model, but naming a
-    fourth type is adding a `Params` class, not a fourth tool. Tool calling is
-    used rather than a structured output type because some OpenAI-compatible
-    providers reject `response_format: json_schema` outright.
+    **One answer, one closed set** (board `every-answer-has-a-shape`, D6). It
+    answers a `Decided` — a member of `DECISIONS`, which is every task type
+    plus `skip`, and a confidence — through the tool `Harness` generates from
+    that shape, and the arguments are validated here before anything acts on
+    them.
+
+    It was two tools writing into a per-run capture the caller read back, so
+    the classification was not the return value of anything and the two halves
+    of one question were validated differently. An invented type could reach
+    `TriageRunner._apply` and open a task the pool then discovers has no graph.
     """
 
     def __init__(
@@ -59,26 +63,17 @@ class Triage:
         self._run = Harness(
             config=config,
             instructions=build_instructions(examples),
-            tools=TOOLS,
             model=model,
             record=record,
             spent=spent,
-            context_type=ClassifyCapture,
-            model_settings={
-                # Without a forced tool call the vaguest message — "the api is
-                # wrong", the most common shape there is — produces no call at
-                # all and the mention silently yields nothing.
-                "tool_choice": "required",
-            },
-            # Stop when a classification has actually been *recorded*, not
-            # when the first tool call produces an output. The difference is
-            # a call the schema rejects: `stop_on_first_tool` made the SDK's
-            # "try again with valid JSON" the run's final answer, so the one
-            # party who could fix it never saw it, and a mention the model
-            # very nearly classified became work for a person. The budget for
-            # that correction is one turn — `max_turns` and the one
-            # `run(extra_turns=1)` adds — after which it is a person's anyway.
-            tool_use_behavior=stop_when(lambda capture: capture.decided is not None),
+            # The shape this agent answers. The harness generates the tool it
+            # arrives through, forces the call, ends the run on an actual
+            # `Decided` rather than on any tool output, and validates the
+            # arguments — all four from this one class. Each of those was a
+            # line here, and the last of them was a `stop_when` predicate over
+            # a capture nobody could find from a signature.
+            answers=Decided,
+            context_type=FridayState,
         )
 
     async def decide(
@@ -128,31 +123,37 @@ class Triage:
             )
             return NeedsHuman(f"mentions {held!r} — not sent to the model")
 
-        capture = ClassifyCapture()
-        # One extra turn: the answer arrives as a tool call, which is the call
-        # and its result where a written answer would be one turn.
-
         context = build_light_context(
             self._context,
             channel_id=event.conversation.channel_id,
             turn=list(turn) or [event],
         )
         said = build_input(context)
-        result = await self._run.run(
+        # **No `extra_turns` here.** This line used to add one for a malformed
+        # call, and `run_structured` now adds exactly that turn itself — so
+        # asking again would buy a *second* correction on the highest-volume
+        # path in the system, which is the budget CLAUDE.md pins at one for a
+        # reason: a model that cannot get its own schema right twice will not
+        # on the third go, and every attempt is billed.
+        decided = await self._run.run_structured(
             said,
-            context=capture,
-            # One for a malformed classify call, plus whatever the skill
-            # tools need — the harness knows whether it wired them, so the
-            # number is asked for rather than assumed here.
-            extra_turns=1,
-            message_id=event.provider_message_id,
+            # The run's state, which is what the SDK's context means now (D8).
+            # This is where a message's journey starts, so this is where the
+            # state is built; every later step takes the one it was handed.
+            # It is also where the recording sink reads the message id from,
+            # which is why nothing names it separately any more.
+            context=FridayState.for_event(event, agent="triage"),
         )
-        if result is None:
-            return NeedsHuman(f"triage failed: {self._run.last_error}")
-
-        if capture.decided is None:
-            return NeedsHuman("triage produced no classification")
-        decided = capture.decided
+        if decided is None:
+            # **Two failures, told apart by a flag rather than by its words**
+            # (D20). The model naming something outside the closed set is not
+            # the provider being down: one says a prompt or a model is wrong,
+            # the other says the network was, and counting them together would
+            # hide the failure this change exists to make impossible.
+            return NeedsHuman(
+                f"triage failed: {self._run.last_error}",
+                out_of_set=self._run.unfit is not None,
+            )
         log.info(
             "triaged %s: %s (%.2f)",
             event.provider_message_id,

@@ -41,7 +41,7 @@ async def decide(triage, text="the api is wrong", turn=()):
 
 async def test_an_api_problem_becomes_an_api_issue():
     triage = triage_with([
-        function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")
+        function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")
     ])
 
     outcome = await decide(triage)
@@ -53,7 +53,7 @@ async def test_an_api_problem_becomes_an_api_issue():
 
 async def test_a_permission_request_becomes_an_access_request():
     triage = triage_with([
-        function_call("classify", {"task_type": "access_request", "confidence": 0.95}, call_id="1")
+        function_call("answer", {"type": "access_request", "confidence": 0.95}, call_id="1")
     ])
 
     assert (await decide(triage)).type == "access_request"
@@ -61,7 +61,7 @@ async def test_a_permission_request_becomes_an_access_request():
 
 async def test_a_question_about_docs_becomes_a_doc_question():
     triage = triage_with([
-        function_call("classify", {"task_type": "doc_question", "confidence": 0.8}, call_id="1")
+        function_call("answer", {"type": "doc_question", "confidence": 0.8}, call_id="1")
     ])
 
     assert (await decide(triage)).type == "doc_question"
@@ -69,7 +69,7 @@ async def test_a_question_about_docs_becomes_a_doc_question():
 
 async def test_social_talk_becomes_a_skip():
     triage = triage_with([
-        function_call("skip", {"confidence": 0.99}, call_id="1")
+        function_call("answer", {"type": "skip", "confidence": 0.99}, call_id="1")
     ])
 
     assert (await decide(triage)).type == "skip"
@@ -80,7 +80,7 @@ async def test_a_message_carrying_nothing_still_decides():
     values at all. It must still produce a task — that is what triggers asking
     for the fields, and it is why classifying does not depend on extracting."""
     triage = triage_with([
-        function_call("classify", {"task_type": "api_issue", "confidence": 0.6}, call_id="1")
+        function_call("answer", {"type": "api_issue", "confidence": 0.6}, call_id="1")
     ])
 
     assert (await decide(triage)).type == "api_issue"
@@ -109,43 +109,6 @@ async def test_triage_needs_no_database():
     import inspect
 
     assert "db" not in inspect.signature(Triage.__init__).parameters
-
-
-def test_no_triage_tool_asks_for_anything_but_a_type_and_confidence():
-    """The line, held by the only thing that can hold it.
-
-    A tool parameter is an instruction to the model, so a schema with
-    `correlation_id` in it *is* triage extracting, whatever the prompt says.
-    Adding one back would put two producers on one field again — and the merge
-    that reconciled them cost nineteen direct messages about one report before
-    it was removed.
-
-    `task_type` is not extraction: it is what used to be encoded as *which*
-    tool got called, and ticket 08 made it a parameter of one tool instead.
-    """
-    from friday.triage import TOOLS
-
-    for tool in TOOLS:
-        params = set(getattr(tool, "params_json_schema", {}).get("properties", {}))
-        assert params <= {"confidence", "task_type"}, f"{tool.name} also asks for {params}"
-
-
-def test_create_task_describes_every_type_from_its_own_params_class():
-    """D16: adding a task type is adding one `Params` class, not a class and a
-    second description of it here. `create_task`'s enum and its per-value
-    description are both read out of `PARAMS` at import time — this pins that
-    nobody hand-wrote either and let them drift."""
-    from friday.triage import TOOLS
-    from friday.domain.models import PARAMS
-
-    (create_task,) = [t for t in TOOLS if t.name == "classify"]
-    schema = create_task.params_json_schema["properties"]["task_type"]
-
-    assert set(schema["enum"]) == set(PARAMS)
-    for name, cls in PARAMS.items():
-        assert cls.__doc__.strip() in schema["description"], (
-            f"{name}'s own docstring is not in create_task's description"
-        )
 
 
 class NeverCalled(Model):
@@ -254,7 +217,7 @@ async def test_a_word_inside_an_identifier_is_not_the_word(text):
     """A hyphen or a suffix makes it a name. Holding every message about
     `salary-service` would make the list unusable in a codebase that has one."""
     triage = triage_with(
-        [function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")],
+        [function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")],
     )
     triage._sensitive = WORDS
 
@@ -266,7 +229,7 @@ async def test_an_empty_list_holds_nothing():
     had without the feature, not someone else's guesses about what is sensitive
     in their workplace."""
     triage = triage_with(
-        [function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")],
+        [function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")],
     )
 
     assert (await decide(triage, "lương tháng này về chưa")).type == "api_issue"
@@ -284,8 +247,9 @@ async def test_a_malformed_classify_call_is_corrected_by_the_model():
     read it. A mention the model had all but classified became work for a
     person.
 
-    `stop_when` moves the terminator to the thing that actually means
-    answered: a classification recorded in the capture.
+    The terminator an agent with a declared shape gets moves it to the thing
+    that actually means answered: the tool returning an *instance* of that
+    shape, rather than returning anything at all.
     """
     from agents.testing import ScriptedModel, function_call
 
@@ -293,9 +257,9 @@ async def test_a_malformed_classify_call_is_corrected_by_the_model():
         config=CONFIG,
         model=ScriptedModel(
             [
-                [function_call("classify", {"task_type": "api_issue",
+                [function_call("answer", {"type": "api_issue",
                                             "confidence": "high"}, call_id="1")],
-                [function_call("classify", {"task_type": "api_issue",
+                [function_call("answer", {"type": "api_issue",
                                             "confidence": 0.9}, call_id="2")],
             ]
         ),
@@ -318,7 +282,7 @@ async def test_a_model_that_cannot_fix_its_own_call_becomes_a_persons_problem():
     """
     from agents.testing import ScriptedModel, function_call
 
-    bad = [function_call("classify", {"task_type": "api_issue",
+    bad = [function_call("answer", {"type": "api_issue",
                                       "confidence": "high"}, call_id="1")]
     triage = Triage(config=CONFIG, model=ScriptedModel([bad, bad, bad]))
 
@@ -370,12 +334,18 @@ def test_triage_carries_no_skill_catalogue_and_cannot_be_given_one():
         )
 
 
-def test_triage_still_has_exactly_the_two_tools_that_are_its_answer():
-    """Removing the catalogue must not remove the answer. `classify` names
-    everything that opens work and `skip` names the absence of it."""
-    from friday.tools.classify import TOOLS
+def test_triage_still_has_exactly_the_one_tool_that_is_its_answer():
+    """Removing the catalogue must not remove the answer.
 
-    assert [t.name for t in TOOLS] == ["classify", "skip"]
+    It was two tools — `classify` naming everything that opens work, `skip`
+    naming the absence of it — and D6 made them one closed set on one tool,
+    so this counts one where it used to count two.
+    """
+    from friday.agent.harness import ANSWER
+
+    triage = triage_with()
+
+    assert [t.name for t in triage._run.agent.tools] == [ANSWER]
 
 
 # --- triage reads a light context (ticket 09) -----------------------------
@@ -473,7 +443,7 @@ async def test_decide_resolves_the_room_from_its_own_context_store():
         async def get_response(self, *a, **kw):
             seen.append(kw.get("input") or a)
             return await ScriptedModel([
-                function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")
+                function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")
             ]).get_response(*a, **kw)
 
         def stream_response(self, *a, **kw):
@@ -505,7 +475,7 @@ async def test_decide_renders_the_given_turn_not_just_the_one_event():
         async def get_response(self, *a, **kw):
             seen.append(str(kw.get("input") or a))
             return await ScriptedModel([
-                function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")
+                function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")
             ]).get_response(*a, **kw)
 
         def stream_response(self, *a, **kw):
@@ -622,7 +592,7 @@ async def test_decide_gathers_context_through_the_one_builder(monkeypatch):
     monkeypatch.setattr(triage_module, "build_light_context", spy)
 
     triage = triage_with([
-        function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")
+        function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")
     ])
     await decide(triage)
 
@@ -784,3 +754,157 @@ def test_the_shared_prefix_between_two_triage_calls_is_almost_the_whole_prompt()
     ratio = matched / shorter if shorter else 1.0
 
     assert ratio > 0.9
+
+
+# --- board `every-answer-has-a-shape`, ticket 07: one closed set (D6) --------
+
+
+async def test_a_classification_is_the_return_value_of_the_call_that_asked():
+    """Nothing is read off a capture. `Triage.decide` returns what the model
+    said, validated, and reading the code is enough to see where the answer
+    comes from — which it was not while a tool wrote into a per-run object the
+    caller read back afterwards."""
+    from agents.testing import ScriptedModel, function_call
+
+    triage = triage_with(
+        [function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")]
+    )
+
+    assert await decide(triage) == Decided(type="api_issue", confidence=0.9)
+
+
+async def test_skip_is_a_member_of_the_same_set_and_is_validated_the_same_way():
+    """D6 reverses the `classify`/`skip` split. The two were validated
+    differently because they were two tools; "there is no work here" is now
+    checked exactly as strictly as "there is"."""
+    from agents.testing import ScriptedModel, function_call
+
+    triage = triage_with(
+        [function_call("answer", {"type": "skip", "confidence": 0.95}, call_id="1")]
+    )
+
+    assert await decide(triage, text="anyone want lunch") == Decided(
+        type="skip", confidence=0.95
+    )
+
+
+async def test_a_type_outside_the_closed_set_never_becomes_a_classification():
+    """The failure this change exists to make impossible. An invented type
+    could reach `TriageRunner._apply` and open a task the pool then discovers
+    has no graph — money spent finding out what the schema already knew.
+
+    Measured, the wire does not stop it: asked for a closed enum, the
+    configured provider returned `hardware_issue`. What stops it is the
+    validation in this process.
+    """
+    from agents.testing import ScriptedModel, function_call
+
+    triage = triage_with(
+        [function_call("answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="1")],
+        [function_call("answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="2")],
+    )
+
+    outcome = await decide(triage)
+
+    assert isinstance(outcome, NeedsHuman)
+    assert outcome.out_of_set, (
+        "an invented type and a wrong-but-real one are different failures"
+    )
+
+
+async def test_an_invented_type_earns_the_same_one_correction_as_anything_else():
+    """It is a bad tool call like any other, so it comes back as the tool's own
+    output naming the field, and the model gets the turn `max_turns` allows."""
+    from agents.testing import ScriptedModel, function_call
+
+    triage = triage_with(
+        [function_call("answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="1")],
+        [function_call("answer", {"type": "api_issue", "confidence": 0.8}, call_id="2")],
+    )
+
+    assert await decide(triage) == Decided(type="api_issue", confidence=0.8)
+
+
+async def test_a_provider_that_never_answered_is_not_an_invented_type():
+    """Two failures that both leave no classification, told apart because they
+    lead different places: one is worth reporting as the model inventing a
+    label, the other is an outage."""
+    triage = triage_with([assistant_message("")])
+
+    outcome = await decide(triage)
+
+    assert isinstance(outcome, NeedsHuman)
+    assert not outcome.out_of_set
+
+
+def test_every_decision_the_model_may_name_carries_its_own_description():
+    """A tool parameter is an instruction to the model, and an enum member
+    nobody defined is an instruction to guess. Each type's description is read
+    from its own `Params` class docstring — so a fourth type is a fourth class,
+    not a class and a second description of it somewhere else.
+
+    `skip`'s line is written by hand, because it is the one decision with no
+    class behind it. It was a whole second tool for that reason; D6 is the
+    finding that a tool is an expensive way to hold one sentence.
+
+    This replaces `test_create_task_describes_every_type_from_its_own_params_class`,
+    which asserted the same thing about `classify`'s enum.
+    """
+    from friday.agent.harness import _answer_tool
+    from friday.domain.models import DECISIONS, PARAMS
+
+    described = _answer_tool(Decided).params_json_schema["properties"]["type"]
+
+    assert set(described["enum"]) == set(DECISIONS)
+    for name, params_cls in PARAMS.items():
+        assert params_cls.__doc__.strip() in described["description"], name
+    assert "skip" in described["description"]
+
+
+def test_triage_is_never_asked_for_anything_but_a_type_and_a_confidence():
+    """The line, held by the only thing that can hold it.
+
+    A tool parameter is an instruction to the model, so a schema with
+    `correlation_id` in it *is* triage extracting, whatever the prompt says.
+    Adding one back would put two producers on one field again — and the merge
+    that reconciled them cost nineteen direct messages about one report before
+    it was removed. Lifting values out of the message is
+    `friday/extraction/`'s job, with its own failure mode.
+
+    **Asserted over the agent this really builds**, not over a tool list
+    imported by name: triage's tools used to be a module constant a test could
+    read, and now they are whatever `Harness(answers=Decided)` wires, so
+    reading the construction is the only way to be sure nothing else was
+    handed to it.
+    """
+    triage = triage_with()
+
+    for tool in triage._run.agent.tools:
+        asked = set(tool.params_json_schema.get("properties", {}))
+        assert asked <= {"type", "confidence"}, f"{tool.name} also asks for {asked}"
+
+
+def test_a_task_type_that_never_wrote_down_what_it_means_is_refused_at_import():
+    """An enum member nobody defined is an instruction to guess, and the guess
+    is on the highest-volume path in the system.
+
+    **The hazard is not an empty docstring, which cannot happen.** A
+    `@dataclass` always has one: absent its own, Python synthesises the
+    constructor signature, so a forgetful author ships
+    `ApiIssueParams(summary: str = '', environment: str | None = None, ...)`
+    to the model as the description of what the type *means*. It reads like a
+    description to everything except a person. Written after a guard against
+    the empty case was found unable to fire.
+    """
+    from dataclasses import dataclass
+
+    from friday.domain.actions import _means
+
+    @dataclass
+    class Undocumented:
+        summary: str = ""
+
+    assert Undocumented.__doc__, "Python synthesised one; that is the point"
+
+    with pytest.raises(ValueError, match="constructor signature"):
+        _means("mystery", Undocumented)

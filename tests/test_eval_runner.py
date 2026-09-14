@@ -61,8 +61,8 @@ async def test_run_scores_every_row_in_the_dataset(db, tmp_path):
     )
 
     triage = _scripted_triage(
-        [function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")],
-        [function_call("skip", {"confidence": 0.4}, call_id="1")],
+        [function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")],
+        [function_call("answer", {"type": "skip", "confidence": 0.4}, call_id="1")],
     )
 
     predictions = await run(dataset_path=dataset, triage=triage)
@@ -148,7 +148,7 @@ async def test_a_multi_message_row_reaches_triage_as_a_real_turn(tmp_path):
     class _Capturing(Model):
         async def get_response(self, *a, **kw):
             return await ScriptedModel([
-                function_call("classify", {"task_type": "api_issue", "confidence": 0.9}, call_id="1")
+                function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")
             ]).get_response(*a, **kw)
 
         def stream_response(self, *a, **kw):
@@ -168,3 +168,64 @@ async def test_a_multi_message_row_reaches_triage_as_a_real_turn(tmp_path):
         "api lỗi rồi anh ơi", "correlationId nằm trong x-request-id đó em",
     ]
     assert [m.is_own for m in turn] == [False, True]
+
+
+async def test_an_invented_type_is_reported_as_its_own_number(tmp_path):
+    """D20, end to end through the runner: a model that names a type that does
+    not exist is scored as `needs_human` — the outcome the row produced — and
+    counted separately beside it.
+
+    Driven through a real `Triage` on a scripted model, so what is exercised is
+    the validation that actually refuses the type rather than a flag a test set
+    by hand.
+    """
+    from agents.testing import ScriptedModel, function_call
+
+    from evals.dataset import Example, write_jsonl
+    from evals.run_triage_eval import report, run
+    from evals.scoring import out_of_set
+    from friday.triage import Triage
+
+    dataset = tmp_path / "triage.jsonl"
+    write_jsonl(dataset, [Example(text="the api is 500ing", expected="api_issue")])
+
+    invented = {"type": "hardware_issue", "confidence": 0.9}
+    triage = Triage(
+        config=CONFIG,
+        model=ScriptedModel([
+            [function_call("answer", invented, call_id="1")],
+            [function_call("answer", invented, call_id="2")],
+        ]),
+    )
+
+    predictions = await run(dataset, triage=triage)
+
+    assert out_of_set(predictions) == 1
+    assert predictions[0].predicted == "needs_human", (
+        "the mention still reaches a person, which is what the row produced"
+    )
+    assert "decisions outside the closed set: 1" in report(predictions)
+
+
+async def test_a_clean_run_still_reports_the_number_as_zero(tmp_path):
+    """A line that appears only when it is non-zero is a line whose absence
+    means both "none" and "not measured"."""
+    from agents.testing import ScriptedModel, function_call
+
+    from evals.dataset import Example, write_jsonl
+    from evals.run_triage_eval import report, run
+    from friday.triage import Triage
+
+    dataset = tmp_path / "triage.jsonl"
+    write_jsonl(dataset, [Example(text="the api is 500ing", expected="api_issue")])
+
+    triage = Triage(
+        config=CONFIG,
+        model=ScriptedModel([
+            [function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")]
+        ]),
+    )
+
+    assert "decisions outside the closed set: 0" in report(
+        await run(dataset, triage=triage)
+    )

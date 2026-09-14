@@ -588,6 +588,32 @@ class FridayState:
     task_id: int | None = None
 
     @classmethod
+    def for_event(cls, event: "InboundEvent", *, agent: str) -> "FridayState":
+        """The state a message's journey starts with.
+
+        Seven of the nine fields are facts the inbound message already carries,
+        and copying them here once is the whole point: they used to be named
+        again, as a different subset, by `Triage.decide`, `Responder.draft`,
+        `prepare`, `Extractor.run` and the recording sink — so adding one more
+        fact meant threading one more parameter through five signatures.
+
+        Deliberately absent until board `every-answer-has-a-shape`'s ticket 07
+        gave it a caller: triage is where a journey actually starts, and a
+        constructor with no caller is the speculative generality this board is
+        otherwise removing.
+        """
+        return cls(
+            channel_id=event.channel_id,
+            agent=agent,
+            provider=event.provider,
+            thread_id=event.thread_id,
+            message_id=event.provider_message_id,
+            author_id=event.author_id,
+            author_name=event.author_name,
+            reply_to=event.reply_to,
+        )
+
+    @classmethod
     def for_conversation(
         cls, conversation: "ConversationId", *, agent: str
     ) -> "FridayState":

@@ -32,7 +32,13 @@ from friday.triage import Triage
 from friday.triage.runner import build_triage
 
 from evals.dataset import Example, load_jsonl
-from evals.scoring import Prediction, accuracy, confusion_matrix, threshold_table
+from evals.scoring import (
+    Prediction,
+    accuracy,
+    confusion_matrix,
+    out_of_set,
+    threshold_table,
+)
 
 __all__ = ["DATASET", "main", "report", "run"]
 
@@ -53,7 +59,17 @@ def _to_prediction(example: Example, outcome: TriageOutcome) -> Prediction:
             predicted=outcome.type,
             confidence=outcome.confidence,
         )
-    return Prediction(expected=example.expected, predicted="needs_human", confidence=0.0)
+    return Prediction(
+        expected=example.expected,
+        predicted="needs_human",
+        confidence=0.0,
+        # D20's own number. Still `needs_human` in the matrix — that is the
+        # outcome the row produced, and the mention reaches a person either
+        # way — but counted separately beside it, because "the model invented
+        # a type" and "the provider was down" are different failures reported
+        # as one without this.
+        out_of_set=outcome.out_of_set,
+    )
 
 
 def _event(example: Example, index: int) -> InboundEvent:
@@ -162,6 +178,19 @@ def report(predictions: list[Prediction]) -> str:
     lines.append("confidence below threshold -> escalated to a human:")
     for threshold, count in threshold_table(predictions).items():
         lines.append(f"  {threshold}: {count}/{len(predictions)}")
+
+    # Always printed, including as zero: a line that appears only when it is
+    # non-zero is a line whose absence means both "none" and "not measured".
+    invented = out_of_set(predictions)
+    lines.append("")
+    lines.append(
+        f"decisions outside the closed set: {invented}/{len(predictions)}"
+        + (
+            "  <- the model named a type that does not exist"
+            if invented
+            else ""
+        )
+    )
 
     return "\n".join(lines)
 

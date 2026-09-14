@@ -75,7 +75,6 @@ __all__ = [
     "MCPServerStdio",
     "ToolContext",
     "create_static_tool_filter",
-    "stop_when",
     "tool",
 ]
 
@@ -166,40 +165,6 @@ def _tool_failed(ctx: RunContextWrapper, error: Exception) -> str:
         return default_tool_error_function(ctx, error)
     log.warning("tool failed: %s", scrub(str(error)))
     return "that tool is unavailable right now — carry on without it"
-
-
-def stop_when(recorded):
-    """Stop the run when the agent has actually recorded something.
-
-    For an agent whose answer arrives as a tool call. The obvious setting is
-    `tool_use_behavior="stop_on_first_tool"`, and it is subtly wrong: it ends
-    the run at the first tool call's **output**, and the SDK cannot tell a
-    tool's success string from its failure string — a `failure_error_function`
-    return value is the tool output. So a call the schema rejects, which the
-    model could fix by emitting it again, instead becomes the run's final
-    answer and nobody reads it.
-
-    `recorded` is a predicate over the run's context — the capture object the
-    tool writes into — and it says what "answered" actually means. Falsely, the
-    model runs again and is handed the tool's output, which is the error
-    message telling it what to correct.
-
-    The retry budget is `max_turns` and nothing else: a bad call spends a turn,
-    so an agent configured for one turn plus the one `run(extra_turns=1)` adds
-    gets exactly one correction before the run is over and the failure becomes
-    a person's. That is deliberate — a model that cannot get its own schema
-    right twice is not going to on the third go, and this is the highest-volume
-    path in the system.
-    """
-
-    def decide(ctx, results) -> ToolsToFinalOutputResult:
-        if results and recorded(ctx.context):
-            return ToolsToFinalOutputResult(
-                is_final_output=True, final_output=results[-1].output
-            )
-        return ToolsToFinalOutputResult(is_final_output=False)
-
-    return decide
 
 
 def tool(func=None, **options):
@@ -306,6 +271,14 @@ class Harness:
         #: failing. `last_error` carries the same words; this is what lets a
         #: caller branch on it without reading them.
         self.refusal: str | None = None
+        #: Set when the model answered and the answer did not fit `answers`.
+        #: The same idiom as `refusal` one line up, and for the same reason:
+        #: `last_error` says it in words, and a caller that has to tell "the
+        #: model named something the shape does not allow" from "the provider
+        #: never answered" should not be reading them. Triage is that caller
+        #: — an invented task type and an outage are different failures and
+        #: are counted separately (D20).
+        self.unfit: str | None = None
         #: The catalogue, for whoever builds this agent's instructions. Read
         #: off the same object the tools came from, so the prompt and the
         #: tools cannot describe different skills.
@@ -364,7 +337,7 @@ class Harness:
                     "an agent that declares `answers=` owns its own "
                     "tool_use_behavior; passing one too would silently win"
                 )
-            tools = [*tools, _answer_tool(answers)]
+            tools = [*tools, _answer_tool(answers, self._refused)]
             agent_options["tool_use_behavior"] = _answered(answers)
             # Without a forced call the model writes prose instead, which is
             # the path this exists to stop being the road. It is not a
@@ -406,6 +379,24 @@ class Harness:
             ),
             **agent_options,
         )
+
+    def _refused(self, problem: str) -> None:
+        """The answer tool turned a call down, and why.
+
+        **The tool has to tell the harness, because the run may not get to.** A
+        model that answers wrongly twice overruns `max_turns`, the SDK raises,
+        `_settle` turns that into a `last_error`, and `run_structured` returns
+        `None` having never seen a reply to check — so the only thing that
+        knows the answer was *refused* rather than *absent* is the tool body
+        that refused it. Without this, an invented task type and a provider
+        outage arrive at the caller identically, which is exactly the pair D20
+        exists to keep apart.
+
+        On the instance, beside `last_error` and `refusal`, and with the same
+        caveat they carry: two runs of one harness at once would overwrite each
+        other. Every caller here runs one at a time.
+        """
+        self.unfit = problem
 
     @property
     def instructions(self) -> str:
@@ -528,6 +519,7 @@ class Harness:
         against the same shape — one path in, one check, whichever surface it
         came over.
         """
+        self.unfit = None
         if self.answers is None:
             raise ValueError(
                 f"{self._config.name} was not built with `answers=`, so there "
@@ -536,11 +528,20 @@ class Harness:
         said = await self.run(
             prompt,
             context=context,
-            # The answer is a tool call, which is the call and its result
-            # where a written answer is one turn. Added here rather than asked
-            # of callers for the reason `tool_turns` is: the harness is the
-            # only thing that knows how its own answer arrives, and three
-            # callers remembering a number is three places to forget.
+            # **This turn is the correction, and nothing else.** A run whose
+            # answer fits ends on the first turn — the terminator finishes it
+            # the moment the tool returns an instance, so the call and its
+            # result are not two turns here the way they are for an agent
+            # whose tools do not end the run. One turn answers; the one added
+            # here is the single go at fixing a call that did not fit, which
+            # is the budget CLAUDE.md states and the reason there is no retry
+            # loop anywhere near this.
+            #
+            # Added here rather than asked of callers for the reason
+            # `tool_turns` is: the harness is the only thing that knows how
+            # its own answer arrives, and three callers remembering a number
+            # is three places to forget. A caller that passes `extra_turns`
+            # is asking for something beyond the correction.
             extra_turns=extra_turns + 1,
             message_id=message_id,
             task_id=task_id,
@@ -551,17 +552,30 @@ class Harness:
 
         answered = _instance_in(said, self.answers)
         if answered is not None:
+            # A run that was corrected and then answered is not an unfit run.
+            # `_refused` fires per turned-down call; clearing it here is what
+            # makes the flag mean "this run produced no answer that fits"
+            # rather than "a call was turned down somewhere along the way".
+            self.unfit = None
             return answered
 
+        # The written-answer fallback (D13), in two steps rather than one, so
+        # the distinction the tool body draws is drawn here too: an object
+        # that arrived and did not fit is the model naming something the shape
+        # does not allow; no object at all is the model saying nothing.
         written = said.final_output
-        value, problem = _fitted(
-            written if isinstance(written, str) else "", self.answers
-        )
-        if problem is None:
-            return value
-        self.last_error = (
-            f"the answer did not fit {self.answers.__name__}: {problem}"
-        )
+        data = find_json(written if isinstance(written, str) else "")
+        if data is not None:
+            value, problem = fits(data, self.answers)
+            if problem is None:
+                self.unfit = None
+                return value
+            self._refused(problem)
+            self.last_error = (
+                f"the answer did not fit {self.answers.__name__}: {problem}"
+            )
+        else:
+            self.last_error = f"there was no {self.answers.__name__} in the reply"
         log.warning("%s: %s", self._config.name, self.last_error)
         return None
 
@@ -951,19 +965,6 @@ def _chat_model(config: AgentConfig) -> OpenAIChatCompletionsModel:
     return OpenAIChatCompletionsModel(model=config.model, openai_client=client)
 
 
-def _fitted(output: str, schema: type) -> tuple[Any | None, str | None]:
-    """`(instance, None)`, or `(None, what to tell the model)`.
-
-    Two failures, one shape of answer: no JSON at all, and JSON that does
-    not fit. They are told apart here because the correction differs — one
-    asks for JSON, the other names the field that was wrong.
-    """
-    data = find_json(output)
-    if data is None:
-        return None, "there was no JSON object in the reply"
-    return fits(data, schema)
-
-
 #: What the model calls to answer. One name for every shape, because an agent
 #: built with `answers=` has exactly one way to finish, and a name that varied
 #: per schema would be a second thing for a prompt to have to know.
@@ -1007,7 +1008,7 @@ def _instance_in(result: Any, schema: type) -> Any | None:
     return _newest_instance(getattr(result, "new_items", ()), schema)
 
 
-def _answer_tool(schema: type) -> FunctionTool:
+def _answer_tool(schema: type, refused=None) -> FunctionTool:
     """The tool an agent answers through, generated from the shape itself.
 
     **Not in `friday/tools/`,** and that is where it would belong if it were a
@@ -1032,9 +1033,20 @@ def _answer_tool(schema: type) -> FunctionTool:
     that text back into the prompt outside the boundary the original put it
     behind. `fits` produces the reason inside this process, and it names the
     field.
+
+    **`refused` is how the harness hears about a turned-down call**, and it
+    exists because the run may never get back to tell it: a model that answers
+    wrongly twice overruns `max_turns` and `run_structured` returns `None`
+    having seen no reply at all. See `Harness._refused`.
     """
 
     async def invoke(ctx: Any, arguments: str) -> Any:
+        # **Neither parse failure calls `refused`.** That signal means the
+        # model *named* something the shape does not allow — a task type that
+        # does not exist — and arguments that are not an object named nothing
+        # at all. Counting the two together would put "the model invented a
+        # label" and "the provider sent noise" in one number, which is the
+        # pair D20 exists to keep apart.
         try:
             data = json.loads(arguments or "{}")
         except json.JSONDecodeError:
@@ -1042,7 +1054,11 @@ def _answer_tool(schema: type) -> FunctionTool:
         if not isinstance(data, dict):
             return "that was not a JSON object — call it again with one"
         value, problem = fits(data, schema)
-        return value if problem is None else f"that did not fit: {problem}"
+        if problem is None:
+            return value
+        if refused is not None:
+            refused(problem)
+        return f"that did not fit: {problem}"
 
     return FunctionTool(
         name=ANSWER,
