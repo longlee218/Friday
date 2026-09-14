@@ -156,7 +156,13 @@ class Responder:
             skills=skills,
             model=model,
             tools=tools,
-            context_type=FridayState if self._has_memory else None,
+            # **Unconditional, where it used to follow `_has_memory`.** The
+            # state travels whether or not this agent has memory tools — the
+            # recording sink reads the message and the task off it (D8) — so a
+            # context type that appeared only when the tools did was the last
+            # place the slot meant two things depending on how the agent was
+            # built. One slot, one type, every time (ticket 09).
+            context_type=FridayState,
             record=record,
             spent=spent,
         )

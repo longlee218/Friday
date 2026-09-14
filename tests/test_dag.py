@@ -789,26 +789,14 @@ async def test_a_one_node_type_hands_over_on_the_same_terms_as_api_issue(db):
 # --- ticket 07: a patch waits for the operator -----------------------------
 
 
-def _fix_bug_agent(*steps):
-    """A real Harness, wired the way `router.py` wires `fix_bug`'s — the two
-    tools, stopping at either — but scripted, so the seam is the model."""
-    from agents.testing import ScriptedModel
-    from friday.agent.harness import Harness
-    from friday.config import AgentConfig
-    from friday.tools.patch import FIX_TOOLS
-    from friday.tools.reply import ComposeCapture
-
-    return Harness(
-        config=AgentConfig(
-            name="dag_fix", api_key="k",
-            base_url="https://example.invalid/v1", model="test-model",
-        ),
-        instructions="fix",
-        tools=FIX_TOOLS,
-        context_type=ComposeCapture,
-        tool_use_behavior={"stop_at_tool_names": [t.name for t in FIX_TOOLS]},
-        model=ScriptedModel(list(steps)),
-    )
+#: `_fix_bug_agent` stood here and is gone. It built a `Harness` around
+#: `friday.tools.patch`'s `FIX_TOOLS` and `friday.tools.reply`'s
+#: `ComposeCapture` — two modules that went with the five-node `api_issue`
+#: graph — so it had been unimportable for as long as those had been missing,
+#: and nothing called it, so nothing said so. Board
+#: `every-answer-has-a-shape`'s ticket 09 is what found it: its guard asks
+#: what every `context_type=` in the repo names, and this answered with a
+#: capture class that no longer exists.
 
 
 async def _wired_for_a_fix(db, fixer):

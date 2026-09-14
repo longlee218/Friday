@@ -30,10 +30,9 @@ and nothing could explain, and the operator answered by hand while the agent
 went on asking. Each ticket names what blocks it; work the frontier.
 
 A fourth board, `.scratch/every-answer-has-a-shape/`, holds nine tickets.
-**01, 02, 04, 05, 06, 07 and 08 are done**; 04 and 06 were merged, because
-replacing `MemoryScope` turned out to be eight production sites reading the
-same four fields rather than the wide refactor the board planned for. **09 is
-next and is unblocked** — the guard that closes the run context to state alone.
+**Every ticket but 03 is done.** 04 and 06 were merged, because replacing
+`MemoryScope` turned out to be eight production sites reading the same four
+fields rather than the wide refactor the board planned for.
 
 **03 is `ready-for-human`**: the operator fills the evaluation rows, which D18
 says are theirs by right, since a classifier scored against labels a model
@@ -571,6 +570,31 @@ not an implementation detail:
   from a conversation it was already holding. It takes one object now, which
   is the whole of D22 — adding one more fact must not mean threading one more
   parameter through five signatures.
+
+  **And it is the only thing the SDK's per-run `context` carries.** That slot
+  used to mean two things at once: "who is this run about" for the responder's
+  memory tools, and "where the answer will appear" for triage and the
+  extractor, whose tools wrote a result into an object the caller read back
+  afterwards. So a classification was not the return value of anything, and
+  following "what did triage decide" meant knowing that a tool wrote into a
+  capture, that a predicate watched it, and that the runner read it after the
+  call returned — none of it in any signature.
+
+  Every agent that declares a context type declares `FridayState`, including
+  one with no memory tools: the recording sink reads the message and the task
+  off the same object, so a context type that appeared only when the tools did
+  was the last place the slot's meaning depended on how the agent was built.
+  `tests/test_run_context.py` holds both halves — that nothing assigns through
+  a `.context`, and that every `context_type=` in the repo is that bare name.
+  The second is the stronger of the two, because `FridayState` is frozen: an
+  agent built that way *cannot* be written into.
+
+  There is deliberately **no third guard on the word "Capture"**. One was
+  written and deleted: it fired on two `Model` subclasses in tests that capture
+  a *prompt*, and the pattern it aimed at is caught the moment it matters by
+  the two above — a capture nothing writes into and nothing declares is
+  harmless dead code. A fuzzy guard that fires on innocent code teaches a
+  reader to edit the guard.
 
 - **`friday/agent/harness.py` is the only module that may import `agents`.** The SDK
   is here for speed, not for keeps, and that is only true while replacing it

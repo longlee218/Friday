@@ -238,14 +238,24 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
     assert "memory_search" in with_calls[0].prompt
 
 
-def test_a_responder_with_memory_is_built_with_the_matching_context_type(monkeypatch):
-    """The SDK's context typing is cosmetic at runtime — passing `context=` at
-    call time populates a tool's `ctx.context` regardless of what `Harness`
-    was constructed with, confirmed separately. The acceptance property this
-    pins is structural: a future reader checking what an agent's tools expect
-    should find the answer on the `Harness` construction, not have to trace
-    into `friday/tools/memory.py` to work it out — and a responder given no
-    store should not claim a context type its tools do not need.
+def test_a_responder_declares_the_run_state_whether_or_not_it_has_memory(monkeypatch):
+    """One slot, one type, every time (board `every-answer-has-a-shape`,
+    ticket 09).
+
+    **This reverses what this test used to assert**, and the reversal is the
+    point rather than a relaxation. It read: "a responder given no store should
+    not claim a context type its tools do not need" — true while the run
+    context meant one thing, where the memory tools read their scope. It means
+    the run's whole state now: which room, which task, which message, which
+    agent, read by the recording sink as well (D8). A responder with no memory
+    tools still has all of those, so a context type that appeared only when the
+    tools did was the last place the slot's meaning depended on how the agent
+    was built.
+
+    The SDK's context typing is cosmetic at runtime — passing `context=`
+    populates a tool's `ctx.context` regardless of what `Harness` was
+    constructed with, confirmed separately. What this pins is structural: a
+    reader asking what a run carries finds the answer on the construction.
     """
     import friday.responder as responder_module
 
@@ -267,7 +277,7 @@ def test_a_responder_with_memory_is_built_with_the_matching_context_type(monkeyp
     Responder(config=CONFIG, model=ScriptedModel([]), db=Store())
     Responder(config=CONFIG, model=ScriptedModel([]))
 
-    assert given == [FridayState, None]
+    assert given == [FridayState, FridayState]
 
 
 def test_the_skill_catalogue_is_in_the_instructions_not_the_per_call_input():
