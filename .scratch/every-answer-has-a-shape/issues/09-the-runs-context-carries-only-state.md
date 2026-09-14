@@ -52,7 +52,22 @@ declares as a context type is harmless dead code, and the instant it is wired
 it is one or the other. A fuzzy guard that fires on innocent code teaches a
 reader to edit the guard.
 
-Both guards deleted once and watched go red, plus a third mutation: a
-conditional picking a different type on one branch, which the first version of
-the check would have passed because it walked every `Name` in the expression
-and subtracted `FridayState`. The value has to *be* the type, not contain it.
+**And the guarantee is the construction, not the syntax.** Probed rather than
+assumed: the syntactic scan catches `ctx.context.x = y` and misses aliasing
+first, `setattr`, and in-place mutation of a field. The first two raise
+`FrozenInstanceError`; the third cannot arise while every field is immutable —
+which was true only by accident of the field types until
+`test_every_field_holds_something_that_cannot_be_changed_in_place` asserted it.
+The holes are now stated in the guard file rather than left to be discovered.
+
+That new test was itself wrong on its first write, and its own mutation found
+it: `get_args(list[str])` is `(str,)`, so a `list` field looked exactly like a
+`str | None` one and passed. It asserted nothing about the case it exists for.
+A union has to be taken apart and a container must not be.
+
+Mutations, each red: a tool assigning through `ctx.context`; a context type
+that is not the state; a conditional picking a different type on one branch —
+which the first version of that check would have *passed*, because it walked
+every `Name` in the expression and subtracted `FridayState`, so the value has
+to *be* the type rather than contain it; and `list`, `dict` and `set` fields on
+the state, with `tuple` and `frozenset` confirmed still accepted.

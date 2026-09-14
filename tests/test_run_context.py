@@ -14,13 +14,29 @@ the answer tools took the captures with them in tickets 07 and 08. What is here
 is the thing that says so out loud, because a rule that was only written down is
 the one this repo keeps finding has drifted.
 
-Two halves, and they close different doors:
+Two halves, and they close different doors — but only one of them is the real
+guarantee, and it is worth being exact about which:
 
-- Every agent that declares a context type declares `FridayState`. Since that
-  class is frozen, an agent built this way *cannot* be written into — closed by
-  construction rather than by anybody remembering.
-- `context_type` is optional, though, so an agent can still be handed any object
-  through `run(context=...)`. The syntactic half is what covers that door.
+- **The construction.** Every agent that declares a context type declares
+  `FridayState`. That class is frozen, and every one of its fields holds
+  something that cannot be changed in place
+  (`tests/test_friday_state.py::test_every_field_holds_something_that_cannot_be_changed_in_place`)
+  — so an agent built this way cannot be written into at all. Nobody has to
+  remember anything.
+- **The syntax**, which is a net rather than a proof. `context_type` is
+  optional, so an agent can still be handed any object through
+  `run(context=...)`, and the scan below is what covers that door.
+
+**What the syntactic half misses, stated rather than discovered later.** It
+matches an assignment whose target walks through a `.context` attribute, so
+`ctx.context.decided = x` is caught and these are not: aliasing first
+(`state = ctx.context` then `state.decided = x`), `setattr(ctx.context, ...)`,
+and in-place mutation of a field (`ctx.context.items.append(x)`). The first two
+raise `FrozenInstanceError` at runtime and the third cannot arise while every
+field is immutable — which is exactly why that is asserted rather than left
+true by accident. Chasing every spelling here would be a losing game against a
+language; the construction is what closes the door, and this is what notices
+somebody propping open a different one.
 """
 
 from __future__ import annotations

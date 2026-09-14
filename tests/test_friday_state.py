@@ -119,3 +119,57 @@ def test_a_state_is_built_from_the_message_that_started_the_journey():
     assert state.reply_to == event.reply_to
     assert state.agent == "triage"
     assert state.task_id is None, "a message has not become a task yet"
+
+
+def test_every_field_holds_something_that_cannot_be_changed_in_place():
+    """`frozen=True` stops assignment; it does not stop mutation.
+
+    A frozen dataclass with a `list` field hands every holder of it a way to
+    change what the others see — `state.things.append(x)` needs no assignment
+    and raises nothing. That matters here more than it usually would, because
+    this value is what the SDK's per-run context carries, and the whole of
+    board `every-answer-has-a-shape`'s ticket 09 is that a tool cannot write
+    into that slot. Frozen plus immutable fields is what makes that true by
+    construction; the syntactic guard in `tests/test_run_context.py` is a net
+    under the case where an agent is handed something that is not this type at
+    all, and it cannot see an in-place mutation either.
+
+    So: every field, checked, rather than "they all happen to be strings
+    today". A `tuple` or a `frozenset` would pass and should; a `list`, `dict`
+    or `set` is what this refuses.
+    """
+    import types
+    from dataclasses import fields as dataclass_fields
+    from typing import Union, get_args, get_origin, get_type_hints
+
+    immutable = {str, int, float, bool, bytes, frozenset, tuple, type(None)}
+
+    def settled(annotation) -> bool:
+        """Whether nothing reachable through this annotation can be changed in
+        place.
+
+        **A union has to be taken apart and a container must not be**, which
+        is the distinction the first version of this got wrong and a mutation
+        caught: `get_args(list[str])` is `(str,)`, so a `list` field looked
+        exactly like a `str | None` one and passed. The guard asserted nothing
+        about the case it exists for.
+        """
+        origin = get_origin(annotation)
+        if origin in (Union, types.UnionType):
+            return all(settled(part) for part in get_args(annotation))
+        # `tuple[str, ...]` is settled; `list[str]` is not. The container
+        # decides, not what it holds — and `origin or annotation` is what
+        # makes a bare `str` and a subscripted `tuple` both reach the check.
+        return (origin or annotation) in immutable
+
+    hints = get_type_hints(FridayState)
+    mutable = [
+        (f.name, hints[f.name])
+        for f in dataclass_fields(FridayState)
+        if not settled(hints[f.name])
+    ]
+
+    assert mutable == [], (
+        f"a field that can be changed in place reopens the run context: "
+        f"{mutable}"
+    )
