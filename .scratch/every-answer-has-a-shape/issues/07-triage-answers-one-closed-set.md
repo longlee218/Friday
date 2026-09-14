@@ -68,3 +68,27 @@ confusion matrix and the threshold table reported alongside a change to
 triage's prompt. Running it now would produce an "after" with no "before",
 against a set too thin to catch a regression — the measurement D16 calls
 worthless. The runner is ready and reports the new out-of-set number.
+
+## Review
+
+`/code-review` against `bee022f`, Standards and Spec as parallel subagents.
+**Both axes independently found the same defect, and it was the one this board
+was opened to kill, reintroduced in triage.** `Decided.type` defaulted to
+`skip`, `fits` drops unknown keys by design, and every remaining field had a
+default — so an empty answer, or one using the deleted tool's own former field
+name `task_type`, validated cleanly into a silent discard. That is CLAUDE.md's
+"Never drop a mention". Neither field has a default now.
+
+`out_of_set` was also counting failures it then described wrongly: it fired on
+any validation failure, so a malformed `confidence` was reported under "the
+model named a type that does not exist". `fits` returns which fields failed now
+(`structured.Unfit`), rather than the caller matching a substring against a
+sentence written for a model.
+
+Four smaller findings, all verified before acting: a stale Layout row in
+CLAUDE.md, a flag cleared in the wrong place so a plain `run()` could read it
+stale, a comment that contradicted its own test, and two tests reaching through
+the harness into the SDK. Two judgement calls declined with reasons.
+
+See the commit `Ticket 07 review: a silent discard I introduced, and five
+smaller findings`. Every fix carries a test, deleted once and watched go red.
