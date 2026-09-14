@@ -338,7 +338,7 @@ async def test_a_field_the_type_does_not_have_is_refused_rather_than_asked_about
     value, problem = fits({"ask_about": ["deployment_colour"]}, answer_shape(ApiIssueParams))
 
     assert value is None
-    assert "ask_about" in problem
+    assert "ask_about" in problem.fields
 
 
 # --- triage classifies; extraction is the only producer ---------------------

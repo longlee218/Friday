@@ -14,7 +14,9 @@ from typing import Any, Literal
 
 from friday.domain.models import DECISIONS, PARAMS, SKIP
 
-__all__ = ["Action", "Ask", "Decided", "HandOver", "NeedsHuman", "Reply"]
+__all__ = [
+    "Action", "Ask", "Decided", "HandOver", "NeedsHuman", "Reply", "TriageOutcome",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,12 +140,25 @@ class Decided:
     it.
     """
 
-    type: Literal[DECISIONS] = field(  # type: ignore[valid-type]
-        default=SKIP, metadata={"doc": _TYPE_DOC}
-    )
+    #: **Neither field has a default, and that is the guard rather than a
+    #: style.** `skip` opens nothing — `TriageRunner._apply` logs a line and
+    #: returns — so it is the one decision that must never be reachable by
+    #: accident. A default of `skip` made it the decision the system reached
+    #: when the model said *nothing at all*: `fits` drops unknown keys, every
+    #: remaining field had a default, and an empty answer validated cleanly
+    #: into a silent discard. That is CLAUDE.md's "never to a silent discard",
+    #: and it is the same shape as the failure this board was opened for — an
+    #: unreadable answer becoming a successful one because every field had a
+    #: default.
+    #:
+    #: The realistic trigger was not an empty object but a stale field name:
+    #: `task_type` is what the deleted `classify` tool called this, so a model
+    #: carrying that habit named a real type and had it dropped. Without a
+    #: default, pydantic answers "Field required", which is exactly the
+    #: correction the answer tool hands back.
+    type: Literal[DECISIONS] = field(metadata={"doc": _TYPE_DOC})  # type: ignore[valid-type]
     confidence: float = field(
-        default=0.0,
-        metadata={"doc": "how certain you are of this classification, 0 to 1."},
+        metadata={"doc": "how certain you are of this classification, 0 to 1."}
     )
 
 

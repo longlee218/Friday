@@ -62,7 +62,7 @@ from openai import (
 
 from pydantic import TypeAdapter
 
-from friday.agent.structured import describe, find_json, fits
+from friday.agent.structured import Unfit, describe, find_json, fits
 from friday.config import AgentConfig
 from friday.ops.redact import scrub
 
@@ -271,14 +271,19 @@ class Harness:
         #: failing. `last_error` carries the same words; this is what lets a
         #: caller branch on it without reading them.
         self.refusal: str | None = None
-        #: Set when the model answered and the answer did not fit `answers`.
-        #: The same idiom as `refusal` one line up, and for the same reason:
-        #: `last_error` says it in words, and a caller that has to tell "the
-        #: model named something the shape does not allow" from "the provider
-        #: never answered" should not be reading them. Triage is that caller
-        #: — an invented task type and an outage are different failures and
-        #: are counted separately (D20).
-        self.unfit: str | None = None
+        #: Set when the model answered and the answer did not fit `answers`:
+        #: why, and which of the shape's fields said so. The same idiom as
+        #: `refusal` one line up, and for the same reason — `last_error` says
+        #: it in words, and a caller that has to branch should not be reading
+        #: them.
+        #:
+        #: Triage is that caller, and it branches on the *field*: "the model
+        #: named a task type that does not exist" and "the model wrote
+        #: nonsense in the confidence" are one validation failure and two
+        #: different things to tell an operator (D20). `Unfit.fields` is what
+        #: makes that answerable without matching a substring against a
+        #: sentence written for a model.
+        self.unfit: Unfit | None = None
         #: The catalogue, for whoever builds this agent's instructions. Read
         #: off the same object the tools came from, so the prompt and the
         #: tools cannot describe different skills.
@@ -372,15 +377,22 @@ class Harness:
             # `answers=` put `tool_choice` in the second while `settings:` in
             # `config.yaml` can put it in the first. A crash at construction
             # is a boot loop, and the operator's only clue would be a keyword
-            # name. The per-agent value wins, which is the direction every
-            # other override here runs.
+            # name.
+            #
+            # **What this class wired itself wins over the file**, which is
+            # the opposite of the usual direction and is deliberate for the
+            # one key that collides: an `answers=` agent that does not force
+            # its tool call writes prose instead, so a `tool_choice: auto` in
+            # `config.yaml` would quietly disable the mechanism the agent was
+            # built around. This comment claimed the other direction until a
+            # review read it against the test that pins this one.
             model_settings=ModelSettings(
                 **{**config.settings, **agent_options.pop("model_settings", {})}
             ),
             **agent_options,
         )
 
-    def _refused(self, problem: str) -> None:
+    def _refused(self, problem: Unfit) -> None:
         """The answer tool turned a call down, and why.
 
         **The tool has to tell the harness, because the run may not get to.** A
@@ -413,6 +425,20 @@ class Harness:
     def tool_servers(self) -> list:
         """The tool servers this agent was handed. Same reason as above."""
         return list(self.agent.mcp_servers)
+
+    @property
+    def tools(self) -> list:
+        """Every tool this agent can reach, including the ones this class
+        wired itself — the four skill tools, and the answer tool an
+        `answers=` agent finishes through.
+
+        Same reason as the two properties above: composition is worth
+        checking, and the alternative is a test reaching through here into
+        the SDK's own object to do it, which is the reach this module's seam
+        rule exists to keep cheap to break. Two tests did exactly that before
+        this property existed.
+        """
+        return list(self.agent.tools)
 
     async def run(
         self,
@@ -519,7 +545,6 @@ class Harness:
         against the same shape — one path in, one check, whichever surface it
         came over.
         """
-        self.unfit = None
         if self.answers is None:
             raise ValueError(
                 f"{self._config.name} was not built with `answers=`, so there "
@@ -572,7 +597,7 @@ class Harness:
                 return value
             self._refused(problem)
             self.last_error = (
-                f"the answer did not fit {self.answers.__name__}: {problem}"
+                f"the answer did not fit {self.answers.__name__}: {problem.why}"
             )
         else:
             self.last_error = f"there was no {self.answers.__name__} in the reply"
@@ -660,6 +685,12 @@ class Harness:
 
         self.last_error = None
         self.refusal = None
+        # Cleared here rather than in `run_structured`, which is where it was:
+        # `_settle` is the one place every run begins, so a harness with an
+        # `answers=` shape that is called through plain `run()` cannot read a
+        # flag left by the run before it. No caller does that today, which is
+        # exactly the condition under which a trap like this is laid.
+        self.unfit = None
         if (refusal := await self._over_budget()) is not None:
             self.last_error = self.refusal = refusal
             log.warning("%s not called: %s", self._config.name, refusal)
@@ -1058,7 +1089,7 @@ def _answer_tool(schema: type, refused=None) -> FunctionTool:
             return value
         if refused is not None:
             refused(problem)
-        return f"that did not fit: {problem}"
+        return f"that did not fit: {problem.why}"
 
     return FunctionTool(
         name=ANSWER,

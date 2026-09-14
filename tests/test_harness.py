@@ -1038,8 +1038,11 @@ def test_an_agent_can_declare_both_a_shape_and_its_own_tool_choice():
     process that migrates and builds its agents before it serves anything, that
     is a boot loop whose only clue is a keyword name.
 
-    The per-agent value wins, which is the direction every other override in
-    this constructor runs.
+    **What the harness wired itself wins over the file**, which is the
+    opposite of the usual direction and is deliberate for the one key that
+    collides: an `answers=` agent that does not force its tool call writes
+    prose instead, so a `tool_choice: auto` in `config.yaml` would quietly
+    disable the mechanism the agent was built around.
     """
     from dataclasses import dataclass
 

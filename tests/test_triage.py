@@ -345,7 +345,7 @@ def test_triage_still_has_exactly_the_one_tool_that_is_its_answer():
 
     triage = triage_with()
 
-    assert [t.name for t in triage._run.agent.tools] == [ANSWER]
+    assert [t.name for t in triage._run.tools] == [ANSWER]
 
 
 # --- triage reads a light context (ticket 09) -----------------------------
@@ -879,7 +879,7 @@ def test_triage_is_never_asked_for_anything_but_a_type_and_a_confidence():
     """
     triage = triage_with()
 
-    for tool in triage._run.agent.tools:
+    for tool in triage._run.tools:
         asked = set(tool.params_json_schema.get("properties", {}))
         assert asked <= {"type", "confidence"}, f"{tool.name} also asks for {asked}"
 
@@ -908,3 +908,95 @@ def test_a_task_type_that_never_wrote_down_what_it_means_is_refused_at_import():
 
     with pytest.raises(ValueError, match="constructor signature"):
         _means("mystery", Undocumented)
+
+
+async def test_an_answer_that_names_no_type_is_never_silently_a_skip():
+    """**The bug this whole board exists to kill, reintroduced in triage and
+    found by review.**
+
+    `skip` opens nothing: `TriageRunner._apply` logs a debug line and returns,
+    so the mention leaves the queue and nobody ever sees it. That makes `skip`
+    the one decision that must never be reachable by accident — and giving
+    `Decided.type` a default of `skip` made it the decision the system reaches
+    when the model says *nothing at all*. `fits` drops unknown keys, every
+    remaining field had a default, and an empty answer validated cleanly into a
+    silent discard.
+
+    Which is CLAUDE.md's "Never drop a mention... never to a silent discard",
+    and it is the same shape as the failure this board was opened for: an
+    unreadable answer becoming a successful one because every field had a
+    default.
+    """
+    from agents.testing import ScriptedModel, function_call
+
+    nothing = {}
+    triage = triage_with(
+        [function_call("answer", nothing, call_id="1")],
+        [function_call("answer", nothing, call_id="2")],
+    )
+
+    outcome = await decide(triage, text="the api is 500ing")
+
+    assert isinstance(outcome, NeedsHuman), (
+        "a model that named no type produced a silent discard"
+    )
+
+
+async def test_the_tools_own_former_parameter_name_is_not_a_skip_either():
+    """The realistic shape of the same bug, and the reason a default was
+    dangerous rather than merely untidy: `task_type` is what the deleted
+    `classify` tool called this field, so a model carrying that habit — from a
+    few-shot example, from its own training, from a prompt someone half
+    updated — named a real type and had it dropped.
+
+    Unknown keys are dropped by design (that tolerance is load-bearing and
+    older than this board), so the only thing standing between a stale field
+    name and a lost mention is `type` having no default.
+    """
+    from agents.testing import ScriptedModel, function_call
+
+    stale = {"task_type": "api_issue", "confidence": 0.9}
+    triage = triage_with(
+        [function_call("answer", stale, call_id="1")],
+        [function_call("answer", stale, call_id="2")],
+    )
+
+    assert isinstance(await decide(triage), NeedsHuman)
+
+
+def test_both_of_the_fields_triage_answers_are_required():
+    """Asserted on the schema as well as through the run, because this is the
+    guard and a guard that only holds by accident of another test's scripting
+    is not one."""
+    from friday.agent.harness import _answer_tool
+
+    schema = _answer_tool(Decided).params_json_schema
+
+    assert set(schema.get("required", ())) == {"type", "confidence"}
+
+
+async def test_a_malformed_confidence_is_not_reported_as_an_invented_type():
+    """D20 splits one failure into two numbers, and the split has to be true
+    of each of them: the report says "the model named a type that does not
+    exist", so it must not say it about a model that named a real type and
+    then wrote nonsense in the other field.
+
+    Found by review. The signal fired on *any* validation failure, so a
+    confidence of `"very high"` — which is a formatting mistake, not an
+    invented decision — was counted as an invented type and printed under that
+    sentence.
+    """
+    from agents.testing import ScriptedModel, function_call
+
+    wrong_shape = {"type": "api_issue", "confidence": "very high"}
+    triage = triage_with(
+        [function_call("answer", wrong_shape, call_id="1")],
+        [function_call("answer", wrong_shape, call_id="2")],
+    )
+
+    outcome = await decide(triage)
+
+    assert isinstance(outcome, NeedsHuman)
+    assert not outcome.out_of_set, (
+        "a malformed confidence was reported as an invented task type"
+    )

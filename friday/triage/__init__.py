@@ -150,9 +150,17 @@ class Triage:
             # the provider being down: one says a prompt or a model is wrong,
             # the other says the network was, and counting them together would
             # hide the failure this change exists to make impossible.
+            unfit = self._run.unfit
             return NeedsHuman(
                 f"triage failed: {self._run.last_error}",
-                out_of_set=self._run.unfit is not None,
+                # **`type` specifically, not "something did not fit"** (D20).
+                # The eval prints this under "the model named a type that does
+                # not exist", so it has to be true of every row it counts: a
+                # confidence of `"very high"` is a formatting mistake, not an
+                # invented decision, and reporting it as one would make the
+                # number say something it does not mean. Found by review — the
+                # flag fired on any validation failure at first.
+                out_of_set=unfit is not None and "type" in unfit.fields,
             )
         log.info(
             "triaged %s: %s (%.2f)",

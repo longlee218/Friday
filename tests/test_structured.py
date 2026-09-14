@@ -105,13 +105,13 @@ def test_a_wrong_type_is_refused_rather_than_constructed():
     value, problem = fits({"name": ["a", "b"]}, Shape)
 
     assert value is None
-    assert "name" in problem
+    assert "name" in problem.fields
 
 
 def test_the_reason_names_the_field_so_the_model_can_fix_it():
     _, problem = fits({"count": "not a number"}, Shape)
 
-    assert "count" in problem
+    assert "count" in problem.fields
 
 
 def test_an_unknown_key_is_dropped_not_fatal():
@@ -346,7 +346,7 @@ def test_an_object_of_entirely_unknown_keys_is_refused_not_emptied():
     value, problem = fits({"parameters": {"name": "x"}}, Shape)
 
     assert value is None
-    assert "parameters" in problem
+    assert "parameters" in problem.why
 
 
 def test_a_literally_empty_object_is_still_an_answer():
@@ -465,7 +465,7 @@ def test_the_reason_a_shape_refuses_never_carries_the_value_that_was_refused():
     ):
         _, problem = fits(data, shape)
         assert problem is not None
-        assert "send without approval" not in problem, problem
+        assert "send without approval" not in problem.why, problem.why
 
 
 async def test_arguments_that_are_not_an_object_are_not_the_model_naming_anything():
@@ -502,3 +502,61 @@ async def test_a_run_that_was_corrected_and_then_answered_is_not_an_unfit_run():
 
     assert await harness.run_structured("ask") == Shape(name="x")
     assert harness.unfit is None, "a recovered run is still flagged as unfit"
+
+
+def test_a_refusal_says_which_fields_said_so_not_only_why():
+    """A caller that acts differently per field should not be reading the
+    sentence to find out which one. Matching `"type:"` against a message
+    written for a model would be a private protocol between that message and
+    somebody's `startswith`, and the message is free to be reworded.
+
+    Triage is the caller: an invented task type and a malformed confidence are
+    one validation failure and two different things to tell an operator."""
+    _, problem = fits({"name": ["a"], "count": "nope"}, Shape)
+
+    assert problem.fields == {"name", "count"}
+
+
+def test_a_nested_failure_names_the_field_a_caller_can_act_on():
+    """`ask_about.0` is a failure of `ask_about`. Top-level names only,
+    because that is the granularity anything upstream can do something
+    about."""
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction.answer import answer_shape
+
+    _, problem = fits({"ask_about": ["deployment_colour"]}, answer_shape(ApiIssueParams))
+
+    assert problem.fields == {"ask_about"}
+
+
+def test_an_object_with_none_of_the_shapes_keys_blames_every_field():
+    """None of them arrived, so a caller asking "was mine the problem" gets a
+    true yes. The alternative — an empty set — would let triage read a reply
+    that named nothing at all as "the type was fine"."""
+    value, problem = fits({"parameters": {"name": "x"}}, Shape)
+
+    assert value is None
+    assert problem.fields == {"name", "count", "tags", "note"}
+
+
+async def test_a_stale_refusal_does_not_survive_into_the_next_run():
+    """The flag is set from inside a tool body, so it outlives the call that
+    set it by design — a run that overruns its turns never gets back to report.
+    That makes clearing it the responsibility of whatever starts the next run,
+    and `run_structured` is not the only thing that can: a harness with a shape
+    can be called through plain `run()` too.
+
+    No caller does that today, which is exactly the condition under which a
+    trap like this gets laid and then found by someone else."""
+    harness = _asking(
+        [function_call("answer", {"name": ["a"]}, call_id="1")],
+        [function_call("answer", {"name": ["b"]}, call_id="2")],
+        [assistant_message("ok")],
+    )
+
+    await harness.run_structured("ask")
+    assert harness.unfit is not None
+
+    await harness.run("ask again")
+
+    assert harness.unfit is None, "the next run read a flag left by the last"

@@ -36,12 +36,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
 from typing import Any, Literal, get_args, get_origin, get_type_hints
 
 from pydantic import TypeAdapter, ValidationError
 
-__all__ = ["describe", "find_json", "fits"]
+__all__ = ["Unfit", "describe", "find_json", "fits"]
 
 log = logging.getLogger(__name__)
 
@@ -148,12 +149,33 @@ def _closing_brace(text: str, start: int) -> int | None:
     return None
 
 
-def fits(data: dict[str, Any], schema: type) -> tuple[Any | None, str | None]:
-    """`(instance, None)` when `data` fits `schema`, `(None, why)` when not.
+@dataclass(frozen=True, slots=True)
+class Unfit:
+    """Why some data does not fit a shape, and which of its fields said so.
 
-    `why` is written for the model, not for a log: it is handed straight
-    back on the repair turn, so it names the field and what was wrong with
-    it rather than quoting a Python traceback.
+    `why` is written for the model, not for a log: it is handed straight back
+    on the repair turn, so it names the field and what was wrong with it
+    rather than quoting a Python traceback.
+
+    **`fields` is the same information structurally**, and it exists because a
+    caller that has to act differently per field should not be reading the
+    sentence to find out which one. Triage is that caller: "the model named a
+    task type that does not exist" and "the model wrote nonsense in the
+    confidence" are one validation failure and two different things to tell an
+    operator, and the eval reports them as two numbers. Matching `"type:"`
+    against `why` would work today and would be a private protocol between a
+    message written for a model and a `startswith` written for a person.
+
+    Top-level names only: a failure at `ask_about.0` is a failure of
+    `ask_about`, which is the field a caller can do anything about.
+    """
+
+    why: str
+    fields: frozenset[str]
+
+
+def fits(data: dict[str, Any], schema: type) -> tuple[Any | None, Unfit | None]:
+    """`(instance, None)` when `data` fits `schema`, `(None, Unfit)` when not.
 
     **An unknown key is dropped, not fatal**, which is the one tolerance
     kept from the parser this replaces — and kept for its recorded reason: a
@@ -182,17 +204,28 @@ def fits(data: dict[str, Any], schema: type) -> tuple[Any | None, str | None]:
         # A literal `{}` is left alone: that is a model saying it found
         # nothing, which is an answer, and every field being absent is what
         # it means.
-        return None, (
-            f"none of the keys are ones this shape has — it names "
-            f"{', '.join(sorted(known))}, and the reply had "
-            f"{', '.join(unknown)}"
+        return None, Unfit(
+            why=(
+                f"none of the keys are ones this shape has — it names "
+                f"{', '.join(sorted(known))}, and the reply had "
+                f"{', '.join(unknown)}"
+            ),
+            # Every field this shape has, because none of them arrived. A
+            # caller asking "was my field the problem" gets a true yes.
+            fields=frozenset(known),
         )
     try:
         return TypeAdapter(schema).validate_python(kept), None
     except ValidationError as invalid:
-        return None, "; ".join(
-            f"{'.'.join(str(p) for p in e['loc']) or 'the object'}: {e['msg']}"
-            for e in invalid.errors()
+        errors = invalid.errors()
+        return None, Unfit(
+            why="; ".join(
+                f"{'.'.join(str(p) for p in e['loc']) or 'the object'}: {e['msg']}"
+                for e in errors
+            ),
+            fields=frozenset(
+                str(e["loc"][0]) for e in errors if e["loc"]
+            ),
         )
 
 
