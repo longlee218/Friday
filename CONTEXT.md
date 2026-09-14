@@ -409,11 +409,9 @@ Three readers so far: the memory tools take it as their scope, the recording
 sink reads the message and the task off it, and the responder stamps its own
 name on it before writing anything down.
 
-It is also the **only** thing the run context carries. That slot meant two
-things at once — which room a run is about, and where an agent's answer would
-appear — because a tool could write its result into an object the caller read
-back afterwards. An answer is the return value of the call that asked for it
-now, so the slot has one meaning and the state is it.
+What made the slot mean two things was that a tool could write its result into
+an object the caller read back afterwards. An answer is the return value of the
+call that asked for it now, so there is nothing else for the slot to carry.
 
 ## Memory
 

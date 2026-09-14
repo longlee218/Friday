@@ -71,3 +71,46 @@ which the first version of that check would have *passed*, because it walked
 every `Name` in the expression and subtracted `FridayState`, so the value has
 to *be* the type rather than contain it; and `list`, `dict` and `set` fields on
 the state, with `tuple` and `frozenset` confirmed still accepted.
+
+
+## Review
+
+`/code-review` against `4aab038`, Standards and Spec as parallel subagents.
+Both converged on the same thing, and it is worth stating plainly: **the
+syntactic guard is a net, not the closure.** Both found the alias
+(`state = ctx.context` then `state.decided = x`) independently, and it is the
+likeliest spelling of the three it misses, because `friday/tools/memory.py`
+already opens with exactly that line — it is the shape a tool author has in
+front of them. The guard's docstring and CLAUDE.md both said "pinned shut";
+they now say what closes the door (frozen, with immutable fields, asserted)
+and what merely watches it.
+
+Four more, all verified before acting:
+
+- **The scan did not cover the composition root.** `SOURCES` read `friday/`
+  and `tests/` while CLAUDE.md claimed "every `context_type=` in the repo" —
+  so an agent wired wrongly in `run_agent.py`, *the one place adapters are
+  constructed*, was exactly what these guards exist to catch and exactly what
+  they could not see. `evals/` builds a real `Triage` and was outside too.
+  Both now scanned, and both mutated to prove it.
+- **Two lines of CLAUDE.md still described the old mechanism**: triage
+  stopping on `capture.decided is not None`, and captures travelling with a
+  tool. This is the file that goes stale silently, in the ticket whose job was
+  to stop that.
+- **The write guard is broad on purpose** — any store through an attribute
+  named `context` fires, including `friday/dag/prepare.py`'s `FullContext`.
+  That is the right way round here, but it was the same false-positive shape
+  this ticket rejected a third guard for, so the message now says what it saw
+  rather than what it concluded.
+- **Prose duplication**: CONTEXT.md's new paragraph restated its own opening
+  twenty lines above, the responder gained a comment already written sixty
+  lines below it, and the `_fix_bug_agent` tombstone carried a fourth copy of
+  its own provenance. All trimmed.
+
+One thing the Spec axis asked that is worth recording: with this ticket done,
+is the spec's *"Nothing is read off a capture; no caller parses anything"*
+true? **The first half, yes** — nothing in `friday/` reads a capture. The
+second is true of every answer with a shape, and not literally true of the
+responder, which still strips a reasoning block out of free text. That is D12
+working as written: prose is the responder's actual product, and giving it a
+shape would be a lie about what it returns.

@@ -49,10 +49,23 @@ REPO = Path(__file__).resolve().parents[1]
 #: Read rather than imported: the point is to catch a tool that writes into the
 #: context in a module nothing here imports, and an import-based check only ever
 #: sees what it already knows about.
+#:
+#: **Every Python file this project owns**, which `friday/` and `tests/` alone
+#: were not. `run_agent.py` is the composition root — the one place adapters
+#: are constructed — so an agent wired there with the wrong context type was
+#: exactly the thing these guards exist to catch and exactly what they could
+#: not see. `evals/` builds a real `Triage`. Both were outside the scan while
+#: CLAUDE.md claimed it covered the repo.
+#:
+#: `migrations/` and `.agents/` are skipped for opposite reasons: a migration
+#: is generated and frozen, and `.agents/` is somebody else's vendored skill
+#: that happens to live here.
+_SKIP = ("migrations", ".agents", ".venv", "node_modules", "web")
+
 SOURCES = sorted(
     path
-    for where in ("friday", "tests")
-    for path in (REPO / where).rglob("*.py")
+    for path in REPO.rglob("*.py")
+    if not any(part in _SKIP for part in path.relative_to(REPO).parts)
 )
 
 
@@ -71,7 +84,13 @@ def test_nothing_writes_into_the_run_context():
     obvious-looking way for a tool to hand something back.
 
     Matched on the *shape* of the assignment rather than on the name `ctx`,
-    since the parameter can be called anything.
+    since the parameter can be called anything — which makes it deliberately
+    broad: any store through an attribute named `context` fires, including one
+    that has nothing to do with a run (`friday/dag/prepare.py` calls a
+    `FullContext` `context`). That is the right way round for this particular
+    guard, because a false positive here is a rename or a conversation and a
+    false negative is the side channel coming back. The message says what it
+    saw rather than what it concluded, so the conversation can happen.
     """
     offenders: dict[str, list[int]] = {}
     for path, tree in _trees():
@@ -86,8 +105,11 @@ def test_nothing_writes_into_the_run_context():
             offenders[str(path.relative_to(REPO))] = lines
 
     assert offenders == {}, (
-        f"something writes into the run context, which is the side channel "
-        f"this board closed: {offenders}"
+        f"an assignment through an attribute named `context`: {offenders}. If "
+        f"that is a run's context, it is the side channel this board closed "
+        f"and it must not come back. If it is some other object that happens "
+        f"to be called `context`, this guard is broad on purpose — say so "
+        f"here rather than narrowing it."
     )
 
 
@@ -105,6 +127,21 @@ def _walks_through_context(node: ast.expr) -> bool:
     return False
 
 
+#: **What this misses, and why it is not chased.** A local alias
+#: (`state = ctx.context` then `state.decided = x`) is invisible to it, and so
+#: are `setattr` and mutation by method call. Two reviews found the alias
+#: independently, and it is the likeliest of the three — `friday/tools/memory.py`
+#: already opens with `state = getattr(ctx, "context", None)`, so it is the
+#: shape a tool author has in front of them.
+#:
+#: Chasing every spelling is a losing game against a language, and it is the
+#: wrong place to spend the effort: all three are closed by `FridayState` being
+#: frozen with immutable fields, which is a property rather than a pattern
+#: match. This catches the shape the side channel actually took here — a tool
+#: writing straight into `ctx.context` — which is the shape somebody
+#: reintroducing it would most likely reach for.
+
+
 def test_every_agent_that_declares_a_context_declares_the_state():
     """One slot, one type. `FridayState` is frozen, so an agent built this way
     cannot be written into at all — which is the guarantee the test above
@@ -114,6 +151,12 @@ def test_every_agent_that_declares_a_context_declares_the_state():
     used consistently" would pass on the day somebody introduces a second
     context type and uses it everywhere, which is the exact thing being
     forbidden.
+
+    **Two agents declare one today** — triage and the responder. The extractor
+    and the summariser declare none at all, which is legal: `context_type` is
+    the SDK's generic parameter and nothing requires it. So this binds "if you
+    declare one, it is the state" and not "every agent declares one", and the
+    difference is worth knowing before reading it as broader than it is.
     """
     declared: dict[str, list[str]] = {}
     for path, tree in _trees():
@@ -131,7 +174,14 @@ def test_every_agent_that_declares_a_context_declares_the_state():
                 declared.setdefault(str(path.relative_to(REPO)), []).append(said)
 
     assert declared == {}, (
-        f"an agent declares a run context that is not the state: {declared}"
+        # What it saw, not what it concluded. `models.FridayState` and an
+        # import alias are both *the state* spelled differently, and both fail
+        # here — which is the right call for a guard that has to be readable
+        # rather than clever, but only if the message does not accuse them of
+        # being something else.
+        f"a context type that is not the bare name `FridayState`: {declared}. "
+        f"If it is the state under another spelling, spell it this way; if it "
+        f"is a different type, that is the thing this guard forbids."
     )
 
 

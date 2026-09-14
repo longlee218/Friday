@@ -793,10 +793,7 @@ async def test_a_one_node_type_hands_over_on_the_same_terms_as_api_issue(db):
 #: `friday.tools.patch`'s `FIX_TOOLS` and `friday.tools.reply`'s
 #: `ComposeCapture` — two modules that went with the five-node `api_issue`
 #: graph — so it had been unimportable for as long as those had been missing,
-#: and nothing called it, so nothing said so. Board
-#: `every-answer-has-a-shape`'s ticket 09 is what found it: its guard asks
-#: what every `context_type=` in the repo names, and this answered with a
-#: capture class that no longer exists.
+#: and nothing called it, so nothing said so.
 
 
 async def _wired_for_a_fix(db, fixer):

@@ -224,8 +224,7 @@ across four modules that each owned part of the answer, and two of them were
 invisible to a `grep` for `@tool` because they are wrapped by calling
 `tool(fn)` after `__doc__` is assigned. Nor was the guard argument true: what
 gates `apply_fix` is `needs_approval=True` on the decorator, which travels
-with the function; the captures are per-run dataclasses that travel with it
-too.
+with the function.
 
 So **every tool lives in `friday/tools/`**, one module per subject, and
 `tests/test_tools.py` enforces both halves of that: the list of tools is
@@ -585,16 +584,24 @@ not an implementation detail:
   off the same object, so a context type that appeared only when the tools did
   was the last place the slot's meaning depended on how the agent was built.
   `tests/test_run_context.py` holds both halves — that nothing assigns through
-  a `.context`, and that every `context_type=` in the repo is that bare name.
-  The second is the stronger of the two, because `FridayState` is frozen: an
-  agent built that way *cannot* be written into.
+  a `.context`, and that every `context_type=` this project owns is that bare
+  name (it scanned `friday/` and `tests/` alone until a review pointed out
+  that `run_agent.py`, the one place adapters are constructed, was outside it).
+  **The second is the guarantee and the first is a net.** `FridayState` is
+  frozen and every one of its fields holds something that cannot be changed in
+  place — asserted, since frozen alone says nothing about a `list` field — so
+  an agent built that way *cannot* be written into by any spelling. The scan
+  covers the other door: `context_type` is optional, so an agent can still be
+  handed an object that is not the state at all.
 
   There is deliberately **no third guard on the word "Capture"**. One was
   written and deleted: it fired on two `Model` subclasses in tests that capture
-  a *prompt*, and the pattern it aimed at is caught the moment it matters by
-  the two above — a capture nothing writes into and nothing declares is
-  harmless dead code. A fuzzy guard that fires on innocent code teaches a
-  reader to edit the guard.
+  a *prompt* — the word is not the pattern, and a guard that fires on innocent
+  code teaches a reader to edit the guard. What the two above catch is the
+  shape the side channel actually took here, not every shape it could take: an
+  agent that declares no context type, is handed a capture through
+  `run(context=...)`, and is mutated by a method call rather than an
+  assignment would pass both. The closure is the construction, not the scan.
 
 - **`friday/agent/harness.py` is the only module that may import `agents`.** The SDK
   is here for speed, not for keeps, and that is only true while replacing it
@@ -970,10 +977,10 @@ not an implementation detail:
 
   **Wired to the responder, never to triage.** The responder is the agent
   that writes text a person reads, and a room's habits are exactly the kind
-  of thing worth remembering; triage stops on `capture.decided is not None`
-  rather than on the first tool output (see the stop-when note on
-  `friday/agent/harness.py`), which is the same rule that means a
-  `fetch_skill` does not terminate the run before the model classifies.
+  of thing worth remembering; triage stops when its answer tool has returned
+  an actual `Decided` rather than on the first tool output, which is the same
+  rule that means a `fetch_skill` does not terminate the run before the model
+  classifies.
   Whether the summariser should get memory tools is still undecided; the
   extractor's own case is answered below, and by injection rather than a
   tool.
