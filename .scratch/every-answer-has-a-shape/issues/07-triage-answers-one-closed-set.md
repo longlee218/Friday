@@ -15,11 +15,56 @@ together would hide the one this change exists to make impossible (D20).
 
 **Blocked by:** 03, 05.
 
-**Status:** ready-for-agent
+**Status:** done (eval reading owed, gated on ticket 03)
 
-- [ ] A decision outside the closed set never opens a task.
-- [ ] `skip` is validated exactly as strictly as every other member, and still opens nothing.
-- [ ] Triage's answer is the return value of the call that asked for it; nothing is read off a capture.
-- [ ] The eval runner scores the new shape and reports out-of-set decisions as their own number.
+- [x] A decision outside the closed set never opens a task.
+- [x] `skip` is validated exactly as strictly as every other member, and still opens nothing.
+- [x] Triage's answer is the return value of the call that asked for it; nothing is read off a capture.
+- [x] The eval runner scores the new shape and reports out-of-set decisions as their own number.
 - [ ] The classifier is scored against the frozen set and compared to ticket 03's baseline, with accuracy, confusion matrix and threshold table reported.
-- [ ] CLAUDE.md's record of the old split is corrected in the same commit.
+- [x] CLAUDE.md's record of the old split is corrected in the same commit.
+
+## Comments
+
+`Decided` **is** the shape triage answers — `type` closed to
+`models.DECISIONS`, validated in this process. `friday/tools/classify.py` is
+deleted and the asserted tool list is nine.
+
+**`for_event` has its caller now.** Ticket 04 shaped `FridayState` for it and
+declined to build it, because a constructor with no caller is the speculative
+generality this board is otherwise removing. Triage is where a message's
+journey starts.
+
+**D20 is a flag, not a sentence.** `NeedsHuman.out_of_set` tells an invented
+type from an outage, raised by the answer tool's own body rather than by the
+run — because a model that answers wrongly twice overruns `max_turns` and the
+run returns `None` having seen no reply at all, so the only thing that knows
+the answer was *refused* rather than *absent* is the tool that refused it.
+Arguments that are not a JSON object deliberately do **not** raise it: that is
+the model saying nothing, not naming something.
+
+**A turn-budget bug this change exposed.** A run whose answer fits ends on its
+*first* turn — the terminator finishes it the moment the tool returns an
+instance — so the call and its result are not two turns. Triage and the
+extractor each passed `extra_turns=1` on top of the one `run_structured` adds,
+buying a second correction nobody decided on, on the highest-volume path in
+the system. Both pass nothing now.
+
+**`stop_when` is deleted.** Triage was its only caller and no longer needs a
+predicate. That is the shape ticket 01 deleted `ask_clarification` for, and the
+rule cuts the same way when the code is this board's own.
+
+**A guard that could not fire, replaced by one that can.** `_means` refuses a
+task type that never wrote down what it means — and the check is *not* "is the
+docstring empty", because a `@dataclass` always has one: absent its own, Python
+synthesises the constructor signature. Found by writing the empty-case guard
+first and watching its test fail to fail.
+
+Two mutations survived the first pass, both guards written deliberately and
+never tested; both have tests that bite now.
+
+**The eval run is owed and is ticket 03's.** CLAUDE.md wants accuracy, a
+confusion matrix and the threshold table reported alongside a change to
+triage's prompt. Running it now would produce an "after" with no "before",
+against a set too thin to catch a regression — the measurement D16 calls
+worthless. The runner is ready and reports the new out-of-set number.

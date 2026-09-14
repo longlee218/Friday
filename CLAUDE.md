@@ -30,16 +30,19 @@ and nothing could explain, and the operator answered by hand while the agent
 went on asking. Each ticket names what blocks it; work the frontier.
 
 A fourth board, `.scratch/every-answer-has-a-shape/`, holds nine tickets.
-**01, 02, 04, 05, 06 and 08 are done**; 04 and 06 were merged, because
+**01, 02, 04, 05, 06, 07 and 08 are done**; 04 and 06 were merged, because
 replacing `MemoryScope` turned out to be eight production sites reading the
-same four fields rather than the wide refactor the board planned for. **03 is
-`ready-for-human`** — the operator fills the evaluation rows, which D18 says
-are theirs by right: a classifier scored against labels a model chose measures
-nothing. **07 and 09 are blocked on it**, and that order is the board's whole
-measurement discipline (D16): rebuild the ruler, read today's code with it,
-then change triage. What landed is one way to ask a model for a shape and one
-state travelling a message's whole journey; what has not is triage's own closed
-enum and the guard that closes the run context to state alone.
+same four fields rather than the wide refactor the board planned for. **09 is
+next and is unblocked** — the guard that closes the run context to state alone.
+
+**03 is `ready-for-human`**: the operator fills the evaluation rows, which D18
+says are theirs by right, since a classifier scored against labels a model
+chose measures nothing. **Ticket 07 shipped without its eval reading**, which
+is a deliberate exception to the verifying-a-change rule below rather than a
+skipped step: D16 puts the baseline first, and running the eval now would
+produce an "after" with no "before" against a set too thin to catch a
+regression. The runner is ready and reports the new out-of-set number; the
+reading is owed the moment the rows exist.
 
 A second board, `.scratch/every-task-is-a-graph/`, holds the spec and tickets
 01–13, and all thirteen are done. 01–09 folded two packages into one engine —
