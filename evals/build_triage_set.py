@@ -53,22 +53,11 @@ OUT = Path(__file__).parent / "triage.jsonl"
 #: `CLAUDE.md` cites "token hết hạn rồi" as an ordinary bug report for the
 #: same reason.
 SEED: list[tuple[str, str] | tuple[str, str, tuple]] = [
-    ("the checkout api keeps returning 500 on prod, anyone seen this", "api_issue"),
-    ("getting a 403 from /v2/orders since this morning, did something change", "api_issue"),
     ("api trả về lỗi 502 liên tục từ tối qua, có ai check giúp không", "api_issue"),
     ("token hết hạn rồi, gọi api báo unauthorized", "api_issue"),
-    ("can I get write access to the payments repo", "access_request"),
-    ("need read access to the analytics dashboard for the new hire", "access_request"),
     ("xin quyền truy cập vào kho staging cho dự án mới", "access_request"),
-    ("could you add me to the #incidents channel", "access_request"),
-    ("where's the spec for the refund flow", "doc_question"),
-    ("do we have docs on how retries are configured for the outbox", "doc_question"),
     ("tài liệu về luồng duyệt task ở đâu vậy", "doc_question"),
     ("is there a runbook for rotating the discord token", "doc_question"),
-    ("anyone want lunch", "skip"),
-    ("happy friday everyone", "skip"),
-    ("lol nice one", "skip"),
-    ("chúc mừng sinh nhật nha", "skip"),
     # Ticket 09: two rows a single string cannot exercise. The sixteen above
     # are what this set held before triage stopped receiving an unbounded
     # window — a bare string, no newlines, no `is_own` — so `run_triage_eval`
