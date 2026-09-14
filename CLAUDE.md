@@ -95,6 +95,18 @@ cd web && npm run dev     # port 5173, proxying /api to 127.0.0.1:8086
 uv run serve_board.py     # the API alone against the live db, for `npm run dev`
 ```
 
+**React's one rule is checked by `tests/test_web_hooks.py`**, and it is there
+because this repo has no way to notice otherwise. `FlowScreen` called
+`useEffect` below two early returns, so the render before the fetch resolved ran
+two hooks and the render after ran three; React throws on the mismatch, the tree
+unmounts, and the page renders *nothing* — which from the outside looks exactly
+like a backend fault, since the API answers correctly. Every visit to
+`/flow/{provider}/{id}` died the moment its data arrived, through a code review
+and a green suite, because there are no JavaScript tests here and no linter, so
+`eslint-plugin-react-hooks` — which exists for precisely this — never ran. The
+guard is narrow (one shape: a hook after an `if` that returns) and is a
+stopgap: wiring the real plugin would replace it, not duplicate it.
+
 `web/src/api-types.ts` is **written by hand, not generated**, and that is a
 decision rather than an omission: every route is annotated `-> dict` and
 builds its body by hand, so `/openapi.json` describes each response as a bare

@@ -72,23 +72,19 @@ function Path({ provider, id }: { provider: string; id: string }) {
   const board = useAsync(() => api.board(), []);
   const threshold = board.value?.confidence_threshold ?? null;
 
-  if (flow.error) {
-    return (
-      <div className="card error">
-        No path for {provider}/{id}: {flow.error}
-      </div>
-    );
-  }
-  if (!flow.value) {
-    return (
-      <div>
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} height={56} />
-        ))}
-      </div>
-    );
-  }
-
+  // **Above the early returns, and that is not style.** This sat below
+  // them, so the first render — `flow.value` still undefined — returned the
+  // skeleton after two hooks, and the render *after* the fetch resolved ran
+  // three. React counts hooks per render and refuses a mismatch: every visit
+  // to this screen died with "rendered more hooks than during the previous
+  // render" the moment its data arrived, which reads from the outside as an
+  // API that works and a page that never fills in. Nothing in the suite
+  // could see it — there are no JavaScript tests here, deliberately — and
+  // there is no linter, so `react-hooks/rules-of-hooks` never ran.
+  //
+  // The body already no-ops on a missing `flow.value`, so hoisting it needs
+  // no other change.
+  //
   // The Monitor screen's drill-down lands on
   // `/flow/{provider}/{id}#call-{call_id}` so the operator can
   // share a specific turn. Read the hash on mount, scroll the
@@ -109,6 +105,24 @@ function Path({ provider, id }: { provider: string; id: string }) {
       el.focus({ preventScroll: true });
     }
   }, [flow.value]);
+
+
+  if (flow.error) {
+    return (
+      <div className="card error">
+        No path for {provider}/{id}: {flow.error}
+      </div>
+    );
+  }
+  if (!flow.value) {
+    return (
+      <div>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} height={56} />
+        ))}
+      </div>
+    );
+  }
 
   const it: Flow = flow.value;
   const held = reasonHeld(it);
