@@ -28,8 +28,31 @@ the rows have to cover. Filling them in is a data change to
 judgement, and a classifier scored against labels a model chose measures
 nothing.
 
-Once the rows are in: `uv run python -m evals.run_triage_eval` against the
-current code, and record accuracy, the confusion matrix, the threshold table
-and what the run cost. That reading is the baseline ticket 07 is judged
-against, and D16 is the reason it has to be taken before triage changes rather
-than after.
+**The baseline is taken at `bee022f`, not at `HEAD`, and that is a correction
+rather than a detail.** This ticket said "against the current code", which was
+true when it was written and stopped being true when ticket 07 shipped ahead of
+it — 07 declared itself blocked by this one and was done anyway. Followed today,
+that instruction would record an *after* as the baseline, which is exactly the
+worthless measurement D16 exists to prevent. Found by a review of the whole
+board, not by anyone reading the ticket.
+
+Recovery is still open because `evals/triage.jsonl` has not changed since the
+board began: the file at `HEAD` is byte-identical to the file at `b61a7e1`. So
+the rows go in on this branch, and then:
+
+    git stash                                     # keep the filled rows
+    git checkout bee022f                          # the last commit before 07
+    git stash pop                                 # the set, against old code
+    uv run python -m evals.run_triage_eval        # the BEFORE reading
+    git checkout main && git stash pop            # back, rows intact
+    uv run python -m evals.run_triage_eval        # the AFTER reading
+
+Record accuracy, the confusion matrix, the threshold table, the count of
+decisions outside the closed set, and what each run cost. Two readings of one
+ruler is what D16 asks for; one reading of a ruler that moved is what it
+forbids.
+
+**A caveat on the before reading, stated rather than discovered:** `bee022f`
+has no out-of-set number, because the concept did not exist yet. Its rows land
+as `needs_human` there and as `needs_human` plus a count here, so accuracy is
+comparable and that one line is new rather than changed.

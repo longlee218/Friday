@@ -274,7 +274,7 @@ def test_the_one_tool_outside_the_package_is_the_answer_tool():
     from friday.agent.harness import ANSWER, _answer_tool
     from friday.domain.models import ApiIssueParams
 
-    built = _answer_tool(ApiIssueParams)
+    built = _answer_tool(ApiIssueParams, lambda problem: None)
 
     assert built.name == ANSWER
     assert built.name not in _tool_objects(), (
@@ -317,13 +317,11 @@ def test_the_field_names_an_extractor_may_ask_about_are_a_closed_set():
     lost it would have cost more than it saved — an extractor that invents a
     field name asks the reporter a question about nothing.
     """
-    from friday.agent.harness import _answer_tool
+    from friday.agent.harness import _answer_params
     from friday.domain.models import ApiIssueParams, askable_fields
     from friday.extraction.answer import answer_shape
 
-    asked = _answer_tool(answer_shape(ApiIssueParams)).params_json_schema[
-        "properties"
-    ]["ask_about"]
+    asked = _answer_params(answer_shape(ApiIssueParams))["properties"]["ask_about"]
 
     assert asked["items"]["enum"] == list(askable_fields(ApiIssueParams))
 

@@ -153,14 +153,16 @@ class Triage:
             unfit = self._run.unfit
             return NeedsHuman(
                 f"triage failed: {self._run.last_error}",
-                # **`type` specifically, not "something did not fit"** (D20).
+                # **A type the model *sent* and this shape refused** (D20) —
+                # not any failure, and not any failure of the `type` field.
                 # The eval prints this under "the model named a type that does
-                # not exist", so it has to be true of every row it counts: a
-                # confidence of `"very high"` is a formatting mistake, not an
-                # invented decision, and reporting it as one would make the
-                # number say something it does not mean. Found by review — the
-                # flag fired on any validation failure at first.
-                out_of_set=unfit is not None and "type" in unfit.fields,
+                # not exist", so every row it counts has to be one: a
+                # confidence of `"very high"` is a formatting mistake, an
+                # empty answer names nothing, and a real type sent under the
+                # deleted tool's old key names nothing this shape can see.
+                # Each of those three was counted here at some point, and each
+                # was found by review rather than by the suite.
+                out_of_set=unfit is not None and "type" in unfit.rejected,
             )
         log.info(
             "triaged %s: %s (%.2f)",

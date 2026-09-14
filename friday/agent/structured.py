@@ -168,10 +168,26 @@ class Unfit:
 
     Top-level names only: a failure at `ask_about.0` is a failure of
     `ask_about`, which is the field a caller can do anything about.
+
+    **`rejected` is the narrower question, and it is the one worth asking.**
+    `fields` says which fields the failure is *about*; `rejected` says which of
+    them the model actually supplied a value for and had it refused. A field
+    the model left out is in `fields` and not in `rejected`, and so is every
+    field of a shape whose keys were all unknown — nothing arrived, so nothing
+    was refused.
+
+    The difference is not academic: "the model named a task type that does not
+    exist" is a sentence about a value it sent. A model that sent no type at
+    all, or that sent one under a field name this shape does not have, has not
+    named anything — and reporting it as though it had makes the number say
+    something it does not mean. Both halves of that were shipped and found by
+    review, which is why the distinction lives here rather than in a caller's
+    `if`.
     """
 
     why: str
     fields: frozenset[str]
+    rejected: frozenset[str] = frozenset()
 
 
 def fits(data: dict[str, Any], schema: type) -> tuple[Any | None, Unfit | None]:
@@ -211,7 +227,9 @@ def fits(data: dict[str, Any], schema: type) -> tuple[Any | None, Unfit | None]:
                 f"{', '.join(unknown)}"
             ),
             # Every field this shape has, because none of them arrived. A
-            # caller asking "was my field the problem" gets a true yes.
+            # caller asking "was my field the problem" gets a true yes — and
+            # `rejected` stays empty, because the model supplied a value for
+            # none of them.
             fields=frozenset(known),
         )
     try:
@@ -225,6 +243,15 @@ def fits(data: dict[str, Any], schema: type) -> tuple[Any | None, Unfit | None]:
             ),
             fields=frozenset(
                 str(e["loc"][0]) for e in errors if e["loc"]
+            ),
+            # `missing` is pydantic's own word for a field that never arrived.
+            # Everything else is a value the model sent and this shape turned
+            # down — which is the only thing "the model named something wrong"
+            # can honestly mean.
+            rejected=frozenset(
+                str(e["loc"][0])
+                for e in errors
+                if e["loc"] and e["type"] != "missing"
             ),
         )
 

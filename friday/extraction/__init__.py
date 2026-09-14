@@ -35,7 +35,7 @@ from dataclasses import fields
 from typing import TYPE_CHECKING
 
 from friday.agent.harness import Harness, Refused
-from friday.extraction.answer import Clarify, answer_shape, split
+from friday.extraction.answer import Clarify, answer_shape, params_and_clarify
 from friday.extraction.context import FullContext
 from friday.domain.models import MODEL_AUTHORED, PARAMS, Params
 from friday.extraction.prompt import build_input, build_instructions
@@ -162,7 +162,7 @@ class Extractor:
             # replaced could survive a failed extraction and hand back a
             # half-run's worth of asking.
             return None, None
-        filled, clarify = split(answered, self._params_cls)
+        filled, clarify = params_and_clarify(answered, self._params_cls)
         return _hygiene(filled), clarify
 
 
@@ -195,10 +195,10 @@ def build_extractor(
     at runtime, in the middle of a task, where the only symptom is fields
     that never fill in. Refusing here costs a restart.
     """
-    if getattr(harness, "answers", None) is not answer_shape(params_cls):
+    if harness.answers is not answer_shape(params_cls):
         raise ValueError(
             f"the {name} extractor fills {params_cls.__name__}, but its "
-            f"harness answers {getattr(harness, 'answers', None)}"
+            f"harness answers {harness.answers}"
         )
     return Extractor(harness=harness, params_cls=params_cls, name=name)
 

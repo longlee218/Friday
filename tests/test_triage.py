@@ -850,10 +850,10 @@ def test_every_decision_the_model_may_name_carries_its_own_description():
     This replaces `test_create_task_describes_every_type_from_its_own_params_class`,
     which asserted the same thing about `classify`'s enum.
     """
-    from friday.agent.harness import _answer_tool
+    from friday.agent.harness import _answer_params
     from friday.domain.models import DECISIONS, PARAMS
 
-    described = _answer_tool(Decided).params_json_schema["properties"]["type"]
+    described = _answer_params(Decided)["properties"]["type"]
 
     assert set(described["enum"]) == set(DECISIONS)
     for name, params_cls in PARAMS.items():
@@ -968,9 +968,9 @@ def test_both_of_the_fields_triage_answers_are_required():
     """Asserted on the schema as well as through the run, because this is the
     guard and a guard that only holds by accident of another test's scripting
     is not one."""
-    from friday.agent.harness import _answer_tool
+    from friday.agent.harness import _answer_params
 
-    schema = _answer_tool(Decided).params_json_schema
+    schema = _answer_params(Decided)
 
     assert set(schema.get("required", ())) == {"type", "confidence"}
 
@@ -1000,3 +1000,84 @@ async def test_a_malformed_confidence_is_not_reported_as_an_invented_type():
     assert not outcome.out_of_set, (
         "a malformed confidence was reported as an invented task type"
     )
+
+
+def test_the_prompt_describes_the_one_tool_that_exists():
+    """**The board's own "door that is not in the room" failure, on the prompt
+    where it costs most.**
+
+    Triage answered by *choosing between two tools* — the label was which tool
+    got called — and now answers by naming a value in one tool's argument.
+    D6 changed the mechanism; the prompt went on describing the old one, and a
+    model told to pick between tools that are not there improvises.
+
+    This is the highest-volume prompt in the system and CLAUDE.md already
+    records one instance of it costing 79% of the prompt on instructions for
+    something the agent could not do. Pinned on the assembled instructions
+    rather than on a constant, so rewording any one of the pieces cannot lose
+    it.
+    """
+    from friday.triage.prompt import build_instructions
+
+    built = build_instructions()
+
+    assert "which tool you call is the answer" not in built.lower(), (
+        "the prompt still says the label is which tool was called"
+    )
+    assert "not two" not in built.lower(), (
+        "the prompt still warns against calling two tools; there is one"
+    )
+
+
+async def test_a_model_that_named_nothing_did_not_name_an_invented_type():
+    """D20's number has to be true of every row it counts. An empty answer
+    names no type — it is a model that said nothing, which is the same class of
+    non-answer as a provider that never replied.
+
+    Found by review, twice: the flag first fired on any validation failure,
+    then on any failure of the `type` field, and only this version distinguishes
+    a value the model *sent* from one it left out."""
+    from agents.testing import ScriptedModel, function_call
+
+    triage = triage_with(
+        [function_call("answer", {}, call_id="1")],
+        [function_call("answer", {}, call_id="2")],
+    )
+
+    outcome = await decide(triage)
+
+    assert isinstance(outcome, NeedsHuman)
+    assert not outcome.out_of_set, "an empty answer was counted as an invented type"
+
+
+async def test_a_real_type_under_the_deleted_tools_old_key_is_not_invented_either():
+    """`task_type` is what `classify` called this field. A model carrying that
+    habit named `api_issue` — a real member of the set — under a key this shape
+    cannot see. It still reaches a person, and the mention is still not
+    dropped, but calling it an invented type would be false."""
+    from agents.testing import ScriptedModel, function_call
+
+    stale = {"task_type": "api_issue", "confidence": 0.9}
+    triage = triage_with(
+        [function_call("answer", stale, call_id="1")],
+        [function_call("answer", stale, call_id="2")],
+    )
+
+    outcome = await decide(triage)
+
+    assert isinstance(outcome, NeedsHuman)
+    assert not outcome.out_of_set
+
+
+async def test_a_type_the_model_actually_invented_is_still_counted():
+    """The other side of the line, so the narrowing above cannot have quietly
+    turned the number off."""
+    from agents.testing import ScriptedModel, function_call
+
+    invented = {"type": "hardware_issue", "confidence": 0.9}
+    triage = triage_with(
+        [function_call("answer", invented, call_id="1")],
+        [function_call("answer", invented, call_id="2")],
+    )
+
+    assert (await decide(triage)).out_of_set

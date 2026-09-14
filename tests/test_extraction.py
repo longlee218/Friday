@@ -315,12 +315,12 @@ def test_an_extractor_cannot_ask_about_a_field_that_does_not_exist():
     `summary` (model-authored) excluded, so the schema itself is what stops
     the model asking about something that is not there or that it writes
     itself."""
-    from friday.agent.harness import _answer_tool
+    from friday.agent.harness import _answer_params
     from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
     from friday.extraction.answer import answer_shape
 
     for params_cls in (ApiIssueParams, AccessRequestParams, DocQuestionParams):
-        schema = _answer_tool(answer_shape(params_cls)).params_json_schema
+        schema = _answer_params(answer_shape(params_cls))
         enum = set(schema["properties"]["ask_about"]["items"]["enum"])
         assert enum == set(params_cls.__dataclass_fields__) - {"summary"}
 

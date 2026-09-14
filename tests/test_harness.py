@@ -1139,3 +1139,48 @@ async def test_a_caller_that_knows_better_than_its_state_still_wins():
     )
 
     assert written[0].message_id == "m9"
+
+
+def test_an_agent_with_a_shape_may_not_have_its_mechanism_overridden():
+    """Two settings an `answers=` agent owns, and a caller may override
+    neither: the terminator is what knows that "answered" means an instance
+    rather than any tool output, and the forced call is what stops the model
+    writing prose instead.
+
+    `tool_choice` was refused only against `config.yaml` until a review read
+    the comment against the code — a caller's `model_settings` splatted after
+    the harness's, so `tool_choice: "auto"` from a caller won and disabled the
+    mechanism with nothing said. The asymmetry was invisible because the two
+    settings sit four lines apart.
+    """
+    from dataclasses import dataclass
+
+    from agents.testing import ScriptedModel
+
+    from friday.agent.harness import Harness
+    from friday.config import AgentConfig
+
+    @dataclass
+    class Shape:
+        value: str = ""
+
+    def build(**options):
+        return Harness(
+            config=AgentConfig(
+                name="owned", api_key="k", base_url="http://x/v1", model="m"
+            ),
+            instructions="i",
+            answers=Shape,
+            model=ScriptedModel([]),
+            **options,
+        )
+
+    with pytest.raises(ValueError, match="tool_choice"):
+        build(model_settings={"tool_choice": "auto"})
+
+    with pytest.raises(ValueError, match="tool_use_behavior"):
+        build(tool_use_behavior="stop_on_first_tool")
+
+    # An agent that declares neither is untouched: `max_tokens` and anything
+    # else in `model_settings` still reaches the model.
+    assert build(model_settings={"max_tokens": 64}).agent.model_settings.max_tokens == 64

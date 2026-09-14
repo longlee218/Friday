@@ -64,6 +64,7 @@ from pydantic import TypeAdapter
 
 from friday.agent.structured import Unfit, describe, find_json, fits
 from friday.config import AgentConfig
+from friday.domain.models import FridayState
 from friday.ops.redact import scrub
 
 __all__ = [
@@ -283,6 +284,14 @@ class Harness:
         #: different things to tell an operator (D20). `Unfit.fields` is what
         #: makes that answerable without matching a substring against a
         #: sentence written for a model.
+        #:
+        #: **Read it immediately after `run_structured` returned `None`, and
+        #: nowhere else.** That is the one window in which it means what its
+        #: name says: `_settle` clears it as every run begins, a run that
+        #: recovered on its correction turn clears it on the way out, and a
+        #: turned-down call sets it from inside the tool. Read at any other
+        #: time it answers a question about a run that is not the one you are
+        #: asking about.
         self.unfit: Unfit | None = None
         #: The catalogue, for whoever builds this agent's instructions. Read
         #: off the same object the tools came from, so the prompt and the
@@ -335,12 +344,31 @@ class Harness:
         #: every *written* answer from the same model carries all three.
         self.answers = answers
         if answers is not None:
-            if "tool_use_behavior" in agent_options:
-                # Both decide when the run is over, and the answer tool's
-                # terminator is the one that knows what "answered" means here.
+            # **Two settings this agent owns, and a caller may override
+            # neither.** They are the mechanism, not a default it dresses up:
+            # the terminator is what knows that "answered" means an instance
+            # rather than any tool output, and the forced call is what stops
+            # the model writing prose instead. A caller passing either is
+            # asking for something that cannot work, so it is refused rather
+            # than quietly honoured.
+            #
+            # `tool_choice` was refused only against the *file* until a review
+            # read the comment against the code: a caller's `model_settings`
+            # splatted after this dict, so `tool_choice: "auto"` from a caller
+            # won, and disabled the mechanism with nothing said. The asymmetry
+            # was invisible because the two settings sit four lines apart.
+            owned = [
+                name
+                for name in ("tool_use_behavior",)
+                if name in agent_options
+            ]
+            if "tool_choice" in agent_options.get("model_settings", {}):
+                owned.append("tool_choice")
+            if owned:
                 raise ValueError(
-                    "an agent that declares `answers=` owns its own "
-                    "tool_use_behavior; passing one too would silently win"
+                    f"an agent that declares `answers=` owns "
+                    f"{' and '.join(owned)}; passing one would silently "
+                    f"disable the mechanism it was built around"
                 )
             tools = [*tools, _answer_tool(answers, self._refused)]
             agent_options["tool_use_behavior"] = _answered(answers)
@@ -878,11 +906,6 @@ class _About:
         the state carries, which is what `about_message` exists for on the
         other side of the same question.
         """
-        # Imported here rather than at module scope: `friday.domain.models`
-        # does not import this module and must not start, but the seam rule
-        # keeps every SDK name in here, so the cycle is only ever one way.
-        from friday.domain.models import FridayState
-
         if isinstance(context, FridayState):
             message_id = message_id or context.message_id
             task_id = task_id if task_id is not None else context.task_id
@@ -1003,7 +1026,8 @@ ANSWER = "answer"
 
 
 def _newest_instance(candidates, schema: type) -> Any | None:
-    """The last thing in `candidates` that is an instance of `schema`.
+    """The newest of `candidates` whose `output` is an instance of `schema`,
+    and that **output** rather than the candidate holding it.
 
     Both places that need this scan newest-first for the same reason — a model
     may answer and reach for a skill in the same turn, and which order those
@@ -1039,7 +1063,7 @@ def _instance_in(result: Any, schema: type) -> Any | None:
     return _newest_instance(getattr(result, "new_items", ()), schema)
 
 
-def _answer_tool(schema: type, refused=None) -> FunctionTool:
+def _answer_tool(schema: type, refused) -> FunctionTool:
     """The tool an agent answers through, generated from the shape itself.
 
     **Not in `friday/tools/`,** and that is where it would belong if it were a
@@ -1087,8 +1111,13 @@ def _answer_tool(schema: type, refused=None) -> FunctionTool:
         value, problem = fits(data, schema)
         if problem is None:
             return value
-        if refused is not None:
-            refused(problem)
+        # Not optional, and not guarded. `NeedsHuman.out_of_set` is built from
+        # this — it was a defaulted parameter with an `is not None` around
+        # every call, which made a load-bearing contract read as a
+        # convenience, and left the schema-only callers looking like they had
+        # opted out of something. They want `_answer_params`, which is the
+        # schema on its own.
+        refused(problem)
         return f"that did not fit: {problem.why}"
 
     return FunctionTool(

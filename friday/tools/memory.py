@@ -95,7 +95,7 @@ def memory_tools(db):
     none, because four of them are unusable without the fifth (`search`).
 
     The split is by lifetime. `db` lives as long as the process, so it is
-    closed over; the scope lives as long as one run, so it is
+    closed over; the state lives as long as one run, so it is
     `Harness.run(context=FridayState(...))` and each tool reads it off
     `ctx.context` through `_state`. An agent given these must therefore be
     built with `context_type=FridayState`.
@@ -304,7 +304,7 @@ def memory_tools(db):
 class NotWired(RuntimeError):
     """The agent holding these tools was run without a `FridayState`.
 
-    Its own class so the log line names the mistake. Without it the scope was
+    Its own class so the log line names the mistake. Without it the state was
     dereferenced straight off `ctx.context`, an `AttributeError` on `None`
     reached `harness._tool_failed`, and the operator was told a tool was
     unavailable — which reads as the store being down, and is instead an agent
@@ -315,19 +315,27 @@ class NotWired(RuntimeError):
 
 
 def _state(ctx) -> FridayState:
-    """The run's scope, or a failure that says what is actually wrong.
+    """The run's state, or a failure that says what is actually wrong.
 
-    Every tool here reads it through this. The model still gets "unavailable"
-    either way, which is true — without a scope there is no memory to reach —
-    but the operator gets a sentence they can act on.
+    Every tool here reads it through this, and hands it to the store whole —
+    the store takes the state *as* the scope, reading the room, the task, the
+    agent and the source message off it. The model still gets "unavailable"
+    either way, which is true — without a state there is no room, and so no
+    memory to reach — but the operator gets a sentence they can act on.
+
+    Named for what it returns rather than for what this module does with it.
+    It was `_scope`, which was true while the only thing in the object was a
+    memory's scope and stopped being true the moment the run's own state took
+    that slot (D10) — and the rename was left half-done for a commit, so this
+    function said "state" in its name and "scope" in every line of its body.
     """
-    scope = getattr(ctx, "context", None)
-    if not isinstance(scope, FridayState):
+    state = getattr(ctx, "context", None)
+    if not isinstance(state, FridayState):
         raise NotWired(
             "memory tools were run without a FridayState: build the agent with "
-            f"context_type=FridayState and pass context= to run() (got {scope!r})"
+            f"context_type=FridayState and pass context= to run() (got {state!r})"
         )
-    return scope
+    return state
 
 
 def _bounded(text: str, chars: int = TEXT_CHARS) -> str:

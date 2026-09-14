@@ -6,16 +6,25 @@ who it is, the job, and the operator's vouched-for examples, appended to
 instructions rather than sent per call because examples that moved per call
 would cost the cache hit on everything after them.
 
-**No voice, deliberately.** Triage's whole output is which tool it called and
-a number. There is no sentence a voice could improve, and every word would be
-paid for on the highest-volume calls in the system to change nothing — which
-is what happened: 79% of this prompt was once instructions for writing replies
-it never writes.
+**No voice, deliberately.** Triage's whole output is a label and a number.
+There is no sentence a voice could improve, and every word would be paid for
+on the highest-volume calls in the system to change nothing — which is what
+happened: 79% of this prompt was once instructions for writing replies it
+never writes.
 
-**No clarification tool, deliberately.** Triage cannot ask; it picks one of
-two tools and stops. `clarification_system(None)` renders nothing, which is
-the point — an agent told about a door that is not in the room goes looking
-for it.
+**No clarification tool, deliberately.** Triage cannot ask; it names a label
+and stops. `clarification_system(None)` renders nothing, which is the point —
+an agent told about a door that is not in the room goes looking for it.
+
+**And this file has now been the door.** Triage used to answer by *choosing
+between two tools* — the label was which tool got called — and board
+`every-answer-has-a-shape` (D6) made it one tool whose `type` argument carries
+the label. This module went on saying "which tool you call is the answer" and
+"not two, not none" for a commit: instructions for a mechanism that no longer
+existed, on the prompt this same docstring names as the most expensive place
+to get that wrong. Found by review, not by the suite, which is why
+`tests/test_triage.py` now pins it against the assembled instructions rather
+than against any one constant here.
 """
 
 from __future__ import annotations
@@ -44,8 +53,8 @@ __all__ = ["build_input", "build_instructions"]
 #: tools carry their own docstrings, and that schema is the real contract.
 JOB = """You decide what a chat message is. Nothing else.
 
-Call exactly one tool. Which tool you call is the answer; the only thing you
-add is how certain you are of it.
+Answer once, with the label that fits and how certain you are of it. The label
+is one of a fixed set; nothing outside that set is an answer.
 
 Do not copy values out of the message, do not summarise it, do not answer it.
 Something else reads the message for what it contains — your job is the label
@@ -61,7 +70,7 @@ THINKING = [
 
 #: The two that must not be got wrong, at the end where a model looks again.
 REMINDERS = [
-    "Exactly one tool call. Not two, not none.",
+    "Answer exactly once, and only with a label from the set you were given.",
     "Salary, personal matters and social talk are always skip.",
 ]
 

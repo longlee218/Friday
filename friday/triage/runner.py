@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from friday.config import duration
 from friday.store.db import Database
 from friday.domain.states import TaskState
-from friday.domain.models import InboundEvent, Task
+from friday.domain.models import SKIP, InboundEvent, Task
 from friday.triage import Decided, NeedsHuman, Triage, TriageOutcome
 from friday.triage.prefilter import Sensitive
 
@@ -349,7 +349,7 @@ class TriageRunner:
                 event, "unknown", 0.0, {"reason": outcome.reason}, NEEDS_HUMAN
             )
 
-        if outcome.type == "skip":
+        if outcome.type == SKIP:
             log.debug("skipped %s", event.provider_message_id)
             return None
 

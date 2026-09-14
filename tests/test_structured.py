@@ -40,6 +40,16 @@ class Picks:
 
 
 @dataclass
+class Required:
+    """A shape with no defaults, so "the model sent nothing" is a failure it
+    can actually have — which every other shape in this file cannot, since
+    every field of theirs has a default. `Decided` is the real one of these.
+    """
+
+    mode: Literal["strict", "loose"]
+
+
+@dataclass
 class Shape:
     name: str = ""
     count: int = 0
@@ -322,10 +332,10 @@ def test_the_answer_tool_carries_each_fields_own_meaning():
     one is an instruction to guess — the argument `classify`'s enum
     descriptions already make. The meaning lives on the field, as the same
     `doc` the prompt renders, so there is one source for both readers."""
-    from friday.agent.harness import _answer_tool
+    from friday.agent.harness import _answer_params
     from friday.domain.models import ApiIssueParams
 
-    described = _answer_tool(ApiIssueParams).params_json_schema["properties"]
+    described = _answer_params(ApiIssueParams)["properties"]
 
     assert "copied exactly" in described["correlation_id"]["description"]
 
@@ -560,3 +570,31 @@ async def test_a_stale_refusal_does_not_survive_into_the_next_run():
     await harness.run("ask again")
 
     assert harness.unfit is None, "the next run read a flag left by the last"
+
+
+def test_a_refusal_tells_a_value_that_was_refused_from_one_that_never_arrived():
+    """Two failures that both implicate a field, and a caller that reports
+    them as one is reporting something false.
+
+    `fields` says which fields the failure is about. It cannot say whether the
+    model *supplied* something there — and that is the whole question triage
+    asks: "the model named a type that does not exist" is a sentence about a
+    value it sent, not about a field it left out. Found by review, after a
+    first fix narrowed from "any failure" to "the type field" and still
+    counted a model that named nothing at all.
+    """
+    absent = fits({}, Required)[1]
+    wrong = fits({"mode": "sideways"}, Required)[1]
+
+    assert absent.fields == {"mode"} and absent.rejected == frozenset()
+    assert wrong.fields == {"mode"} and wrong.rejected == {"mode"}
+
+
+def test_a_key_the_shape_does_not_name_refuses_without_rejecting_a_field():
+    """The model used a field name this shape does not have. Every field is
+    implicated — none of them arrived — but it named no *value* any of them
+    refused, so nothing is rejected."""
+    problem = fits({"invented_key": "x"}, Required)[1]
+
+    assert problem.fields == {"mode"}
+    assert problem.rejected == frozenset()
