@@ -13,9 +13,9 @@ means nothing.
 
 **Status:** ready-for-human
 
-- [ ] The frozen set holds rows at the boundaries between task types, rows a correct classifier should call `skip`, and rows whose turn is several messages.
-- [ ] Rows read like the channel does — Vietnamese, a pasted `curl`, a correlationId, a stack trace — rather than like an English description of it.
-- [ ] The coverage guard from ticket 02 passes against the filled file.
+- [ ] The frozen set holds rows at the boundaries between task types, rows a correct classifier should call `skip`, and rows whose turn is several messages. *(Partly: `api_issue` is filled from real traffic; the other three labels and every hard row are still outstanding.)*
+- [x] Rows read like the channel does — Vietnamese, a pasted `curl`, a correlationId, a stack trace — rather than like an English description of it. *(True of the seventeen `api_issue` rows; the eight `access_request`/`doc_question` rows are still English textbook.)*
+- [x] The coverage guard from ticket 02 passes against the filled file.
 - [ ] The current classifier is scored against it and the numbers are recorded where the next person can find them.
 - [ ] The cost of that run is written down beside it.
 
@@ -56,3 +56,47 @@ forbids.
 has no out-of-set number, because the concept did not exist yet. Its rows land
 as `needs_human` there and as `needs_human` plus a count here, so accuracy is
 comparable and that one line is new rather than changed.
+
+
+## Where this stands, 2026-09-14
+
+**Seventeen rows in, from the operator's own channel** (commit `827296a`).
+Supplied verbatim and labelled by them, converted into `SEED` — not into
+`triage.jsonl`, which is generated and would lose them on the next refresh.
+35 rows now, guard green.
+
+**Not yet a ruler, and the baseline is not worth taking until it is.** The set
+is 66% `api_issue`: a classifier answering `api_issue` to everything scores
+65.7%, so the headline accuracy can rise while the system gets worse. The
+confusion matrix would still tell the truth; the number above it would not.
+Spending two eval runs to record a figure that cannot be compared later is the
+measurement D16 forbids, arrived at from the other direction.
+
+**What is still the operator's to write**, and why code cannot:
+
+- **`skip` rows that look like work.** The four there are "anyone want lunch".
+  What is needed is a message *about* an API that asks for nothing — "hôm qua
+  api lỗi nhưng tự hết rồi nhé". It is the only detector for a change that
+  makes the model eager to open tasks; without it that failure surfaces weeks
+  later as tasks nobody wanted.
+- **Rows on the boundary between two types.** "Xin quyền vào repo để fix cái
+  500" is an access request or an API issue depending on what this team means
+  by it. Nobody else can say.
+- **`access_request` and `doc_question` in the channel's own voice.** Those
+  eight rows are still full-sentence English and resemble nothing the system
+  reads.
+
+**Two loose ends from the conversion:**
+
+- The rows the operator marked "(có CURL bên dưới)" carry the ask without the
+  evidence, so they are harder than reality. They become multi-message turns
+  the moment the real `curl` bodies are pasted in. Inventing one would be
+  putting traffic in a reporter's mouth to make a number look better.
+- One row — "nguyên nhân thật - bẫy region interfence của API v2…" — reads
+  like the operator explaining a cause rather than a reporter asking. If it is
+  the watched account's own message the correct behaviour is to *close* a task,
+  not open one. Flagged, label left as given.
+
+**Ticket 07 still owes its eval reading**, and that debt is this ticket's to
+clear. The runner is ready and reports the out-of-set count; the two readings
+and their order are written above.
