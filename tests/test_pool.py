@@ -396,7 +396,9 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
     )
     _EXTRACTORS["api_issue"] = ext
 
-    responder = StubResponder("anh check giúp em cái server nhé")
+    # Ticket 12: a draft naming no work, so this stays a test of whose
+    # words reach the reporter rather than of `friday.responder.check`.
+    responder = StubResponder("em đang chạy trên môi trường nào thế?")
 
     try:
         event = InboundEvent(
@@ -417,7 +419,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
         await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
         (row,) = await db.outbound()
-        assert row.text == "anh check giúp em cái server nhé", (
+        assert row.text == "em đang chạy trên môi trường nào thế?", (
             "the reporter must see the Responder's sentence, not the template"
         )
         (asking,) = responder.asked

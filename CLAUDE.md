@@ -683,15 +683,29 @@ not an implementation detail:
   untrusted text and signed with the operator's name. It has already produced
   a promise nobody would keep, recorded in `Responder.draft`'s docstring.
   `friday/responder/check.py` is the floor — no link, no code block, near the
-  template's length, and no promise — and a draft that fails it is replaced by
-  the template and the reason logged.
+  template's length, no promise, and no work the question did not name — and a
+  draft that fails it is replaced by the template and the reason logged.
 
-  **One of the five rules binds only some questions, and saying so is part of
+  **The promise rule was the wrong shape and production proved it** (ticket 12
+  on `nothing-runs-unmeasured`). `_PROMISES` was a list of phrasings drawn from
+  one incident, so it caught that sentence and not the promise: all three
+  `ask_for_details` this system has ever sent went out on 2026-09-14 — eight
+  days after the floor shipped — ending in "anh trace giúp", which the list has
+  no entry for. A blacklist cannot close a language. What carries it now is
+  `_KEPT`'s rule read backwards: every question this system can ask is for a
+  *thing* and none of them names an action, so an action named in the draft is
+  content the model added, and adding content is what the no-approval argument
+  says cannot happen. It refuses more than promises on purpose — a draft
+  explaining which Postman tab to open promises nothing and is still unapproved
+  content written from channel text. `_PROMISES` stays for an undertaking with
+  no named work in it ("để anh lo", "I'll").
+
+  **One of the six rules binds only some questions, and saying so is part of
   the rule.** A draft must still name what the template named *where the
   template names something untranslatable* — `correlationId`, `curl`. Five of
   the eight questions this system asks name nothing of the kind ("what access
   you need", "which document you mean"), and for those there is no way to tell
-  a faithful Vietnamese rewording from a different question. The other four
+  a faithful Vietnamese rewording from a different question. The other five
   rules carry those. A test says this out loud, so the paragraph cannot
   quietly become a stronger promise than the code makes. Blunt on purpose: a
   false refusal sends a plainer question, a false acceptance sends the
