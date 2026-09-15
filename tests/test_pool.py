@@ -1204,3 +1204,95 @@ async def test_a_draft_that_only_reworded_the_question_does_reach_them(db):
 
     (queued,) = await db.outbound()
     assert queued.text.startswith("anh ơi cho em xin")
+
+
+# --- ticket 46: the operator answering first is the case that is missed ------
+
+
+async def _reported(db, task_id, message_id, *, secs, text="@Lee API lỗi rồi a ơi"):
+    """The mention that opened `task_id`, written `secs` from now.
+
+    Linked the way triage links it, because the link is what this ticket's
+    fix reads: a task with no message attached keeps comparing against its own
+    row, and that case is deliberately unchanged.
+    """
+    from datetime import timedelta
+
+    event = make_event(
+        message_id=message_id,
+        text=text,
+        created_at=datetime.now(timezone.utc) + timedelta(seconds=secs),
+    )
+    await db.record_message(event)
+    await db.mark_triaged(event, task_id, decision={"type": "api_issue"})
+
+
+async def test_an_answer_written_before_the_task_row_existed_still_closes_it(db):
+    """The operator answering *fast* is the case that gets missed.
+
+    A mention opens a turn, the turn closes after `turn_seconds`, and triage
+    polls every two seconds — so the task row is created some fourteen seconds
+    after the reporter wrote. Comparing the operator's message against
+    `task.created_at` therefore sorts an answer typed inside that window
+    *before* the task it answers, and it never counts.
+
+    Worse, the operator speaking is itself what closes the reporter's turn, so
+    replying quickly is what pushes `task.created_at` past their own message.
+    The faster they are, the more certain the miss.
+    """
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    await _reported(db, task.id, "report-1", secs=-14)
+    await _operator_said(db, "op-1", "à cái này anh xử lý rồi", secs=-9)
+
+    await Pool(db=db, auto_ask=True).run_once()
+
+    (closed,) = await db.tasks()
+    assert closed.state == TaskState.HANDLED_BY_OPERATOR
+
+
+async def test_a_backfilled_task_sees_the_answer_in_its_own_history(db):
+    """The sweep recovering a mention after downtime is the same shape at a
+    larger scale: the task row is created now, every message in it was written
+    hours ago. Against `task.created_at` *no* answer in recovered history can
+    ever count, so the agent re-asks a reporter what the operator already
+    answered by hand while the process was down.
+    """
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    await _reported(db, task.id, "report-1", secs=-20 * 3600)
+    await _operator_said(db, "op-1", "anh trả lời trên thread rồi nhé", secs=-19 * 3600)
+
+    await Pool(db=db, auto_ask=True).run_once()
+
+    (closed,) = await db.tasks()
+    assert closed.state == TaskState.HANDLED_BY_OPERATOR
+
+
+async def test_what_the_operator_said_before_the_report_is_not_an_answer_to_it(db):
+    """The line moves; it is not removed. Whatever they were talking about
+    before the reporter wrote cannot be an answer to a report that did not
+    exist yet — and reading it as one would close tasks on unrelated chatter,
+    which is a worse failure than the one this ticket fixes.
+    """
+    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    await _operator_said(db, "op-0", "sáng nay deploy xong rồi nha", secs=-30)
+    await _reported(db, task.id, "report-1", secs=-14)
+
+    await Pool(db=db, auto_ask=True).run_once()
+
+    (task_now,) = await db.tasks()
+    assert task_now.state != TaskState.HANDLED_BY_OPERATOR
+
+
+async def test_a_task_with_no_message_attached_still_uses_its_own_row(db):
+    """A manually seeded task has nothing to compare against but itself.
+    `source_message_of` names this case — a seeded task, or a follow-up whose
+    linkage was lost — and it must keep behaving exactly as it did.
+    """
+    task = await make_task(db)
+    await _operator_said(db, "op-1", "anh xử lý rồi", secs=10)
+
+    await Pool(db=db, auto_ask=False).run_once()
+
+    (closed,) = await db.tasks()
+    assert closed.id == task.id
+    assert closed.state == TaskState.HANDLED_BY_OPERATOR

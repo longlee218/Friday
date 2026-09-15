@@ -2061,8 +2061,18 @@ class Database:
 
         The operator's own messages never create work and are always stored,
         so the record is already here; this reads it. For each open task: has
-        the watched account said anything in that conversation since the task
-        opened that this process did not post?
+        the watched account said anything in that conversation since the work
+        was **reported** that this process did not post?
+
+        Reported, not opened. `Task.created_at` is `_now()` at the moment
+        triage inserted the row, and a message's is Discord's own clock, so
+        comparing the two measures the lag between them rather than anything
+        about the conversation. That lag is about fourteen seconds on the live
+        path — a turn window plus a poll — and hours on a backfill, where the
+        task is created now and every message in it was written while the
+        process was down. Ticket 46: the operator answering *fast* was the case
+        that got missed, and answering quickly is itself what closes the
+        reporter's turn, so being quick was what caused the miss.
 
         Which task a message closes follows the same rule as everything else
         about replies. A reply names what it answers — the reporter's message,
@@ -2070,6 +2080,16 @@ class Database:
         so that task closes. A message that replies to nothing closes the
         conversation's task only when there is exactly one; several open and no
         reply means guessing, and guessing here loses work.
+
+        **That last fallback is what moving the line costs.** A message
+        replying to nothing closes the one open task here, and the window it
+        is judged in now starts earlier — by the triage lag on the live path,
+        and by however long the backfill reached on a cold cursor. So more of
+        the operator's own chatter sits inside it, and chatter that answers
+        nothing in particular can close a task it was not about. Accepted
+        deliberately: the failure on the other side is the agent asking a
+        reporter a question the operator already answered, which reaches a
+        person, while this one closes a task the operator can reopen.
         """
         handled: list[Task] = []
         for task in await self._tasks(
@@ -2084,13 +2104,29 @@ class Database:
             schema.Outbound.sent_message_id.is_not(None)
         )
         async with self._sessions() as session:
+            # When the work was reported: the earliest message linked to this
+            # task, read off the same clock as the messages compared against
+            # it. The same row `source_message_of` returns, by its timestamp
+            # rather than its id.
+            #
+            # A task with nothing linked — manually seeded, or a follow-up
+            # whose linkage was lost — has only its own row to go on, and is
+            # deliberately left comparing against that.
+            since = await session.scalar(
+                select(schema.Message.created_at)
+                .where(schema.Message.task_id == task.id)
+                .order_by(schema.Message.created_at)
+                .limit(1)
+            )
+            if since is None:
+                since = task.created_at
             said = (
                 await session.execute(
                     select(schema.Message.reply_to)
                     .where(
                         schema.Message.conversation_id == str(task.conversation),
                         schema.Message.is_own.is_(True),
-                        schema.Message.created_at > task.created_at,
+                        schema.Message.created_at > since,
                         schema.Message.provider_message_id.not_in(ours),
                     )
                 )
