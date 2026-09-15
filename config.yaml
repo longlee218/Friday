@@ -75,7 +75,7 @@ agents:
     # own thread pulls the older part back in with them. A reply to something
     # this system asked is never outdated, however late — the task asked, and
     # is still waiting.
-    # max_message_age: '24h'
+    max_message_age: '24h'
 
     # How many past classifications the operator marked right to show as
     # examples. Read once at startup: examples belong in the stable front of

@@ -393,7 +393,9 @@ not an implementation detail:
   still needs to see it; this one decides nobody does. Judged by the turn's
   newest message, so a live follow-up pulls its older part in, and never
   applied to a reply answering something this system asked. Unset by default,
-  for the reason `daily_token_budget` is.
+  for the reason `daily_token_budget` is — **and set to `'24h'` in this
+  repo's `config.yaml` since 2026-09-15**, which is the date the rule
+  started actually running rather than merely existing.
 - **Some messages must not reach the model at all**, and that is decided
   before the call, by `config.yaml`'s `sensitive_words` — pay, health records,
   credentials. A rule that runs first cannot be argued out of by a persuasive
