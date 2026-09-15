@@ -181,7 +181,8 @@ docker compose logs -f
 Secrets arrive at runtime from `.env`, never baked. `config.yaml` is mounted
 read-only, so changing a model or a threshold is a restart rather than a
 rebuild. The database is on a named volume — without it a redeploy loses the
-cursors, and the sweep either re-reads history or misses the gap.
+cursors, and the sweep then recovers only the last `max_message_age` of each
+watched channel and misses whatever gap is older than that.
 
 The board is unauthenticated by design and shows every captured message and
 every model prompt, so it is published to the host's loopback only. Reach it
@@ -396,6 +397,19 @@ not an implementation detail:
   for the reason `daily_token_budget` is — **and set to `'24h'` in this
   repo's `config.yaml` since 2026-09-15**, which is the date the rule
   started actually running rather than merely existing.
+
+  **The same number is also how far a cold cursor reads back**, and that one
+  *is* a bounded drop rather than a recorded one. A channel with no cursor is
+  a fresh database, which always follows downtime the gateway was also absent
+  for; the sweep recovers the last `max_message_age` of it and does not look
+  further. What is older leaves no row, because it was never fetched. That is
+  the one place this rule is traded away rather than satisfied, it is traded
+  for the alternative of reading a channel from the day it was created, and
+  the price of the trade is a log line at boot saying which channel and how
+  far back — see board `work-that-has-gone-cold` ticket 02's D8 and D11.
+  Before that ticket the sweep read the *oldest* hundred messages in the
+  channel and crawled forward a hundred every five minutes, which was nobody's
+  decision: `_replay` passed no `limit` and inherited the library's.
 - **Some messages must not reach the model at all**, and that is decided
   before the call, by `config.yaml`'s `sensitive_words` — pay, health records,
   credentials. A rule that runs first cannot be argued out of by a persuasive

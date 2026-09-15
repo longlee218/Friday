@@ -75,6 +75,34 @@ def duration(written: object, *, key: str) -> int | None:
     return int(found.group(1)) * _IN_SECONDS[found.group(2)]
 
 
+def message_age_cutoff(config) -> int | None:
+    """How old a turn may be before this system stops acting on it, in
+    seconds. `None` means no cutoff.
+
+    **One number, two readers, and this is the only place that knows where it
+    lives.** Triage marks a turn older than this `outdated` and never sends it
+    to a model; the recovery sweep, meeting a channel with no cursor, uses it
+    as how far back to read (board `work-that-has-gone-cold`, ticket 02, D8).
+    Those are the same policy seen from two sides — "work this old is not
+    worth starting" — and a second key under `ingest:` would be that policy
+    written twice, which is the drift this repo keeps paying for.
+
+    It sits under `agents.triage` because that is where it was born and moving
+    it would be a config migration for every deployment, to no end. Neither
+    reader is told that: `friday/inbox/` never learns triage exists, and the
+    composition root never reads an agent's knobs — the rule
+    `test_composition_root_reads_no_agent_config` exists to keep.
+
+    Ticket 02's own "How B is wired" section said the composition root would
+    read this and hand it on. That was written without checking, and it is
+    exactly what that guard forbids.
+    """
+    triage = config.agents.get("triage")
+    if triage is None:
+        return None
+    return duration(triage.options.get("max_message_age"), key="max_message_age")
+
+
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 _REQUIRED_AGENT_FIELDS = ("api_key", "base_url", "model")

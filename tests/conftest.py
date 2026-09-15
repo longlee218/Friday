@@ -25,7 +25,7 @@ class FakeProvider:
     def __init__(self) -> None:
         self._queued: list[InboundEvent] = []
         self._history: dict[str, list[InboundEvent]] = {}
-        self.history_calls: list[tuple[str, str | None]] = []
+        self.history_calls: list[tuple[str, str | None, datetime | None]] = []
         self._recent: dict[str, list[InboundEvent]] = {}
         self.recent_calls: list[tuple[str, str, int]] = []
         self.reconnected = asyncio.Event()
@@ -60,11 +60,22 @@ class FakeProvider:
         for event in self._recent.get(conversation.target_id, [])[-limit:]:
             yield event
 
-    async def history(self, channel_id: str, *, after: str | None):
-        self.history_calls.append((channel_id, after))
+    async def history(
+        self, channel_id: str, *, after: str | None, since: datetime | None
+    ):
+        """Replay a channel, oldest first.
+
+        `since` is the cold-cursor lookback (ticket 02): with no cursor to
+        start from, the sweep says how far back it is willing to read instead
+        of reading from the day the channel was created.
+        """
+        self.history_calls.append((channel_id, after, since))
         for event in self._history.get(channel_id, []):
-            if after is None or int(event.provider_message_id) > int(after):
-                yield event
+            if after is not None and int(event.provider_message_id) <= int(after):
+                continue
+            if after is None and since is not None and event.created_at < since:
+                continue
+            yield event
 
 
 def make_event(

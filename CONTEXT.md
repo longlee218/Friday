@@ -550,3 +550,9 @@ outbound intents out. Platform mechanics stay inside the implementation.
 The recovery path. The live connection can miss messages, so channel history is
 re-read from a stored **cursor** (`last_seen_message_id`) on a timer and
 immediately on reconnect.
+
+A channel with no cursor — a fresh database, or a redeploy that lost the
+volume — is a **cold cursor**, and it is read from the other end: back as far
+as the **lookback** and no further, newest end first, delivered oldest first.
+The lookback is `max_message_age`, the same number that decides a turn is
+`outdated`, because both answer "work this old is not worth starting".

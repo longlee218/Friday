@@ -51,7 +51,7 @@ async def test_a_failure_inside_the_inbox_surfaces_instead_of_hanging(db, config
             raise RuntimeError("the gateway fell over")
             yield  # pragma: no cover - makes this an async generator
 
-        async def history(self, channel_id, *, after):
+        async def history(self, channel_id, *, after, since):
             return
             yield  # pragma: no cover
 

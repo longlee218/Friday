@@ -38,7 +38,7 @@ async def test_a_sweep_asks_only_for_messages_after_the_cursor(inbox, provider):
 
     await inbox.sweep_once()
 
-    assert provider.history_calls == [("watched", "100")]
+    assert provider.history_calls == [("watched", "100", None)]
 
 
 async def test_a_sweep_asks_from_the_beginning_when_there_is_no_cursor(
@@ -46,7 +46,7 @@ async def test_a_sweep_asks_from_the_beginning_when_there_is_no_cursor(
 ):
     await inbox.sweep_once()
 
-    assert provider.history_calls == [("watched", None)]
+    assert provider.history_calls == [("watched", None, None)]
 
 
 async def test_a_sweep_covers_only_watched_channels(inbox, provider):
@@ -55,7 +55,7 @@ async def test_a_sweep_covers_only_watched_channels(inbox, provider):
     swept = await inbox.sweep_once()
 
     assert swept == []
-    assert [c for c, _ in provider.history_calls] == ["watched"]
+    assert [c for c, _, _ in provider.history_calls] == ["watched"]
 
 
 async def test_a_swept_message_that_does_not_address_the_account_is_dropped(
@@ -137,3 +137,114 @@ async def test_the_sweep_also_runs_on_a_timer(provider, db, config):
     await asyncio.wait_for(asyncio.create_task(consume()), timeout=2)
 
     assert [e.provider_message_id for e in seen] == ["100"]
+
+
+# --- ticket 02 (board `work-that-has-gone-cold`): the cold cursor ------------
+
+
+def _cold(provider, db, config, *, lookback):
+    from friday.inbox import Inbox
+
+    return Inbox(
+        provider=provider, db=db, config=config, cold_start_lookback=lookback
+    )
+
+
+async def test_a_cold_cursor_looks_back_as_far_as_the_lookback(provider, db, config):
+    """D8. With no cursor there is no message to start after, so the sweep
+    says how far back it is willing to read instead of reading from the day
+    the channel was created."""
+    from datetime import datetime, timedelta, timezone
+
+    before = datetime.now(timezone.utc)
+    await _cold(provider, db, config, lookback=24 * 3600).sweep_once()
+
+    (channel, after, since) = provider.history_calls[0]
+    assert (channel, after) == ("watched", None)
+    assert since is not None
+    assert before - timedelta(hours=24, seconds=5) <= since <= before - timedelta(
+        hours=23, minutes=59
+    )
+
+
+async def test_a_warm_cursor_asks_after_it_and_names_no_lookback(provider, db, config):
+    """The lookback answers "where do I start when there is nothing to start
+    after". A cursor is that something, so it wins and the lookback is not
+    consulted — otherwise a channel quiet for longer than the lookback would
+    have its own cursor overruled."""
+    await db.advance_cursor(make_event(message_id="100"))
+
+    await _cold(provider, db, config, lookback=24 * 3600).sweep_once()
+
+    assert provider.history_calls == [("watched", "100", None)]
+
+
+async def test_with_no_lookback_a_cold_cursor_still_reads_from_the_beginning(
+    provider, db, config
+):
+    """`max_message_age` unset means no cutoff, and the lookback is that same
+    number — so unset here means the same thing it means there, rather than a
+    second default nobody chose."""
+    await _cold(provider, db, config, lookback=None).sweep_once()
+
+    assert provider.history_calls == [("watched", None, None)]
+
+
+async def test_a_cold_cursor_says_so_in_the_log(provider, db, config, caplog):
+    """D11. The residual failure of this design is downtime longer than the
+    lookback: the gap beyond it is dropped. That is acceptable only because
+    it is visible, so a boot that reads from a lookback rather than a cursor
+    has to say which channel and how far back."""
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="friday.inbox"):
+        await _cold(provider, db, config, lookback=24 * 3600).sweep_once()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "watched" in said
+    assert "24" in said or "86400" in said
+
+
+async def test_a_cold_cursor_is_reported_once_not_every_sweep(provider, db, config):
+    """D11 asks for one line at boot. A cold cursor is not a one-shot state:
+    a watched channel whose lookback holds no messages records no cursor, so
+    it is cold again on the next sweep and on every sweep after it. Told every
+    five minutes, it becomes the line a person scrolls past."""
+    import logging
+
+    inbox = _cold(provider, db, config, lookback=24 * 3600)
+    with caplog_at(logging, "friday.inbox") as records:
+        await inbox.sweep_once()
+        await inbox.sweep_once()
+        await inbox.sweep_once()
+
+    cold = [r for r in records if "has no cursor" in r.getMessage()]
+    assert len(cold) == 1
+
+
+class caplog_at:
+    """A handler on one logger, because `caplog` is per-test and this needs
+    the count across three calls in one."""
+
+    def __init__(self, logging_module, name):
+        self._logging = logging_module
+        self._logger = logging_module.getLogger(name)
+        self.records = []
+
+    def __enter__(self):
+        outer = self
+
+        class Collect(self._logging.Handler):
+            def emit(self, record):
+                outer.records.append(record)
+
+        self._handler = Collect()
+        self._previous = self._logger.level
+        self._logger.setLevel(self._logging.INFO)
+        self._logger.addHandler(self._handler)
+        return self.records
+
+    def __exit__(self, *exc):
+        self._logger.removeHandler(self._handler)
+        self._logger.setLevel(self._previous)
+        return False

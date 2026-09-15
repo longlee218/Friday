@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from collections.abc import AsyncIterator
 
-from friday.config import IngestConfig
+from friday.config import IngestConfig, message_age_cutoff
 from friday.store.db import Database
 from friday.domain.models import InboundEvent, MentionType
 
@@ -36,10 +36,46 @@ class Inbox:
     package should import its internals.
     """
 
-    def __init__(self, *, provider, db: Database, config: IngestConfig) -> None:
+    @classmethod
+    def build(cls, config, *, provider, db: Database) -> "Inbox":
+        """The inbox, read from configuration here.
+
+        The same shape `TriageRunner.build` uses, for the same reason: which
+        knobs a step has is that step's business, and the composition root
+        must not read them. The cold-start lookback comes through
+        `message_age_cutoff`, which is the one place that knows where that
+        number lives — this module never learns that triage exists, or that
+        the number is shared with it.
+        """
+        return cls(
+            provider=provider,
+            db=db,
+            config=config.ingest,
+            cold_start_lookback=message_age_cutoff(config),
+        )
+
+    def __init__(
+        self,
+        *,
+        provider,
+        db: Database,
+        config: IngestConfig,
+        cold_start_lookback: float | None = None,
+    ) -> None:
         self._provider = provider
         self._db = db
         self._config = config
+        #: How far back a sweep reads when a channel has no cursor, in
+        #: seconds. `None` means from the beginning of the channel, which is
+        #: what "no cutoff configured" already means everywhere else.
+        self._cold_start_lookback = cold_start_lookback
+        #: Channels already reported as cold. D11 asks for one line at boot,
+        #: and a cold cursor is not a one-shot state: a watched channel whose
+        #: lookback contains no messages records no cursor, so it is cold
+        #: again on the next sweep and every sweep after it. Told once, it
+        #: stays worth reading; told every five minutes, it is what a person
+        #: learns to scroll past.
+        self._reported_cold: set[str] = set()
         #: What has arrived and what became of it. Read by the heartbeat: a
         #: message that is dropped leaves no row anywhere, so without this the
         #: difference between "nothing arrived" and "everything was out of
@@ -124,17 +160,59 @@ class Inbox:
 
         Runs the same acceptance path as the live connection, so a message that
         arrives on both is captured exactly once.
+
+        A channel with a cursor is asked for what comes after it. A channel
+        with none is asked for the last `cold_start_lookback` instead of for
+        its whole history — the cursor wins where there is one, so a channel
+        quiet for longer than the lookback is not overruled by it.
         """
         recovered: list[InboundEvent] = []
         for channel_id in sorted(self._config.watched_channels):
             after = await self._db.cursor_for(self._provider.name, channel_id)
-            async for event in self._provider.history(channel_id, after=after):
+            since = self._lookback_for(channel_id) if after is None else None
+            async for event in self._provider.history(
+                channel_id, after=after, since=since
+            ):
                 accepted = await self._accept(event)
                 if accepted is not None:
                     recovered.append(accepted)
         if recovered:
             log.info("sweep recovered %d missed message(s)", len(recovered))
         return recovered
+
+    def _lookback_for(self, channel_id: str) -> datetime | None:
+        """Where a cold cursor starts reading, and a line saying so.
+
+        A cold cursor always means the same thing — this process has no record
+        of ever having read this channel — and it always follows downtime,
+        because the gateway was not running either while the record was being
+        lost. So the gap beyond the lookback is dropped, and that is only an
+        acceptable trade while somebody can see it happening. Hence the line:
+        the never-drop rule is about a mention leaving no trace, and a bounded
+        decision nobody is told about leaves none.
+        """
+        first_time = channel_id not in self._reported_cold
+        self._reported_cold.add(channel_id)
+        if self._cold_start_lookback is None:
+            if first_time:
+                log.info(
+                    "%s has no cursor and no lookback is configured — "
+                    "reading from the beginning of the channel",
+                    channel_id,
+                )
+            return None
+        since = datetime.now(timezone.utc) - timedelta(
+            seconds=self._cold_start_lookback
+        )
+        if first_time:
+            log.info(
+                "%s has no cursor — reading back %.0fh, to %s; "
+                "anything older than that is not recovered",
+                channel_id,
+                self._cold_start_lookback / 3600,
+                since.isoformat(timespec="seconds"),
+            )
+        return since
 
     def still_typing(self, conversation: ConversationId, author_id: str) -> bool:
         """Whether this person was seen typing within the turn window.

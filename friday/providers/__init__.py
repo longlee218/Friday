@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from friday.domain.conversation import ConversationId
@@ -66,11 +67,24 @@ class Provider(Protocol):
         ...
 
     def history(
-        self, channel_id: str, *, after: str | None
+        self, channel_id: str, *, after: str | None, since: datetime | None
     ) -> AsyncIterator[InboundEvent]:
-        """Yield past messages in a channel, oldest first, after a message id.
+        """Yield past messages in a channel, oldest first.
 
-        `after=None` means from the beginning. This is the recovery path: the
-        live connection can miss messages, and this is how they are found.
+        This is the recovery path: the live connection can miss messages, and
+        this is how they are found.
+
+        `after` is a cursor and wins wherever there is one: the read starts
+        after that message and `since` is ignored. `after=None` means there is
+        no cursor — a fresh database — and `since` is what to do about it:
+        read back only that far, newest end first, and still hand them over
+        oldest first. Both `None` means from the beginning of the channel
+        (board `work-that-has-gone-cold`, ticket 02, D8).
+
+        **`since` carries no default, deliberately.** A default would let an
+        implementation omit the parameter and fail with `TypeError` the first
+        time a cold cursor met it in production, which is precisely the
+        failure this protocol's own docstring opens by warning about — and it
+        would buy nothing, since the one caller always passes it by name.
         """
         ...

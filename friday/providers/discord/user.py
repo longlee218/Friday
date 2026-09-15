@@ -163,18 +163,58 @@ class DiscordUserProvider:
         await self._incoming.put(event)
 
     async def history(
-        self, channel_id: str, *, after: str | None
+        self, channel_id: str, *, after: str | None, since: datetime | None
     ) -> AsyncIterator[InboundEvent]:
         """Replay a channel from a cursor, oldest first.
 
         The recovery path: the live connection can miss messages, and this is
         how they are found again.
+
+        With no cursor and a `since`, it reads the other end — see `_since`.
+        Every other case reads forwards a page at a time, as it always has.
         """
+        if after is None and since is not None:
+            async for event in self._since(channel_id, since):
+                yield event
+            return
         async for event in self._replay(
             channel_id,
+            limit=_PAGE,
             after=_snowflake(after),
             oldest_first=True,
         ):
+            yield event
+
+    async def _since(
+        self, channel_id: str, since: datetime
+    ) -> AsyncIterator[InboundEvent]:
+        """Read backwards from now until `since`, then hand them over in order.
+
+        Backwards because there is no cursor to read forwards from, and the
+        end worth having is the recent one. The library pages for us with
+        `limit=None`, and that is safe *here* and nowhere else in this file:
+        what bounds the read is the `break`, not a page size. A `break`
+        rather than a filter, so a channel with ten years of history costs
+        one page.
+
+        Same reversal as `recent`, for the same reason: Discord hands back
+        newest first when reading this way, and a transcript out of order
+        reads to a model as a different conversation.
+        """
+        collected: list[InboundEvent] = []
+        async for event in self._replay(
+            channel_id,
+            limit=None,
+            oldest_first=False,
+        ):
+            if event.created_at < since:
+                break
+            collected.append(event)
+        # The count only. Which boundary and why is `Inbox._lookback_for`'s
+        # line, said once at boot; repeating it here would be the same fact
+        # in two voices.
+        log.info("%s: cold read recovered %d message(s)", channel_id, len(collected))
+        for event in reversed(collected):
             yield event
 
     async def recent(
@@ -190,8 +230,8 @@ class DiscordUserProvider:
             event
             async for event in self._replay(
                 conversation.target_id,
-                before=_snowflake(before),
                 limit=limit,
+                before=_snowflake(before),
                 oldest_first=False,
             )
         ]
@@ -199,20 +239,28 @@ class DiscordUserProvider:
             yield event
 
     async def _replay(
-        self, channel_id: str, **filters
+        self, channel_id: str, *, limit: int | None, **filters
     ) -> AsyncIterator[InboundEvent]:
         """Normalise a slice of a channel's history.
 
         `is_own` is decided the same way as on the live path — by author — so a
         message recovered by the sweep is indistinguishable from one that
         arrived over the gateway.
+
+        **`limit` is required, and that is the whole of ticket 02's D9.** It
+        used to travel in `**filters`, so a caller that forgot it got the
+        library's own default of 100 — a page size no line of this repo ever
+        chose, and invisible because both test fakes read "no limit" as "all
+        of them". Required here, a caller that forgets it fails at the call
+        rather than quietly reading a hundred messages. `None` means let the
+        library page.
         """
         me = self._client.user
         if me is None:
             log.warning("asked for history before the client was ready")
             return
         channel = await self._channel(int(channel_id))
-        async for message in channel.history(**filters):
+        async for message in channel.history(limit=limit, **filters):
             yield normalise(
                 message,
                 me_id=me.id,
@@ -300,6 +348,22 @@ def is_credential_rejected(exc: BaseException) -> bool:
     return (
         isinstance(exc, discord_self.ConnectionClosed) and exc.code == 4004
     )
+
+
+#: What one forward page of a channel's history is worth reading, and ticket
+#: 02's D9: the number is *stated*, not inherited. It is the library's own
+#: default, deliberately — D9 asked that the page size stop being invisible,
+#: not that it change, and every caller that reads forwards is bounded by
+#: something else anyway: a cursor bounds the recovery sweep, and `_since`'s
+#: own `break` bounds the cold read.
+#:
+#: **The one case with nothing bounding it is a cold cursor with no lookback**
+#: — `max_message_age` unset — and that is left exactly as it was found rather
+#: than decided here. Reading the whole channel then is ticket 02's option C,
+#: which the operator rejected; reading nothing is option A, also rejected.
+#: Neither was chosen for this sub-case, so this ticket does not choose one.
+#: See ticket 02's "Still open" section.
+_PAGE = 100
 
 
 def _snowflake(message_id: str | None):

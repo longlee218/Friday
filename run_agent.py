@@ -124,7 +124,7 @@ async def _run(stack: AsyncExitStack) -> None:
     skills = SkillLibrary.build(config)
 
     provider = DiscordUserProvider(token=token)
-    inbox = Inbox(provider=provider, db=db, config=config.ingest)
+    inbox = Inbox.build(config, provider=provider, db=db)
 
     async def marked(
         *, provider_message_id: str, mark, by: str, taking_back: bool

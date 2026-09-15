@@ -16,7 +16,7 @@ import logging
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from friday.config import duration
+from friday.config import message_age_cutoff
 from friday.store.db import Database
 from friday.domain.states import TaskState
 from friday.domain.models import SKIP, InboundEvent, Task
@@ -147,9 +147,7 @@ class TriageRunner:
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)
             ),
-            max_message_age=duration(
-                settings.options.get("max_message_age"), key="max_message_age"
-            ),
+            max_message_age=message_age_cutoff(config),
             turn_seconds=config.ingest.turn_seconds,
             still_typing=still_typing,
         )

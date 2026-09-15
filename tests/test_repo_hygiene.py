@@ -133,3 +133,35 @@ def test_doc_paths_resolve_to_existing_files() -> None:
         f"CLAUDE.md names paths that do not exist: {missing}"
     )
 
+
+
+def test_only_config_knows_where_the_message_age_cutoff_lives() -> None:
+    """`friday/config.py`'s `message_age_cutoff` says it is "the only place
+    that knows where it lives", and until this test that was a sentence
+    rather than a fact.
+
+    Two readers share that number now — triage, which marks a turn
+    `outdated`, and the sweep, which uses it as how far a cold cursor reads
+    back. Neither may learn that it sits under `agents.triage`: the inbox
+    would gain a dependency on triage's configuration section, and the
+    composition root is forbidden agent config outright by the test above.
+    Reaching for the key by name anywhere else is how that becomes untrue,
+    so the key as a *string* may appear in one file.
+
+    A parameter or keyword named `max_message_age` is not a string literal
+    and is not what this catches — `TriageRunner` is free to call its own
+    argument that, and does.
+    """
+    offenders: list[str] = []
+    for path in sorted((ROOT / "friday").rglob("*.py")):
+        if path.name == "config.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value == "max_message_age":
+                offenders.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert not offenders, (
+        "the cutoff's config key is named outside friday/config.py: "
+        f"{offenders}. Call `message_age_cutoff(config)` instead — see its "
+        "docstring."
+    )

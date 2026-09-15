@@ -12,7 +12,7 @@ fixed. Read that section anyway: it is why B is safe now and was not before.
 are decisions about the same board's one rule and restarting at D1 would make
 two D1s on one board.
 
-**Status:** ready-for-agent
+**Status:** done, with one question left open — see "Still open"
 
 ## Why
 
@@ -118,12 +118,27 @@ one the next reader has to re-derive.
 
 ## How B is wired
 
-`friday/inbox/` must not read a triage knob. It does not have to: `run_agent.py`
-is already the only place agent configuration is read, and the guard for that
-(`test_composition_root_reads_no_agent_config`) exists because the rule has
-been broken before. The composition root reads `max_message_age` and hands
-`Inbox` a `cold_start_lookback` duration. The inbox receives a number of
-seconds and never learns that triage exists.
+`friday/inbox/` must not read a triage knob, and the inbox must receive a
+number of seconds without ever learning that triage exists.
+
+**How this section said to do that was wrong, and it was wrong when it was
+written.** It said: "the composition root reads `max_message_age` and hands
+`Inbox` a `cold_start_lookback` duration", on the strength of
+`test_composition_root_reads_no_agent_config` existing. That guard does not
+permit the composition root to read agent configuration — it *forbids* it,
+which is the opposite of what this paragraph assumed, and it forbids it by
+walking `run_agent.py`'s AST for any attribute chain containing `agents`. The
+proposed wiring spells as `config.agents[...]` in `run_agent.py` and trips it
+on the first run. Written without checking; recorded rather than edited away,
+because the next reader deserves to know the instruction on this page was once
+the opposite of the rule it cited.
+
+What was built instead: `friday/config.py` grows `message_age_cutoff(config)`,
+the one place that knows where that number lives, and both readers call it —
+`TriageRunner.build` and a new `Inbox.build` classmethod, the same shape
+`TriageRunner.build` and `ContextStore.build` already use. The composition
+root reads nothing; the inbox imports one duration function and never names
+triage. D10's intent is met; only its mechanism changed.
 
 The alternative — a separate number under `ingest:` — is two values that have
 to be kept in agreement, which is the drift shape `CLAUDE.md` devotes a
@@ -156,6 +171,39 @@ window between a mention and its task row. It is now
 `.scratch/discord-mention-triage/issues/46-the-operator-answering-first-is-missed.md`,
 with a strict-xfail reproduction in `tests/test_pool.py`. Fixing 46 fixes
 this, which is why this ticket lists it as a blocker rather than restating it.
+
+## Still open
+
+**What a cold cursor should do when `max_message_age` is unset.** This ticket
+defines the lookback as that number, so with the number absent there is
+nothing to look back by — and both ways of resolving it are options this
+ticket already rejected: reading the whole channel is C, reading nothing is A.
+Neither was chosen for this sub-case, so the implementation changed nothing
+about it: that path reads as it always did, a forward page at a time, with the
+page size now *stated* (`_PAGE` in `friday/providers/discord/user.py`) rather
+than inherited from the library, which is all D9 asked for.
+
+The original bug therefore survives in that one configuration, and says so in
+a comment where it lives. Worth a ticket if anyone runs without a cutoff; it
+is not this one's to decide twice.
+
+## Known residuals
+
+Both found by review rather than by the ticket, and both accepted rather than
+fixed here.
+
+- **A turn straddling the lookback is truncated, not skipped.** `_since` cuts
+  per message; `TriageRunner._age` judges a turn by its **newest** message
+  (D5 of ticket 01). So a burst that began just before the cutoff and
+  continued past it is classified as fresh, from a transcript whose older half
+  the sweep never fetched. Narrow — a turn is a run of messages under
+  `turn_seconds` apart, so this needs a burst in flight across that exact
+  instant — and the alternative is over-reading by an amount nothing bounds.
+
+- **The two floors are one number, not one rule.** D8's phrase "one number
+  with one meaning" is true of the number and slightly generous about the
+  meaning: the sweep's floor cuts messages, the classifier's judges turns.
+  That difference is the residual above and is the whole of it.
 
 ## Out of scope
 
