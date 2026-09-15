@@ -252,11 +252,26 @@ workflows:
   # messages — so the one path with no human in it was also the one whose
   # wording a model wrote from untrusted text under your name. Every draft now
   # passes `friday/responder/check.py` first: no link, no code block, near the
-  # template's length, no promise, and — where the template named something
-  # that cannot be translated, like correlationId — it still names it. Failing
-  # sends the plain template and logs why. False refusals are expected and
-  # cost a plainer question, which is the right way round.
-  auto_ask_for_details: true
+  # template's length, no promise, no work the question did not name, and —
+  # where the template named something that cannot be translated, like
+  # correlationId — it still names it. Failing sends the plain template and
+  # logs why. False refusals are expected and cost a plainer question, which
+  # is the right way round.
+  #
+  # **Off since 2026-09-15, and the floor above is why rather than why not.**
+  # Every message this ever sent — three of them, on 2026-09-14 — ended in
+  # "anh trace giúp", a promise to trace, under the operator's name, with the
+  # floor in place and passing them: it held a list of phrasings drawn from
+  # one incident, so it caught that sentence and not the promise. Ticket 12
+  # replaced the rule with one that reads the other way round, and that rule
+  # is still a heuristic — it catches an action the question did not name, not
+  # every way a sentence can commit somebody.
+  #
+  # So this is off until a person has read what it wants to send. Turning it
+  # back on is this one line; what it costs while off is that a task missing a
+  # detail waits in `needs_human` instead of asking, which is slower and is
+  # not a lost mention.
+  auto_ask_for_details: false
 
 ingest:
   # Which kinds of mention create work: direct, role, dm
