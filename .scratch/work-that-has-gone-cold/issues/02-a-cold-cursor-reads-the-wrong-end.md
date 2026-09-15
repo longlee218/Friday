@@ -4,8 +4,9 @@
 newest end, not the oldest, and says in code how far back it is willing to
 look.
 
-**Blocked by:** 46 (on board `discord-mention-triage`) — see "What B needs
-that is not in the sweep" below
+**Blocked by:** nothing — 46 (on board `discord-mention-triage`) is done, so
+what "What B needs that is not in the sweep" describes below is already
+fixed. Read that section anyway: it is why B is safe now and was not before.
 
 **Decisions:** D8–D11, below. Continuing ticket 01's numbering, since these
 are decisions about the same board's one rule and restarting at D1 would make

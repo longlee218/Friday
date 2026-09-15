@@ -5,7 +5,7 @@ closes the task, the same as one written after it.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## What is wrong
 
