@@ -21,7 +21,11 @@ in favour of `.scratch/a-monitor-on-the-whole-path/`, a 13-ticket board that
 redoes the UI as a real-time operator monitor dashboard (Monitor
 front door, SSE updates, drill-down paths, motion + skeleton + toast,
 axe-core + Lighthouse gates). Ticket 20 (SSE) landed in ticket 05
-of that board. 34–45 are done.
+of that board. 34–46 are done — 46 is the newest and did not come from a
+plan either: reading the sweep for an unrelated question turned up that
+`Database._operator_answered` compared a Discord timestamp against a row's
+insertion time, so the operator answering *fast* was the case that did not
+count.
 
 **Ticket 18 is retired too, and this paragraph said the opposite for
 months.** It read "ticket 18 stays `ready-for-agent` — the React+Vite
@@ -38,6 +42,14 @@ reading code: the reporter replied and nothing could hear the answer, sent the
 details in a second message and nothing read it, asked what a correlationId is
 and nothing could explain, and the operator answered by hand while the agent
 went on asking. Each ticket names what blocks it; work the frontier.
+
+A fifth board, `.scratch/work-that-has-gone-cold/`, holds two, both done:
+`max_message_age` (ticket 01, written 2026-09-07 and not actually *set* until
+2026-09-15) and the cold-cursor sweep that read the oldest end of a channel
+(ticket 02). Ticket 02 carries one question the operator has not been asked:
+what a cold cursor should do when no cutoff is configured. The board is small
+and its two tickets are eight days apart, which is the shape of a rule that
+was written, shelved, and then found to be load-bearing.
 
 A fourth board, `.scratch/every-answer-has-a-shape/`, holds nine tickets.
 **Every ticket but 03 is done.** 04 and 06 were merged, because replacing
