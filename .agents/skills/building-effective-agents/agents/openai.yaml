@@ -1,0 +1,3 @@
+interface:
+  display_name: "Building Effective Agents"
+  short_description: "Workflow vs. agent taxonomy for agentic system design"

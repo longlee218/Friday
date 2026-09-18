@@ -1,0 +1,3 @@
+interface:
+  display_name: "Demystifying Evals for Agents"
+  short_description: "Task design, graders, and eval suite lifecycle"

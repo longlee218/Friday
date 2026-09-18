@@ -1,0 +1,16 @@
+{
+  "skill_name": "anthropic-agent-cookbook",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I want to implement the orchestrator-workers pattern from scratch for a new feature -- can you point me to a reference implementation and tell me what it does and doesn't handle out of the box?",
+      "expected_output": "Points to the actual claude-cookbooks orchestrator_workers.ipynb notebook, correctly describes its two-phase shape (runtime decomposition, then worker calls), and names its real limitations (sequential execution, no built-in synthesis step) rather than presenting it as a complete, ready-to-use implementation.",
+      "files": [],
+      "expectations": [
+        "Points to an actual/plausible reference implementation of orchestrator-workers (e.g. a claude-cookbooks notebook)",
+        "Describes the runtime-decomposition-then-dispatch shape correctly",
+        "Names at least one real limitation of the reference implementation (e.g. sequential execution or missing synthesis step) rather than presenting it as a complete, ready-to-use solution"
+      ]
+    }
+  ]
+}

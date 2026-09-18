@@ -1,0 +1,17 @@
+{
+  "skill_name": "writing-effective-tools",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm reviewing a PR that adds four new tools: fetch_skill, search_skills, describe_skill, read_skill_file. My instinct is that this should just be one skill_lookup tool with an action parameter, since I've read that agents get confused by too many similar tools. Should I push back on this PR?",
+      "expected_output": "Applies the consolidation guidance correctly by checking what axis the tools actually split on (what the caller already knows / how much it should pay) rather than reflexively applying 'fewer tools is better'. Concludes the four-tool split is likely defensible if it's not near-duplicate verbs on the same resource, and explains why via the ResponseFormat/cost-tiering analogy, rather than agreeing with the reviewer's instinct by default.",
+      "files": [],
+      "expectations": [
+        "Identifies the actual axis the four tools split on (what the caller knows / cost tiering) rather than just counting tools",
+        "References the ResponseFormat concise/detailed pattern or an equivalent cost-tiering analogy",
+        "Does not recommend merging the four tools into one without qualification",
+        "Gives the PR reviewer an actual recommendation (push back or don't) with reasoning"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "skill_name": "building-effective-agents",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We're arguing about whether the Diagnose/Collector redesign on .scratch/read-it-the-way-the-operator-does/ counts as 'orchestrator-workers' or if it's really just routing. The Gather checks that run are a fixed set today, and Diagnose only interprets their already-computed output. Which pattern is this, and does the distinction actually matter for how we build it?",
+      "expected_output": "Correctly identifies that a fixed set of checks interpreted by one model step is routing/chaining, not orchestrator-workers (which requires the decomposition itself to be chosen by a model at runtime). Explains the workflow-vs-agent distinction (who decides the next step). Notes the practical consequence: calling it orchestrator-workers when it isn't could lead to building the wrong thing or accepting the wrong tradeoffs.",
+      "files": [],
+      "expectations": [
+        "Identifies that a fixed set of checks interpreted by one model step is routing/chaining, not orchestrator-workers",
+        "States that orchestrator-workers requires the decomposition itself to be chosen by a model at runtime",
+        "Explicitly frames the workflow-vs-agent 'who decides the next step' question",
+        "Gives a concrete, actionable recommendation for the Diagnose/Collector design rather than only reciting the taxonomy",
+        "Does not simply agree the design is already orchestrator-workers without qualification"
+      ]
+    }
+  ]
+}

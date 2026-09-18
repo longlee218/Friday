@@ -1,0 +1,3 @@
+interface:
+  display_name: "Harnesses for Long-running Agents"
+  short_description: "Multi-session handoff, checkpointing, doer/judge split"

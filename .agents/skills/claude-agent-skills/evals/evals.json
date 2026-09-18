@@ -1,0 +1,17 @@
+{
+  "skill_name": "claude-agent-skills",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I just wrote a new SKILL.md for a project and the description field is 3 paragraphs long, explaining in detail what it does. Is that a problem?",
+      "expected_output": "Correctly flags this as a problem: the description is always-loaded metadata paid on every turn, should be specific but concise, and 1024-char/conciseness guidance applies. Recommends moving extended explanation into the body or a reference file, and gives concrete guidance on what should stay in the description (what + when) vs. move out.",
+      "files": [],
+      "expectations": [
+        "Flags the 3-paragraph description as a real problem, not a stylistic nicety",
+        "Explains that the description is always-loaded/permanent context cost paid on every turn",
+        "Recommends moving detail into the body or a reference file rather than the description",
+        "Gives concrete guidance on what belongs in a description (what + when) vs. what should move out"
+      ]
+    }
+  ]
+}

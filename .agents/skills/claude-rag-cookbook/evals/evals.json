@@ -1,0 +1,16 @@
+{
+  "skill_name": "claude-rag-cookbook",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Someone on the team wants to add a vector database and embeddings so agents can search past incidents and memory notes semantically instead of exact-match SQL. Is that a good idea for Friday right now?",
+      "expected_output": "Pushes back appropriately: names the corpus-size / measure-first principle from Contextual Retrieval, points out Friday's memory is small and exact-match by design (200-row cap), and recommends measuring exact-match recall@k against a golden query set before adopting embeddings, rather than agreeing that RAG is needed just because someone wants semantic search.",
+      "files": [],
+      "expectations": [
+        "Does not simply agree that adding a vector DB/embeddings is a good idea",
+        "References measuring a baseline (e.g. recall@k with exact-match retrieval) before adopting embeddings",
+        "Mentions a corpus-size or scale caveat (a small/bounded corpus may not need RAG at all)"
+      ]
+    }
+  ]
+}
