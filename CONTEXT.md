@@ -457,6 +457,9 @@ operator typing it on the board — and a model may not update, supersede or
 delete an admin row. A structured kind carries its payload in `data`,
 checked against that kind's schema when written, and a natural **key**
 (a service's name, a route's domain) that one active row per room may hold.
+The exception is `finding`: its key, `service:error_code`, names the fault
+rather than the finding, and findings on one fault pile up — several saying
+the same thing are the signal a runbook is owed.
 
 ## Outbound intent
 
