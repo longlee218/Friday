@@ -54,6 +54,11 @@ def prepare_node(
     #: all, which reads exactly as it did before rooms reached the
     #: extractor.
     context_store: Any = None,
+    #: The configured agent this node calls, and its clock — see
+    #: `Node.agent`. Set by `build_simple_dag` from the `extractor` block;
+    #: `None` for both when there is none, and node 0 is code alone.
+    agent: str | None = None,
+    timeout_seconds: float | None = None,
 ) -> Node:
     """Node 0: everything the reporter has said, filled in and checked.
 
@@ -118,7 +123,7 @@ def prepare_node(
             return problem
         return on_ready(filled) if on_ready else filled
 
-    return Node("prepare", _prepare)
+    return Node("prepare", _prepare, agent=agent, timeout_seconds=timeout_seconds)
 
 
 def prepared_ok(state: DAGState) -> bool:

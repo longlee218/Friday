@@ -28,6 +28,7 @@ __all__ = [
     "EDGE_ROUTER",
     "NODE_CLOCK_MARGIN_SECONDS",
     "build_simple_dag",
+    "check_graphs",
     "check_node_clocks",
     "dag_for",
     "register_dag",
@@ -78,9 +79,10 @@ NODE_CLOCK_MARGIN_SECONDS = 5.0
 def check_node_clocks(dags: Any, agents: dict[str, Any]) -> None:
     """Refuse a model node whose timeout does not leave its harness room.
 
-    At registration, which is where a graph first meets the configuration —
-    so a misconfigured timeout stops the process at boot rather than
-    surfacing as a cancelled run on a task nobody is watching. A model node
+    Run by `check_graphs` straight after the configuration is loaded, and
+    again by `register_dags` on what it registers — so a misconfigured
+    timeout stops the process at boot rather than surfacing as a cancelled
+    run on a task nobody is watching. A model node
     with no timeout of its own has one clock and nothing to check.
     """
     for dag in dags:
@@ -113,6 +115,7 @@ def build_simple_dag(
     *,
     budget_tokens: int | None = None,
     context_store: Any = None,
+    extractor: Any = None,
 ) -> DAG:
     """`prepare`, then ask for what is missing or hand the rest over — what
     every type without an investigation needs (D1). There is nothing here
@@ -124,6 +127,12 @@ def build_simple_dag(
     `prepare_node`, the same for every type: node 0's budget and the
     channel context store are each one value shared by every task type,
     not one per type.
+
+    `extractor` is the configured `extractor` agent, if there is one. Node 0
+    calls it, which makes node 0 a model node: it names the agent and gets a
+    clock that is the extractor's own plus `NODE_CLOCK_MARGIN_SECONDS` —
+    derived rather than declared, so raising the extractor's timeout in
+    config.yaml moves node 0's with it instead of slipping under it.
     """
     return DAG(
         name=task_type,
@@ -134,9 +143,40 @@ def build_simple_dag(
                 on_ready=lambda filled: plan_by_required_parameters(task_type, filled),
                 budget_tokens=budget_tokens,
                 context_store=context_store,
+                agent=None if extractor is None else "extractor",
+                timeout_seconds=(
+                    None
+                    if extractor is None
+                    else extractor.timeout_seconds + NODE_CLOCK_MARGIN_SECONDS
+                ),
             ),
         ),
     )
+
+
+def _graphs(config: Any, *, context_store: Any = None) -> dict[str, DAG]:
+    """Every type's graph, built from the configuration."""
+    budget_tokens = config.context.extraction_budget_tokens
+    extractor = config.agents.get("extractor")
+    return {
+        task_type: build_simple_dag(
+            task_type,
+            params_cls,
+            budget_tokens=budget_tokens,
+            context_store=context_store,
+            extractor=extractor,
+        )
+        for task_type, params_cls in PARAMS.items()
+    }
+
+
+def check_graphs(config: Any) -> None:
+    """Refuse a configuration under which a model node's clock would cut its
+    harness short — from the configuration alone, so the composition root
+    runs it straight after `load_config`, before it opens the database or
+    builds anything a graph is later handed. `register_dags` checks again
+    what it actually registers."""
+    check_node_clocks(_graphs(config).values(), config.agents)
 
 
 def register_dags(
@@ -178,22 +218,14 @@ def register_dags(
     already is.
     """
     EDGE_ROUTER.clear()
-    budget_tokens = config.context.extraction_budget_tokens
-    for task_type, params_cls in PARAMS.items():
-        register_dag(
-            task_type,
-            build_simple_dag(
-                task_type,
-                params_cls,
-                budget_tokens=budget_tokens,
-                context_store=context_store,
-            ),
-        )
+    for task_type, dag in _graphs(config, context_store=context_store).items():
+        register_dag(task_type, dag)
 
     check_node_clocks(EDGE_ROUTER.values(), config.agents)
 
-    # No graph has a node agent any more — the one that did was `api_issue`'s
-    # investigation, and it is gone. `DAG_DEPS_EXTRA` stays empty and the
+    # No node past node 0 has an agent any more — the ones that did were
+    # `api_issue`'s investigation, and it is gone; node 0 reaches its
+    # extractor through `friday.extraction`'s registry, not through here. `DAG_DEPS_EXTRA` stays empty and the
     # dict stays, because it is what a graph's agents would be handed down
     # through, and `Pool` reads it either way.
     DAG_DEPS_EXTRA.clear()

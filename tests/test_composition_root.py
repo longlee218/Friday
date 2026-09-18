@@ -273,3 +273,16 @@ def test_every_name_a_module_level_coroutine_uses_is_one_it_can_see():
         }
         unseen = used - visible - set(dir(builtins))
         assert not unseen, f"{func.name} reads names it cannot see: {sorted(unseen)}"
+
+
+def test_the_graphs_clocks_are_checked_as_soon_as_the_config_is_loaded():
+    """Board `read-it-the-way-the-operator-does`, ticket 11: config load
+    refuses a model node whose clock does not outlast its harness's. So the
+    check runs straight after `load_config`, before the database is opened
+    or anything else is built — not only at `register_dags`, which comes
+    after all of that."""
+    calls = _calls_in_run()
+
+    assert "check_graphs" in calls
+    assert calls["check_graphs"].lineno < calls["Database.connect"].lineno
+    assert calls["check_graphs"].lineno < calls["register_extractors"].lineno

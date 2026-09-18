@@ -437,6 +437,75 @@ async def test_node_0_raising_still_hands_the_task_over(db, api_issue_graph):
     assert "extractor exploded" in rows[0]["reason"]
 
 
+# --- credentials in an exception ----------------------------------------------
+
+#: What a kubectl, Loki or HTTP client's exception quotes: the header it sent.
+#: Shaped to match `friday.ops.redact`'s pattern, and split so this file does
+#: not itself look like it carries one.
+_SECRET = "Bearer " + "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+async def _leaks(state: DAGState, deps: DAGDeps):
+    raise RuntimeError(f"401 from loki, sent Authorization: {_SECRET}")
+
+
+async def test_an_exception_quoting_a_credential_is_scrubbed_before_it_is_the_result():
+    """The reason is built from the exception in the runner, and from there
+    it is the node's result, the recorded attempt, and the hand-over the
+    operator is sent. Scrubbed where it is built, so none of them carries it."""
+    recorded = []
+
+    async def sink(run) -> None:
+        recorded.append(run)
+
+    dag = DAG(name="d", nodes=(Node("look", _leaks),))
+
+    state = await DAGRunner(dag, on_node_run=sink).run()
+
+    assert _SECRET not in state["look"]["reason"]
+    assert "[REDACTED]" in state["look"]["reason"]
+    assert _SECRET not in recorded[0].reason
+
+
+async def test_the_store_scrubs_what_it_is_handed_for_node_runs_and_pauses(db):
+    """At the point of writing as well, which is the only place the rule is
+    unconditional — `fail_outbound` scrubs its provider error for the same
+    reason. A caller that did not build its text through the runner is still
+    a caller."""
+    from tests.test_pool import make_task
+
+    task = await make_task(db, correlation_id=_CID)
+    await db.record_node_run(
+        task_id=task.id, dag_name="d", dag_version="v", node="look", attempt=1,
+        status="error", reason=f"boom {_SECRET}", duration_ms=1,
+    )
+    await db.save_dag_state(
+        task.id, dag_name="d", results={}, params_fingerprint="f",
+        dag_version="v", paused_at_node="look", paused_question=f"boom {_SECRET}",
+    )
+
+    (row,) = await db.node_runs(task.id)
+    assert _SECRET not in row["reason"]
+    _, question = await db.dag_pause(task.id)
+    assert _SECRET not in question
+
+
+async def test_a_credential_in_a_node_exception_never_reaches_the_task_db(db, api_issue_graph):
+    """End to end: a node raising with a token in its message, through the
+    pool, and neither `node_runs` nor `dag_state` holds it."""
+    from tests.test_pool import make_task
+
+    api_issue_graph(_graph(Node("look", _leaks)))
+    task = await make_task(db, correlation_id=_CID)
+
+    await _pass(db, task)
+
+    rows = await db.node_runs(task.id)
+    assert rows and all(_SECRET not in r["reason"] for r in rows)
+    _, question = await db.dag_pause(task.id)
+    assert "look" in question and _SECRET not in question
+
+
 # --- two clocks ---------------------------------------------------------------
 
 
@@ -506,3 +575,58 @@ def test_a_model_node_naming_an_agent_nobody_configured_is_refused(monkeypatch):
         router.register_dags(
             SimpleNamespace(agents={}, context=SimpleNamespace(extraction_budget_tokens=None))
         )
+
+
+def _extractor_config(timeout: float | None):
+    from types import SimpleNamespace
+
+    agents = {} if timeout is None else {
+        "extractor": SimpleNamespace(timeout_seconds=timeout)
+    }
+    return SimpleNamespace(
+        agents=agents, context=SimpleNamespace(extraction_budget_tokens=None)
+    )
+
+
+@pytest.mark.parametrize("extractor_timeout", [60.0, 200.0])
+def test_node_0_runs_the_extractor_on_a_clock_that_outlasts_the_extractors(
+    extractor_timeout,
+):
+    """Node 0 is the one model call that goes through the invoke today, so it
+    is the one the two-clocks rule has to cover: it names its agent, and its
+    clock is the extractor's plus the margin — whatever the extractor is
+    given, so raising that in config.yaml cannot slip under node 0."""
+    from friday.dag import router
+
+    router.register_dags(_extractor_config(extractor_timeout))
+
+    for task_type in router.EDGE_ROUTER:
+        node = router.dag_for(task_type).node("prepare")
+        assert node.agent == "extractor"
+        assert node.timeout_seconds == extractor_timeout + router.NODE_CLOCK_MARGIN_SECONDS
+
+
+def test_node_0_with_no_extractor_configured_calls_no_model_and_has_no_clock():
+    """No `extractor` block is a warned-about install where node 0 is code
+    alone — nothing to bound on the model's behalf, and naming an agent that
+    is not configured would refuse the boot."""
+    from friday.dag import router
+
+    router.register_dags(_extractor_config(None))
+
+    node = router.dag_for("api_issue").node("prepare")
+    assert node.agent is None and node.timeout_seconds is None
+
+
+def test_the_clocks_are_checked_from_the_configuration_alone(monkeypatch):
+    """At config load: `check_graphs` needs nothing but the configuration, so
+    the composition root can refuse before it opens the database or reads a
+    token — rather than at registration, which waits on the skill library
+    and the tool servers."""
+    from friday.config import ConfigError
+    from friday.dag import router
+
+    monkeypatch.setattr(router, "build_simple_dag", _model_graph(30.0))
+
+    with pytest.raises(ConfigError, match="diagnose"):
+        router.check_graphs(_config_with(agent_timeout=60.0))

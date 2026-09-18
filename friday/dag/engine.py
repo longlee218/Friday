@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from friday.dag.state import DAGState
+from friday.ops.redact import scrub
 
 __all__ = [
     "DAG",
@@ -407,7 +408,11 @@ class DAGRunner:
                     # the cancellation and raised something else; the clock ran
                     # out either way.
                     return await self._ended(node, attempt, started, _timed_out(node))
-                reason = f"{type(exc).__name__}: {exc}"
+                # Scrubbed here, where it is built: from this line it is the
+                # node's result, a `node_runs` row, and the hand-over the
+                # operator is sent, and the clients these nodes wrap are the
+                # ones whose exceptions quote an Authorization header.
+                reason = scrub(f"{type(exc).__name__}: {exc}")
                 retryable = isinstance(exc, node.retry_on)
                 if not retryable or attempt >= node.max_attempts:
                     if retryable:

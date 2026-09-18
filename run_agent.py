@@ -92,6 +92,11 @@ async def run() -> None:
 
 async def _run(stack: AsyncExitStack) -> None:
     config = load_config()
+    # Part of loading it: a graph node whose clock would cut its model's run
+    # short is a configuration error, refused before anything is opened.
+    from friday.dag.router import check_graphs
+
+    check_graphs(config)
     Path(config.database_path).parent.mkdir(parents=True, exist_ok=True)
 
     token = os.environ.get("DISCORD_USER_TOKEN")

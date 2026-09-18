@@ -51,6 +51,38 @@ tightened until it did not.
 Not done here: no subagent `code-review` ran inside this ticket's run (the
 implementing agent could not spawn one) — owed by the orchestrator.
 
+## Review fixes
+
+A review of 97c0bd7 found one must-fix and two spec gaps; all three closed.
+
+- **Exception text reached the task DB unscrubbed.** `_invoke` builds the
+  reason from the exception, and from there it was a `node_runs.reason`, a
+  hand-over, and `dag_state.paused_question` — none of which existed before
+  this ticket for a raising node. Scrubbed where it is built (`_invoke`) and
+  again at both writes (`record_node_run`, `save_dag_state`'s
+  `paused_question`), the second for the reason `fail_outbound` scrubs its
+  own: the rule is only unconditional at the point of writing.
+- **Node 0 was the model node the clock check never saw.** It runs the
+  extractor but declared no agent and no timeout. `build_simple_dag` now
+  gives it `agent="extractor"` and a clock of the extractor's
+  `timeout_seconds + NODE_CLOCK_MARGIN_SECONDS`, derived so raising the
+  extractor's timeout moves node 0's with it. No `extractor` block: no agent,
+  no clock, as before.
+- **"At config load", not at registration.** `router.check_graphs(config)`
+  builds the graphs from the configuration alone and checks the clocks;
+  `run_agent.py` calls it straight after `load_config`, before the database
+  is opened. `register_dags` still checks what it registers.
+
+Tests: 7 new in `tests/test_dag_invoke.py` (scrub at the invoke, scrub at
+the store, token end to end through the pool; node 0's agent and clock ×2,
+node 0 with no extractor, `check_graphs` from config alone) and 1 in
+`tests/test_composition_root.py` (`check_graphs` before `Database.connect`).
+Guards deleted once and watched go red (8): the invoke's scrub, the
+`record_node_run` scrub, the `paused_question` scrub, node 0's agent, node
+0's margin, the no-extractor branch, `check_graphs`'s check, and its call in
+`run_agent.py`. Suite: `1 failed, 1269 passed, 1 skipped` — the one failure
+is the known baseline `test_doc_paths_resolve_to_existing_files`.
+
 ## Docs owed
 
 `CLAUDE.md` (not edited, per the operator's rewrite in another checkout):
@@ -64,3 +96,10 @@ implementing agent could not spawn one) — owed by the orchestrator.
   `register_dags` (finding E, two clocks).
 - Layout, `friday/dag/`: `engine.py` now also holds the invoke and the result
   envelope.
+- "Every model call is bounded": node 0 is a model node — its clock is the
+  extractor's `timeout_seconds + NODE_CLOCK_MARGIN_SECONDS` — and the clock
+  check runs at config load (`check_graphs`, straight after `load_config` in
+  `run_agent.py`) as well as at `register_dags`.
+- Conventions, the token paragraph: a node's exception text is scrubbed in
+  `DAGRunner._invoke` and again where `node_runs.reason` and
+  `dag_state.paused_question` are written.

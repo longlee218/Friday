@@ -822,8 +822,13 @@ class Database:
         )
 
     async def record_node_run(self, **values) -> None:
-        """One attempt at one graph node — see `schema.NodeRun`."""
+        """One attempt at one graph node — see `schema.NodeRun`.
+
+        `reason` is scrubbed at the write for the reason `fail_outbound`'s
+        error is: it is exception text, and a client's exception can quote
+        the header it sent."""
         values.setdefault("created_at", _now())
+        values["reason"] = scrub(values.get("reason") or "")
         async with self._sessions.begin() as session:
             session.add(schema.NodeRun(**values))
 
@@ -2693,7 +2698,10 @@ class Database:
             results=results,
             trail=list(trail or []),
             paused_at_node=paused_at_node,
-            paused_question=paused_question,
+            # A hand-over's reason, which can be a node's exception text.
+            paused_question=(
+                None if paused_question is None else scrub(paused_question)
+            ),
             interruption=interruption,
             updated_at=_now(),
         )
