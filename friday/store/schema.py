@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, String, TypeDecorator
+from sqlalchemy import JSON, Index, String, TypeDecorator
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 __all__ = ["Base", "Conversation", "Cursor", "DagState", "Memory", "MemoryCandidate", "Message", "ModelCall", "NodeRun", "Outbound", "Task", "ToolCall", "Verdict"]
@@ -346,7 +347,7 @@ class Memory(Base):
     text: Mapped[str]
     #: `friday.domain.models.MemoryKind` as a string, the way `Task.state`
     #: stores `TaskState`. Who reads a row is a function of this value
-    #: (`reader_for`), never a second column.
+    #: (`readers_for`), never a second column.
     kind: Mapped[str]
     task_id: Mapped[int | None] = mapped_column(index=True)
     #: The message that produced this memory. Set by memory_add from the
@@ -365,6 +366,29 @@ class Memory(Base):
     #: this with a server default of `"active"` for any pre-existing row.
     status: Mapped[str] = mapped_column(default="active")
     superseded_by: Mapped[str | None] = mapped_column(default=None)
+    #: `friday.domain.models.MemoryOrigin`: `"model"` or `"admin"`. The
+    #: migration backs it with a server default of `"model"`, which is what
+    #: every row written before the column existed was.
+    origin: Mapped[str] = mapped_column(default="model")
+    #: A structured kind's natural key; null for prose.
+    key: Mapped[str | None] = mapped_column(default=None)
+    #: A structured kind's payload, checked against its schema at write time.
+    data: Mapped[dict | None] = mapped_column(JSON, default=None)
+
+    #: One active row per `(channel, kind, key)` — a second `service` named
+    #: `reelme-order` is a conflict, not a second opinion. Partial, so a
+    #: superseded or deleted row keeps its key as history, and a prose row's
+    #: null key never collides (SQLite treats nulls as distinct).
+    __table_args__ = (
+        Index(
+            "uq_memories_active_key",
+            "channel_id",
+            "kind",
+            "key",
+            unique=True,
+            sqlite_where=sql_text("status = 'active' AND deleted_at IS NULL"),
+        ),
+    )
 
 
 class MemoryCandidate(Base):

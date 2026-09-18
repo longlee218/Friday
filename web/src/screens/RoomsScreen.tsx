@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "../api";
-import type { Memory, Message, Room } from "../api-types";
+import type { Memory, MemoryField, MemoryKindForm, Message, Room } from "../api-types";
 import { useAsync } from "../useAsync";
 import { ContextPanel } from "./ContextPanel";
 import { Pill, Skeleton, ago, roomName, shortTime } from "../ui";
@@ -267,6 +267,7 @@ function Rename({ room, onRenamed }: { room: Room; onRenamed: () => void }) {
 
 function MemoryPanel({ channelId }: { channelId: string }) {
   const held = useAsync(() => api.memories(channelId), [channelId]);
+  const form = <MemoryForm channelId={channelId} onSaved={held.reload} />;
 
   if (held.error) return <p className="mono error">{held.error}</p>;
   if (!held.value) {
@@ -276,27 +277,33 @@ function MemoryPanel({ channelId }: { channelId: string }) {
   }
   if (held.value.length === 0) {
     return (
-      <p className="empty">
-        Nothing written down about this room yet. The responder writes these
-        itself, through its own tools — nobody types them here.
-      </p>
+      <>
+        {form}
+        <p className="empty">
+          Nothing written down about this room yet. The responder writes its
+          own through its tools; what only you know goes in the form above.
+        </p>
+      </>
     );
   }
 
   return (
     <>
+      {form}
       <p className="faint">
-        What an agent chose to remember about this room, newest first. Read
-        only: these are the agent's, written and removed through its own
-        tools. A removed one stays visible, with who removed it — so does a
-        superseded one, with what it used to say and when it changed.
+        What this room's memory holds, newest first. An agent's rows are its
+        own, written and removed through its tools; yours are marked admin and
+        no agent can change them. A removed one stays visible, with who
+        removed it — so does a superseded one, with what it used to say and
+        when it changed.
       </p>
       {held.value.map((m: Memory) => (
         <article key={m.id} className="detail">
           <header className="row wrap">
             <span className="mono faint">{m.id}</span>
             <Pill label={m.kind} />
-            <Pill label={m.agent} />
+            <Pill label={m.origin === "admin" ? "admin" : m.agent} />
+            {m.key && <span className="mono">{m.key}</span>}
             {m.status === "superseded" && (
               <Pill tone="bad" label="superseded" />
             )}
@@ -304,6 +311,16 @@ function MemoryPanel({ channelId }: { channelId: string }) {
             <span className="count auto">
               {ago(m.created_at)}
             </span>
+            {m.origin === "admin" && !m.deleted_at && m.status === "active" && (
+              <button
+                onClick={async () => {
+                  await api.deleteMemory(channelId, m.id);
+                  held.reload();
+                }}
+              >
+                Remove
+              </button>
+            )}
           </header>
           <p
             className="said"
@@ -315,6 +332,7 @@ function MemoryPanel({ channelId }: { channelId: string }) {
           >
             {m.text}
           </p>
+          {m.data && <pre className="mono">{JSON.stringify(m.data, null, 2)}</pre>}
           {m.deleted_at && (
             <p className="faint mono">removed by {m.deleted_by ?? "—"}</p>
           )}
@@ -328,6 +346,158 @@ function MemoryPanel({ channelId }: { channelId: string }) {
       ))}
     </>
   );
+}
+
+/** What only the operator knows, typed in as a row (board
+ *  `read-it-the-way-the-operator-does`, ticket 09): a text area for a prose
+ *  kind, one field per schema field for a structured one. The fields come
+ *  from `/api/memory-kinds`, which reads them off the schemas the store
+ *  checks — so a refusal names a field this form actually showed. */
+function MemoryForm({
+  channelId,
+  onSaved,
+}: {
+  channelId: string;
+  onSaved: () => void;
+}) {
+  const kinds = useAsync(() => api.memoryKinds(), []);
+  const [kind, setKind] = useState("fact");
+  const [text, setText] = useState("");
+  const [key, setKey] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [problem, setProblem] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  if (kinds.error) return <p className="mono error">{kinds.error}</p>;
+  if (!kinds.value) return null;
+  const shape: MemoryKindForm =
+    kinds.value.find((k) => k.kind === kind) ?? kinds.value[0];
+
+  const save = async () => {
+    setProblem(null);
+    setSaving(true);
+    try {
+      await api.addMemory(channelId, {
+        kind: shape.kind,
+        text,
+        key: shape.names_key ? key : undefined,
+        data: shape.prose ? undefined : payload(shape.fields, values),
+      });
+      setText("");
+      setKey("");
+      setValues({});
+      onSaved();
+    } catch (e) {
+      setProblem((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="card memory-form" aria-label="Write a memory">
+      <label>
+        <span className="faint">Kind</span>
+        <select
+          value={shape.kind}
+          onChange={(e) => {
+            setKind(e.target.value);
+            setValues({});
+          }}
+        >
+          {kinds.value.map((k) => (
+            <option key={k.kind} value={k.kind}>
+              {k.kind}
+            </option>
+          ))}
+        </select>
+      </label>
+      {shape.names_key && (
+        <label>
+          <span className="faint">Name</span>
+          <input type="text" value={key} onChange={(e) => setKey(e.target.value)} />
+        </label>
+      )}
+      {shape.fields.map((f: MemoryField) => (
+        <label key={f.name}>
+          <span className="faint">
+            {f.name}
+            {f.required ? "" : " (optional)"}
+            {f.type === "list" ? " — comma-separated" : ""}
+            {f.type === "json" ? " — JSON" : ""}
+          </span>
+          {f.type === "choice" ? (
+            <select
+              value={values[f.name] ?? ""}
+              onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
+            >
+              <option value="" />
+              {f.choices.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          ) : f.type === "json" ? (
+            <textarea
+              rows={3}
+              value={values[f.name] ?? ""}
+              onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
+            />
+          ) : (
+            <input
+              type="text"
+              value={values[f.name] ?? ""}
+              onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
+            />
+          )}
+        </label>
+      ))}
+      <label>
+        <span className="faint">
+          {shape.prose
+            ? "What is true here"
+            : shape.names_key
+              ? "The steps, in words"
+              : "Note (optional)"}
+        </span>
+        <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} />
+      </label>
+      {problem && <p className="mono error">{problem}</p>}
+      <div>
+        <button className="primary" disabled={saving} onClick={save}>
+          Remember it
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** The form's strings as the object the kind's schema expects: dotted names
+ *  nested, lists split on commas, numbers parsed, JSON parsed. An optional
+ *  field left empty is left out; a required one is sent empty, so the
+ *  store's refusal names it. */
+function payload(fields: MemoryField[], values: Record<string, string>) {
+  const out: Record<string, unknown> = {};
+  for (const f of fields) {
+    const raw = (values[f.name] ?? "").trim();
+    if (!raw && !f.required) continue;
+    const value =
+      f.type === "list"
+        ? raw.split(",").map((v) => v.trim()).filter(Boolean)
+        : f.type === "number"
+          ? Number(raw)
+          : f.type === "json"
+            ? JSON.parse(raw || "null")
+            : raw;
+    const path = f.name.split(".");
+    let at = out;
+    for (const part of path.slice(0, -1)) {
+      at = (at[part] ??= {}) as Record<string, unknown>;
+    }
+    at[path[path.length - 1]] = value;
+  }
+  return out;
 }
 
 /** A real `<dialog>`, so the focus trap, the backdrop and the Escape key are

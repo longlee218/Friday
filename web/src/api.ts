@@ -10,6 +10,7 @@ import type {
   ChannelContext,
   Flow,
   Memory,
+  MemoryKindForm,
   MonitorSnapshot,
   Room,
   Spend,
@@ -47,6 +48,30 @@ export const api = {
   messagesIn: (limit = 200) => get<Board["messages"]>(`/api/messages?limit=${limit}`),
   memories: (channelId: string) =>
     get<Memory[]>(`/api/channels/${encodeURIComponent(channelId)}/memories`),
+  // The operator's own rows (board `read-it-the-way-the-operator-does`,
+  // ticket 09). The store checks each one against its kind's schema and the
+  // instruction-shape guard; a refusal arrives as `detail` and is thrown.
+  memoryKinds: () => get<MemoryKindForm[]>("/api/memory-kinds"),
+  addMemory: (
+    channelId: string,
+    body: { kind: string; text: string; key?: string; data?: unknown },
+  ) =>
+    send<Memory>(
+      `/api/channels/${encodeURIComponent(channelId)}/memories`,
+      "POST",
+      body,
+    ),
+  updateMemory: (channelId: string, id: string, text: string, data?: unknown) =>
+    send<Memory>(
+      `/api/channels/${encodeURIComponent(channelId)}/memories/${encodeURIComponent(id)}`,
+      "PUT",
+      { text, data },
+    ),
+  deleteMemory: (channelId: string, id: string) =>
+    send<{ deleted: boolean }>(
+      `/api/channels/${encodeURIComponent(channelId)}/memories/${encodeURIComponent(id)}`,
+      "DELETE",
+    ),
   rename: (conversation: string, name: string) =>
     send<{ name: string | null }>(
       // Not encoded: a conversation id carries a `/` when it names a thread,

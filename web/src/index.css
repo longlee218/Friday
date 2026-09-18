@@ -126,7 +126,9 @@ button.primary {
   border-color: var(--accent);
 }
 
-input[type="text"] {
+input[type="text"],
+textarea,
+select {
   font: var(--text) / 1.4 var(--font-data);
   color: inherit;
   background: var(--bg-2);
@@ -1183,4 +1185,17 @@ dialog > .body {
   border-radius: 4px;
   padding: 1px 6px;
   color: var(--ink);
+}
+
+/* The operator's memory form (board read-it-the-way-the-operator-does,
+   ticket 09): one labelled field per line, the label above its input. */
+.memory-form {
+  display: grid;
+  gap: var(--grid-gap);
+  margin-bottom: var(--grid-gap);
+}
+
+.memory-form label {
+  display: grid;
+  gap: 4px;
 }

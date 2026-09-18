@@ -304,27 +304,31 @@ async def test_memory_add_records_the_source_message_id(db):
 
 def test_the_reader_of_a_memory_follows_from_its_kind():
     """D14: the reader is a function of `kind`, not a second column — so
-    there is nothing for a second field to disagree with."""
-    from friday.domain.models import DOMAIN_KINDS, MemoryKind, reader_for
+    there is nothing for a second field to disagree with. `reader_for`
+    became `readers_for` on board `read-it-the-way-the-operator-does`
+    (ticket 09), because `finding` has two readers; the whole table is
+    pinned in `tests/test_memory_kinds.py`, and this keeps the extractor's
+    half of it."""
+    from friday.domain.models import DOMAIN_KINDS, MemoryKind, readers_for
 
     for kind in DOMAIN_KINDS:
-        assert reader_for(kind) == "extractor"
-    assert reader_for(MemoryKind.VOICE) == "responder"
+        assert "extractor" in readers_for(kind)
+    assert readers_for(MemoryKind.VOICE) == {"responder"}
     assert DOMAIN_KINDS == {
         MemoryKind.FACT, MemoryKind.CONSTRAINT, MemoryKind.FINDING, MemoryKind.DECISION,
     }
 
 
-def test_reader_for_refuses_a_kind_outside_the_closed_set():
+def test_readers_for_refuses_a_kind_outside_the_closed_set():
     """`preference` was considered and rejected (D14): every preference in
     this domain is either voice or a constraint, and a kind that cannot be
     told apart from its neighbours is one a model will place at random."""
     import pytest
 
-    from friday.domain.models import reader_for
+    from friday.domain.models import readers_for
 
     with pytest.raises(ValueError):
-        reader_for("preference")
+        readers_for("preference")
 
 
 async def test_memory_add_defaults_to_voice_and_active(db):
@@ -354,7 +358,10 @@ async def test_domain_memories_reads_the_four_domain_kinds(db):
 
     await db.memory_add(ROOM, "test.apero is staging", kind=MemoryKind.FACT)
     await db.memory_add(ROOM, "never deploy on fridays", kind=MemoryKind.CONSTRAINT)
-    await db.memory_add(ROOM, "the timeout was the proxy, not the api", kind=MemoryKind.FINDING)
+    await db.memory_add(
+        ROOM, "the timeout was the proxy, not the api", kind=MemoryKind.FINDING,
+        data={"task_id": 7, "service": "api", "confidence": 0.7},
+    )
     await db.memory_add(ROOM, "moved to the new queue", kind=MemoryKind.DECISION)
     await db.memory_add(ROOM, "they like short replies", kind=MemoryKind.VOICE)
 

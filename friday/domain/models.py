@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from enum import StrEnum
 
 from friday.domain.conversation import ConversationId, resolve
@@ -336,17 +336,45 @@ def askable_fields(params_cls: type) -> tuple[str, ...]:
 
 
 class MemoryKind(StrEnum):
-    """What kind of thing a memory is (board `what-the-room-already-knows`,
-    D14). Five values, closed: the four the extractor reads because they are
-    about the room's domain, and one the responder reads because it is about
-    how the room is spoken to.
+    """What kind of thing a memory is — twelve, closed (board
+    `read-it-the-way-the-operator-does`, spec "Memory: one store, twelve
+    kinds", widening D14's five).
+
+    The first five are prose a model reads and writes. The seven after them
+    were a YAML file and an operator's head: `runbook` (how the operator
+    reasons about one kind of fault, in words), `summary` (one per room,
+    replacing `derived`), and five structured kinds that never reach a model
+    at all and only parameterise code — `project`, `service`, `route`,
+    `dependency`, `person`.
 
     **The reader is a function of the kind, not a second column** — see
-    `reader_for`. `preference` was considered and rejected: in this domain
+    `readers_for`. `preference` was considered and rejected: in this domain
     every preference is either `VOICE` or `CONSTRAINT`, and a value that
     cannot be told apart from its neighbours is one a model will place at
-    random.
+    random — which is also why a model is offered `ModelMemoryKind`, not
+    this.
     """
+
+    FACT = "fact"
+    CONSTRAINT = "constraint"
+    FINDING = "finding"
+    DECISION = "decision"
+    VOICE = "voice"
+    RUNBOOK = "runbook"
+    SUMMARY = "summary"
+    PROJECT = "project"
+    SERVICE = "service"
+    ROUTE = "route"
+    DEPENDENCY = "dependency"
+    PERSON = "person"
+
+
+class ModelMemoryKind(StrEnum):
+    """The five kinds a model sees and writes — the enum the memory tools
+    expose, unchanged by `MemoryKind` growing to twelve. A separate enum
+    rather than a subset filtered at each call site, so the tools module has
+    no name through which the other seven could reach a schema.
+    `tests/test_memory_kinds.py` asserts no tool schema mentions them."""
 
     FACT = "fact"
     CONSTRAINT = "constraint"
@@ -355,23 +383,282 @@ class MemoryKind(StrEnum):
     VOICE = "voice"
 
 
-def reader_for(kind: str) -> str:
-    """Which agent reads a memory of this kind — `"extractor"` or
-    `"responder"`. Derived from `kind` rather than stored beside it, so
-    nothing has to keep two fields in agreement (D14). Raises on a kind
-    outside the closed set in `MemoryKind`, the same way a wrong `TaskState`
-    string would."""
-    return "responder" if MemoryKind(kind) is MemoryKind.VOICE else "extractor"
+class MemoryOrigin(StrEnum):
+    """Who is answerable for a memory row. `ADMIN` is the operator, through
+    the board's own routes; a model-origin call may not update, supersede or
+    delete an `ADMIN` row, and is told "no such memory" rather than why."""
+
+    MODEL = "model"
+    ADMIN = "admin"
+
+
+class MemoryRefused(ValueError):
+    """A memory write the store will not make, and a sentence saying why —
+    a `data` that does not fit its kind's schema (naming the field), a kind
+    this origin may not write, or a natural key an active row already
+    holds. `InstructionShaped` is the guard's own refusal and stays its own
+    class."""
+
+
+class MemoryKeyTaken(MemoryRefused):
+    """The one refusal that is a conflict rather than a bad write: an active
+    row of this kind already holds this natural key here. Its own class so
+    the board can answer 409 without reading the sentence."""
+
+
+_READERS: dict[MemoryKind, frozenset[str]] = {
+    MemoryKind.FACT: frozenset({"extractor", "diagnose"}),
+    MemoryKind.CONSTRAINT: frozenset({"extractor", "diagnose"}),
+    MemoryKind.DECISION: frozenset({"extractor", "diagnose"}),
+    MemoryKind.FINDING: frozenset({"diagnose", "extractor"}),
+    MemoryKind.VOICE: frozenset({"responder"}),
+    MemoryKind.RUNBOOK: frozenset({"diagnose"}),
+    MemoryKind.SUMMARY: frozenset({"triage", "responder"}),
+    MemoryKind.PROJECT: frozenset({"code"}),
+    MemoryKind.SERVICE: frozenset({"code"}),
+    MemoryKind.ROUTE: frozenset({"code"}),
+    MemoryKind.DEPENDENCY: frozenset({"code"}),
+    MemoryKind.PERSON: frozenset({"code"}),
+}
+
+
+def readers_for(kind: str) -> frozenset[str]:
+    """Who reads a memory of this kind — agents by name, or `"code"` for a
+    structured kind only a tool call is parameterised by. A set, because
+    `finding` has two readers. Derived from `kind` rather than stored beside
+    it, so nothing has to keep two fields in agreement (D14). Raises on a
+    kind outside `MemoryKind`, the way a wrong `TaskState` string would."""
+    return _READERS[MemoryKind(kind)]
+
+
+_WRITERS: dict[MemoryKind, frozenset[MemoryOrigin]] = {
+    MemoryKind.FACT: frozenset(MemoryOrigin),
+    MemoryKind.CONSTRAINT: frozenset(MemoryOrigin),
+    MemoryKind.DECISION: frozenset(MemoryOrigin),
+    MemoryKind.VOICE: frozenset(MemoryOrigin),
+    MemoryKind.FINDING: frozenset({MemoryOrigin.MODEL}),
+    MemoryKind.SUMMARY: frozenset({MemoryOrigin.MODEL}),
+    MemoryKind.RUNBOOK: frozenset({MemoryOrigin.ADMIN}),
+    MemoryKind.PROJECT: frozenset({MemoryOrigin.ADMIN}),
+    MemoryKind.SERVICE: frozenset({MemoryOrigin.ADMIN}),
+    MemoryKind.ROUTE: frozenset({MemoryOrigin.ADMIN}),
+    MemoryKind.DEPENDENCY: frozenset({MemoryOrigin.ADMIN}),
+    MemoryKind.PERSON: frozenset({MemoryOrigin.ADMIN}),
+}
+
+
+def writers_for(kind: str) -> frozenset[MemoryOrigin]:
+    """Which origin may write a memory of this kind — the spec table's
+    "Written by" column. `Database.memory_add` refuses anything else."""
+    return _WRITERS[MemoryKind(kind)]
 
 
 #: The four kinds the extractor reads. `VOICE` is the responder's alone.
-#: **Derived from `reader_for`, not a second enumeration beside it** — a
-#: `MemoryKind` this misses only if `reader_for` itself would misroute it,
-#: rather than a hand-kept list that could drift from what `reader_for`
+#: **Derived from `readers_for`, not a second enumeration beside it** — a
+#: `MemoryKind` this misses only if `readers_for` itself would misroute it,
+#: rather than a hand-kept list that could drift from what `readers_for`
 #: actually decides (found in code review: an earlier version of this line
 #: listed the four kinds by hand, which is exactly the "two fields that have
 #: to agree" D14 exists to rule out).
-DOMAIN_KINDS = frozenset(k for k in MemoryKind if reader_for(k) == "extractor")
+DOMAIN_KINDS = frozenset(k for k in MemoryKind if "extractor" in readers_for(k))
+
+
+# ---- one schema per structured kind (spec, "Memory: one store, twelve kinds")
+#
+# `data` is checked against these with `friday.agent.structured.fits` at
+# `Database.memory_add` — the same checker the harness uses on a model's
+# answer, so a wrong-typed field is refused with the field named. Every field
+# a spec line marks optional (`?`) has a default; the rest are required.
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionData:
+    decided_on: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FindingData:
+    task_id: int
+    service: str
+    confidence: float
+    error_code: str | None = None
+    refs: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class RunbookWhen:
+    services: list[str] = field(default_factory=list)
+    error_codes: list[str] = field(default_factory=list)
+    path_patterns: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class RunbookData:
+    when: RunbookWhen
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectData:
+    name: str
+    repo_path: str
+    default_branch: str
+    stack: str
+    docs_paths: list[str] = field(default_factory=list)
+    error_codes_doc: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProdPlacement:
+    cluster: str
+    namespace: str
+    app: str
+
+
+@dataclass(frozen=True, slots=True)
+class DevPlacement:
+    kube_context: str
+    namespace: str
+    pod_pattern: str
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceData:
+    name: str
+    project: str
+    prod: ProdPlacement
+    dev: DevPlacement
+
+
+@dataclass(frozen=True, slots=True)
+class RouteData:
+    domain: str
+    env: Literal["dev", "production"]
+    service: str
+
+
+@dataclass(frozen=True, slots=True)
+class DbCheck:
+    table: str
+    key_column: str
+    state_column: str
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyData:
+    from_service: str
+    to_service: str
+    via: Literal["http", "queue", "webhook"]
+    join_key: str
+    db_checks: list[DbCheck] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class PersonData:
+    discord_id: str
+    name: str
+    role: str
+    team: str
+
+
+@dataclass(frozen=True, slots=True)
+class RoomSummary:
+    """What a summariser call may say about a room — the shape, once.
+
+    Lives here rather than beside the summariser
+    (`friday/memory/channel_context.py`, which re-exports it) because it is
+    also the `summary` kind's schema, and the store — which that module
+    imports — has to check a row against it.
+
+    **Four fields, where D9 named six**, and both absences are D2 applied to
+    a prompt rather than to a table:
+
+    `open_questions` is derived from the outbox with no model at all
+    (`Database.unanswered_questions`, ticket 05). A model-written,
+    channel-wide second version of the same thing could only ever disagree
+    with the one that is a query over what was actually sent.
+
+    `artifacts` waits for ticket 07, which is what produces one. Asking a
+    model for the ids of things that do not exist yet is asking it to invent
+    them.
+
+    **This replaced a tuple of key names and a paragraph of prose that each
+    described the same four fields.** `SUMMARY_FIELDS` was what the code
+    enforced and `SUMMARY_JOB`'s indented block was what the model read, and
+    two encodings of one contract drift in the direction nobody is looking:
+    a fifth field added to the prose would have been invisible to the filter,
+    and one added to the tuple invisible to the model. The prompt's own
+    description is generated from this class now (`structured.describe`), and
+    so is the validation (`Harness.run_structured`).
+
+    Every field defaults to empty because a model that found nothing to say
+    about `decisions` should say so by omission, and because a summary that
+    fails to mention one field is still worth storing for the three it got.
+    """
+
+    topic: str = field(
+        default="",
+        metadata={"doc": "one line: what this room is for."},
+    )
+    facts: list[str] = field(
+        default_factory=list,
+        metadata={"doc": "what is true of this room and would still be true "
+                         "next month — what a name refers to, which host is "
+                         "which, where something lives. Copy a name exactly "
+                         "as it is written."},
+    )
+    decisions: list[str] = field(
+        default_factory=list,
+        metadata={"doc": "what this room has settled and now works by."},
+    )
+    constraints: list[str] = field(
+        default_factory=list,
+        metadata={"doc": "what must not happen here, and what always has to."},
+    )
+
+
+#: Each kind's `data` schema; `None` is a prose kind, which carries no `data`.
+MEMORY_DATA: dict[MemoryKind, type | None] = {
+    MemoryKind.FACT: None,
+    MemoryKind.CONSTRAINT: None,
+    MemoryKind.VOICE: None,
+    MemoryKind.DECISION: DecisionData,
+    MemoryKind.FINDING: FindingData,
+    MemoryKind.RUNBOOK: RunbookData,
+    MemoryKind.SUMMARY: RoomSummary,
+    MemoryKind.PROJECT: ProjectData,
+    MemoryKind.SERVICE: ServiceData,
+    MemoryKind.ROUTE: RouteData,
+    MemoryKind.DEPENDENCY: DependencyData,
+    MemoryKind.PERSON: PersonData,
+}
+
+
+def natural_key(kind: str, data: dict[str, Any] | None, given: str | None) -> str | None:
+    """A structured kind's natural key — the spec's `key=` column — read off
+    its already-validated `data`, so the key cannot disagree with the row.
+
+    `runbook` is the one kind whose key is not in its data (it is a short
+    name the operator gives), so it is the one that takes `given`, and
+    refuses without it. `summary` has a fixed key, which is what makes the
+    partial unique index hold it to one per room. Prose kinds and
+    `decision` have none.
+    """
+    kind = MemoryKind(kind)
+    d = data or {}
+    if kind is MemoryKind.RUNBOOK:
+        if not (given or "").strip():
+            raise MemoryRefused("a runbook needs a key — a short name for it")
+        return given.strip()
+    return {
+        MemoryKind.FINDING: lambda: f"{d.get('service')}:{d.get('error_code') or ''}",
+        MemoryKind.SUMMARY: lambda: "room",
+        MemoryKind.PROJECT: lambda: d.get("name"),
+        MemoryKind.SERVICE: lambda: d.get("name"),
+        MemoryKind.ROUTE: lambda: d.get("domain"),
+        MemoryKind.DEPENDENCY: lambda: f"{d.get('from_service')}->{d.get('to_service')}",
+        MemoryKind.PERSON: lambda: d.get("discord_id"),
+    }.get(kind, lambda: None)()
 
 
 class MemoryStatus(StrEnum):
@@ -402,7 +689,7 @@ class Memory:
     `id` is opaque and sparse rather than sequential, so a model that invents
     one fails instead of landing on a neighbouring row.
 
-    `kind` decides who reads this row (`reader_for`, D14). `status` and
+    `kind` decides who reads this row (`readers_for`, D14). `status` and
     `superseded_by` are D16's lifecycle: correcting a memory's wording
     (`memory_update`) leaves it `ACTIVE` in place; replacing what it claims
     (`memory_supersede`) marks it `SUPERSEDED` and points `superseded_by` at
@@ -432,6 +719,13 @@ class Memory:
     deleted_by: str | None = None
     status: str = MemoryStatus.ACTIVE
     superseded_by: str | None = None
+    #: Who is answerable for the row (`MemoryOrigin`). Every row written
+    #: before the column existed is a model's.
+    origin: str = MemoryOrigin.MODEL
+    #: A structured kind's natural key (`natural_key`); `None` for prose.
+    key: str | None = None
+    #: A structured kind's payload, already checked against `MEMORY_DATA`.
+    data: dict[str, Any] | None = None
 
 
 class CandidateStatus(StrEnum):

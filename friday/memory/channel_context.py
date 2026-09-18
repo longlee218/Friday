@@ -16,7 +16,7 @@ from __future__ import annotations
 import html
 import json
 import logging
-from dataclasses import dataclass, field, fields as dataclass_fields, replace
+from dataclasses import dataclass, fields as dataclass_fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -27,63 +27,13 @@ from friday.domain.memory_guard import check_not_instruction_shaped
 from friday.store.db import Database
 from friday.agent.harness import Harness
 from friday.agent.structured import describe
+from friday.domain.models import RoomSummary
 
 __all__ = ["ChannelContext", "ContextRebuilder", "ContextStore", "RoomSummary"]
 
 log = logging.getLogger(__name__)
 
 BASE_NAME = "base.yaml"
-
-@dataclass(frozen=True, slots=True)
-class RoomSummary:
-    """What a summariser call may say about a room — the shape, once.
-
-    **Four fields, where D9 named six**, and both absences are D2 applied to
-    a prompt rather than to a table:
-
-    `open_questions` is derived from the outbox with no model at all
-    (`Database.unanswered_questions`, ticket 05). A model-written,
-    channel-wide second version of the same thing could only ever disagree
-    with the one that is a query over what was actually sent.
-
-    `artifacts` waits for ticket 07, which is what produces one. Asking a
-    model for the ids of things that do not exist yet is asking it to invent
-    them.
-
-    **This replaced a tuple of key names and a paragraph of prose that each
-    described the same four fields.** `SUMMARY_FIELDS` was what the code
-    enforced and `SUMMARY_JOB`'s indented block was what the model read, and
-    two encodings of one contract drift in the direction nobody is looking:
-    a fifth field added to the prose would have been invisible to the filter,
-    and one added to the tuple invisible to the model. The prompt's own
-    description is generated from this class now (`structured.describe`), and
-    so is the validation (`Harness.run_structured`).
-
-    Every field defaults to empty because a model that found nothing to say
-    about `decisions` should say so by omission, and because a summary that
-    fails to mention one field is still worth storing for the three it got.
-    """
-
-    topic: str = field(
-        default="",
-        metadata={"doc": "one line: what this room is for."},
-    )
-    facts: list[str] = field(
-        default_factory=list,
-        metadata={"doc": "what is true of this room and would still be true "
-                         "next month — what a name refers to, which host is "
-                         "which, where something lives. Copy a name exactly "
-                         "as it is written."},
-    )
-    decisions: list[str] = field(
-        default_factory=list,
-        metadata={"doc": "what this room has settled and now works by."},
-    )
-    constraints: list[str] = field(
-        default_factory=list,
-        metadata={"doc": "what must not happen here, and what always has to."},
-    )
-
 
 #: The summariser's job. Assembled into sections by `_summary_instructions`
 #: below, like every other agent's — this used to be the whole prompt, a bare
