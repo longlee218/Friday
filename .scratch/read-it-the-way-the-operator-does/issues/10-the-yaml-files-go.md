@@ -148,12 +148,24 @@ carry over unchanged; the label becomes `origin` instead of a layer name.
   `memory_search`, and a person is read by code. No install had any (the one
   file was empty), so nothing is lost today; ticket 40's per-room register
   test now proves per-room *summaries* instead.
-- **Not done:** no `code-review` subagent pass — this lane has no agent tool
-  to spawn one. The review is owed.
+- **Review:** the `code-review` pass this lane could not spawn was supplied
+  afterwards by the orchestrator's reviewer. It found no code defect; its one
+  must-fix and both spec gaps are the `CLAUDE.md` correction below.
+- **Not done, and cannot be from this lane: `CLAUDE.md`.** The Verify section
+  asks for it in the same commit, and `CLAUDE.md`'s own rule says a reversed
+  load-bearing decision is corrected there in the same commit. This lane is
+  forbidden to edit `CLAUDE.md` — the operator is rewriting it in their own
+  checkout — so the correction is carried below, line by line against the
+  committed file, for the operator to fold into that rewrite. Until it lands,
+  `CLAUDE.md` describes code that is gone, and this ticket's Verify is met in
+  every respect but that one.
 
 ## Docs owed
 
-`CLAUDE.md` (not editable from this lane):
+`CLAUDE.md` (not editable from this lane). Line numbers are the committed
+file's at 275b4ce; checked by grepping it for `ContextStore`, `init_channel`,
+`context_store`, `overrides`, `channel_base`, `LightContext`, `FullContext`,
+`YAML` and `state`:
 
 - Layout: the `friday/memory/` row ("tiers that never mix:
   `channel_context.py` (per-channel YAML)…") — it is the summariser only, and
@@ -182,4 +194,19 @@ carry over unchanged; the label becomes `origin` instead of a layer name.
 - The responder's section order / "One persona" material: the responder has
   `channel_derived` only (no `channel_base`/`channel_overrides`).
 - `Pool._stranger` asks `Database.knows_person` (a `person` row) where it
-  asked `Responder.knows` (a `people:` name).
+  asked `Responder.knows` (a `people:` name). (`CLAUDE.md` does not name
+  `Responder.knows` today; this matters only if the rewrite describes how a
+  stranger is recognised.)
+- Layout, the `friday/extraction/` row (line 227): `context.py` gathers "the
+  room" — it gathers no room now; the operator's facts arrive among the
+  domain memories (room + `'*'`).
+- The memory-kind paragraph (line ~1063): the four domain kinds reach the
+  extractor "alongside the room facts the operator wrote by hand" — the
+  operator's facts are now the same rows, `origin=admin`, rendered first by
+  `room_facts` under "the operator wrote".
+- By line, for the rewrite: 215 (`init_channel.py` row), 221
+  (`friday/memory/` row), 227 (`friday/extraction/` row), 876
+  (`LightContext(turn, room)`), 977 (responder section order), 986 (`state`
+  section outside `derived`), ~1063 (room facts by hand), 1079
+  (`ContextStore.set_overrides`/`init_channel`), 1179–1184 (`context_store`
+  reaching `build_full_context`, `FullContext.room`).
