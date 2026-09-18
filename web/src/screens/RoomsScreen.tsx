@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { Memory, MemoryField, MemoryKindForm, Message, Room } from "../api-types";
 import { useAsync } from "../useAsync";
-import { ContextPanel } from "./ContextPanel";
 import { Pill, Skeleton, ago, roomName, shortTime } from "../ui";
 
 /** Rooms: the list on the left, one room's messages on the right.
@@ -102,7 +101,7 @@ function RoomDetail({
   onOpenFlow: (provider: string, id: string) => void;
 }) {
   const feed = useAsync(() => api.messagesIn(200), [room.id]);
-  const [showing, setShowing] = useState<"context" | "memory" | null>(null);
+  const [showing, setShowing] = useState<"memory" | null>(null);
 
   const messages = (feed.value ?? [])
     .filter((m) => m.conversation === room.id)
@@ -114,16 +113,10 @@ function RoomDetail({
       <header className="card row wrap between">
         <Rename room={room} onRenamed={onRenamed} />
         <div className="row">
-          <button onClick={() => setShowing("context")}>What it is told</button>
           <button onClick={() => setShowing("memory")}>What it remembers</button>
         </div>
       </header>
 
-      {showing === "context" && (
-        <Dialog title={`Context · ${roomName(room.id, room.name)}`} onClose={() => setShowing(null)}>
-          <ContextPanel channelId={room.channel_id} />
-        </Dialog>
-      )}
       {showing === "memory" && (
         <Dialog title={`Memory · ${roomName(room.id, room.name)}`} onClose={() => setShowing(null)}>
           <MemoryPanel channelId={room.channel_id} />
@@ -267,6 +260,7 @@ function Rename({ room, onRenamed }: { room: Room; onRenamed: () => void }) {
 
 function MemoryPanel({ channelId }: { channelId: string }) {
   const held = useAsync(() => api.memories(channelId), [channelId]);
+  const [correcting, setCorrecting] = useState<string | null>(null);
   const form = <MemoryForm channelId={channelId} onSaved={held.reload} />;
 
   if (held.error) return <p className="mono error">{held.error}</p>;
@@ -312,16 +306,33 @@ function MemoryPanel({ channelId }: { channelId: string }) {
               {ago(m.created_at)}
             </span>
             {m.origin === "admin" && !m.deleted_at && m.status === "active" && (
-              <button
-                onClick={async () => {
-                  await api.deleteMemory(channelId, m.id);
-                  held.reload();
-                }}
-              >
-                Remove
-              </button>
+              <>
+                <button
+                  onClick={() => setCorrecting(correcting === m.id ? null : m.id)}
+                >
+                  {correcting === m.id ? "Cancel" : "Correct"}
+                </button>
+                <button
+                  onClick={async () => {
+                    await api.deleteMemory(channelId, m.id);
+                    held.reload();
+                  }}
+                >
+                  Remove
+                </button>
+              </>
             )}
           </header>
+          {correcting === m.id && (
+            <MemoryForm
+              channelId={channelId}
+              editing={m}
+              onSaved={() => {
+                setCorrecting(null);
+                held.reload();
+              }}
+            />
+          )}
           <p
             className="said"
             style={
@@ -352,19 +363,28 @@ function MemoryPanel({ channelId }: { channelId: string }) {
  *  `read-it-the-way-the-operator-does`, ticket 09): a text area for a prose
  *  kind, one field per schema field for a structured one. The fields come
  *  from `/api/memory-kinds`, which reads them off the schemas the store
- *  checks — so a refusal names a field this form actually showed. */
+ *  checks — so a refusal names a field this form actually showed.
+ *
+ *  Given `editing`, the same form corrects that row in place through the PUT
+ *  route: its kind and name are fixed, and its fields start from what the
+ *  row holds. A name is not editable because `memory_update` takes none — a
+ *  structured row's key moves with its data, and a runbook's is its own. */
 function MemoryForm({
   channelId,
   onSaved,
+  editing,
 }: {
   channelId: string;
   onSaved: () => void;
+  editing?: Memory;
 }) {
   const kinds = useAsync(() => api.memoryKinds(), []);
-  const [kind, setKind] = useState("fact");
-  const [text, setText] = useState("");
+  const [kind, setKind] = useState(editing?.kind ?? "fact");
+  const [text, setText] = useState(editing?.text ?? "");
   const [key, setKey] = useState("");
-  const [values, setValues] = useState<Record<string, string>>({});
+  // `null` until a field is touched, so a correction starts from the row's
+  // own data once the kind's fields have loaded.
+  const [touched, setValues] = useState<Record<string, string> | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -372,20 +392,26 @@ function MemoryForm({
   if (!kinds.value) return null;
   const shape: MemoryKindForm =
     kinds.value.find((k) => k.kind === kind) ?? kinds.value[0];
+  const values = touched ?? (editing ? fieldValues(shape.fields, editing.data) : {});
 
   const save = async () => {
     setProblem(null);
     setSaving(true);
     try {
-      await api.addMemory(channelId, {
-        kind: shape.kind,
-        text,
-        key: shape.names_key ? key : undefined,
-        data: shape.prose ? undefined : payload(shape.fields, values),
-      });
+      const data = shape.prose ? undefined : payload(shape.fields, values);
+      if (editing) {
+        await api.updateMemory(channelId, editing.id, text, data);
+      } else {
+        await api.addMemory(channelId, {
+          kind: shape.kind,
+          text,
+          key: shape.names_key ? key : undefined,
+          data,
+        });
+      }
       setText("");
       setKey("");
-      setValues({});
+      setValues(null);
       onSaved();
     } catch (e) {
       setProblem((e as Error).message);
@@ -395,24 +421,29 @@ function MemoryForm({
   };
 
   return (
-    <section className="card memory-form" aria-label="Write a memory">
-      <label>
-        <span className="faint">Kind</span>
-        <select
-          value={shape.kind}
-          onChange={(e) => {
-            setKind(e.target.value);
-            setValues({});
-          }}
-        >
-          {kinds.value.map((k) => (
-            <option key={k.kind} value={k.kind}>
-              {k.kind}
-            </option>
-          ))}
-        </select>
-      </label>
-      {shape.names_key && (
+    <section
+      className="card memory-form"
+      aria-label={editing ? `Correct ${editing.id}` : "Write a memory"}
+    >
+      {!editing && (
+        <label>
+          <span className="faint">Kind</span>
+          <select
+            value={shape.kind}
+            onChange={(e) => {
+              setKind(e.target.value);
+              setValues(null);
+            }}
+          >
+            {kinds.value.map((k) => (
+              <option key={k.kind} value={k.kind}>
+                {k.kind}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {!editing && shape.names_key && (
         <label>
           <span className="faint">Name</span>
           <input type="text" value={key} onChange={(e) => setKey(e.target.value)} />
@@ -466,11 +497,31 @@ function MemoryForm({
       {problem && <p className="mono error">{problem}</p>}
       <div>
         <button className="primary" disabled={saving} onClick={save}>
-          Remember it
+          {editing ? "Save correction" : "Remember it"}
         </button>
       </div>
     </section>
   );
+}
+
+/** `payload` read backwards: a row's stored data as the form's strings, so
+ *  a correction starts from what is there rather than from blank fields. */
+function fieldValues(fields: MemoryField[], data: unknown) {
+  const out: Record<string, string> = {};
+  for (const f of fields) {
+    let at: unknown = data;
+    for (const part of f.name.split(".")) {
+      at = at && typeof at === "object" ? (at as Record<string, unknown>)[part] : undefined;
+    }
+    if (at === undefined || at === null) continue;
+    out[f.name] =
+      f.type === "json"
+        ? JSON.stringify(at, null, 2)
+        : Array.isArray(at)
+          ? at.join(", ")
+          : String(at);
+  }
+  return out;
 }
 
 /** The form's strings as the object the kind's schema expects: dotted names

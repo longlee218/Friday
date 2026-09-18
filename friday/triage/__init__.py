@@ -45,17 +45,20 @@ class Triage:
         sensitive: Sensitive | None = None,
         record=None,
         spent=None,
-        #: Where the room's summary lives. Held for the process, resolved
-        #: per call — the same split `Extractor` uses (ticket 01), and for
-        #: the same reason: a store outlives every call, a room does not.
-        context=None,
+        #: Where the room's summary row is read from — anything with
+        #: `room_summary(channel_id)`, which is the store in production. Held
+        #: for the process, read per call: a store outlives every call, a
+        #: room's summary does not. Named for what it is asked, not `db`,
+        #: because triage writes nothing and a whole store would say it
+        #: could. `None` reads no room at all — a bare test.
+        summaries=None,
     ) -> None:
         #: Empty by default, which means nothing is held. An install that has
         #: not thought about this yet gets the behaviour it would have had
         #: without the feature, rather than a silent list of someone else's
         #: guesses about what is sensitive in their workplace.
         self._sensitive = sensitive or Sensitive(())
-        self._context = context
+        self._summaries = summaries
         # Examples are appended to the instructions rather than passed per
         # call: the instructions are the stable prefix, and a list that
         # changed per call would cost the cache hit on everything after it.
@@ -97,9 +100,8 @@ class Triage:
         **This is the whole of ticket 09's change to this method**: `context:
         Sequence[InboundEvent]` — every message that had ever mentioned the
         operator in this conversation, unbounded and growing forever — is
-        gone. What replaces it is the room's own summary, read from the
-        context store this class now holds, plus `turn` in place of a
-        pre-joined string.
+        gone. What replaces it is the room's own summary row, read from the
+        store this class holds, plus `turn` in place of a pre-joined string.
 
         **Ticket 14 (D26):** this method no longer resolves the room itself.
         `build_light_context` is the one place that happens; this just calls
@@ -123,8 +125,8 @@ class Triage:
             )
             return NeedsHuman(f"mentions {held!r} — not sent to the model")
 
-        context = build_light_context(
-            self._context,
+        context = await build_light_context(
+            self._summaries,
             channel_id=event.conversation.channel_id,
             turn=list(turn) or [event],
         )

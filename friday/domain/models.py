@@ -567,8 +567,8 @@ class RoomSummary:
 
     Lives here rather than beside the summariser
     (`friday/memory/channel_context.py`, which re-exports it) because it is
-    also the `summary` kind's schema, and the store — which that module
-    imports — has to check a row against it.
+    also the `summary` kind's schema (`SummaryData` adds the bookmark), and
+    the store — which that module imports — has to check a row against it.
 
     **Four fields, where D9 named six**, and both absences are D2 applied to
     a prompt rather than to a table:
@@ -617,6 +617,23 @@ class RoomSummary:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class SummaryData(RoomSummary):
+    """A `summary` row's `data`: the four fields the summariser answered, and
+    the bookmark the YAML file kept in its own `state` section — which
+    messages the summary was made from, under which version of the shape
+    (board `read-it-the-way-the-operator-does`, ticket 10).
+
+    A subclass rather than three more fields on `RoomSummary`, because that
+    class is what the model is asked for, and a message id is not something
+    to ask a model for. The renderer reads `RoomSummary`'s own fields by
+    name and nothing else, so the bookmark is never rendered."""
+
+    summary_from: str | None = None
+    summary_of: str | None = None
+    summary_version: int | None = None
+
+
 #: Each kind's `data` schema; `None` is a prose kind, which carries no `data`.
 MEMORY_DATA: dict[MemoryKind, type | None] = {
     MemoryKind.FACT: None,
@@ -625,7 +642,7 @@ MEMORY_DATA: dict[MemoryKind, type | None] = {
     MemoryKind.DECISION: DecisionData,
     MemoryKind.FINDING: FindingData,
     MemoryKind.RUNBOOK: RunbookData,
-    MemoryKind.SUMMARY: RoomSummary,
+    MemoryKind.SUMMARY: SummaryData,
     MemoryKind.PROJECT: ProjectData,
     MemoryKind.SERVICE: ServiceData,
     MemoryKind.ROUTE: RouteData,

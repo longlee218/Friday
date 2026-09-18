@@ -81,6 +81,39 @@ form behind it.
 - Not done: no code-review subagent could be spawned from this lane (no
   agent tool available to it); the review is owed.
 
+## Review fixes
+
+A review of `67eca42` found two must-fix items and two spec gaps.
+
+- **Findings could not pile up.** The partial unique index held a room to
+  one active `finding` per `service:error_code`, so the second diagnosis of
+  a known fault got `MemoryKeyTaken` and `diagnose_memories`' "few newest"
+  could never return more than one per room. The spec contradicted itself
+  (one `UNIQUE` vs. "several findings that say the same thing"); resolved
+  in favour of the findings, and recorded in `spec.md` and `CONTEXT.md`.
+  The index predicate now adds `kind != 'finding'` (migration
+  `f81f63e7d3ce`); the key stays on the row because Diagnose matches on it.
+  Test: `test_findings_on_one_fault_pile_up_and_diagnose_reads_the_newest`
+  (six findings on one key, the five newest read, newest first).
+- **Autogenerate missed it.** Alembic does not compare an index predicate,
+  so the revision came out as `pass` and `test_migrations` stayed green over
+  a drifted database. The migration's body uses `batch_alter_table`
+  drop/create index ops, and `tests/test_migrations.py` now compares every
+  partial index's `WHERE` between the models and the migrated database.
+- **Correcting a row had a route but no UI path.** The Rooms memory dialog
+  gains a Correct button on active admin rows; it opens the same
+  `MemoryForm`, fixed to that row's kind, fields filled from its `data`, and
+  saves through `PUT /api/channels/{id}/memories/{memory_id}`. No JS test
+  (the repo has none, deliberately); `npm run build` type-checks it.
+- Suite: `1 failed, 1271 passed, 1 skipped` — the one failure is the
+  baseline `test_doc_paths_resolve_to_existing_files`.
+- Guards reddened: `kind != 'finding'` removed from the model → the new
+  test and the new migration check red; the migration body reverted to
+  `pass` → `test_the_models_and_the_migrations_describe_the_same_database`
+  red. Both restored.
+- Still owed: the `CLAUDE.md` update below, and a code-review subagent pass
+  (this lane has no agent tool to spawn one).
+
 ## Docs owed
 
 `CLAUDE.md` (not editable from this lane):
@@ -93,3 +126,11 @@ form behind it.
   memory rows (`POST/PUT/DELETE /api/channels/{id}/memories`), not only
   context overrides; CORS allows `DELETE`.
 - `RoomSummary` now lives in `friday/domain/models.py`.
+- The memory paragraphs should say that `finding` is the one structured kind
+  outside `uq_memories_active_key`: findings on one `service:error_code`
+  pile up, and Diagnose reads the five newest.
+- The migrations paragraph should say that `tests/test_migrations.py` also
+  compares partial-index predicates, because `compare_metadata` does not and
+  autogenerate emits `pass` for a changed predicate.
+- The board's Rooms memory dialog can now correct an admin row
+  (PUT route), not only write and remove one.

@@ -38,7 +38,6 @@ from friday.agent.instruction_prompt import (
     job,
     memory,
     outstanding_questions,
-    remembered_facts,
     role,
     room_facts,
     thinking_style,
@@ -166,12 +165,14 @@ def build_input(context: FullContext) -> str:
     this existed. A test says so, because "close enough" would still cost
     every extractor in every such install its prefix.
 
-    **`context.domain_memories` shares the channel slot with `room_facts`,
-    not a fourth slot of its own** (board `what-the-room-already-knows`,
-    ticket 10, D14). Both answer the same question — what is this room known
-    to be — from two different producers: the operator's hand, through
-    `ChannelContext`, and an agent's own domain-kind memories, through
-    `db.domain_memories`. An agent given two blocks for the same kind of
+    **`context.domain_memories` is the channel slot, whoever wrote it**
+    (board `what-the-room-already-knows`, ticket 10, D14; board
+    `read-it-the-way-the-operator-does`, ticket 10). It answers one question
+    — what is this room known to be — from two producers: the operator's
+    hand, `origin=admin` rows for this room and for every room, which were a
+    YAML file's `base` and `overrides`; and an agent's own domain-kind
+    memories. `room_facts` renders both, labelled by origin, in one block
+    rather than two slots: an agent given two blocks for the same kind of
     thing would have to work out that they mean one another, the same
     reasoning `memory`'s own docstring gives for not splitting
     `conversation` and `channel` further.
@@ -203,12 +204,7 @@ def build_input(context: FullContext) -> str:
     # what `input_fingerprint` hashes, so a field getting filled still moves
     # the mark and still earns a fresh extraction.
     schema = describe(type(context.known), omit=context.known) or "(no fields)"
-    channel_body = "\n".join(
-        filter(
-            None,
-            [room_facts(context.room), remembered_facts(list(context.domain_memories))],
-        )
-    )
+    channel_body = room_facts(list(context.domain_memories))
     return (
         f"Fields:\n{schema}\n\n"
         + assemble(

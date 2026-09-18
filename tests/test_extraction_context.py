@@ -28,10 +28,10 @@ async def test_the_extractor_itself_reads_what_it_already_asked(db):
     await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
 
     with_task = await build_full_context(
-        db, None, channel_id=None, task_id=task.id, known=ApiIssueParams()
+        db, channel_id=None, task_id=task.id, known=ApiIssueParams()
     )
     without_task = await build_full_context(
-        db, None, channel_id=None, task_id=None, known=ApiIssueParams()
+        db, channel_id=None, task_id=None, known=ApiIssueParams()
     )
 
     assert with_task.asked == ("em gửi anh curl với",)
@@ -54,10 +54,10 @@ async def test_the_extractor_itself_reads_domain_kind_memories(db):
     )
 
     with_room = await build_full_context(
-        db, None, channel_id="watched", task_id=None, known=ApiIssueParams()
+        db, channel_id="watched", task_id=None, known=ApiIssueParams()
     )
     without_channel = await build_full_context(
-        db, None, channel_id=None, task_id=None, known=ApiIssueParams()
+        db, channel_id=None, task_id=None, known=ApiIssueParams()
     )
 
     assert any(m.text == "test.apero is staging" for m in with_room.domain_memories)
@@ -76,7 +76,7 @@ async def test_voice_kind_memories_do_not_reach_the_extractor(db):
     await db.memory_add(scope, "they like short replies", kind=MemoryKind.VOICE)
 
     context = await build_full_context(
-        db, None, channel_id="watched", task_id=None, known=ApiIssueParams()
+        db, channel_id="watched", task_id=None, known=ApiIssueParams()
     )
 
     texts = [m.text for m in context.domain_memories]
@@ -93,7 +93,7 @@ async def test_the_outstanding_questions_cost_no_model_call(db):
     await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
 
     context = await build_full_context(
-        db, None, channel_id=None, task_id=task.id, known=ApiIssueParams()
+        db, channel_id=None, task_id=task.id, known=ApiIssueParams()
     )
 
     assert context.asked == ("em gửi anh curl với",)
@@ -113,31 +113,31 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
         assemble,
         memory,
         outstanding_questions,
-        remembered_facts,
         room_facts,
         user_input,
     )
     from friday.agent.structured import describe
     from friday.extraction.prompt import build_input
-    from friday.memory.channel_context import ChannelContext
 
     known = ApiIssueParams(environment="production")
-    room = ChannelContext(
-        channel_id="watched", base={}, derived={}, overrides={"env": "staging"}
-    )
     now = datetime.now(UTC)
     memories = [
         Memory(
             id="m1", channel_id="watched", agent="extractor",
             text="test.apero is staging", kind=MemoryKind.FACT,
             created_at=now, updated_at=now,
-        )
+        ),
+        Memory(
+            id="m2", channel_id="*", agent="operator",
+            text="env: staging", kind=MemoryKind.FACT,
+            created_at=now, updated_at=now, origin="admin",
+        ),
     ]
     asked = ("còn environment nào em?",)
     transcript = "API lỗi rồi"
 
     context = _context(
-        transcript, ApiIssueParams, room=room, asked=asked, memories=memories,
+        transcript, ApiIssueParams, asked=asked, memories=memories,
         known=known,
     )
 
@@ -148,7 +148,7 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
     # hand, and when `build_input` moved to `describe` (which also names
     # types) the two drifted, which is how this test earned its keep.
     schema = describe(ApiIssueParams, omit=known) or "(no fields)"
-    channel_body = "\n".join(filter(None, [room_facts(room), remembered_facts(memories)]))
+    channel_body = room_facts(memories)
     by_hand = (
         f"Fields:\n{schema}\n\n"
         + assemble(
@@ -176,7 +176,7 @@ async def test_the_debug_log_never_carries_content(db, caplog):
 
     with caplog.at_level(logging.DEBUG, logger="friday.extraction.context"):
         await build_full_context(
-            db, None, channel_id=None, task_id=task.id, known=ApiIssueParams()
+            db, channel_id=None, task_id=task.id, known=ApiIssueParams()
         )
 
     logged = "\n".join(r.getMessage() for r in caplog.records)
@@ -202,7 +202,7 @@ async def test_the_builder_never_writes_even_when_over_budget(db):
     )
 
     context = await build_full_context(
-        db, None, channel_id=None, task_id=task.id, known=ApiIssueParams(),
+        db, channel_id=None, task_id=task.id, known=ApiIssueParams(),
         budget_tokens=5,
     )
 

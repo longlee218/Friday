@@ -43,7 +43,7 @@ class Heartbeat:
         self._extra = extra
         self._keep_days = keep_model_calls_days
         self._liveness = liveness
-        #: Rebuilds channel context files. Its own condition decides whether
+        #: Rebuilds rooms' summary rows. Its own condition decides whether
         #: a channel is worth another summary call — see `ContextRebuilder`.
         self._context_rebuilder = context_rebuilder
         self._started = datetime.now(timezone.utc)

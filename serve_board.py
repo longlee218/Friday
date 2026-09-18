@@ -1,10 +1,10 @@
 """Run just the board's API, against the live database.
 
 The agent serves this itself; this is for looking at what is already stored,
-and editing a channel's context, without connecting to Discord or sending
-anything. Safe to run beside a live agent — SQLite in WAL mode takes many
-readers, and the one thing this writes is a YAML file the agent re-reads only
-when asked to.
+and writing the operator's memory rows, without connecting to Discord or
+sending anything. Safe to run beside a live agent — SQLite in WAL mode takes
+many readers, and what this writes is rows through the same store the agent
+reads them from.
 
 It served a server-rendered page too until board ticket 01 deleted it. What is
 left is the JSON API, which is what `web/` reads (board ticket 05) and what is
@@ -13,7 +13,8 @@ worth having pointed at the live database while that is being built.
 **Not read-only, and it says so here because it stopped being true.** This
 docstring claimed "read-only, so it is safe to run beside a live agent" for
 exactly as long as it took a review to notice that the commit below had wired
-a `ContextStore` in. A write path is why `check_exposure` is called here as
+a write path in — a channel file's overrides then, the operator's memory rows
+since the files went. A write path is why `check_exposure` is called here as
 well as in `run_agent.py`: two entrypoints bind the same `config.board_host`,
 and hardening one of them is hardening none.
 """
@@ -26,7 +27,6 @@ import os
 import uvicorn
 from dotenv import load_dotenv
 
-from friday.memory.channel_context import ContextStore
 from friday.ops.api import bind, build_api, check_exposure
 from friday.config import load_config
 from friday.store.db import Database
@@ -46,7 +46,6 @@ async def main() -> None:
         db=db,
         provider_status=status,
         origins=list(config.board_origins),
-        context_store=ContextStore.build(config),
         # Asked of the runner rather than read out of config, for the reason
         # `run_agent.py` is held to: which knobs triage has is triage's.
         confidence_threshold=(

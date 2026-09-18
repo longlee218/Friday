@@ -213,16 +213,19 @@ class OutboxConfig:
 
 @dataclass(frozen=True, slots=True)
 class ContextConfig:
-    """Where a channel's knowledge lives, and what a summary of it may cost."""
+    """What a room's summary and a task's transcript may cost, and where the
+    skills live. A channel's knowledge lived here too, as a directory of YAML
+    files; it is rows in the database now (board
+    `read-it-the-way-the-operator-does`, ticket 10)."""
 
-    directory: str = "context"
     #: Where the operator's skills live. One Markdown file per skill; adding
     #: one is adding a file, with no list to edit.
     skills_directory: str = "skills"
     #: A ceiling refuses; it does not trim (ticket 06). A summary cut mid-field
     #: says something false about the room; the previous one is merely older.
     #: Measured on the stored, structured form — the same measure the room
-    #: sees, since `room_facts` renders `derived` as written.
+    #: sees, since `channel_derived` renders the summary row's fields as
+    #: written.
     #:
     #: Replaces `summary_share`, which gated the *call* on a fraction of the
     #: model's context window — the layer that made every room's derived
@@ -313,7 +316,6 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             ),
         ),
         context=ContextConfig(
-            directory=str((raw.get("context") or {}).get("directory", "context")),
             skills_directory=str(
                 (raw.get("context") or {}).get("skills_directory", "skills")
             ),

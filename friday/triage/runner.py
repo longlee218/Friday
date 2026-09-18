@@ -58,7 +58,7 @@ def _record(outcome: TriageOutcome) -> dict:
 
 
 async def build_triage(
-    config, *, db: Database, record=None, spent=None, context=None
+    config, *, db: Database, record=None, spent=None
 ) -> Triage:
     """The real classifier, assembled the one place this is done.
 
@@ -107,7 +107,9 @@ async def build_triage(
         sensitive=sensitive,
         record=record,
         spent=spent,
-        context=context,
+        # The room's summary row is read from here per call — the eval gets
+        # the same reading production does, from whatever store it is given.
+        summaries=db,
     )
 
 
@@ -121,7 +123,6 @@ class TriageRunner:
         still_typing=None,
         record=None,
         spent=None,
-        context=None,
     ) -> "TriageRunner":
         """Everything triage needs, read from configuration here.
 
@@ -142,7 +143,7 @@ class TriageRunner:
         return cls(
             db=db,
             triage=await build_triage(
-                config, db=db, record=record, spent=spent, context=context
+                config, db=db, record=record, spent=spent
             ),
             confidence_threshold=float(
                 settings.options.get("confidence_threshold", 0.7)
@@ -332,8 +333,8 @@ class TriageRunner:
         `context = await self._db.relevant_messages(event.conversation)` —
         every message that had ever mentioned the operator in this
         conversation, unbounded and growing forever (ticket 26). Ticket 09
-        reverses that: `Triage` reads the room's own summary from the context
-        store it now holds, and `turn` — the raw messages `_triage_one` just
+        reverses that: `Triage` reads the room's own summary row from the
+        store it holds, and `turn` — the raw messages `_triage_one` just
         read from `turn_from`, before they were joined into `event`'s own
         text — is what reaches the prompt instead of a transcript.
         """

@@ -33,14 +33,14 @@ from friday.extraction.context import FullContext
 from friday.domain.validation import Matches
 
 
-def _context(text="", params_cls=None, *, room=None, asked=(), memories=(), known=None):
+def _context(text="", params_cls=None, *, asked=(), memories=(), known=None):
     """A `FullContext` built the way `build_full_context` would, for tests
     that only care about rendering, not gathering. Mirrors the shape
     `build_input`'s five arguments used to have before ticket 15's D26."""
     if known is None:
         known = params_cls() if params_cls is not None else None
     return FullContext(
-        transcript=text, room=room, domain_memories=memories, asked=asked, known=known
+        transcript=text, domain_memories=memories, asked=asked, known=known
     )
 
 
@@ -472,7 +472,7 @@ def test_a_freshly_constructed_known_shows_every_field():
     """`context.known` is never `None` (ticket 15, D26) — a task with
     nothing filled in yet is `params_cls()`, every field its own default —
     so this, not an absent `known`, is what "nothing known yet" looks like
-    now. A room with no context file already gets the same guarantee for
+    now. A room with no rows already gets the same guarantee for
     `room_facts`."""
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
@@ -527,24 +527,35 @@ async def test_a_model_that_could_not_answer_is_not_a_refusal():
 # --- the room reaches the extractor (ticket 01) ---------------------------
 
 
-def _room(**overrides):
-    from friday.memory.channel_context import ChannelContext
+def _rows(*lines, origin="admin", channel_id="watched", kind="fact"):
+    """What `db.domain_memories` hands back for a room — the operator's rows
+    by default, which is what a channel file's `overrides` were until board
+    `read-it-the-way-the-operator-does`, ticket 10."""
+    from datetime import datetime, timezone
 
-    return ChannelContext(
-        channel_id="watched", base={}, derived={}, overrides=overrides
+    from friday.domain.models import Memory
+
+    now = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    return tuple(
+        Memory(
+            id=f"r{n}", channel_id=channel_id, agent="operator", text=line,
+            kind=kind, created_at=now, updated_at=now, origin=origin,
+        )
+        for n, line in enumerate(lines)
     )
 
 
-def test_a_room_with_no_context_file_leaves_the_prompt_exactly_as_it_was():
+def test_a_room_with_no_rows_leaves_the_prompt_exactly_as_it_was():
     """The tracer bullet must not change the prompt of a room nobody has
     written anything about, and "not much" is not the same as "not at all":
     every extractor in every unconfigured install shares this prefix."""
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
 
-    assert build_input(_context("API lỗi", ApiIssueParams, room=None)) == build_input(
-        _context("API lỗi", ApiIssueParams)
-    )
+    said = build_input(_context("API lỗi", ApiIssueParams, memories=()))
+
+    assert "<memory>" not in said
+    assert said == build_input(_context("API lỗi", ApiIssueParams))
 
 
 def test_the_rooms_facts_reach_the_input_and_not_the_instructions():
@@ -558,7 +569,7 @@ def test_the_rooms_facts_reach_the_input_and_not_the_instructions():
     from friday.extraction.prompt import build_input, build_instructions
 
     said = build_input(
-        _context("API lỗi", ApiIssueParams, room=_room(**{"test.apero": "staging"}))
+        _context("API lỗi", ApiIssueParams, memories=_rows("test.apero: staging"))
     )
 
     assert "test.apero" in said
@@ -573,7 +584,7 @@ def test_the_rooms_facts_arrive_through_the_memory_section():
     from friday.extraction.prompt import build_input
 
     said = build_input(
-        _context("API lỗi", ApiIssueParams, room=_room(register="thân mật"))
+        _context("API lỗi", ApiIssueParams, memories=_rows("register: thân mật"))
     )
 
     assert "<memory>" in said
@@ -589,59 +600,36 @@ def test_the_field_schema_comes_before_the_room():
     from friday.extraction.prompt import build_input
 
     said = build_input(
-        _context("API lỗi", ApiIssueParams, room=_room(register="thân mật"))
+        _context("API lỗi", ApiIssueParams, memories=_rows("register: thân mật"))
     )
 
     assert said.index("Fields:") < said.index("<memory>") < said.index("What they said:")
 
 
-def test_an_override_the_operator_wrote_wins_over_a_derived_summary():
-    """The three layers in the precedence order they already have. A rebuild
-    rewrites `derived` and must never change what an operator typed — which is
-    what makes writing a fact by hand the producer this board may not ship
-    without."""
+def test_what_the_operator_wrote_is_labelled_apart_from_what_a_model_did():
+    """It was three layers in precedence order — base, derived, overrides —
+    and a test that the operator's won. The layers were a file's (ticket 10);
+    what survives of the rule is provenance: the operator's rows, here and
+    everywhere, under one label and first, a model's under another, and
+    nothing dropped — a mutation that lost one kind of row stays red."""
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
-    from friday.memory.channel_context import ChannelContext
-
-    room = ChannelContext(
-        channel_id="watched",
-        base={"env": "from base"},
-        derived={"env": "from the summariser"},
-        overrides={"env": "from the operator"},
-    )
-    said = build_input(_context("API lỗi", ApiIssueParams, room=room))
-
-    assert "from the operator" in said
-    assert "from the summariser" not in said
-    assert "from base" not in said
-
-
-def test_a_layer_the_operator_did_not_override_still_reaches_the_prompt():
-    """All three layers, merged. Asserting only that overrides *win* left a
-    mutation passing that dropped `base` and `derived` entirely — the
-    summariser's own output would have reached nobody, which is the half of
-    the context layer ticket 06 exists to fill."""
-    from friday.domain.models import ApiIssueParams
-    from friday.extraction.prompt import build_input
-    from friday.memory.channel_context import ChannelContext
 
     said = build_input(
         _context(
             "API lỗi",
             ApiIssueParams,
-            room=ChannelContext(
-                channel_id="watched",
-                base={"company": "apero"},
-                derived={"busiest": "the reelme team"},
-                overrides={"test.apero": "staging"},
+            memories=(
+                *_rows("the reelme team is busiest", origin="model"),
+                *_rows("company: apero", channel_id="*"),
+                *_rows("test.apero: staging"),
             ),
         )
     )
 
-    assert "apero" in said, "the shared base layer never reached the prompt"
-    assert "the reelme team" in said, "the summariser's own layer was dropped"
-    assert "staging" in said
+    operator, model = said.split("the operator wrote:")[1].split("remembered:")
+    assert "apero" in operator and "staging" in operator
+    assert "the reelme team" in model
 
 
 # --- what we already asked (ticket 05) -----------------------------------
@@ -679,15 +667,12 @@ def test_the_room_and_the_outstanding_questions_are_both_labelled():
     `memory()` was written for and the reason it is one section."""
     from friday.domain.models import ApiIssueParams
     from friday.extraction.prompt import build_input
-    from friday.memory.channel_context import ChannelContext
 
     said = build_input(
         _context(
             "API lỗi",
             ApiIssueParams,
-            room=ChannelContext(
-                channel_id="watched", base={}, derived={}, overrides={"test.apero": "staging"}
-            ),
+            memories=_rows("test.apero: staging"),
             asked=("còn environment nào em?",),
         )
     )

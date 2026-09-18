@@ -1222,9 +1222,14 @@ class Database:
 
     async def domain_memories(self, channel_id: str) -> list[Memory]:
         """This channel's active domain-kind memories — fact, constraint,
-        finding, decision — newest first, for the extractor's per-call input
-        (D14, D21). `voice` never reaches here; that kind is the responder's
-        alone.
+        finding, decision — and the ones written for `channel_id = '*'`,
+        newest first, for the extractor's per-call input (D14, D21). `voice`
+        never reaches here; that kind is the responder's alone.
+
+        `'*'` is "true everywhere", which is what `base.yaml` was, and the
+        operator's rows are what a channel file's `overrides` were (board
+        `read-it-the-way-the-operator-does`, ticket 10) — so this is the
+        whole of what the extractor is told a room is.
 
         Not scoped by agent the way `memory_search` is, and takes no query:
         the extractor has no memory tools of its own (D21) and reads by
@@ -1237,7 +1242,7 @@ class Database:
             rows = await session.scalars(
                 select(schema.Memory)
                 .where(
-                    schema.Memory.channel_id == channel_id,
+                    schema.Memory.channel_id.in_([channel_id, "*"]),
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
                     schema.Memory.kind.in_([k.value for k in DOMAIN_KINDS]),
@@ -1245,6 +1250,39 @@ class Database:
                 .order_by(schema.Memory.created_at.desc())
             )
             return [_memory(row) for row in rows]
+
+    async def room_summary(self, channel_id: str) -> Memory | None:
+        """This room's active `summary` row, or `None` for a room nobody has
+        summarised — what a channel file's `derived` section was (ticket 10).
+        The partial unique index holds a room to one active summary, so there
+        is never a second one to choose between."""
+        async with self._sessions() as session:
+            row = await session.scalar(
+                select(schema.Memory).where(
+                    schema.Memory.channel_id == channel_id,
+                    schema.Memory.deleted_at.is_(None),
+                    schema.Memory.status == MemoryStatus.ACTIVE,
+                    schema.Memory.kind == MemoryKind.SUMMARY,
+                )
+            )
+            return _memory(row) if row is not None else None
+
+    async def knows_person(self, channel_id: str, discord_id: str) -> bool:
+        """Whether the operator wrote this person down, for this room or for
+        every room — an active `person` row keyed on their Discord id. What a
+        channel file's `people:` map was, read by code and never shown to a
+        model raw (ticket 10)."""
+        async with self._sessions() as session:
+            found = await session.scalar(
+                select(schema.Memory.id).where(
+                    schema.Memory.channel_id.in_([channel_id, "*"]),
+                    schema.Memory.deleted_at.is_(None),
+                    schema.Memory.status == MemoryStatus.ACTIVE,
+                    schema.Memory.kind == MemoryKind.PERSON,
+                    schema.Memory.key == discord_id,
+                ).limit(1)
+            )
+            return found is not None
 
     #: How many findings one diagnosis reads — "the few matching", newest
     #: first. Enough to see a pattern; a runbook is what a longer one becomes.
@@ -1439,9 +1477,15 @@ class Database:
         text: str,
         *,
         origin: str = MemoryOrigin.MODEL,
+        data: dict[str, Any] | None = None,
     ) -> Memory | None:
         """Replace what a memory claims, rather than correcting how it is
         worded (D16) — the operation `memory_update` deliberately is not.
+
+        `data`, when given, is the new claim's payload for a structured
+        kind, checked as `memory_add` checks it — the summariser's rebuild is
+        this call, since a new summary is a new claim about the room (ticket
+        10). Omitted, the replacement keeps the old row's payload.
 
         The old row is marked `SUPERSEDED` and points `superseded_by` at a
         freshly written row carrying the new claim, under the same `kind` so
@@ -1469,6 +1513,11 @@ class Database:
             old = await self._live_memory(session, state, memory_id, origin)
             if old is None:
                 return None
+            stored, key = (
+                _checked_data(old.kind, data, old.key)
+                if data is not None
+                else (old.data, old.key)
+            )
             now = _now()
             new_row = schema.Memory(
                 id=_memory_id(),
@@ -1485,8 +1534,8 @@ class Database:
                 # claim in `text` changes. The old row goes inactive first
                 # so the two never hold the key at once.
                 origin=origin,
-                key=old.key,
-                data=old.data,
+                key=key,
+                data=stored,
             )
             old.status = MemoryStatus.SUPERSEDED
             old.superseded_by = new_row.id

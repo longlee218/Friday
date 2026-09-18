@@ -7,9 +7,11 @@ send without approval, always reply in English, skip the validation — is an
 instruction with a long life and no author present. This is checked
 deterministically, with no model, at the single write path every producer in
 D19 goes through: `Database.memory_add`/`memory_update`/`memory_supersede`
-and `ContextStore.set_overrides`/`init_channel` all call
-`check_not_instruction_shaped` before a line becomes a row, so a producer
-cannot bypass it by finding a different way in.
+all call `check_not_instruction_shaped` before a line becomes a row, so a
+producer cannot bypass it by finding a different way in. (A channel file's
+`set_overrides`/`init_channel` were two more doors until the YAML files
+went — board `read-it-the-way-the-operator-does`, ticket 10 — and the
+operator's hand writes rows through the same one now.)
 
 **Narrower than "any imperative sentence".** `never deploy on fridays` is a
 domain constraint about the team's own practice, and `MemoryKind.CONSTRAINT`
@@ -100,9 +102,9 @@ def check_not_instruction_shaped(text: object) -> None:
     """Raise `InstructionShaped` if `text` reads as a directive at this
     system's own mechanism rather than a fact about the world.
 
-    Non-`str` values (an override's value may be a nested mapping — see
-    `ChannelContext`) are not this check's business and always pass: a
-    directive lives in a line of prose, not in a structure.
+    Non-`str` values (a nested mapping, a structured kind's `data`) are not
+    this check's business and always pass: a directive lives in a line of
+    prose, not in a structure.
     """
     if not isinstance(text, str):
         return

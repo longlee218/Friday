@@ -116,11 +116,9 @@ def build_input(context: LightContext) -> str:
     replaced the unbounded relevance window with.
 
     **One value, not two arguments** (board `what-the-room-already-knows`,
-    ticket 14, D26): `context.turn` and `context.room` are gathered by
+    ticket 14, D26): `context.turn` and `context.summary` are gathered by
     `friday.triage.context.build_light_context`, the only place triage
-    resolves a room. This function renders; it does not gather — reading
-    `context_store` itself, the way this used to, is exactly the thing 14
-    moved out.
+    resolves a room. This function renders; it does not gather.
 
     **The room, not the reporter's own words, is what changed in ticket 09.**
     `turn` is unchanged in shape from what this function always rendered —
@@ -130,20 +128,20 @@ def build_input(context: LightContext) -> str:
     needs instead is a fact about the room, not a transcript of it.
 
     **`channel_derived`, not a section built for this.** It is the same
-    section the responder already reads, and it renders exactly
-    `ctx.derived["summary"]` — the four structured fields ticket 06 writes,
-    nothing else. `base` and `overrides` do not reach it, which is what keeps
-    domain facts and operator-written values out of triage's prompt: triage
-    decides a label, not a value, and those two layers are exactly the kind
-    of thing a value gets built from.
+    section the responder reads, and it renders exactly the summary row's
+    four `RoomSummary` fields, nothing else. The operator's rows and the
+    domain memories do not reach it — `readers_for` gives triage the
+    `summary` kind and no other — which is what keeps domain facts out of
+    triage's prompt: triage decides a label, not a value, and those rows are
+    exactly the kind of thing a value gets built from.
 
-    A room with nothing written about it renders no section at all, so an
-    unconfigured install's prompt is byte-identical to what it always was.
+    A room with no summary row renders no section at all, so an unconfigured
+    install's prompt is byte-identical to what it always was.
 
     Quoted through the section rather than wrapped round it; `_quoted` in the
     seam says why, and this prompt is one of the two that got it wrong until
     ticket 06.
     """
     return assemble(
-        channel_derived(context.room), conversation(list(context.turn), quoted=True)
+        channel_derived(context.summary), conversation(list(context.turn), quoted=True)
     )

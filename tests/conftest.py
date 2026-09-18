@@ -107,6 +107,23 @@ def make_event(
     )
 
 
+def summary_row(channel_id: str = "watched", **fields):
+    """A room's `summary` row as the store hands it back — what a channel
+    file's `derived: {summary: ...}` was until board
+    `read-it-the-way-the-operator-does`, ticket 10. For a renderer test that
+    has no reason to run the summariser to get one."""
+    from friday.domain.models import Memory, MemoryKind, RoomSummary
+
+    now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+    data = {f: fields.get(f, [] if f != "topic" else "") for f in RoomSummary.__dataclass_fields__}
+    data.update(summary_of=fields.get("summary_of", "m1"))
+    return Memory(
+        id="s1", channel_id=channel_id, agent="summary", text=data["topic"],
+        kind=MemoryKind.SUMMARY, created_at=now, updated_at=now,
+        key="room", data=data,
+    )
+
+
 @pytest.fixture
 def provider() -> FakeProvider:
     return FakeProvider()

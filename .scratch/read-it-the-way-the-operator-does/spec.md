@@ -310,11 +310,19 @@ the instruction-shape guard stands at instead of three.
     key      natural key for a structured kind; null for prose
     data     JSON, validated against the kind's schema at write time
     UNIQUE (channel_id, kind, key) WHERE status='active' AND deleted_at IS NULL
+                                     AND kind != 'finding'
 
 `channel_id = '*'` is "true everywhere", replacing `base.yaml`. `text` stays
 prose, guarded and bounded; a structured kind's payload goes in `data`, so
 the guard and the character limit never run over something that is not a
 sentence. A model may not update, supersede or delete an `origin=admin` row.
+
+`finding` is outside the index (ticket 09's review). As first written the
+index held a room to one active finding per `service:error_code`, which
+contradicts this spec's own "the few matching findings, newest first" and
+"several findings that say the same thing are the signal to write a
+runbook": the second diagnosis of a known fault could not record what it
+found. The key stays on a finding because Diagnose matches on it.
 
 **No kind reaches the system prompt.** `instructions` stays fixed so the
 provider's cache reuses it. Seven kinds reach the per-call *input*; five

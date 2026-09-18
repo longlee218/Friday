@@ -330,9 +330,9 @@ ingest:
 
 # ── What the operator writes down ─────────────────────────────────────────
 context:
-  # Per-channel YAML: what the machine learned about a channel, and what you
-  # wrote there yourself. `init_channel.py` creates one for you to fill in.
-  directory: context
+  # What a room is known to be is rows in the database now, written on the
+  # board's memory form — not a directory of YAML files. A second install
+  # that still has one runs `uv run import_context_files.py <dir>` once.
   # One Markdown file per skill, with `name` and `description` in its
   # frontmatter. Adding a skill is adding a file — there is no list to edit.
   # Agents are shown one line per skill and fetch the body only when they

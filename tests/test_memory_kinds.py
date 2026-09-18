@@ -349,6 +349,26 @@ async def test_diagnose_reads_the_domain_the_matching_runbook_and_finding(db):
     ]
 
 
+async def test_findings_on_one_fault_pile_up_and_diagnose_reads_the_newest(db):
+    """A finding is evidence, not a record of the fault: every diagnosis of
+    `midas:ERR301` writes its own, and several saying the same thing are the
+    signal that a runbook is owed. So the key does not hold one finding per
+    room — `diagnose_memories` reads the few newest, not only the first."""
+    for n in range(DB_FINDINGS := 6):
+        await db.memory_add(
+            ROOM.for_task(100 + n), f"ERR301 was Midas, case {n}",
+            kind=MemoryKind.FINDING,
+            data={**VALID[MemoryKind.FINDING][0], "task_id": 100 + n},
+        )
+
+    read = await db.diagnose_memories("c1", service="midas", error_code="ERR301")
+
+    assert [m.text for m in read] == [
+        f"ERR301 was Midas, case {n}"
+        for n in reversed(range(DB_FINDINGS - db.DIAGNOSE_FINDINGS, DB_FINDINGS))
+    ]
+
+
 async def test_the_extractor_still_reads_what_it_read(db):
     await db.memory_add(OPERATOR, "read midas first", kind=MemoryKind.RUNBOOK,
                         origin=ADMIN, key="midas", data=VALID[MemoryKind.RUNBOOK][0])

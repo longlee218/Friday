@@ -379,6 +379,12 @@ class Memory(Base):
     #: `reelme-order` is a conflict, not a second opinion. Partial, so a
     #: superseded or deleted row keeps its key as history, and a prose row's
     #: null key never collides (SQLite treats nulls as distinct).
+    #:
+    #: `finding` is left out. Its key is `service:error_code`, which names
+    #: the fault rather than the finding: every diagnosis of a known fault
+    #: writes its own, and several saying the same thing are the spec's
+    #: signal that a runbook is owed. The key stays on the row because
+    #: `Database.diagnose_memories` matches on it.
     __table_args__ = (
         Index(
             "uq_memories_active_key",
@@ -386,7 +392,9 @@ class Memory(Base):
             "kind",
             "key",
             unique=True,
-            sqlite_where=sql_text("status = 'active' AND deleted_at IS NULL"),
+            sqlite_where=sql_text(
+                "status = 'active' AND deleted_at IS NULL AND kind != 'finding'"
+            ),
         ),
     )
 

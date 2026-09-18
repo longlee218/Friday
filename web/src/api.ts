@@ -7,7 +7,6 @@
 
 import type {
   Board,
-  ChannelContext,
   Flow,
   Memory,
   MemoryKindForm,
@@ -82,23 +81,4 @@ export const api = {
     ),
   flow: (provider: string, id: string) =>
     get<Flow>(`/api/messages/${provider}/${encodeURIComponent(id)}/flow`),
-  channels: () => get<string[]>("/api/channels"),
-  context: (id: string) =>
-    get<ChannelContext>(`/api/channels/${encodeURIComponent(id)}/context`),
-  createContext: (id: string) =>
-    send<{ created: boolean }>(
-      `/api/channels/${encodeURIComponent(id)}/context`,
-      "POST",
-    ),
-  setOverrides: (id: string, overrides: Record<string, string>) =>
-    send<{ saved: boolean }>(
-      `/api/channels/${encodeURIComponent(id)}/context/overrides`,
-      "PUT",
-      { overrides },
-    ),
-  reload: () =>
-    send<{ reloaded: string[]; problems: string[] }>(
-      "/api/context/reload",
-      "POST",
-    ),
 };

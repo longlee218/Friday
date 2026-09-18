@@ -28,9 +28,7 @@ from friday.agent.instruction_prompt import (
     role,
     soul,
     base,
-    channel_base,
     channel_derived,
-    channel_overrides,
     conversation,
     task,
     tone_examples,
@@ -40,10 +38,12 @@ from friday.domain.models import InboundEvent, Params
 
 __all__ = ["build_input", "build_instructions"]
 
-#: The job. Contracts inside, reworded but not renamed: the section names
-#: channel_overrides / channel_derived / channel_base, the `register` and
-#: `people:` keys (produced by the channel context), and the `fetch_skill`
-#: tool. The `<counterpart>` section it explains is the constant below.
+#: The job. Contracts inside, reworded but not renamed: the section name
+#: channel_derived (the room's summary row), and the `fetch_skill` tool. The
+#: `register` and `people:` keys it used to explain were a channel file's
+#: overrides, gone with the files (board `read-it-the-way-the-operator-does`,
+#: ticket 10) — a room's register is a `voice` row, reached by
+#: `memory_search`, and a person is a row code reads. The `<counterpart>` section it explains is the constant below.
 INSTRUCTIONS = """You write chat replies as a specific backend engineer.
 
 You are shown examples of how they actually write, the conversation so far, and
@@ -61,11 +61,8 @@ this request; the conversation is a whole channel and may hold values from
 somebody else's. Never say we have something the params show as null, and never
 say what you will do next — you are asking a question, not making a promise.
 
-Sections named channel_overrides, channel_derived and channel_base describe the
-room you are writing in; where they disagree, that is their order of precedence.
-A `register` there says how this room is spoken in. A `people` map there names
-particular people and how to address each; it wins over the room's register for
-that person and nobody else.
+A section named channel_derived, when there is one, is what has been worked out
+about the room you are writing in.
 
 Do not address anyone by @-mention. The message is posted as a reply to
 theirs, so it is already attached to them."""
@@ -221,7 +218,7 @@ def build_input(
     *,
     asking: str,
     params: Params | None = None,
-    room=None,
+    summary=None,
     stranger: bool = False,
     has_memory: bool = False,
     tone: Sequence[InboundEvent] = (),
@@ -231,9 +228,7 @@ def build_input(
     """Everything one draft call knows, rendered stable-first."""
     parts = [
         base(now or datetime.now(timezone.utc)),
-        channel_base(room),
-        channel_derived(room),
-        channel_overrides(room),
+        channel_derived(summary),
         counterpart(COUNTERPART if stranger else ""),
         # `has_memory` is decided the same way, by `__init__`: whether a
         # `db` was given to build the four memory tools from. Same rule as
