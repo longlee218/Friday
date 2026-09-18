@@ -821,6 +821,35 @@ class Database:
             },
         )
 
+    async def record_node_run(self, **values) -> None:
+        """One attempt at one graph node — see `schema.NodeRun`."""
+        values.setdefault("created_at", _now())
+        async with self._sessions.begin() as session:
+            session.add(schema.NodeRun(**values))
+
+    async def node_runs(self, task_id: int) -> list[dict]:
+        """Every recorded attempt at every node of this task's graphs, oldest
+        first."""
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                select(schema.NodeRun)
+                .where(schema.NodeRun.task_id == task_id)
+                .order_by(schema.NodeRun.id)
+            )
+            return [
+                {
+                    "dag_name": r.dag_name,
+                    "dag_version": r.dag_version,
+                    "node": r.node,
+                    "attempt": r.attempt,
+                    "status": r.status,
+                    "reason": r.reason,
+                    "duration_ms": r.duration_ms,
+                    "created_at": r.created_at,
+                }
+                for r in rows
+            ]
+
     async def source_message_of_task(self, task_id: int) -> tuple[str, str] | None:
         """`provider, provider_message_id` of the message that opened
         `task_id`. The SSE payload carries the row id of the call
@@ -2637,6 +2666,10 @@ class Database:
         #: forgot this argument writes, and writing it guarantees the next
         #: load throws the state away.
         params_fingerprint: str,
+        #: `DAG.version` of the graph writing this. Required for the reason
+        #: `params_fingerprint` is: a row saved without it matches no graph
+        #: that asks with one, so every resume would silently start over.
+        dag_version: str,
         paused_at_node: str | None = None,
         paused_question: str | None = None,
         #: The SDK's own run state, set only while a `needs_approval` tool
@@ -2655,6 +2688,7 @@ class Database:
         statement = insert(schema.DagState).values(
             task_id=task_id,
             dag_name=dag_name,
+            dag_version=dag_version,
             params_fingerprint=params_fingerprint,
             results=results,
             trail=list(trail or []),
@@ -2669,6 +2703,7 @@ class Database:
                     index_elements=[schema.DagState.task_id],
                     set_={
                         "dag_name": statement.excluded.dag_name,
+                        "dag_version": statement.excluded.dag_version,
                         "params_fingerprint": (
                             statement.excluded.params_fingerprint
                         ),
@@ -2688,6 +2723,7 @@ class Database:
         *,
         dag_name: str | None = None,
         params_fingerprint: str | None = None,
+        dag_version: str | None = None,
     ) -> dict | None:
         """What the graph recorded, or None if it has not run.
 
@@ -2712,7 +2748,7 @@ class Database:
         graph. `load_dag_progress` returns the path alongside it, for the
         caller that resumes rather than only reads.
         """
-        row = await self._dag_row(task_id, dag_name, params_fingerprint)
+        row = await self._dag_row(task_id, dag_name, params_fingerprint, dag_version)
         return None if row is None else dict(row.results or {})
 
     async def load_dag_progress(
@@ -2721,6 +2757,7 @@ class Database:
         *,
         dag_name: str | None = None,
         params_fingerprint: str | None = None,
+        dag_version: str | None = None,
     ) -> tuple[dict, list[str]] | None:
         """What the graph recorded, and the path that recorded it.
 
@@ -2729,13 +2766,17 @@ class Database:
         results say which nodes have run, the path says in what order, and
         `Pool._outcome` reads the second backwards.
         """
-        row = await self._dag_row(task_id, dag_name, params_fingerprint)
+        row = await self._dag_row(task_id, dag_name, params_fingerprint, dag_version)
         if row is None:
             return None
         return dict(row.results or {}), list(row.trail or [])
 
     async def _dag_row(
-        self, task_id: int, dag_name: str | None, params_fingerprint: str | None
+        self,
+        task_id: int,
+        dag_name: str | None,
+        params_fingerprint: str | None,
+        dag_version: str | None = None,
     ):
         """The row, once it has passed both tests of whether it is still
         anybody's to read. One place, so the two readers cannot disagree about
@@ -2750,6 +2791,18 @@ class Database:
                     task_id,
                     row.dag_name,
                     dag_name,
+                )
+                return None
+            if dag_version is not None and row.dag_version != dag_version:
+                # Same name, different shape: a node was renamed, added or
+                # reordered. A result recorded under the old shape is not
+                # this graph's, however its key happens to read.
+                log.info(
+                    "task %d: discarding state from %s version %s, this is %s",
+                    task_id,
+                    row.dag_name,
+                    row.dag_version or "(none recorded)",
+                    dag_version,
                 )
                 return None
             if (

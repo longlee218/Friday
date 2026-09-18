@@ -22,7 +22,7 @@ import logging
 from dataclasses import asdict
 from typing import Any
 
-from friday.dag.engine import DAGDeps, DAGRunner, DAGState
+from friday.dag.engine import DAGDeps, DAGRunner, DAGState, NodeRun, status_of
 from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS, dag_for
 from friday.store.db import Database
 from friday.domain.actions import Action, Ask, HandOver, Reply
@@ -425,13 +425,18 @@ class Pool:
         `_raise_hands` can put the specific question in front of the operator
         rather than the task's bare type and parameters.
         """
-        try:
-            prepared = await dag.node(dag.entry).run(
-                DAGState.empty(), self._deps_for(task)
+        # Through the runner's invoke like every other node, so node 0 has a
+        # clock, a retry and a `node_runs` row too; an exception comes back
+        # as `{status: error}` rather than raised, and is still work.
+        prepared = await DAGRunner(
+            dag, deps=self._deps_for(task), on_node_run=self._recorder(task)
+        ).run_entry()
+        if status_of(prepared) in _FAILED:
+            log.warning(
+                "task %d: %s's %s failed — %s",
+                task.id, dag.name, dag.entry, prepared["reason"],
             )
-        except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
-            log.warning("task %d: %s's %s failed — %s", task.id, dag.name, dag.entry, exc)
-            return HandOver(f"{dag.name} failed: {exc}")
+            return HandOver(f"{dag.name} failed: {prepared['reason']}")
 
         if isinstance(prepared, (Ask, Reply, HandOver)):
             if isinstance(prepared, HandOver):
@@ -464,7 +469,10 @@ class Pool:
 
         fingerprint = _fingerprint(_prepare_material(prepared))
         stored = await self._db.load_dag_progress(
-            task.id, dag_name=dag.name, params_fingerprint=fingerprint
+            task.id,
+            dag_name=dag.name,
+            params_fingerprint=fingerprint,
+            dag_version=dag.version,
         )
         results, walked = stored if stored is not None else ({}, [])
         state = DAGState.from_dict(results).with_result(dag.entry, prepared)
@@ -488,7 +496,7 @@ class Pool:
                 results=_checkpointable(final, dag),
                 trail=trail,
                 fingerprint=fingerprint,
-                node=_last_action_node(final, trail) or dag.name,
+                node=_deciding_node(final, trail) or dag.name,
                 hand_over=outcome,
             )
         return outcome
@@ -536,6 +544,7 @@ class Pool:
                 results=_checkpointable(current, dag),
                 trail=path,
                 params_fingerprint=fingerprint,
+                dag_version=dag.version,
             )
 
         runner = DAGRunner(
@@ -544,6 +553,7 @@ class Pool:
             state=state,
             trail=walked,
             on_checkpoint=checkpoint,
+            on_node_run=self._recorder(task),
         )
         try:
             final = await runner.run()
@@ -557,6 +567,14 @@ class Pool:
             )
             return HandOver(f"{dag.name} failed: {exc}"), None, []
         return self._outcome(dag, final, runner.trail), final, runner.trail
+
+    def _recorder(self, task: Task):
+        """Where a graph's attempts are written: `node_runs`, under this task."""
+
+        async def record(run: NodeRun) -> None:
+            await self._db.record_node_run(task_id=task.id, **asdict(run))
+
+        return record
 
     async def _params_now(self, task: Task) -> dict:
         """The task's parameters as the database holds them, not as this pass
@@ -602,6 +620,7 @@ class Pool:
             results=results,
             trail=trail,
             params_fingerprint=fingerprint,
+            dag_version=dag.version,
             paused_at_node=node,
             paused_question=hand_over.reason,
         )
@@ -614,9 +633,12 @@ class Pool:
         not said what to send, and handing over is the honest answer. Inventing a
         reply out of a value the graph never meant as one is not.
         """
-        node = _last_action_node(final, trail)
+        node = _deciding_node(final, trail)
         if node is not None:
-            return final[node]
+            result = final[node]
+            if status_of(result) in _FAILED:
+                return HandOver(f"{dag.name} failed at {node}: {result['reason']}")
+            return result
         return HandOver(f"{dag.name} finished without deciding what to send")
 
     async def _move(self, task: Task, state: str) -> Task:
@@ -657,8 +679,15 @@ def _prepare_material(prepared) -> dict:
     return {"value": prepared}
 
 
-def _last_action_node(final: DAGState, trail: list[str]) -> str | None:
-    """Which node in the trail produced the graph's `Action`, reading
+#: The envelope statuses the runner writes when a node did not finish: its
+#: clock ran out, or it raised. Neither is a completion to resume past.
+_FAILED = frozenset({"timed_out", "error"})
+
+
+def _deciding_node(final: DAGState, trail: list[str]) -> str | None:
+    """Which node in the trail produced the graph's `Action` — or, failing
+    that, the failure it ended on (`timed_out`, `error`), which is the honest
+    answer where an exception used to end the run and carry its reason. Reading
     backwards along the path the run actually took rather than the order the
     nodes were declared in. A graph often ends with bookkeeping — an audit
     line, a cleanup — declared after the node that decides, and letting
@@ -667,6 +696,9 @@ def _last_action_node(final: DAGState, trail: list[str]) -> str | None:
     """
     for name in reversed(trail):
         if final.has(name) and isinstance(final[name], (Ask, Reply, HandOver)):
+            return name
+    for name in reversed(trail):
+        if final.has(name) and status_of(final[name]) in _FAILED:
             return name
     return None
 
@@ -680,7 +712,11 @@ def _checkpointable(state: DAGState, dag) -> dict:
     normal loop in the first place — this only has to keep it out of what
     gets written, in the two places a run's state is saved.
     """
-    return {k: v for k, v in state.to_dict().items() if k != dag.entry}
+    return {
+        k: v
+        for k, v in state.to_dict().items()
+        if k != dag.entry and status_of(v) not in _FAILED
+    }
 
 
 def _fingerprint(params: dict) -> str:

@@ -243,6 +243,23 @@ node 0 exactly when nothing it found has changed, and re-investigates when it
 has — otherwise asking the reporter a question and receiving an answer would
 change nothing.
 
+The checkpoint is keyed on the graph's **version** as well as its name — a
+digest of its node names and edges (`DAG.version`), so a renamed, added or
+reordered node never inherits a result recorded under the old shape.
+
+Every node runs through **one invoke** (`DAGRunner._invoke`, board
+`read-it-the-way-the-operator-does` ticket 11): the node's own
+`timeout_seconds`, its retry over an explicit `retry_on` list with doubling
+backoff, and any other exception turned into the node's result rather than
+raised. A result that is not an `Action` may be an **envelope** — a JSON dict
+with `status` (`ok`, `empty`, `skipped`, `timed_out`, `error`) and `reason`;
+the runner writes the last two itself, the run goes on along the edges, and a
+graph that ends on one hands over naming it. Neither is checkpointed as done.
+Each attempt is a **node run**, one `node_runs` row per attempt, node 0
+included. A node that calls a model names its `agent`, and registration
+refuses its timeout unless it outlasts that agent's by a margin — two equal
+clocks race, and the outer one's cancellation is invisible to the harness.
+
 A node that cannot decide returns an `Ask` or `HandOver` and the run ends there,
 the same as any node deciding the graph's answer — an absent edge past it, not
 a special case. `PauseForHuman`, raised rather than returned, used to be a

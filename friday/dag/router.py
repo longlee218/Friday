@@ -19,13 +19,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from friday.config import ConfigError
 from friday.dag.engine import DAG
 from friday.dag.prepare import plan_by_required_parameters, prepare_node
 from friday.domain.models import PARAMS, Params
 
 __all__ = [
     "EDGE_ROUTER",
+    "NODE_CLOCK_MARGIN_SECONDS",
     "build_simple_dag",
+    "check_node_clocks",
     "dag_for",
     "register_dag",
     "register_dags",
@@ -59,6 +62,46 @@ def dag_for(task_type: str) -> DAG | None:
     covered is a wiring bug — `Pool._plan` asserts on it rather
     than falling back to a second way of deciding what to do."""
     return EDGE_ROUTER.get(task_type)
+
+
+# --- two clocks ---------------------------------------------------------------
+
+#: How much longer a model node's clock must run than its harness's. The
+#: harness bounds a run with `timeout_seconds` and turns its own expiry into a
+#: `last_error` the node can read; the node's clock expiring first cancels the
+#: run instead, and a cancellation is a `BaseException` nothing in the harness
+#: sees (board `read-it-the-way-the-operator-does`, finding E). The margin is
+#: what lets the inner clock fire first; equal clocks are a race.
+NODE_CLOCK_MARGIN_SECONDS = 5.0
+
+
+def check_node_clocks(dags: Any, agents: dict[str, Any]) -> None:
+    """Refuse a model node whose timeout does not leave its harness room.
+
+    At registration, which is where a graph first meets the configuration —
+    so a misconfigured timeout stops the process at boot rather than
+    surfacing as a cancelled run on a task nobody is watching. A model node
+    with no timeout of its own has one clock and nothing to check.
+    """
+    for dag in dags:
+        for node in dag.nodes:
+            if node.agent is None or node.timeout_seconds is None:
+                continue
+            agent = agents.get(node.agent)
+            if agent is None:
+                raise ConfigError(
+                    f"graph {dag.name!r}: node {node.name!r} runs agent "
+                    f"{node.agent!r}, which is not configured under agents:"
+                )
+            floor = agent.timeout_seconds + NODE_CLOCK_MARGIN_SECONDS
+            if node.timeout_seconds < floor:
+                raise ConfigError(
+                    f"graph {dag.name!r}: node {node.name!r} times out after "
+                    f"{node.timeout_seconds}s, but agent {node.agent!r} is given "
+                    f"{agent.timeout_seconds}s — the node's clock must be at "
+                    f"least {floor}s, or it cancels the run before the harness "
+                    "can say why it stopped"
+                )
 
 
 # --- the one-node graph, for a type with no investigation --------------------
@@ -146,6 +189,8 @@ def register_dags(
                 context_store=context_store,
             ),
         )
+
+    check_node_clocks(EDGE_ROUTER.values(), config.agents)
 
     # No graph has a node agent any more — the one that did was `api_issue`'s
     # investigation, and it is gone. `DAG_DEPS_EXTRA` stays empty and the

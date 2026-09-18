@@ -22,7 +22,11 @@ when durable resume spreads past two workflows.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -36,6 +40,10 @@ __all__ = [
     "DAGState",
     "Edge",
     "Node",
+    "NodeRun",
+    "STATUSES",
+    "envelope",
+    "status_of",
 ]
 
 log = logging.getLogger(__name__)
@@ -66,16 +74,90 @@ class DAGDeps:
 NodeFn = Callable[[DAGState, DAGDeps], Awaitable[Any]]
 
 
+#: What a node's result may say about how it went, when it is not an
+#: `Action`. The runner itself writes `timed_out` and `error`; a node writes
+#: the others. One closed set, so an edge can route on it and the board can
+#: render any node without knowing what the node is.
+STATUSES = frozenset({"ok", "empty", "skipped", "timed_out", "error"})
+
+
+def envelope(status: str, reason: str = "", **fields: Any) -> dict[str, Any]:
+    """A node's result as the one shape every node shares: a JSON dict with a
+    `status` from `STATUSES` and a `reason`, plus whatever the node found."""
+    if status not in STATUSES:
+        raise ValueError(f"unknown status {status!r} (known: {sorted(STATUSES)})")
+    return {**fields, "status": status, "reason": reason}
+
+
+def status_of(result: Any) -> str | None:
+    """The envelope status of a node's result, or `None` if it has none."""
+    if isinstance(result, dict) and result.get("status") in STATUSES:
+        return result["status"]
+    return None
+
+
+def _timed_out(node: "Node") -> dict[str, Any]:
+    return envelope(
+        "timed_out", f"{node.name} did not finish in {node.timeout_seconds}s"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Node:
-    """One step. The name is the key its result is stored under."""
+    """One step. The name is the key its result is stored under.
+
+    How long it may take and what is worth trying again are declared here and
+    enforced by the runner, not by the node: a node that has to remember to
+    wrap itself is a node that one day does not.
+    """
 
     name: str
     run: NodeFn
+    #: The whole invoke — every attempt and every backoff — in seconds. `None`
+    #: is no clock of the node's own. On expiry the node's result is
+    #: `{status: timed_out}` and the run goes on along the edges.
+    timeout_seconds: float | None = None
+    #: What is worth another attempt — an explicit list, never a guess from
+    #: the message, the same rule `Harness._attempts` follows. Anything else
+    #: becomes `{status: error}` on its first occurrence.
+    retry_on: tuple[type[Exception], ...] = ()
+    max_attempts: int = 1
+    #: The wait after the first failed attempt, doubling after each one.
+    retry_backoff_seconds: float = 1.0
+    #: The configured agent this node runs, if it calls a model. Named so the
+    #: graph's registration can check the two clocks against each other — see
+    #: `friday.dag.router.check_node_clocks`. Model calls keep their own retry
+    #: in the harness; a model node lists nothing in `retry_on`.
+    agent: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("a node needs a name — it is the state key")
+        if self.max_attempts < 1:
+            raise ValueError(f"node {self.name!r}: max_attempts must be at least 1")
+        if self.max_attempts > 1 and not self.retry_on:
+            raise ValueError(
+                f"node {self.name!r}: max_attempts={self.max_attempts} with an "
+                "empty retry_on retries nothing — name the exceptions worth "
+                "another attempt"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class NodeRun:
+    """One attempt at one node, as the runner saw it end.
+
+    What `node_runs` holds a row of. `status` is the result's envelope status,
+    or `ok` for a result that is not an envelope — an `Action`, a value.
+    """
+
+    dag_name: str
+    dag_version: str
+    node: str
+    attempt: int
+    status: str
+    reason: str
+    duration_ms: int
 
 
 #: The default edge condition: always follow.
@@ -138,6 +220,26 @@ class DAG:
                 f"DAG {self.name!r}: entry {self.entry!r} is not a node"
             )
 
+    @property
+    def version(self) -> str:
+        """A digest of the graph's shape: its entry, its node names in order,
+        and its edges. Part of the checkpoint key.
+
+        Derived rather than declared, because a version an author has to
+        remember to bump is a version that one day is not bumped. Renaming,
+        adding, removing or reordering a node moves it, so a stored result
+        can never be read under a name it was not produced by. A node whose
+        *body* changed under the same name does not move it — that is what
+        the parameters fingerprint and a new `name` are for.
+        """
+        shape = {
+            "entry": self.entry,
+            "nodes": [n.name for n in self.nodes],
+            "edges": [[e.src, e.dst] for e in self.edges],
+        }
+        digest = hashlib.sha256(json.dumps(shape, sort_keys=True).encode())
+        return digest.hexdigest()[:16]
+
     def node(self, name: str) -> Node:
         for candidate in self.nodes:
             if candidate.name == name:
@@ -184,12 +286,15 @@ class DAGRunner:
         #: `trail`.
         trail: list[str] | None = None,
         on_checkpoint: Callable[[DAGState, list[str]], Awaitable[None]] | None = None,
+        #: Given every attempt of every node this runner invokes, as it ends.
+        on_node_run: Callable[["NodeRun"], Awaitable[None]] | None = None,
         max_steps: int = 50,
     ) -> None:
         self._dag = dag
         self._deps = deps or DAGDeps()
         self._state = state or DAGState.empty()
         self._on_checkpoint = on_checkpoint
+        self._on_node_run = on_node_run
         #: A cycle in the edges would otherwise spin forever. The graph is
         #: meant to be acyclic; this is the guard that says so out loud.
         self._max_steps = max_steps
@@ -249,7 +354,7 @@ class DAGRunner:
             node = self._dag.node(current)
             log.info("dag %s: running %s", self._dag.name, node.name)
             self._record_step(node.name)
-            result = await node.run(self._state, self._deps)
+            result = await self._invoke(node)
 
             self._state = self._state.with_result(node.name, result)
             await self._checkpoint()
@@ -257,6 +362,101 @@ class DAGRunner:
             current = self._dag.next_after(node.name, self._state)
 
         return self._state
+
+    async def run_entry(self) -> Any:
+        """Invoke the entry node alone, through the same invoke as every other
+        node, and return its result without recording it in the state.
+
+        For node 0, which the pool runs outside the walk on every pass —
+        before there is a fingerprint to load a checkpoint by — but not
+        outside the clock, the retry or the `node_runs` record.
+        """
+        return await self._invoke(self._dag.node(self._dag.entry))
+
+    async def _invoke(self, node: Node) -> Any:
+        """Run one node: its clock, its retry, and its failure as a result.
+
+        The clock bounds the whole invoke, backoff included, so a node that
+        fails fast and retries cannot outlive it. Only the runner's own clock
+        is `timed_out`; a `TimeoutError` the node raises itself — an HTTP
+        client's — is an exception like any other, retried if listed.
+
+        An exception that is not retried, or that ran out of attempts, is the
+        node's result, `{status: error}`, and the run goes on along the edges.
+        A cancellation from outside is not an exception here and propagates.
+
+        Every attempt is handed to `on_node_run` as it ends, so the record
+        holds three rows for three tries rather than one for the outcome.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = (
+            None if node.timeout_seconds is None else loop.time() + node.timeout_seconds
+        )
+        attempt = 0
+        while True:
+            attempt += 1
+            started = time.monotonic()
+            # The clock wraps the node alone; recording and backoff happen
+            # outside it, so an expiry never cancels a write half done.
+            try:
+                async with asyncio.timeout_at(deadline) as clock:
+                    result = await node.run(self._state, self._deps)
+            except Exception as exc:  # noqa: BLE001 - becomes the result
+                if clock.expired():
+                    # Either the clock's own TimeoutError, or the node swallowed
+                    # the cancellation and raised something else; the clock ran
+                    # out either way.
+                    return await self._ended(node, attempt, started, _timed_out(node))
+                reason = f"{type(exc).__name__}: {exc}"
+                retryable = isinstance(exc, node.retry_on)
+                if not retryable or attempt >= node.max_attempts:
+                    if retryable:
+                        reason = f"gave up after {attempt} attempts — {reason}"
+                    log.warning(
+                        "dag %s: %s failed — %s", self._dag.name, node.name, reason
+                    )
+                    return await self._ended(
+                        node, attempt, started, envelope("error", reason)
+                    )
+                await self._ended(node, attempt, started, envelope("error", reason))
+            else:
+                return await self._ended(node, attempt, started, result)
+
+            wait = node.retry_backoff_seconds * 2 ** (attempt - 1)
+            if deadline is not None:
+                wait = min(wait, max(0.0, deadline - loop.time()))
+            await asyncio.sleep(wait)
+            if deadline is not None and loop.time() >= deadline:
+                # Out of time in the backoff: no attempt ran, so none is
+                # recorded, and the result is the clock's all the same.
+                return _timed_out(node)
+
+    async def _ended(self, node: Node, attempt: int, started: float, result: Any) -> Any:
+        """Hand one finished attempt to the sink, and pass its result through.
+
+        A failed save must not lose the run — the same rule `_checkpoint`
+        follows, for the same reason.
+        """
+        if self._on_node_run is not None:
+            run = NodeRun(
+                dag_name=self._dag.name,
+                dag_version=self._dag.version,
+                node=node.name,
+                attempt=attempt,
+                status=status_of(result) or "ok",
+                reason=result.get("reason", "") if status_of(result) else "",
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            try:
+                await self._on_node_run(run)
+            except Exception:  # noqa: BLE001 - a failed record must not lose the run
+                log.exception(
+                    "dag %s: could not record attempt %d of %s",
+                    self._dag.name,
+                    attempt,
+                    node.name,
+                )
+        return result
 
     def _record_step(self, name: str) -> None:
         """Put a node on the path, once.

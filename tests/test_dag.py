@@ -588,6 +588,7 @@ async def test_state_from_a_different_graph_is_not_applied(db):
         dag_name="the_old_graph",
         results={"read_logs": "stale lines"},
         params_fingerprint="same-inputs",
+        dag_version="v",
     )
 
     assert await db.load_dag_state(1, dag_name="the_new_graph") is None
@@ -1053,6 +1054,7 @@ async def test_a_pause_computed_against_other_parameters_is_not_announced(db):
         dag_name="api_issue",
         results={},
         params_fingerprint=_fingerprint({"summary": "something else entirely"}),
+        dag_version="v",
         paused_at_node="first",
         paused_question="Which environment is this?",
     )

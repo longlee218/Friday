@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, String, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Base", "Conversation", "Cursor", "DagState", "Memory", "MemoryCandidate", "Message", "ModelCall", "Outbound", "Task", "ToolCall", "Verdict"]
+__all__ = ["Base", "Conversation", "Cursor", "DagState", "Memory", "MemoryCandidate", "Message", "ModelCall", "NodeRun", "Outbound", "Task", "ToolCall", "Verdict"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -183,7 +183,39 @@ class DagState(Base):
     #: resumes this exact call, in this process or a later one, rather than
     #: re-running the node from scratch. Cleared alongside the pause columns.
     interruption: Mapped[dict | None] = mapped_column(JSON, default=None)
+    #: The shape of the graph that wrote this — `DAG.version`, a digest of its
+    #: node names and edges. Part of the key alongside `dag_name`: a renamed
+    #: or reordered node must not inherit a result recorded under the old
+    #: shape. Nullable for the same reason `trail` is; a row written before
+    #: this column existed matches no version and is discarded, not trusted.
+    dag_version: Mapped[str | None] = mapped_column(default=None)
     updated_at: Mapped[datetime] = mapped_column(IsoDateTime)
+
+
+class NodeRun(Base):
+    """One attempt at one graph node, as `DAGRunner._invoke` saw it end.
+
+    A row per attempt, not per node, for the reason `model_calls` holds a row
+    per provider call: three tries recorded as one outcome is the record
+    disagreeing with what happened. Append-only; nothing reads it back to
+    decide anything — the checkpoint in `dag_state` is what resume reads.
+    """
+
+    __tablename__ = "node_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    #: `None` for a graph run with no task, which only a test does today.
+    task_id: Mapped[int | None] = mapped_column(index=True)
+    dag_name: Mapped[str]
+    dag_version: Mapped[str]
+    node: Mapped[str]
+    #: 1 for the first try. An ordinal, not a total.
+    attempt: Mapped[int]
+    #: The result's envelope status — ok, empty, skipped, timed_out, error.
+    status: Mapped[str]
+    reason: Mapped[str] = mapped_column(default="")
+    duration_ms: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
 
 
 class Cursor(Base):

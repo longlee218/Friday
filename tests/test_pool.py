@@ -947,6 +947,7 @@ async def _paused_on_a_patch(db):
         dag_name="api_issue",
         results={},
         params_fingerprint="whatever",
+        dag_version="v",
         paused_at_node="fix_bug",
         paused_question="Found a fix. It needs approval before I use it.",
         interruption={"current_agent": "dag_fix"},
