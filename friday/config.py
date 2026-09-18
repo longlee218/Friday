@@ -177,6 +177,10 @@ class WorkflowConfig:
     #: question every time, and a wrong classification costs the reporter one
     #: unnecessary question. Everything else hands over to a human.
     auto_ask_for_details: bool = False
+    #: How many tasks the pool works at once. Small on purpose: every graph
+    #: shares one SQLite file and one provider's rate limit, and the point is
+    #: only that a slow graph does not hold every other task behind it.
+    concurrency: int = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +302,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             auto_ask_for_details=bool(
                 (raw.get("workflows") or {}).get("auto_ask_for_details", False)
             ),
+            concurrency=_slots((raw.get("workflows") or {}).get("concurrency", 2)),
         ),
         outbox=OutboxConfig(
             max_attempts=int((raw.get("outbox") or {}).get("max_attempts", 3)),
@@ -409,6 +414,17 @@ def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
             options=spec,  # whatever is left is step-specific
         )
     return agents
+
+
+def _slots(value: Any) -> int:
+    """Zero slots is a pool that takes every task and never acts on one —
+    refused where the operator is looking, not discovered as a silent stall."""
+    parsed = int(value)
+    if parsed < 1:
+        raise ConfigError(
+            f"workflows.concurrency must be at least 1 — got {parsed}"
+        )
+    return parsed
 
 
 def _positive_or_none(value: Any, name: str) -> int | None:

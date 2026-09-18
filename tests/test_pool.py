@@ -1301,3 +1301,143 @@ async def test_a_task_with_no_message_attached_still_uses_its_own_row(db):
     (closed,) = await db.tasks()
     assert closed.id == task.id
     assert closed.state == TaskState.HANDLED_BY_OPERATOR
+
+
+# Ticket 13 (board read-it-the-way-the-operator-does): a long graph must not
+# hold the pool. Every graph used to be awaited in turn, so a five-minute
+# `api_issue` meant five minutes in which nothing else was asked, drafted or
+# handed over.
+
+
+def _graph(task_type, node):
+    from friday.dag.engine import DAG, Node
+    from friday.dag.router import EDGE_ROUTER, register_dag
+
+    EDGE_ROUTER.pop(task_type, None)
+    register_dag(task_type, DAG(name=f"{task_type}-test", nodes=(Node("only", node),)))
+
+
+async def _doc_task(db):
+    return await db.create_task(conversation=ConversationId("fake", "watched"),
+                                type="doc_question", state="pending",
+                                confidence=0.9, params={"question": "?"})
+
+
+async def test_a_quick_graph_is_not_held_behind_a_slow_one(db):
+    """The slow graph is first in the batch and cannot finish until the quick
+    one has — so a pool that awaits them in turn never finishes at all."""
+    import asyncio
+
+    from friday.domain.actions import HandOver
+
+    finished: list[str] = []
+    quick_done = asyncio.Event()
+
+    async def slow(state, deps):
+        await quick_done.wait()
+        finished.append("slow")
+        return HandOver("slow")
+
+    async def quick(state, deps):
+        finished.append("quick")
+        quick_done.set()
+        return HandOver("quick")
+
+    _graph("api_issue", slow)
+    _graph("doc_question", quick)
+    await make_task(db)
+    await _doc_task(db)
+
+    acted = await asyncio.wait_for(Pool(db=db, auto_ask=True).run_once(), 5)
+
+    assert finished == ["quick", "slow"]
+    assert len(acted) == 2
+
+
+async def test_no_more_graphs_run_at_once_than_configured(db):
+    import asyncio
+
+    from friday.domain.actions import HandOver
+
+    running = 0
+    most = 0
+
+    async def counted(state, deps):
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.02)
+        running -= 1
+        return HandOver("done")
+
+    _graph("api_issue", counted)
+    for _ in range(4):
+        await make_task(db)
+
+    acted = await Pool(db=db, auto_ask=True, concurrency=2).run_once()
+
+    assert len(acted) == 4
+    assert most == 2
+
+
+async def test_one_task_is_never_acted_on_twice_at_once(db):
+    """A task stays `pending` for as long as its graph runs, so a second pass
+    that starts meanwhile reads it as work waiting. It must leave it alone."""
+    import asyncio
+
+    from friday.domain.actions import HandOver
+
+    entered = 0
+    inside = asyncio.Event()
+    release = asyncio.Event()
+
+    async def held(state, deps):
+        nonlocal entered
+        entered += 1
+        inside.set()
+        await release.wait()
+        return HandOver("done")
+
+    _graph("api_issue", held)
+    await make_task(db)
+    pool = Pool(db=db, auto_ask=True)
+
+    first = asyncio.create_task(pool.run_once())
+    await asyncio.wait_for(inside.wait(), 5)
+    second = await asyncio.wait_for(pool.run_once(), 5)
+    release.set()
+    (done,) = await asyncio.wait_for(first, 5)
+
+    assert second == []
+    assert entered == 1
+    assert done.state == "needs_human"
+
+
+async def test_the_bound_is_the_one_configured(db):
+    """`Pool.build` is how the composition root makes the pool; a knob it does
+    not pass on is a line in `config.yaml` that changes nothing."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from friday.domain.actions import HandOver
+
+    running = 0
+    most = 0
+
+    async def counted(state, deps):
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.02)
+        running -= 1
+        return HandOver("done")
+
+    _graph("api_issue", counted)
+    for _ in range(4):
+        await make_task(db)
+    config = SimpleNamespace(workflows=SimpleNamespace(
+        auto_ask_for_details=True, max_asks=3, concurrency=3))
+
+    await Pool.build(config, db=db).run_once()
+
+    assert most == 3

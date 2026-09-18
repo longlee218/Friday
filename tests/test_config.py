@@ -121,3 +121,24 @@ def test_a_budget_that_cannot_be_a_budget_is_refused_at_load(tmp_path, bad):
 
     with pytest.raises(ConfigError, match="extraction_budget_tokens"):
         load_config(path)
+
+
+def test_the_pool_works_two_tasks_at_once_unless_told_otherwise(tmp_path):
+    """Ticket 13: small by default — every graph shares one SQLite file and
+    one provider's rate limit, so this is a knob an operator raises."""
+    path = tmp_path / "config.yaml"
+    path.write_text(SAMPLE)
+    assert load_config(path).workflows.concurrency == 2
+
+    path.write_text(SAMPLE + "\nworkflows:\n  concurrency: 5\n")
+    assert load_config(path).workflows.concurrency == 5
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_a_pool_that_could_run_nothing_is_refused_at_load(tmp_path, bad):
+    """Zero slots is a pool that takes every task and never acts on one."""
+    path = tmp_path / "config.yaml"
+    path.write_text(SAMPLE + f"\nworkflows:\n  concurrency: {bad}\n")
+
+    with pytest.raises(ConfigError, match="concurrency"):
+        load_config(path)

@@ -69,6 +69,7 @@ class Pool:
             responder=responder,
             auto_ask=config.workflows.auto_ask_for_details,
             max_asks=config.workflows.max_asks,
+            concurrency=config.workflows.concurrency,
         )
 
     def __init__(
@@ -83,6 +84,7 @@ class Pool:
         #: application-only feature, so the question goes out as the bot.
         approver: str = "discord_bot",
         batch_size: int = 20,
+        concurrency: int = 2,
     ) -> None:
         self._db = db
         self._auto_ask = auto_ask
@@ -94,6 +96,11 @@ class Pool:
         self._sender = sender
         self._approver = approver
         self._batch_size = batch_size
+        self._slots = asyncio.Semaphore(concurrency)
+        #: Tasks a pass has taken and not yet finished. A task stays `pending`
+        #: for as long as its graph runs, so without this a second pass that
+        #: starts meanwhile would read it as waiting and act on it again.
+        self._taken: set[int] = set()
 
     async def run_forever(self, poll_interval_seconds: float = 2.0) -> None:
         while True:
@@ -101,12 +108,28 @@ class Pool:
                 await asyncio.sleep(poll_interval_seconds)
 
     async def run_once(self) -> list[Task]:
+        """One pass. Pending tasks are worked side by side, at most
+        `concurrency` at a time, so one slow graph does not hold every other
+        task in the batch behind it.
+
+        Still one pass: it returns when everything it took has finished, and
+        standing down and raising hands stay before and after the batch
+        exactly as they were.
+        """
         await self._stand_down()
-        acted: list[Task] = []
-        for task in await self._db.tasks_in_state(PENDING, self._batch_size):
-            acted.append(await self._act(task))
+        pending = await self._db.tasks_in_state(PENDING, self._batch_size)
+        mine = [task for task in pending if task.id not in self._taken]
+        self._taken.update(task.id for task in mine)
+        acted = list(await asyncio.gather(*(self._take(task) for task in mine)))
         await self._raise_hands()
         return acted
+
+    async def _take(self, task: Task) -> Task:
+        try:
+            async with self._slots:
+                return await self._act(task)
+        finally:
+            self._taken.discard(task.id)
 
     async def _stand_down(self) -> None:
         """The operator answered it themselves. Stop.

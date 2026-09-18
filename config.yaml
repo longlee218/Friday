@@ -235,6 +235,11 @@ workflows:
   # How many times to ask for the same missing detail before it becomes a
   # person's problem.
   max_asks: 3
+  # How many tasks the pool works at once. A pass used to await each graph
+  # in turn, so one slow graph held every other task behind it. Small on
+  # purpose: every graph shares one SQLite file and one provider's rate
+  # limit. At least 1 — zero is refused at startup.
+  concurrency: 2
   # Let the responder phrase the ask in the operator's own voice, from the
   # conversation and their real messages, instead of the fixed template.
   # Still sent with no approval step (see auto_ask_for_details below): what
