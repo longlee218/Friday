@@ -1,19 +1,314 @@
 # friday-agents — Design
 
-Status: **built, and this file has drifted from it.**
+This file holds the architecture. Its first part, **What exists**, describes
+the system as built and is kept current: when a load-bearing decision
+changes, correct it here in the same commit — nothing breaks when it is
+wrong, which is how it goes stale. Its second part, **Reasoning**, records
+why decisions were made; several were later reversed and are marked inline.
+Where the second part disagrees with the first, or with the code, the first
+part and the code are right.
 
-Read `CLAUDE.md` first — it describes what exists. This file records the
-reasoning behind decisions, and several of those decisions were later reversed
-in ways it does not reflect. Three are marked inline below and are the ones
-most likely to mislead: the "agentic nodes" vocabulary was removed, triage's
-tool schemas no longer take any parameter but `confidence`, and the memory
-design below — a staging tier promoted by an approval-gated compaction pass —
-was replaced by an agent writing and reading its own memory directly (ticket
-09's D9, 2026-09-06).
+Project state (what is running, which boards are open) lives in
+`CONTEXT.md`, not here. How to work in the repo lives in `CLAUDE.md`.
 
-Kept rather than rewritten because the argument is still worth reading even
-where the conclusion moved. **Where it disagrees with the code, the code is
-right**, and this line is the warning that it can.
+# What exists
+
+## Environment
+
+Python **3.13** (`.python-version`), managed with **uv**. Runtime
+dependencies in `pyproject.toml` are deliberately few — `openai-agents` is
+here for speed, not for keeps: `friday/agent/harness.py` is the only module
+allowed to import it.
+
+`web/` is React + Vite, built to static files that `friday/ops/api.py`
+serves from the same process — one container, no Node at runtime.
+`web/dist/` is never committed. There are deliberately no JavaScript tests
+and no linter. Two guards compensate: `tests/test_web_hooks.py` (a narrow
+check for a React hook called after an early-return `if`, which renders the
+page blank with no visible error) and `tests/test_web_contract.py` (checks
+the hand-written `web/src/api-types.ts` against the real converters' output
+keys, since every route is typed `-> dict`).
+
+Persistence is **SQLAlchemy 2.0 async** (`friday/store/schema.py` holds the
+mapped classes, `friday/store/db.py` is the only store and converts at the
+edge) with **Alembic** migrations in `migrations/`. `run_agent.py` upgrades
+to head at startup, before anything opens the database. Migrations run
+**transactionally** (`transactional_ddl=True`) — SQLite can do DDL inside a
+transaction, so a migration that fails partway cannot leave the schema ahead
+of its stamped version. The database path comes from `config.yaml`, not
+`alembic.ini`; `FRIDAY_DB` overrides it. `tests/test_migrations.py` fails if
+`schema.py` and the migrations stop describing the same database, and it
+also compares partial-index predicates, which `compare_metadata` does not
+(autogenerate emits `pass` for a changed predicate).
+
+## Running it
+
+Friday currently runs on the operator's own machine (since 2026-09-16),
+with what that machine has: the dev cluster through `ssh dev`, the backend
+repos under `~/Documents/Apero/`, and the MCP sessions the operator
+authenticates. Every tool a graph is given is a read.
+
+The server path still exists:
+
+```bash
+docker compose build && docker compose up -d
+docker compose logs -f
+```
+
+Secrets arrive at runtime from `.env`, never baked. `config.yaml` is mounted
+read-only, so changing a model or a threshold is a restart, not a rebuild.
+The database is on a named volume — without it a redeploy loses the
+cursors, and the sweep then only recovers the last `max_message_age` of each
+watched channel. The board is unauthenticated by design and shows every
+captured message and every model prompt, so it is published to loopback
+only and reached with `ssh -N -L 8086:127.0.0.1:8086 <host>`.
+
+## Layout
+
+| Path | Contents |
+| --- | --- |
+| `run_agent.py` | Composition root — the only place adapters are constructed and asyncio tasks started. Reads no agent's knobs; runs `check_graphs` straight after `load_config` |
+| `serve_board.py` | The board alone, against the live database, without connecting to Discord |
+| `import_context_files.py` | One-off: import a second install's old per-channel YAML files as `origin=admin` memory rows |
+| `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, `workflows.concurrency`, MCP servers, `sensitive_words` |
+| `friday/config.py` | Loads `config.yaml` and resolves `${VAR}`. Outside the packages because it is read before any of them |
+| **`friday/domain/`** | The vocabulary, nothing else: `models.py` (every dataclass, including the twelve `MemoryKind`s, their data shapes and `RoomSummary`), `conversation.py`, `states.py` (`TaskState`/`OutboundState` transitions), `actions.py` (`Ask`/`Reply`/`HandOver`), `validation.py` (the rule engine, one call site), `memory_guard.py` (refuses instruction-shaped memory text) |
+| **`friday/store/`** | `schema.py` the mapped classes, `db.py` the only store, converting at the edge — nothing above it knows SQLAlchemy exists |
+| **`friday/agent/`** | What it takes to call a model, nothing about what to call it for: `harness.py` (only module that may import the SDK), `structured.py` (declared-shape answers), `instruction_prompt.py`, `skills.py`, `mcp.py`, `llm_log.py` |
+| **`friday/memory/`** | `channel_context.py` — the summariser only: it writes one active `summary` row per watched channel. `verdicts.py` — the operator marking a classification right. Every memory is a row in `memories` |
+| **`friday/ops/`** | Alive and safe, deciding nothing: `liveness.py`, `redact.py`, `api.py` (the board's API, including the operator's memory routes) |
+| **`friday/text/`** | `transform.py` splits code out before cleaning prose; `param_hygiene.py` cleans one value |
+| `friday/inbox/` | `stream()`, `sweep_once()`, `tally()`. Gateway, backfill, cursors and dedup are implementation |
+| `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py`, `bot.py`, `normalise.py`. `__init__.py` stays empty on purpose |
+| `friday/triage/` | Classification only, plus its sensitive-word prefilter and the untriaged-message loop. `context.py` gathers what a mention is shown; `prompt.py` renders it |
+| `friday/extraction/` | Everything a task knows, lifted out of the reporter's own words. One extractor per task type, each owning its prompt and `Params` schema; one `extractor` config block serves all of them. `context.py` is node 0's gather function: transcript, domain memories (this room and `'*'`), outstanding questions and `known`, one call, one frozen `FullContext` |
+| `friday/dag/` | `engine.py` — nodes, edges, checkpointed resume, and `DAGRunner._invoke`, the one way a node runs (timeout, retry, result envelope). `state.py` what a run accumulates. `prepare.py` builds the entry node every graph shares. `router.py` maps task type to graph — every type currently gets the same one-node graph — and checks node clocks against agent timeouts |
+| `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs, up to `workflows.concurrency` at once, never taking one task twice while its graph runs. Decides nothing about what a graph decides |
+| `friday/tools/` | Every tool an agent may call, one module per subject: skills (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), memory (`memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder). `tests/test_tools.py` asserts the full list and forbids declaring a tool anywhere else (one exemption, below) |
+| `friday/responder/` | Drafts a reply in the operator's voice |
+| `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
+| `web/` | The operator monitor, on `:8086`. React + Vite SPA served by `ops/api.py`. Live feed via SSE (`/api/events`), drill-down to a Flow screen, breadcrumbs; the Rooms memory dialog writes, corrects and removes the operator's rows. Palette and motion tokens live in `web/src/index.css` under `:root` — no component may hardcode a hex literal or inline `style={{}}` (`tests/test_web_tokens.py`). Shortcuts in `web/src/keyboard.ts` (`?` opens the overlay) |
+| `migrations/` | Alembic revisions |
+| `tests/` | Driven through two seams: a fake `Provider` and a scripted model transport |
+| `docs/` | `DESIGN.md` (this file), `SPEC.md`, `agents/` |
+| `.scratch/` | Local issue tracker: one board per feature |
+| `evals/` | The classifier's regression net: `triage.jsonl` (frozen), `build_triage_set.py` (refreshes it by hand), `run_triage_eval.py` (scores the live classifier — calls the configured provider, not run by the suite). See `evals/README.md` |
+
+Packaging: **explicit `__init__.py`**, not namespace packages — importing
+any submodule runs the parent's `__init__.py` first, so only re-exports
+belong there. There is no `procedures/`, `permissions/` or `hooks/`
+package — build one when a second caller needs it, not before. A node is a
+function inside the graph that owns it (`friday/dag/`), not a `nodes/`
+package.
+
+**Every tool lives in `friday/tools/`.** `tests/test_tools.py` asserts the
+tool list — built from the registered factories, not `vars(module)`, so a
+tool living in a closure is still caught — and forbids declaring one
+anywhere else. **One exemption**: the answer tool `Harness(answers=...)`
+builds lives in `friday/agent/harness.py`, because it needs the SDK's
+`FunctionTool` and answering is not a capability an agent chooses among;
+`test_the_one_tool_outside_the_package_is_the_answer_tool` pins that it
+stays the only occupant.
+
+`harness.tool` wraps the SDK's `function_tool` and defaults
+`failure_error_function`, so a failing tool body tells the model
+"unavailable, carry on" instead of leaking a raw exception. A
+`ModelBehaviorError` (bad JSON, schema violation) is exempt and keeps the
+SDK's own message — the one failure the model can fix inside the same run.
+An agent built with `Harness(answers=...)` stops the run the moment the
+answer tool returns an **instance** of the shape, not on the first tool
+output. `ToolContext` is the SDK's own type, never a subclass —
+`function_schema` decides whether a first parameter is the run context by
+identity. Four tools reach a skill, split by what the agent already knows:
+`fetch_skill` by name, `search_skills` when it has no name,
+`describe_skill` for metadata, `read_skill_file` for a path a body linked
+to.
+
+## Load-bearing constraints
+
+Violating one is a design change, not an implementation detail. Within a
+bullet, the first sentence is the rule; the rest is mechanism and why.
+
+### Process & storage
+
+- **One process, one container.** Bot gateway, user gateway, worker and the
+  web server (`:8086`) are asyncio tasks in one event loop — required by
+  SQLite, since multiple writers over a shared volume means contention.
+- **SQLite is the only state store**, including per-channel cursors and
+  every memory. Anything that must survive a restart goes in the DB — except
+  gateway session state, which the library owns. **DB access must be
+  async** — a blocking call stalls the Discord gateways.
+
+### Discord identity & ingestion
+
+- **Two Discord identities in one process.** `discord.py` for the bot
+  (`providers/discord/bot.py`), `discord-self` for the user account
+  (`providers/discord/user.py`, expected to break — a test enforces it is
+  imported only there). `providers/discord/__init__.py` stays **empty**.
+  `is_own` only knows the user gateway's identity; `Database.we_sent` is the
+  real "is this ours?" check and the inbox calls it on every message.
+- **Inbound messages are deduplicated on `(provider, provider_message_id)`.**
+  Every handler must be idempotent on that key.
+- **Never drop a mention.** Low confidence, cap breaches, refusals,
+  classifier errors and the sensitive-word prefilter all route to a person.
+  A turn older than `max_message_age` is recorded `outdated` — a row, a
+  reason and a board entry, no reply. The same window bounds a cold cursor's
+  backfill, which *is* an unrecorded drop, logged at boot.
+- **`sensitive_words`** blocks a message from reaching the model, checked
+  before the call — it **holds**, not skips.
+- **The operator's own messages end the work and open nothing** — except a
+  message from the watched account tagging itself. That task goes to
+  `handled_by_operator`, and everything queued about it withdraws.
+
+### Model calls
+
+- **Every model call goes through Chat Completions**, not the Responses API.
+  Moving providers is `base_url`/`api_key`/`model` alone.
+- **Every model call is bounded and logged at one seam.** `_settle` sets the
+  clock (`timeout_seconds` per agent, 60 s default) and hands the call to the
+  recording sink given to a `Harness` **at construction**. **One run of a
+  harness at a time** (`Harness._one_run`): the pool runs graphs side by
+  side, and `last_error`, `refusal` and `unfit` are read off the instance.
+- **Structured answers.** `Harness(answers=<dataclass>)` declares the shape;
+  `run_structured(prompt)` returns an instance or `None`. The model answers
+  through a generated tool call — **not** `response_format: json_schema`,
+  which the configured provider accepts and silently ignores — validated
+  in-process (`fits`). One correction, and it is the turn budget. A refusal
+  never quotes the failing value back.
+- **`friday/agent/harness.py` is the only module that may import `agents`.**
+  `tests/test_harness.py` enforces this.
+- **A hiccup is retried here and nowhere else.** `Harness._attempts` retries
+  connection errors, timeouts, 429 and 5xx — never a 400 — with the client's
+  own retry off. `timeout_seconds` bounds the whole run.
+- **`daily_token_budget` refuses; it does not trim**, counted from rows the
+  agent wrote, failing open on a store error. What a refusal becomes is the
+  caller's.
+- **One state travels a message's whole journey, and it is read-only.**
+  `FridayState` is the SDK's per-run `context`; every change is a named
+  method returning a new state. `tests/test_run_context.py` enforces it.
+
+### Workflow / DAG
+
+- **Workflows are deterministic Python; an agent is a node inside one.** A
+  model never chooses the next step. **Every node runs through
+  `DAGRunner._invoke`**: its own timeout (a `timed_out` envelope, not a
+  raise), retry over an explicit exception list with doubling backoff, any
+  other exception as a `{status: error}` envelope, one `node_runs` row per
+  attempt. Graphs checkpoint after every node and discard their state when
+  the task's parameters change **or the graph's `version` does**.
+- **A model node's clock outlasts its agent's** by
+  `NODE_CLOCK_MARGIN_SECONDS`, or a node timeout would cancel the harness
+  mid-run where its retry loop cannot see it. Node 0 is a model node (the
+  extractor). Checked at config load (`check_graphs`) and again at
+  `register_dags`.
+- **Every task type is a graph, and every type currently gets one node** —
+  extract, validate, then ask or hand over.
+
+### Outbound & approval
+
+- **Nothing is sent by the caller that decided to send it.** An outbound
+  message is a row; one loop delivers it. **Approval belongs to the row**:
+  `outbox.approved_at`/`approved_by`, read by the query that selects
+  sendable rows (`_NEEDS_APPROVAL` in `friday/store/db.py`). An approval
+  card names the row it approves (`outbox.approves`); a card from before
+  that change records nothing and says so.
+- **`auto_ask_for_details`** is the only path with no human in it;
+  `friday/responder/check.py` is its floor. It is off in this repo's
+  `config.yaml`.
+- **SSE events come from the store rows the system already writes.**
+  `record_model_call`/`record_tool_call` publish on the in-process
+  `EventBus` after commit; `/api/events` replays from the bus on reconnect
+  (`Last-Event-ID`).
+- **Nothing takes a dangerous action, so there is no second gate.**
+  `Harness.checkpoint`/`resume` still exist; nothing calls them.
+
+### Triage & extraction
+
+- **Triage classifies and nothing else — a closed-set `Decided`.** An
+  out-of-set answer is counted apart from an outage. Every `Params` class
+  carries its own docstring, the type's description in the enum.
+- **The unit is a turn, not a message**, computed when read, never stored.
+- **Triage sees the turn plus the room's summary row**, gathered by
+  `friday/triage/context.py`'s `build_light_context` into
+  `LightContext(turn, summary)` from `Database.room_summary`. Domain memory,
+  task parameters and artifacts do not reach triage.
+
+### Prompts & voice
+
+- **Only the responder carries a voice**, in its `instructions`, never the
+  per-call input. `Reply` is built in exactly one place.
+- **Three prompt families, one module each, no shared text** —
+  `friday.triage.prompt`, `friday.extraction.prompt`,
+  `friday.responder.prompt`; shared mechanism is `assemble(*sections)` and
+  the escaping at a section's boundary, both `ast`-tested. A section
+  describing a tool renders only if the agent has it; `trust_boundary` is
+  claimed only by agents whose input wraps something. The responder reads
+  `channel_derived` only, and its section order is load-bearing.
+- **Anything stored and later read back into a prompt is stored plain**,
+  escaped once at the seam. `channel_derived` takes the `summary` row and
+  reads `RoomSummary`'s four fields by name, so the row's bookmark never
+  reaches a prompt. A channel is resummarised only when it has said
+  something since the bookmark; a rebuild supersedes the previous row.
+
+### Memory
+
+- **Every memory is a row in `memories`, in one of twelve kinds**, with
+  `origin` (`model` | `admin`), `key` and `data`. `readers_for(kind)`
+  decides who reads a row and `writers_for(kind)` who may write it,
+  enforced at `Database.memory_add`. A model is offered five kinds only
+  (`ModelMemoryKind`: fact, constraint, decision, finding, voice); `route`,
+  `service`, `project`, `dependency`, `person` and `runbook` are the
+  operator's, and five of them are read by code, never by a model. A
+  structured kind's `data` is validated with `fits` at write time; one
+  active row per `(channel, kind, key)` — except `finding`, which piles up
+  so a diagnosis can read the newest few. A model-origin call cannot
+  update, supersede or delete an admin row.
+- **Memory reaches a model only as a tool result or an injected section,
+  never through `instructions`.** Scope is runtime-supplied on
+  `FridayState`; ids are opaque and sparse. The responder's tools see
+  `voice`; the extractor gets the domain kinds of this room and `'*'` by
+  injection, rendered by `room_facts` with the operator's rows first.
+- **`check_not_instruction_shaped` refuses a line that reads as a command
+  *and* names this system's own moving parts**, at the one write path,
+  `Database.memory_add` — `text` only, never `data`. The operator writes
+  through `POST/PUT/DELETE /api/channels/{id}/memories`.
+- **Verbatim material (code, stack traces, `curl`) is stored whole as an
+  `Artifact` row, never paraphrased.** The summariser reads it replaced by
+  `[artifact id: description]`, the description built from shape and size
+  only.
+- **Silence is not approval.** Only a classification the operator marked
+  right becomes a few-shot example; a proposed memory waits for the same
+  mark in `memory_candidates`.
+- **Node 0's transcript build respects a token budget**
+  (`context.extraction_budget_tokens`, chars/4; unset means none), dropping
+  the oldest messages first and never summarising one; two ineffective
+  passes put a task on cooldown. A field already in `known` drops out of
+  the extractor's schema.
+
+## Repo conventions
+
+- `pytest` + `pytest-asyncio`, `asyncio_mode = "auto"`.
+- No linter or formatter is configured; one added is wired through `uv`.
+- **Structured config in `config.yaml`**, version-controlled; `.env` holds
+  secrets only. `data/`, `*.db*` and `.env` are never committed.
+- **The Discord user token must never reach logs, tracebacks or the task
+  DB.** `friday/ops/redact.py` scrubs on the way out, including from
+  `sys.excepthook` and `threading.excepthook`; a node's exception text is
+  scrubbed in `DAGRunner._invoke` and again where `node_runs.reason` and
+  `dag_state.paused_question` are written.
+- **A rule worth stating is worth a test.** Most constraints above are
+  enforced by a `grep`/`ast` test, because the ones only written down
+  drifted.
+- Explicit `__init__.py` packages. A node is testable through its
+  declaration. Triage has a fixture set of real messages with expected
+  labels — the regression net for prompt changes.
+
+# Reasoning
+
+The sections below record why the system took its shape. Kept rather than
+rewritten because the argument is still worth reading even where the
+conclusion moved; three reversals are marked inline — the "agentic nodes"
+vocabulary, triage's tool parameters, and the memory staging tier.
 
 A Discord agent that watches for mentions of a specific human, classifies them,
 turns the actionable ones into tasks, runs a fixed workflow of agentic nodes,
@@ -30,8 +325,8 @@ step.
 
 > **Reversed.** The node vocabulary was dropped. Workflows are deterministic
 > Python and a graph's *shape* is code — a model never chooses the next step.
-> Only some nodes call a model at all. See `CLAUDE.md` § Architecture
-> constraints and `CONTEXT.md` § Graph.
+> Only some nodes call a model at all. See § Load-bearing constraints
+> above and `CONTEXT.md` § Graph.
 
 ## Ingestion
 
@@ -398,7 +693,8 @@ approved tasks agreeing. Removal is the agent's own, through `memory_delete`;
 the board is read-only by design (`allow_methods=["GET"]`), so there is no
 route for the operator to remove one directly. An earlier draft of this
 sentence said "see and remove", which overstated the second half. See
-`friday/tools/memory.py` for the shape and `CLAUDE.md` for what is wired.
+`friday/tools/memory.py` for the shape and § Memory under Load-bearing
+constraints for what is wired.
 
 ## Orchestration
 
@@ -513,14 +809,6 @@ FastAPI app. Still one process, one container.
 - **A rejected credential alerts immediately**, not after the disconnection
   threshold. It is a known-terminal state, so waiting N minutes to report it
   only delays the one action that can fix it.
-
-## Repo conventions
-
-- Explicit `__init__.py` packages (not namespace packages).
-- `pytest` + `pytest-asyncio` via `uv add --dev`.
-- A node is testable through its declaration: pass fakes for the tools it uses
-  and assert on its `output_schema`. Triage gets a fixture set of real messages
-  with expected labels — the regression net for prompt changes.
 
 ## Open
 

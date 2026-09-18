@@ -1,10 +1,11 @@
-"""Pin the CLAUDE.md status paragraph to the current board, and
-regression guards learned from earlier breaks.
+"""Pin the docs to where each kind of fact now lives, and regression
+guards learned from earlier breaks.
 
-A future edit that drops the pointer to
-`.scratch/a-monitor-on-the-whole-path/` without updating the docs
-is a regression the operator would catch at the next board
-review. The test catches it first.
+Since 2026-09-18 `CLAUDE.md` says only how to work: project state lives in
+`CONTEXT.md` § Project state and architecture in `docs/DESIGN.md` § What
+exists. The two content pins below follow their facts there — a pin left
+on `CLAUDE.md` would force the state and architecture back into the file
+the operator emptied of them.
 
 The other tests in this file are learned-from-break guards:
 composition root reads no agent config (the audit's rule),
@@ -24,16 +25,35 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_claudemd_status_mentions_the_current_monitor_board() -> None:
-    """CLAUDE.md names the active board. If it points at the wrong
-    one (Liquid Glass / SSE old board), the docs are stale — and
-    the audit's rule says CLAUDE.md is the first place a fresh
-    agent looks."""
-    src = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-    assert "a-monitor-on-the-whole-path" in src, (
-        "CLAUDE.md does not point at .scratch/a-monitor-on-the-whole-path/. "
-        "The status paragraph is stale."
+def _project_state() -> str:
+    src = (ROOT / "CONTEXT.md").read_text(encoding="utf-8")
+    return src[src.index("# Project state"):src.index("# Vocabulary")]
+
+
+def _what_exists() -> str:
+    src = (ROOT / "docs" / "DESIGN.md").read_text(encoding="utf-8")
+    return src[src.index("# What exists"):src.index("# Reasoning")]
+
+
+def test_project_state_mentions_the_current_monitor_board() -> None:
+    """The project state names the monitor board. If it points at the wrong
+    one (Liquid Glass / SSE old board), the state is stale — and it is the
+    first place a fresh agent looks for what is running."""
+    assert "a-monitor-on-the-whole-path" in _project_state(), (
+        "CONTEXT.md § Project state does not point at "
+        ".scratch/a-monitor-on-the-whole-path/. The state is stale."
     )
+
+
+def test_claudemd_holds_no_state_and_no_architecture() -> None:
+    """The operator's rule of 2026-09-18: CLAUDE.md is how to work, nothing
+    else. These headings are the ones that used to live there and drifted
+    there; one coming back is the file growing a second copy of what
+    CONTEXT.md and docs/DESIGN.md already say."""
+    src = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    for heading in ("## Status", "## Layout", "## Architecture constraints",
+                    "## Running it on a server"):
+        assert heading not in src, f"CLAUDE.md grew {heading!r} back"
 
 
 def test_old_board_tickets_are_marked_retired_or_done() -> None:
@@ -50,20 +70,19 @@ def test_old_board_tickets_are_marked_retired_or_done() -> None:
     )
 
 
-def test_claudemd_records_the_sse_decision() -> None:
-    """Ticket 10 acceptance criterion 3: an Architecture-constraints
-    bullet records the D5 (SSE) decision. A future edit that
-    removes the bullet is a regression the audit would catch —
-    CLAUDE.md would drift from the actual behaviour, and the
-    next agent to read it would not know the bus is the seam."""
-    src = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+def test_design_records_the_sse_decision() -> None:
+    """Ticket 10 acceptance criterion 3: a load-bearing constraint records
+    the D5 (SSE) decision. A future edit that removes it is a regression —
+    the architecture would drift from the actual behaviour, and the next
+    agent to read it would not know the bus is the seam."""
+    src = _what_exists()
     assert "EventBus" in src or "Event Bus" in src, (
-        "CLAUDE.md no longer names the EventBus — the SSE seam "
-        "is undocumented"
+        "docs/DESIGN.md § What exists no longer names the EventBus — the "
+        "SSE seam is undocumented"
     )
     assert "/api/events" in src, (
-        "CLAUDE.md no longer mentions /api/events — the SSE endpoint "
-        "is undocumented"
+        "docs/DESIGN.md § What exists no longer mentions /api/events — the "
+        "SSE endpoint is undocumented"
     )
 
 
@@ -95,12 +114,15 @@ def test_composition_root_reads_no_agent_config() -> None:
 
 
 def test_doc_paths_resolve_to_existing_files() -> None:
-    """The audit named two files every agent reads first: CLAUDE.md
-    and `docs/DESIGN.md`. A regression that renames a section or
-    drops a path the docs reference is a regression the build
-    catches first."""
-    docs = ROOT / "CLAUDE.md"
-    src = docs.read_text(encoding="utf-8")
+    """Every path the docs present as existing must exist: all of
+    CLAUDE.md, CONTEXT.md § Project state and docs/DESIGN.md § What exists.
+    DESIGN.md § Reasoning and CONTEXT.md § Vocabulary are left out on
+    purpose — they name removed packages as history."""
+    src = "\n".join([
+        (ROOT / "CLAUDE.md").read_text(encoding="utf-8"),
+        _project_state(),
+        _what_exists(),
+    ])
     # A backticked path under one of this repo's own directories, or one of
     # the two entrypoint scripts, must exist on disk.
     #
@@ -130,7 +152,7 @@ def test_doc_paths_resolve_to_existing_files() -> None:
         if not (ROOT / path_str).exists():
             missing.append(path_str)
     assert not missing, (
-        f"CLAUDE.md names paths that do not exist: {missing}"
+        f"the docs name paths that do not exist: {missing}"
     )
 
 

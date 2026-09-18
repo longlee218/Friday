@@ -1,7 +1,45 @@
 # CONTEXT
 
-The domain vocabulary for friday-agents. Use these words in code, tests, tickets
-and commit messages. Where a word had two meanings, this file picks one.
+Two things, kept apart: the project's current **state**, and the **domain
+vocabulary**. Use the vocabulary's words in code, tests, tickets and commit
+messages; where a word had two meanings, this file picks one.
+
+# Project state
+
+What is running and what is open, as of 2026-09-18. This part goes stale
+fastest — check each ticket's own `**Status:**` line before trusting it.
+Architecture is in `docs/DESIGN.md`; how to work is in `CLAUDE.md`.
+
+**Running.** Friday ingests Discord mentions, classifies them, opens tasks,
+asks for missing details and sends approved replies as the watched account.
+It runs on the operator's own machine, on branch `main`, with a passing
+suite.
+
+**Boards** under `.scratch/<feature-slug>/issues/`:
+
+- `discord-mention-triage/` (from `docs/SPEC.md`) — the original board. Done.
+- `a-monitor-on-the-whole-path/` — the operator UI rebuilt as a real-time
+  monitor: SSE live feed, drill-down to a Flow screen, motion, skeleton and
+  toast, axe-core and Lighthouse gates; a React + Vite SPA inside this
+  repository. Done.
+- `every-task-is-a-graph/` — one engine: `friday/tasks/` (the pool) and
+  `friday/dag/` (the graph). Every task type is a graph of one node. Done.
+- `every-answer-has-a-shape/` — structured answers and the agent memory
+  tools. Done except ticket 03, `ready-for-human`: the eval rows are the
+  operator's to label, since a classifier scored against labels a model
+  chose measures nothing.
+- `work-that-has-gone-cold/` — `max_message_age` and the cold-cursor sweep.
+  Done.
+- `read-it-the-way-the-operator-does/` — the `api_issue` graph, designed from
+  the operator's own routine. Done: 09 (twelve memory kinds), 10 (YAML
+  context files gone), 11 (one invoke in the runner), 12 (approval per
+  outbox row), 13 (bounded pool concurrency), 16 (measurements and the model
+  probe, except the reporter-delay measurement). **Next: 00**, a vertical
+  slice on five past cases the operator picks. Waiting on the operator: 07
+  (confirm the drafted knowledge rows in `research/03-seed-rows.md`, write
+  the runbooks). The order is in its `execution-plan.md`.
+
+# Vocabulary
 
 ## Message
 

@@ -100,7 +100,7 @@ price — this file states the token count because that number does not
 depend on which provider `config.yaml` points at; a dollar figure would.
 
 `SEED` is 18 rows as of ticket 09 (two rows carrying a multi-message `turn`,
-added to exercise what a single line cannot — see `CLAUDE.md`'s note on
+added to exercise what a single line cannot — see `docs/DESIGN.md`'s note on
 triage's light context). The token figures above predate that change and were
 not re-measured against the new set — `run_triage_eval.py` does not record
 per-call cost (`_build_triage` passes no `record=`/`spent=`), so the number
