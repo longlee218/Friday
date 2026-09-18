@@ -49,6 +49,50 @@ Noticed, not changed: `DiscordBot.start` registers the persistent view as
 no real card, so "old cards keep working across a restart" was not true
 before this ticket either.
 
+## Review fixes
+The review of `95d800a` found one must-fix. A press on a card from before
+this change (`friday:approve:<task>`) reached `handle`, which returned
+without doing anything, and `_Buttons._answered` then edited the card to
+"_answered by X_" anyway. The operator saw a decision recorded when nothing
+was approved, and a rejection handed nothing over. That is a dropped
+decision that looks like a recorded one.
+
+Fixed. `handle` now returns whether it reported a decision, and logs a
+warning naming the custom_id whenever it ignores a press. `_answered` writes
+"answered by" only when a decision was recorded. Otherwise the card says
+"nothing was recorded: this card does not name a reply. If it still needs
+sending, answer in the thread yourself." Tests:
+`test_a_recorded_decision_says_who_answered` and
+`test_a_card_from_before_the_move_says_nothing_was_recorded` (the edit and
+the log line).
+
+**Recovery path for replies left waiting at upgrade.** The migration gives
+old cards no `approves` and queues no new card, so a reply that was waiting
+for approval at upgrade time has no working card. The recovery is the
+operator answering in the thread by hand. Their own message moves the task
+to `handled_by_operator`, and `Pool` withdraws every queued row for it
+(`cancel_outbound_for`), including the stale reply. No new card is
+re-queued. That would mean inserting outbox rows from a migration, or
+adding a boot-time sweep, for a window that only exists once, at this
+upgrade.
+
+In practice the stale card may never reach `_answered`. The upgrade is a
+restart, and after a restart only the persistent view registered by `start`
+is dispatched. That view's ids end in `None` (see "Noticed" above), so a
+press on an old card most likely gets Discord's own "interaction failed"
+rather than any edit. The fix still matters for the process that sent a
+card and is still running.
+
+Suite after the fixes: `1 failed, 1231 passed, 1 skipped`. The one failure
+is still the baseline `test_doc_paths_resolve_to_existing_files`. Guards
+deleted once and watched go red, then restored: the "answered by" note
+gated on `recorded`, the warning on a press that names no reply, and
+`handle` returning `True` after a reported decision.
+
+The review also flagged the CLAUDE.md item below as not done. It is still
+owed. This lane may not edit CLAUDE.md while the operator rewrites it
+elsewhere.
+
 ## Docs owed
 - CLAUDE.md, the "Nothing is sent by the caller that decided to send it"
   constraint: add that approval lives on the outbox row

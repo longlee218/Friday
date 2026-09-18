@@ -194,3 +194,60 @@ async def test_telling_the_operator_about_a_row_that_belongs_to_no_task(caplog):
     (line,) = [r.getMessage() for r in caplog.records]
     assert "None" not in line
     assert str(Kind.ALERT) in line
+
+
+class Pressed:
+    """What discord.py hands a button callback, reduced to what `_answered`
+    reads and writes."""
+
+    def __init__(self, custom_id: str, content: str = "**Reply to 999?**"):
+        self.data = {"custom_id": custom_id}
+        self.user = "longle_"
+        self.message = SimpleNamespace(content=content)
+        self.edits: list[dict] = []
+
+        async def edit_message(**kwargs):
+            self.edits.append(kwargs)
+
+        self.response = SimpleNamespace(edit_message=edit_message)
+
+
+async def press(bot: DiscordBot, custom_id: str) -> Pressed:
+    from friday.providers.discord.bot import _Buttons
+
+    interaction = Pressed(custom_id)
+    await _Buttons(12, bot.handle).children[0].callback(interaction)
+    return interaction
+
+
+async def test_a_recorded_decision_says_who_answered():
+    bot = DiscordBot(
+        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        on_decision=lambda **kw: None,
+    )
+
+    pressed = await press(bot, "friday:approve:row:12")
+
+    (edit,) = pressed.edits
+    assert "answered by longle_" in edit["content"]
+
+
+async def test_a_card_from_before_the_move_says_nothing_was_recorded(caplog):
+    """Review of ticket 12: the stale card was edited to "answered by", so
+    the operator saw a decision recorded while nothing was approved and a
+    rejection handed nothing over. The card has to say the press did nothing,
+    and what to do instead; the log has to say it too."""
+    import logging
+
+    bot = DiscordBot(
+        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        on_decision=lambda **kw: None,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="friday.providers.discord.bot"):
+        pressed = await press(bot, "friday:approve:42")
+
+    (edit,) = pressed.edits
+    assert "answered by" not in edit["content"]
+    assert "nothing was recorded" in edit["content"]
+    assert any("friday:approve:42" in r.getMessage() for r in caplog.records)

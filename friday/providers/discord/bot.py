@@ -88,26 +88,34 @@ class DiscordBot:
         )
         return str(message.id)
 
-    async def handle(self, custom_id: str, *, by: str) -> None:
-        """Report a decision about one outbox row. Applying it is the caller's
-        business.
+    async def handle(self, custom_id: str, *, by: str) -> bool:
+        """Report a decision about one outbox row, and say whether it was
+        reported. Applying it is the caller's business.
 
         The id is a *row*, marked as one. A card sent before approval moved
         from the task to the row carries a task id in the three-part form,
         and reading that number as a row would approve whichever reply
         happens to share it — so that form is ignored, not reinterpreted.
+
+        Ignored is not silent. The press is logged and `False` comes back, so
+        the card can say nothing was recorded: a card edited to "answered"
+        when nothing was approved, and nothing handed over on a rejection, is
+        a dropped decision that looks exactly like a recorded one.
         """
         parts = custom_id.split(":")
         if len(parts) != 4 or parts[0] != PREFIX or parts[2] != "row":
-            return
+            log.warning("ignored a press on %r by %s: it names no reply", custom_id, by)
+            return False
         _, decision, _, outbound_id = parts
         if decision not in ("approve", "reject") or self._on_decision is None:
-            return
+            log.warning("ignored a press on %r by %s: nothing takes it", custom_id, by)
+            return False
         result = self._on_decision(
             outbound_id=int(outbound_id), approved=decision == "approve", by=by
         )
         if hasattr(result, "__await__"):
             await result
+        return True
 
     async def start(self) -> None:
         """Connect, and re-register the buttons.
@@ -155,11 +163,16 @@ class _Buttons(discord.ui.View):
             self.add_item(button)
 
     async def _answered(self, interaction) -> None:
-        await self._handle(
+        recorded = await self._handle(
             interaction.data["custom_id"], by=str(interaction.user)
         )
+        note = (
+            f"_answered by {interaction.user}_"
+            if recorded
+            else "_nothing was recorded: this card does not name a reply. "
+            "If it still needs sending, answer in the thread yourself._"
+        )
         await interaction.response.edit_message(
-            content=f"{interaction.message.content}\n\n_answered by "
-            f"{interaction.user}_",
+            content=f"{interaction.message.content}\n\n{note}",
             view=None,
         )
