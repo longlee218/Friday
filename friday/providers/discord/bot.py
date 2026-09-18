@@ -75,7 +75,7 @@ class DiscordBot:
         asking = row.kind == Kind.APPROVAL_CARD
         message = await channel.send(
             content=_asking(row) if asking else _stuck(row, self._board_url),
-            view=_Buttons(row.task_id, self.handle) if asking else None,
+            view=_Buttons(row.approves, self.handle) if asking else None,
         )
         # `%s`, not `%d`: an outbound row does not have to belong to a task.
         # A liveness alert and the daily summary belong to none — there is a
@@ -89,15 +89,22 @@ class DiscordBot:
         return str(message.id)
 
     async def handle(self, custom_id: str, *, by: str) -> None:
-        """Report a decision. Applying it is the caller's business."""
+        """Report a decision about one outbox row. Applying it is the caller's
+        business.
+
+        The id is a *row*, marked as one. A card sent before approval moved
+        from the task to the row carries a task id in the three-part form,
+        and reading that number as a row would approve whichever reply
+        happens to share it — so that form is ignored, not reinterpreted.
+        """
         parts = custom_id.split(":")
-        if len(parts) != 3 or parts[0] != PREFIX:
+        if len(parts) != 4 or parts[0] != PREFIX or parts[2] != "row":
             return
-        _, decision, task_id = parts
+        _, decision, _, outbound_id = parts
         if decision not in ("approve", "reject") or self._on_decision is None:
             return
         result = self._on_decision(
-            task_id=int(task_id), approved=decision == "approve", by=by
+            outbound_id=int(outbound_id), approved=decision == "approve", by=by
         )
         if hasattr(result, "__await__"):
             await result
@@ -106,7 +113,7 @@ class DiscordBot:
         """Connect, and re-register the buttons.
 
         A decision may be made hours after the question, across a restart. The
-        task id lives in the button rather than in this process, and the view is
+        row id lives in the button rather than in this process, and the view is
         registered again so old cards keep working.
         """
         self._client.add_view(_Buttons(None, self.handle))
@@ -119,7 +126,7 @@ def _asking(row: Outbound) -> str:
     return (
         f"**Reply to {row.conversation}?**\n"
         f"> {row.text}\n"
-        f"_task {row.task_id} · goes out as you_"
+        f"_task {row.task_id} · reply {row.approves} · goes out as you_"
     )
 
 
@@ -132,7 +139,7 @@ def _stuck(row: Outbound, board_url: str | None) -> str:
 class _Buttons(discord.ui.View):
     """`timeout=None` and stable ids: a card left overnight still works."""
 
-    def __init__(self, task_id: int | None, handle) -> None:
+    def __init__(self, outbound_id: int | None, handle) -> None:
         super().__init__(timeout=None)
         self._handle = handle
         for label, decision, style in (
@@ -142,7 +149,7 @@ class _Buttons(discord.ui.View):
             button = discord.ui.Button(
                 label=label,
                 style=style,
-                custom_id=f"{PREFIX}:{decision}:{task_id}",
+                custom_id=f"{PREFIX}:{decision}:row:{outbound_id}",
             )
             button.callback = self._answered
             self.add_item(button)

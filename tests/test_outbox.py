@@ -36,14 +36,11 @@ class Refusing(Sender):
         raise RuntimeError(self._error)
 
 
-async def task(db, *, state="pending", approved=False):
-    created = await db.create_task(
+async def task(db, *, state="pending"):
+    return await db.create_task(
         conversation=WATCHED, type="api_issue", state=state,
         confidence=0.9, params={"summary": "s"},
     )
-    if approved:
-        await db.approve_task(created.id, by="operator")
-    return created
 
 
 def outbox(db, sender, **kw):
@@ -65,7 +62,7 @@ async def test_a_queued_ask_is_delivered(db):
     assert [r.state for r in await db.outbound()] == ["sent"]
 
 
-async def test_a_reply_waits_for_its_task_to_be_approved(db):
+async def test_a_reply_waits_to_be_approved(db):
     """The guard is the query, not a check each caller has to remember."""
     opened = await task(db)
     await db.queue_outbound(
@@ -81,11 +78,12 @@ async def test_a_reply_waits_for_its_task_to_be_approved(db):
 
 
 async def test_an_approved_reply_goes_out(db):
-    opened = await task(db, approved=True)
-    await db.queue_outbound(
+    opened = await task(db)
+    row = await db.queue_outbound(
         task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
         sender="discord_user", text="here is your answer",
     )
+    await db.approve_outbound(row.id, by="operator")
     sender = Sender()
 
     await outbox(db, sender).run_once()
@@ -191,11 +189,12 @@ async def test_sending_by_hand_is_recorded_apart_from_abandoning(db):
     assert (await db.outbound())[0].state == "sent_manually"
 
 
-async def test_approving_a_task_releases_its_reply(db):
-    """The whole point of the join: approval is recorded on the task, and the
-    reply becomes sendable without anything having to remember it was waiting."""
+async def test_approving_a_reply_releases_it(db):
+    """The whole point of the predicate: approval is recorded on the row, and
+    the reply becomes sendable without anything having to remember it was
+    waiting."""
     opened = await task(db)
-    await db.queue_outbound(
+    row = await db.queue_outbound(
         task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
         sender="discord_user", text="cho anh xin correlationId",
     )
@@ -203,10 +202,28 @@ async def test_approving_a_task_releases_its_reply(db):
 
     assert await outbox(db, sender).run_once() == []
 
-    await db.approve_task(opened.id, by="longle_")
+    await db.approve_outbound(row.id, by="longle_")
     await outbox(db, sender).run_once()
 
     assert [text for _, text, _ in sender.sent] == ["cho anh xin correlationId"]
+
+
+async def test_approving_one_reply_does_not_approve_the_next(db):
+    """Finding A: approval was a fact about the task, so once "đang xử lý"
+    was approved every later reply on that task went out unread — including
+    the one that asserts a cause. The operator approved a row, not a task."""
+    opened = await task(db)
+    first = await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
+        sender="discord_user", text="đang xử lý",
+    )
+    await db.approve_outbound(first.id, by="longle_")
+    await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
+        sender="discord_user", text="nguyên nhân là cache đầy",
+    )
+
+    assert [r.text for r in await db.sendable_outbound()] == ["đang xử lý"]
 
 
 async def test_an_answer_the_conversation_has_moved_past_is_not_posted(db):
@@ -216,12 +233,13 @@ async def test_an_answer_the_conversation_has_moved_past_is_not_posted(db):
     nothing."""
     from conftest import make_event
 
-    opened = await task(db, approved=True)
+    opened = await task(db)
     await db.record_message(make_event(message_id="10", text="api is broken"))
     row = await db.queue_outbound(
         task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
         sender="discord_user", text="here is your answer", reply_to="10",
     )
+    await db.approve_outbound(row.id, by="operator")
     # They said something else while it waited to be approved.
     await db.record_message(make_event(message_id="20", text="never mind, fixed it"))
     sender = Sender()

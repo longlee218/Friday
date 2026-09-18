@@ -100,7 +100,8 @@ class Outbound:
     """Something to send, held as data rather than performed as a call.
 
     `kind` decides whether it needs approval; `sender` decides which identity
-    says it. Approval itself is a fact about the task, not about this row.
+    says it. Approval itself is a fact about this row, not about its task —
+    approving one reply must not approve the next.
     """
 
     id: int
@@ -113,6 +114,8 @@ class Outbound:
     state: str = "queued"
     attempts: int = 0
     last_error: str | None = None
+    #: On an approval card, the id of the row it asks about.
+    approves: int | None = None
 
 
 # ---- task parameters -------------------------------------------------

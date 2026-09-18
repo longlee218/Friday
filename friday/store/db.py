@@ -99,7 +99,7 @@ OUTBOUND_SENT = OutboundState.SENT
 OUTBOUND_FAILED = OutboundState.FAILED
 OUTBOUND_SENT_MANUALLY = OutboundState.SENT_MANUALLY
 
-#: Kinds the outbox refuses to select without an approval on the task. Kept as
+#: Kinds the outbox refuses to select without an approval on the row. Kept as
 #: data here because it is a `WHERE` clause; `friday.outbox.Kind` is where the
 #: reasoning lives.
 _NEEDS_APPROVAL = ("reply",)
@@ -1617,7 +1617,9 @@ class Database:
         sender: str,
         text: str,
         reply_to: str | None = None,
+        approves: int | None = None,
     ) -> Outbound:
+        """`approves` is for an approval card: the row it asks about."""
         row = schema.Outbound(
             task_id=task_id,
             conversation_id=str(conversation),
@@ -1625,6 +1627,7 @@ class Database:
             sender=sender,
             text=text,
             reply_to=reply_to,
+            approves=approves,
             state=OUTBOUND_QUEUED,
             created_at=_now(),
         )
@@ -1637,15 +1640,14 @@ class Database:
 
         The approval check lives here rather than in the sender, so a caller
         cannot forget it: a kind that needs approval is simply not selected
-        until its task has one. `attempts` orders after `id` so a row that keeps
-        failing does not monopolise every batch.
+        until the row itself has one. Not its task: an approval on the task
+        was written once and never cleared, so every reply queued after the
+        first approved one went out unread. `attempts` orders after `id` so a
+        row that keeps failing does not monopolise every batch.
         """
         async with self._sessions() as session:
             rows = await session.scalars(
                 select(schema.Outbound)
-                # Outer, so a row with no task — an alert about the system
-                # itself — is still selected rather than dropped by the join.
-                .outerjoin(schema.Task, schema.Task.id == schema.Outbound.task_id)
                 .where(
                     schema.Outbound.state == OUTBOUND_QUEUED,
                     or_(
@@ -1654,7 +1656,7 @@ class Database:
                     ),
                     or_(
                         schema.Outbound.kind.not_in(_NEEDS_APPROVAL),
-                        schema.Task.approved_at.is_not(None),
+                        schema.Outbound.approved_at.is_not(None),
                     ),
                 )
                 .order_by(schema.Outbound.attempts, schema.Outbound.id)
@@ -2216,9 +2218,16 @@ class Database:
             )
             return _task(row) if row else None
 
-    async def approve_task(self, task_id: int, *, by: str) -> None:
-        """Record who approved and when. This is what the outbox joins."""
-        await self._set_task(task_id, approved_at=_now(), approved_by=by)
+    async def approve_outbound(self, outbound_id: int, *, by: str) -> None:
+        """Record who approved this row and when. This is what the outbox
+        selects on, and it releases this row and no other."""
+        await self._set_outbound(outbound_id, approved_at=_now(), approved_by=by)
+
+    async def outbound_row(self, outbound_id: int) -> Outbound | None:
+        """One row by id, or None if there is no such row."""
+        async with self._sessions() as session:
+            row = await session.get(schema.Outbound, outbound_id)
+            return _outbound(row) if row else None
 
     async def last_mention_in(self, conversation: ConversationId) -> str | None:
         """The most recent message that addressed us here — what a reply to
@@ -3198,6 +3207,7 @@ def _outbound(row: schema.Outbound) -> Outbound:
         state=row.state,
         attempts=row.attempts,
         last_error=row.last_error,
+        approves=row.approves,
     )
 
 

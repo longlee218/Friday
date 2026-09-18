@@ -20,10 +20,12 @@ from friday.providers.discord.bot import DiscordBot
 OPERATOR = 482447107983147039
 
 
-def card(task_id: int = 7, text: str = "cho anh xin cái correlationId") -> Outbound:
+def card(
+    task_id: int = 7, text: str = "cho anh xin cái correlationId", approves: int = 12
+) -> Outbound:
     return Outbound(
         id=1, task_id=task_id, conversation=ConversationId("discord", "999"),
-        kind=Kind.APPROVAL_CARD, sender="discord_bot", text=text,
+        kind=Kind.APPROVAL_CARD, sender="discord_bot", text=text, approves=approves,
     )
 
 
@@ -65,28 +67,39 @@ async def test_the_card_shows_the_reply_and_where_it_would_go():
     assert "999" in rendered
 
 
-async def test_the_buttons_carry_the_task_so_a_restart_does_not_lose_them():
-    """A decision may be made hours later, after a redeploy. The task id lives
-    in the button rather than in this process's memory."""
+async def test_the_buttons_carry_the_row_they_approve():
+    """Approval belongs to the reply row, not the task (board
+    read-it-the-way-the-operator-does, ticket 12): a task can queue two
+    replies, and approving the first must not approve the second. The row id
+    lives in the button rather than in this process's memory."""
     recipient = Recipient()
     bot = DiscordBot("token", operator_id=OPERATOR, client=stub_client(recipient))
 
-    await bot.send(card(task_id=42))
+    await bot.send(card(task_id=42, approves=12))
 
     ids = [c.custom_id for c in recipient.sent[0]["view"].children]
-    assert ids == ["friday:approve:42", "friday:reject:42"]
+    assert ids == ["friday:approve:row:12", "friday:reject:row:12"]
 
 
-async def test_approving_reports_the_task_and_who_decided():
+async def test_the_card_names_the_row_it_asks_about():
+    recipient = Recipient()
+    bot = DiscordBot("token", operator_id=OPERATOR, client=stub_client(recipient))
+
+    await bot.send(card(task_id=42, approves=12))
+
+    assert "reply 12" in recipient.sent[0]["content"]
+
+
+async def test_approving_reports_the_row_and_who_decided():
     decisions: list = []
     bot = DiscordBot(
         "token", operator_id=OPERATOR, client=stub_client(Recipient()),
         on_decision=lambda **kw: decisions.append(kw),
     )
 
-    await bot.handle("friday:approve:42", by="longle_")
+    await bot.handle("friday:approve:row:12", by="longle_")
 
-    assert decisions == [{"task_id": 42, "approved": True, "by": "longle_"}]
+    assert decisions == [{"outbound_id": 12, "approved": True, "by": "longle_"}]
 
 
 async def test_rejecting_reports_it_too():
@@ -96,9 +109,24 @@ async def test_rejecting_reports_it_too():
         on_decision=lambda **kw: decisions.append(kw),
     )
 
-    await bot.handle("friday:reject:42", by="longle_")
+    await bot.handle("friday:reject:row:12", by="longle_")
 
-    assert decisions == [{"task_id": 42, "approved": False, "by": "longle_"}]
+    assert decisions == [{"outbound_id": 12, "approved": False, "by": "longle_"}]
+
+
+async def test_a_card_from_before_the_move_is_not_read_as_a_row():
+    """A card sent before approval moved to the row carries a *task* id.
+    Read as a row id it would approve whatever reply happens to have that
+    number, so it is ignored instead."""
+    decisions: list = []
+    bot = DiscordBot(
+        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        on_decision=lambda **kw: decisions.append(kw),
+    )
+
+    await bot.handle("friday:approve:42", by="longle_")
+
+    assert decisions == []
 
 
 async def test_a_button_that_is_not_ours_is_ignored():

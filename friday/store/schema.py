@@ -112,10 +112,6 @@ class Task(Base):
     confidence: Mapped[float]
     params: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(IsoDateTime)
-    #: Approval is a fact about the work, not about a message. The outbox
-    #: joins this rather than each caller checking it.
-    approved_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
-    approved_by: Mapped[str | None]
 
 
 class Verdict(Base):
@@ -252,6 +248,15 @@ class Outbound(Base):
     retry_after: Mapped[datetime | None] = mapped_column(IsoDateTime)
     created_at: Mapped[datetime] = mapped_column(IsoDateTime)
     sent_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
+    #: Approval is a fact about this row, not about its task. It was on the
+    #: task, written once and never cleared, so approving the first reply
+    #: approved every reply queued after it — including the one that asserts
+    #: a cause. The outbox reads these rather than each caller checking.
+    approved_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
+    approved_by: Mapped[str | None]
+    #: On an approval card, the row it asks about — so pressing the button
+    #: approves that reply and nothing queued after it.
+    approves: Mapped[int | None]
 
 
 class ModelCall(Base):

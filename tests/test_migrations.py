@@ -121,3 +121,62 @@ def test_a_migration_that_already_half_applied_can_still_finish(tmp_path):
             "SELECT text, original_text FROM messages"
         ).fetchone()
         assert original == text, "the backfill that never ran did not run now"
+
+
+def _alembic(path, *args) -> None:
+    subprocess.run(
+        [sys.executable, "-m", "alembic", *args],
+        cwd=ROOT,
+        env={**os.environ, "FRIDAY_DB": str(path)},
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_an_approved_task_carries_its_approval_onto_its_reply_rows(tmp_path):
+    """Approval moved from the task to the row (board
+    read-it-the-way-the-operator-does, ticket 12). A reply the operator
+    approved before the move must still be approved after it — and nothing
+    else may become approved by the move: not the card that asked, and not
+    another task's reply."""
+    path = tmp_path / "carried.db"
+    _alembic(path, "upgrade", "a423973bc96d")
+
+    engine = create_engine(f"sqlite:///{path}")
+    live = MetaData()
+    live.reflect(bind=engine)
+    tasks, outbox = live.tables["tasks"], live.tables["outbox"]
+    common = dict(conversation_id="discord:1", state="queued", attempts=0,
+                  created_at="2026-09-01T00:00:00+00:00", sender="discord_user")
+    with engine.begin() as connection:
+        connection.execute(tasks.insert(), [
+            dict(id=1, conversation_id="discord:1", type="api_issue", state="review",
+                 confidence=0.9, params={}, created_at="2026-09-01T00:00:00+00:00",
+                 approved_at="2026-09-02T00:00:00+00:00", approved_by="longle_"),
+            dict(id=2, conversation_id="discord:1", type="api_issue", state="review",
+                 confidence=0.9, params={}, created_at="2026-09-01T00:00:00+00:00",
+                 approved_at=None, approved_by=None),
+        ])
+        connection.execute(outbox.insert(), [
+            dict(id=10, task_id=1, kind="reply", text="đang xử lý", **common),
+            dict(id=11, task_id=1, kind="approval_card", text="đang xử lý", **common),
+            dict(id=20, task_id=2, kind="reply", text="chưa duyệt", **common),
+        ])
+    engine.dispose()
+
+    _alembic(path, "upgrade", "head")
+
+    engine = create_engine(f"sqlite:///{path}")
+    live = MetaData()
+    live.reflect(bind=engine)
+    outbox = live.tables["outbox"]
+    with engine.connect() as connection:
+        rows = {
+            r.id: (r.approved_at, r.approved_by)
+            for r in connection.execute(outbox.select())
+        }
+    assert rows == {
+        10: ("2026-09-02T00:00:00+00:00", "longle_"),
+        11: (None, None),
+        20: (None, None),
+    }

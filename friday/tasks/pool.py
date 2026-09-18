@@ -264,9 +264,11 @@ class Pool:
         """An answer, and the question that asks whether to send it.
 
         Both are rows, so a card nobody could deliver shows up rather than
-        leaving an answer waiting for a decision nobody was asked for.
+        leaving an answer waiting for a decision nobody was asked for. The card
+        names the reply it asks about: approval belongs to that row, not to
+        the task, so a reply queued later waits for its own card.
         """
-        await self._db.queue_outbound(
+        reply = await self._db.queue_outbound(
             task_id=task.id,
             conversation=task.conversation,
             kind=Kind.REPLY,
@@ -280,6 +282,7 @@ class Pool:
             kind=Kind.APPROVAL_CARD,
             sender=self._approver,
             text=text,
+            approves=reply.id,
         )
         log.info("task %d: proposed an answer — %r", task.id, text)
         # Waiting on the operator, not on the reporter. Different people,

@@ -509,9 +509,17 @@ system is helping.
 
 ## Approval
 
-A fact about a **task**, not about a message: who approved and when. An
-outbound intent whose kind requires approval is only sendable while its task
-carries one.
+A fact about one **outbox row**, not about its task: who approved that reply
+and when. An outbound intent whose kind requires approval is only sendable
+while the row itself carries one, and the approval card names the row it asks
+about (`approves`), so answering it releases that reply and nothing queued
+after it.
+
+It was a fact about the task until board `read-it-the-way-the-operator-does`
+ticket 12 (finding A): written once and never cleared, so approving a task's
+first reply approved every reply it queued later — the one that asserts a
+cause included — and those went out unread. The migration carried each
+approved task's approval onto the replies it already had.
 
 This is one of two gates, not the only one (ticket 07). A message reaching a
 person waits here, at the outbox, whatever kind of task produced it. An

@@ -230,6 +230,9 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     assert reply.text == "cache đầy thôi, anh clear rồi nhé"
     # Only the question is sendable; the answer waits to be answered.
     assert [r.kind for r in await db.sendable_outbound()] == ["approval_card"]
+    # The card names the row it asks about, so answering it approves that
+    # reply and not whatever the task queues next.
+    assert card.approves == reply.id
     assert acted[0].state == "review"
 
 

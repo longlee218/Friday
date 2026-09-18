@@ -119,8 +119,8 @@ many humans.
 | --- | --- | --- |
 | `messages` | unique `(provider, provider_message_id)` | every message seen. A non-null `mention_type` marks the ones addressed to us — that column, not a second table, is the triage queue. Carries the triage decision: type, confidence, parameters |
 | `conversations` | `(provider, channel_id, thread_id)` | one exchange on one platform |
-| `tasks` | → conversation | work items, their state, and their approval |
-| `outbox` | → task | outbound intents: conversation, text, sender, reply_to, kind, attempts, last_error |
+| `tasks` | → conversation | work items and their state |
+| `outbox` | → task | outbound intents: conversation, text, sender, reply_to, kind, attempts, last_error, and each row's own approval (`approved_at`, `approved_by`; a card's `approves` names the row it asks about) |
 | `llm_calls` | → agent run | prompt, output, tool calls and tokens per model call, for the debug view. Trimmed on a retention bound |
 | ~~`memory_staging`~~ | → task | **removed** — see the Memory section below |
 
@@ -417,7 +417,7 @@ Every outbound reply passes through `review`.
 ## Human loop
 
 The **bot** DMs an approval card with buttons; the interaction resolves the
-task. Buttons are an application-only Discord feature — a user account cannot
+reply row the card names. Buttons are an application-only Discord feature — a user account cannot
 send message components — so approvals flow through the sanctioned bot API,
 which also gives a clean audit trail of who clicked and when. The bot posts
 nothing else and does not need to be in the watched channels.
@@ -435,9 +435,12 @@ Approval, audit, retry, rate limits and the manual-send list are then all views
 over the same rows.
 
 - **The row is written when the workflow decides**, not when approval arrives.
-  The sender's query joins the task: `WHERE outbox.kind <> 'reply' OR
-  tasks.approved_at IS NOT NULL`. Approval stays a fact about the task; the
-  guard is one query rather than a check each caller must remember.
+  The sender's query reads the row: `WHERE outbox.kind <> 'reply' OR
+  outbox.approved_at IS NOT NULL`. Approval is a fact about the row, not the
+  task — on the task it was written once and never cleared, so a second reply
+  on an approved task went out unread (board
+  `read-it-the-way-the-operator-does`, ticket 12). The guard is still one
+  query rather than a check each caller must remember.
 - **`kind` decides whether approval is needed** — see CONTEXT.md. Asking for a
   missing correlationId is the system completing a task's own required
   parameters, not the agent speaking for the operator, so it does not queue

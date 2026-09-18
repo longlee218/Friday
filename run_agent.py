@@ -230,19 +230,25 @@ async def _run(stack: AsyncExitStack) -> None:
         spent=db.spent_today,
     )
     pool = Pool.build(config, db=db, responder=responder)
-    async def decided(*, task_id: int, approved: bool, by: str) -> None:
+    async def decided(*, outbound_id: int, approved: bool, by: str) -> None:
         """What a button press means.
 
-        Approving records who and when on the task, which is the only thing
-        standing between a queued reply and the channel — the outbox selects on
-        it, so nothing has to remember the reply was waiting.
+        Approving records who and when on the reply row the card named, which
+        is the only thing standing between that reply and the channel — the
+        outbox selects on it, so nothing has to remember the reply was
+        waiting. The row, not the task: a reply the task queues later waits
+        for its own card.
         """
         if approved:
-            await db.approve_task(task_id, by=by)
-            log.info("task %d approved by %s", task_id, by)
+            await db.approve_outbound(outbound_id, by=by)
+            log.info("reply %d approved by %s", outbound_id, by)
             return
-        await db.move_task(task_id, TaskState.NEEDS_HUMAN)
-        log.info("task %d rejected by %s", task_id, by)
+        row = await db.outbound_row(outbound_id)
+        if row is None or row.task_id is None:
+            log.warning("reply %d rejected by %s, but it has no task", outbound_id, by)
+            return
+        await db.move_task(row.task_id, TaskState.NEEDS_HUMAN)
+        log.info("task %d rejected by %s (reply %d)", row.task_id, by, outbound_id)
 
     bot_token = os.environ.get("DISCORD_BOT_TOKEN")
     bot = (
