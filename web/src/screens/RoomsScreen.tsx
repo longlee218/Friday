@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { Memory, MemoryField, MemoryKindForm, Message, Room } from "../api-types";
 import { useAsync } from "../useAsync";
-import { ContextPanel } from "./ContextPanel";
 import { Pill, Skeleton, ago, roomName, shortTime } from "../ui";
 
 /** Rooms: the list on the left, one room's messages on the right.
@@ -102,7 +101,7 @@ function RoomDetail({
   onOpenFlow: (provider: string, id: string) => void;
 }) {
   const feed = useAsync(() => api.messagesIn(200), [room.id]);
-  const [showing, setShowing] = useState<"context" | "memory" | null>(null);
+  const [showing, setShowing] = useState<"memory" | null>(null);
 
   const messages = (feed.value ?? [])
     .filter((m) => m.conversation === room.id)
@@ -114,16 +113,10 @@ function RoomDetail({
       <header className="card row wrap between">
         <Rename room={room} onRenamed={onRenamed} />
         <div className="row">
-          <button onClick={() => setShowing("context")}>What it is told</button>
           <button onClick={() => setShowing("memory")}>What it remembers</button>
         </div>
       </header>
 
-      {showing === "context" && (
-        <Dialog title={`Context · ${roomName(room.id, room.name)}`} onClose={() => setShowing(null)}>
-          <ContextPanel channelId={room.channel_id} />
-        </Dialog>
-      )}
       {showing === "memory" && (
         <Dialog title={`Memory · ${roomName(room.id, room.name)}`} onClose={() => setShowing(null)}>
           <MemoryPanel channelId={room.channel_id} />

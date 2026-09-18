@@ -94,5 +94,5 @@ def test_one_familys_prompt_does_not_wrap_another_familys_rules():
 
     assert "You are an agent in the friday system" not in responder._run.instructions
     assert "Section precedence" not in responder._run.instructions
-    # The precedence rule lives in the one family that has channel sections.
-    assert "channel_overrides" in responder._run.instructions
+    # The one family that reads a channel section is the one told about it.
+    assert "channel_derived" in responder._run.instructions

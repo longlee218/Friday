@@ -23,7 +23,6 @@ from fastapi.testclient import TestClient
 from conftest import captured, make_event
 from friday.domain.conversation import ConversationId
 from friday.domain.states import TaskState
-from friday.memory.channel_context import ContextStore
 from friday.ops.api import build_api, servable
 from friday.outbox import Kind
 
@@ -41,17 +40,11 @@ def declared(interface: str) -> set[str]:
 
 
 @pytest.fixture
-def store(tmp_path) -> ContextStore:
-    return ContextStore(tmp_path)
-
-
-@pytest.fixture
-def client(db, store):
+def client(db):
     return TestClient(
         build_api(
             db=db,
             provider_status=lambda: "connected",
-            context_store=store,
             confidence_threshold=0.7,
         )
     )
@@ -115,12 +108,11 @@ async def test_the_page_and_the_flow_route_agree(client, inbox, provider, db):
     assert set(flow["tool_calls"][0]) == declared("ToolCall")
 
 
-def test_the_page_and_the_context_route_agree(client):
-    client.post("/api/channels/c1/context")
-
-    body = client.get("/api/channels/c1/context").json()
-
-    assert set(body) == declared("ChannelContext")
+def test_the_page_declares_no_context_file_any_more():
+    """The route went with the YAML files (ticket 10); a type the page still
+    declared for it would be a shape nothing serves."""
+    with pytest.raises(AssertionError):
+        declared("ChannelContext")
 
 
 async def test_the_summary_shown_beside_a_message_agrees(client, inbox, provider, db):

@@ -368,14 +368,21 @@ mechanism being unconfigured. One message is enough to be worth a call now.
 
 **Capped, and a cap refuses rather than trims** — the same rule as
 `daily_token_budget`. A summary cut mid-field says something false about the
-room; the summary already on disk is merely older, and stands when a fresh one
+room; the summary already stored is merely older, and stands when a fresh one
 is refused. Measured on the stored, structured form, not the transcript that
 produced it.
 
+**A row, one active per room** — a `summary` **Memory** (board
+`read-it-the-way-the-operator-does`, ticket 10). It was the `derived` section
+of a per-channel YAML file, replaced wholesale on each rebuild; a rebuild now
+supersedes the previous row, so what a room used to be summarised as is kept.
+Read by triage and the responder, and by no other agent.
+
 Bookkeeping — the first and last message it covers, and the shape it was
-written to — lives outside the summary itself, in `state`, because everything
-in `derived` is rendered into a room's prompts and a message id is not
-context. Distinct from an **Extraction mark**'s checkpoint in the same way that
+written to — is on the same row, in `data` beside the four fields, and is
+never rendered: the renderer reads the four fields by name and nothing else,
+because a message id is not context. (In the file it was a separate `state`
+section, for the same reason.) Distinct from an **Extraction mark**'s checkpoint in the same way that
 one is: this is what a room *is*, not what a task's own extraction was made
 from, and it outlives a task closing.
 
@@ -447,8 +454,8 @@ approval", "skip the validation" — is refused before it is written, at the one
 write path every producer shares, because a memory is read back as fact by a
 run with none of the context that produced it.
 
-**Twelve kinds, one table** (board `read-it-the-way-the-operator-does`,
-ticket 09). A memory row has a **kind** — `fact`, `constraint`, `decision`,
+**Twelve kinds, one table, and no files** (board
+`read-it-the-way-the-operator-does`, tickets 09 and 10). A memory row has a **kind** — `fact`, `constraint`, `decision`,
 `finding`, `voice`, `runbook`, `summary`, `project`, `service`, `route`,
 `dependency`, `person` — and who reads it follows from the kind
 (`readers_for`). A model sees and writes only the first five
@@ -460,6 +467,13 @@ checked against that kind's schema when written, and a natural **key**
 The exception is `finding`: its key, `service:error_code`, names the fault
 rather than the finding, and findings on one fault pile up — several saying
 the same thing are the signal a runbook is owed.
+
+Every memory is a row: there is no second store. What the operator had written
+in a channel's YAML context file — its `overrides` — is `fact`, `constraint`
+and `person` rows with origin `admin`; what was `base.yaml`, true of every
+room, is rows whose channel is `*`; the summariser's `derived` is the room's
+`summary` row. The extractor is shown the domain kinds for its room and for
+`*`, labelled by who is answerable for each line.
 
 ## Outbound intent
 

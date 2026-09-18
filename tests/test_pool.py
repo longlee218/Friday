@@ -807,24 +807,21 @@ async def test_an_exchange_in_either_direction_makes_them_known(db):
     assert responder.strangers == [False]
 
 
-async def test_being_written_down_for_the_room_makes_them_known(db, tmp_path):
-    from friday.memory.channel_context import ContextStore
-    from friday.responder import Responder
+async def test_being_written_down_for_the_room_makes_them_known(db):
+    """Written down is a `person` row keyed on their Discord id — a name in a
+    channel file's `people:` map until the files went (board
+    `read-it-the-way-the-operator-does`, ticket 10)."""
+    from friday.domain.models import FridayState, MemoryKind, MemoryOrigin
 
-    store = ContextStore(tmp_path)
-    store.init_channel("watched", overrides={"people": {"reporter": "thân"}})
-    store.hold_all()
-
-    class Stub(StubResponder):
-        def __init__(self):
-            super().__init__("ok")
-            self._context = store
-        knows = Responder.knows
-
-    responder = Stub()
+    await db.memory_add(
+        FridayState(channel_id="watched", agent="operator"), "",
+        kind=MemoryKind.PERSON, origin=MemoryOrigin.ADMIN,
+        data={"discord_id": "dana", "name": "Dana", "role": "qa", "team": "orders"},
+    )
+    responder = StubResponder("ok")
     task = await make_task(db)
-    await db.record_message(make_event(message_id="m1", author_name="reporter"))
-    await db.mark_triaged(make_event(message_id="m1", author_name="reporter"), task.id, decision={"type": "api_issue"})
+    await db.record_message(make_event(message_id="m1", author_id="dana"))
+    await db.mark_triaged(make_event(message_id="m1", author_id="dana"), task.id, decision={"type": "api_issue"})
 
     await Pool(db=db, auto_ask=True, responder=responder).run_once()
 

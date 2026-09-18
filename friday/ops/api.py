@@ -14,21 +14,19 @@ on the way out, even where it was already scrubbed on the way in — the cost is
 a regex over a few kilobytes, and the thing it prevents is unscoped access to
 the operator's account.
 
-**It is no longer only the way out.** One thing enters here: a channel's
-context `overrides`, the layer of its YAML file the machine never writes
-(board D7). That is context and not a decision — task state, approvals,
-classifications and the agent's own memory are all still decided in Discord,
-and none of them is reachable by any verb here. The consequence is
-`check_exposure` at the foot of this file, which stopped warning and started
-refusing: "unauthenticated is safe because it is read-only" was always an
-argument about writes, and there is now a write.
-
-**A second thing enters since** (board `read-it-the-way-the-operator-does`,
-ticket 09): the operator's own memory rows — `origin=admin`, the knowledge
-only they have — through `POST/PUT/DELETE /api/channels/{id}/memories`. Like
-`overrides` it is context rather than a decision, and it goes through the
-store's one write door, so the schema check and the instruction-shape guard
-bind the operator's hand as they bind a model's.
+**It is no longer only the way out.** What enters here is the operator's own
+memory rows — `origin=admin`, the knowledge only they have — through
+`POST/PUT/DELETE /api/channels/{id}/memories` (board
+`read-it-the-way-the-operator-does`, ticket 09). It replaced the first thing
+that ever entered, a channel file's `overrides` (board D7), when the YAML
+files went (ticket 10). It is context and not a decision — task state,
+approvals and classifications are all still decided in Discord, and none of
+them is reachable by any verb here. The consequence is `check_exposure` at
+the foot of this file, which stopped warning and started refusing:
+"unauthenticated is safe because it is read-only" was always an argument
+about writes, and there is a write. It goes through the store's one write
+door, so the schema check and the instruction-shape guard bind the
+operator's hand as they bind a model's.
 """
 
 from __future__ import annotations
@@ -49,7 +47,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from friday.agent.instruction_prompt import channel_sections
 from friday.domain.conversation import ConversationId
 from friday.domain.memory_guard import InstructionShaped
 from friday.store.db import Database
@@ -86,14 +83,6 @@ def build_api(
     db: Database,
     provider_status: Callable[[], str],
     origins: list[str] | None = None,
-    #: The live `ContextStore` the agents read from — the same object, not a
-    #: copy, which is what one process buys (the architecture's first
-    #: constraint). Given it, the routes that write a channel's `overrides`
-    #: are registered; without it they are not registered at all rather than
-    #: answering 503, the shape `Responder` already uses for its memory tools:
-    #: what a caller can reach is composition, and a door that is not in the
-    #: room should not be described.
-    context_store: Any = None,
     #: `config.yaml`'s `triage.confidence_threshold`, served so the page can
     #: show a confidence against the line it is judged by. The flow screen
     #: hardcoded `0.70`, which agreed by luck and would have diverged
@@ -107,15 +96,15 @@ def build_api(
         # Named exactly, and no credentials: the browser is not carrying an
         # identity here because there is none to carry.
         #
-        # `PUT`/`POST` are here because one thing is now writable — a channel's
-        # context `overrides` (board D7). That is the whole of the widening:
-        # nothing that *decides* anything is reachable by either verb, and the
-        # guard that made an unauthenticated board defensible moved to
-        # `check_exposure` below, which stopped warning and started refusing.
+        # `PUT`/`POST` came with the first thing that was writable — a
+        # channel file's `overrides` (board D7), gone with the files (board
+        # `read-it-the-way-the-operator-does`, ticket 10). Nothing that
+        # *decides* anything is reachable by either verb, and the guard that
+        # made an unauthenticated board defensible moved to `check_exposure`
+        # below, which stopped warning and started refusing.
         #
-        # `DELETE` and the unconditional widening came with the operator's
-        # own memory rows (board `read-it-the-way-the-operator-does`, ticket
-        # 09): those routes exist whether or not a context store does.
+        # `DELETE` came with the operator's own memory rows (ticket 09), which
+        # are what the page writes now: a room's facts, runbooks and people.
         allow_methods = ["GET", "PUT", "POST", "DELETE"]
         api.add_middleware(
             CORSMiddleware,
@@ -513,8 +502,8 @@ def build_api(
         """Name a room, or take its name back with an empty string.
 
         The operator's label, and only theirs: it reaches no prompt and no
-        agent reads it, which is what makes it a plain write rather than one
-        of the `channel_context` kind. A room nobody has spoken in has no row
+        agent reads it, which is what makes it a plain write rather than a
+        memory row. A room nobody has spoken in has no row
         to name, and saying so beats creating one.
 
         `:path` on the segment because a conversation id carries a `/` when
@@ -568,9 +557,6 @@ def build_api(
     ) -> list[dict]:
         """What was sent, what is waiting, and what nobody could deliver."""
         return _clean([_outbound(r) for r in await db.outbound(state, limit=limit)])
-
-    if context_store is not None:
-        _mount_context(api, context_store)
 
     _mount_page(api)
     return api
@@ -636,161 +622,6 @@ def _mount_page(api: FastAPI) -> None:
         not a real file is answered with `index.html` rather than a 404."""
         found = servable(PAGE, path)
         return FileResponse(found if found is not None else PAGE / "index.html")
-
-
-def _mount_context(api: FastAPI, store: Any) -> None:
-    """The one part of this API that writes (board D7).
-
-    `docs/SPEC.md` said "any interaction on the web page" was out of scope,
-    and this narrows that rather than deleting it. The rule exists so that
-    **decisions** have one home, and a channel's `overrides` is not a
-    decision — it is context, what is true about a room, and it is the one
-    section the machine is forbidden to touch. Nothing that decides anything
-    is reachable here: not a task's state, not an approval, not a
-    classification, not the agent's own memory.
-    """
-
-    @api.get("/api/channels")
-    async def channels() -> list[str]:
-        """Channels that have a context file. Empty is the shipped state —
-        `context/` has never had one written to it."""
-        return _clean(store.known_channels())
-
-    def _named(channel_id: str) -> str:
-        """A channel id the store will accept, or a 400 saying why.
-
-        `ContextStore.path_for` refuses ids that are not ids — a path, `.`,
-        `..`, or `base`, which is the file that reaches *every* channel.
-        Unhandled that arrives as a 500, which reads as "the server is
-        broken" rather than "that is not a channel"; ticket 03 made the same
-        objection about `FileExistsError`.
-        """
-        try:
-            store.path_for(channel_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return channel_id
-
-    @api.get("/api/channels/{channel_id}/context")
-    async def channel_context(channel_id: str = Path(...)) -> dict:
-        """The three layers separately, and what they merge to.
-
-        Separately because the page has to show what an edit is *overriding*:
-        a key typed into `overrides` that also exists in `derived` silently
-        shadows the summariser forever, which is a legitimate thing to want
-        and a bad thing to do by accident.
-
-        `live` is what the running agents are currently using — held from the
-        last reload — and it differs from what is on disk exactly when
-        somebody has saved and not reloaded. That difference is the one rule
-        of D8 made visible.
-
-        `prompt` is the three layers rendered by the seam that actually feeds
-        an agent, `instruction_prompt.channel_sections`, rather than a merge
-        of them. That distinction is not cosmetic and it cost a test to find:
-        `ChannelContext.merged()` exists, and **nothing has ever rendered a
-        prompt from it** — the layers reach a model as three separate labelled
-        sections, and the model is told what each one means. So a key in both
-        `derived` and `overrides` does not resolve to one value the way a
-        merge implies; the model sees both and reconciles them itself. That is
-        what `also_in` is warning about, and it is a worse thing to do by
-        accident than a shadowed dict key would be.
-        """
-        on_disk = store.load(_named(channel_id))
-        held = store.context(channel_id)
-        return _clean(
-            {
-                "channel_id": channel_id,
-                "exists": store.path_for(channel_id).exists(),
-                "base": on_disk.base,
-                "derived": on_disk.derived,
-                "overrides": on_disk.overrides,
-                # What an agent is actually told about this room, through the
-                # one seam that renders it — including the escaping, so the
-                # page shows what the model reads rather than what was typed.
-                "prompt": channel_sections(on_disk),
-                "live": channel_sections(held) if held is not None else None,
-                "also_in": sorted(
-                    set(on_disk.overrides) & (set(on_disk.derived) | set(on_disk.base))
-                ),
-            }
-        )
-
-    @api.post("/api/channels/{channel_id}/context", status_code=201)
-    async def create_channel_context(channel_id: str = Path(...)) -> dict:
-        """Create a file for a channel that has none — what `init_channel.py`
-        does from a terminal.
-
-        `FileExistsError` is the store's own guard and it means something
-        specific: `overrides` is never clobbered, an operator's second `init`
-        included. It reaches the page as a 409, not a 500.
-        """
-        try:
-            store.init_channel(_named(channel_id))
-        except FileExistsError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from None
-        return _clean({"channel_id": channel_id, "created": True})
-
-    @api.put("/api/channels/{channel_id}/context/overrides")
-    async def set_overrides(
-        channel_id: str = Path(...), body: dict[str, Any] = Body(...)
-    ) -> dict:
-        """Replace a channel's `overrides` from key/value pairs.
-
-        Pairs, not YAML (D9): `merged()` is a flat dict with no schema, and a
-        raw-YAML field would make "this channel's file is malformed and it now
-        has no context" a state the UI can produce. So values must be strings,
-        and anything else is a 422 rather than something that reaches a prompt
-        as a rendered `dict`.
-
-        Stored plain. `ChannelContext`'s own rule — *"Every value here is
-        plain text. Escaping happens once, on the way into a prompt"* — so
-        escaping here would show the model `&amp;lt;b&amp;gt;`.
-
-        Takes effect on reload, not now. That is the one rule (D8), and
-        `GET .../context` exposes the difference as `live`.
-
-        A value refused by `check_not_instruction_shaped` (board
-        `what-the-room-already-knows`, ticket 11, D25) is a 422 too — this is
-        the operator's own hand, the one producer D19 says the board may not
-        ship without, and the refusal binds it the same as any other.
-        """
-        overrides = body.get("overrides")
-        if not isinstance(overrides, dict):
-            raise HTTPException(422, "body needs an 'overrides' object")
-        for key, value in overrides.items():
-            if not isinstance(value, str):
-                raise HTTPException(
-                    422,
-                    f"{key!r} is a {type(value).__name__}; overrides are key/value "
-                    "pairs of text, because every value here is rendered into a "
-                    "prompt as a line",
-                )
-        if not store.path_for(_named(channel_id)).exists():
-            raise HTTPException(
-                404, f"{channel_id} has no context file — create it first"
-            )
-        try:
-            store.set_overrides(channel_id, overrides)
-        except InstructionShaped as refused:
-            raise HTTPException(422, str(refused)) from None
-        return _clean({"channel_id": channel_id, "saved": True, "live": False})
-
-    @api.post("/api/context/reload")
-    async def reload_context() -> dict:
-        """Make every file on disk live — the page's edits and a hand-edit
-        alike, which is what keeps it one rule rather than two.
-
-        Reports what would not parse, because unlike startup there is somebody
-        watching this one.
-        """
-        # Scrubbed like everything else, and here it is not ceremony: a
-        # `yaml.YAMLError` quotes the source line it failed on, so an
-        # unscrubbed `problems` hands back the content of the file that
-        # could not be parsed — operator-written, and able to hold whatever
-        # they pasted into it.
-        problems = store.reload()
-        return _clean({"reloaded": store.known_channels(), "problems": problems})
 
 
 #: Who the board's own memory routes write as.

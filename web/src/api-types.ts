@@ -151,23 +151,6 @@ export interface Board {
   messages: Message[];
 }
 
-/** A channel's three context layers, plus what an agent is actually told.
- *  `prompt` is the rendering on disk; `live` is the one the running agents
- *  hold. They differ exactly between saving and reloading. */
-export interface ChannelContext {
-  channel_id: string;
-  exists: boolean;
-  base: Record<string, string>;
-  derived: Record<string, string>;
-  overrides: Record<string, string>;
-  prompt: string;
-  live: string | null;
-  /** Keys also present in `base` or `derived`. The model is shown both
-   *  sections and reconciles them itself — there is no merge that picks a
-   *  winner, which is why this is worth saying out loud. */
-  also_in: string[];
-}
-
 /** Today's tokens. An agent that spent nothing is absent rather than zero —
  *  which agents exist is `config.yaml`'s business, so there is no list to
  *  enumerate against. */

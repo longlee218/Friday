@@ -48,7 +48,7 @@ class Draft:
 class Responder:
     @classmethod
     def build(
-        cls, config, *, skills=None, context_store=None, db=None,
+        cls, config, *, skills=None, db=None,
         record=None, spent=None,
     ) -> "Responder | None":
         """The responder, or None when it is off or unconfigured.
@@ -62,7 +62,6 @@ class Responder:
         built = cls(
             config=settings,
             skills=skills,
-            context_store=context_store,
             db=db,
             record=record,
             spent=spent,
@@ -79,8 +78,7 @@ class Responder:
         config: AgentConfig,
         model=None,
         skills=None,
-        context_store=None,
-        #: The store, for the four memory tools — the responder's own, scoped
+        #: The store, for the memory tools and for the room's summary row — the responder's own, scoped
         #: to one channel per call. `None` means what it means for `skills`:
         #: the tools are not wired and the prompt does not claim them.
         #: Ticket 09's D9: the responder is the obvious first agent to get
@@ -90,9 +88,13 @@ class Responder:
         record=None,
         spent=None,
     ) -> None:
-        #: Where the room's register lives. None means every channel writes
-        #: the way the voice alone says, which is what shipped before.
-        self._context = context_store
+        #: Where the room's summary row is read from, per draft. It was a
+        #: `ContextStore` of YAML files, whose `overrides` could carry a
+        #: room's `register` and a `people:` map; the files are gone (board
+        #: `read-it-the-way-the-operator-does`, ticket 10). How a room is
+        #: spoken in is a `voice` row now, reached through `memory_search`,
+        #: and who someone is is a `person` row, read by code.
+        self._db = db
         #: How many of the operator's real messages to show as tone examples.
         #: The responder's knob, read where the responder is built — the
         #: workflow runner fetches them but has no opinion on how many.
@@ -166,12 +168,6 @@ class Responder:
             spent=spent,
         )
 
-    def knows(self, channel_id: str, name: str) -> bool:
-        """Whether the operator wrote this person down for this room."""
-        room = self._context.context(channel_id) if self._context else None
-        people = (room.overrides.get("people") or {}) if room else {}
-        return name in people
-
     async def draft(
         self,
         *,
@@ -209,15 +205,15 @@ class Responder:
         and never silence either.
         """
         channel_id = state.channel_id if state is not None else None
-        room = (
-            self._context.context(channel_id)
-            if self._context is not None and channel_id is not None
+        summary = (
+            await self._db.room_summary(channel_id)
+            if self._db is not None and channel_id is not None
             else None
         )
         said = build_input(
             asking=asking,
             params=params,
-            room=room,
+            summary=summary,
             stranger=stranger,
             has_memory=self._has_memory,
             tone=tone,

@@ -17,7 +17,7 @@ import pytest
 from agents.models.interface import Model
 from agents.testing import ScriptedModel, assistant_message, function_call
 
-from conftest import make_event
+from conftest import make_event, summary_row
 from friday.config import AgentConfig
 from friday.triage import Decided, NeedsHuman, Triage
 from friday.triage.prefilter import Sensitive
@@ -352,53 +352,51 @@ def test_triage_still_has_exactly_the_one_tool_that_is_its_answer():
 
 
 def test_build_input_carries_the_turn_and_no_room_by_default():
-    """No room, no `<channel_derived>` section at all — a room nobody has
-    written anything about must not cost the classifier a byte, the same
-    property ticket 01 proved for the extractor."""
+    """No summary, no `<channel_derived>` section at all — a room nobody has
+    summarised must not cost the classifier a byte, the same property
+    ticket 01 proved for the extractor."""
     from friday.triage.context import LightContext
     from friday.triage.prompt import build_input
 
-    said = build_input(LightContext(turn=[make_event(text="api lỗi")], room=None))
+    said = build_input(LightContext(turn=[make_event(text="api lỗi")], summary=None))
 
     assert "<channel_derived>" not in said
     assert "api lỗi" in said
 
 
 def test_build_input_carries_the_rooms_summary_when_there_is_one():
-    """The channel slot ticket 06's summariser writes to, read directly —
-    the same section the responder already reads, not a new one invented
-    for triage."""
-    from friday.memory.channel_context import ChannelContext
+    """The row ticket 06's summariser writes, read directly — the same
+    section the responder reads, not a new one invented for triage."""
     from friday.triage.context import LightContext
     from friday.triage.prompt import build_input
 
-    room = ChannelContext(
-        channel_id="watched", base={}, derived={"summary": {"topic": "the reelme api"}},
-        overrides={},
-    )
-    said = build_input(LightContext(turn=[make_event(text="api lỗi")], room=room))
+    said = build_input(LightContext(
+        turn=[make_event(text="api lỗi")], summary=summary_row(topic="the reelme api"),
+    ))
 
     assert "<channel_derived>" in said
     assert "the reelme api" in said
 
 
-def test_build_input_does_not_carry_overrides_or_base():
-    """Domain memory and operator overrides do not reach triage — it decides
-    a label, not a value, and those layers are exactly the kind of thing a
-    value would be built from."""
-    from friday.memory.channel_context import ChannelContext
-    from friday.triage.context import LightContext
+async def test_build_input_does_not_carry_the_operators_rows(db):
+    """Domain rows do not reach triage, the operator's or a model's, here or
+    everywhere — it decides a label, not a value, and those rows are exactly
+    the kind of thing a value would be built from. `readers_for` gives
+    triage the summary and nothing else."""
+    from friday.domain.models import FridayState, MemoryKind, MemoryOrigin
+    from friday.triage.context import build_light_context
     from friday.triage.prompt import build_input
 
-    room = ChannelContext(
-        channel_id="watched",
-        base={"company": "apero"},
-        derived={"summary": {"topic": "x"}},
-        overrides={"test.apero": "staging"},
-    )
-    said = build_input(LightContext(turn=[make_event(text="api lỗi")], room=room))
+    for channel in ("watched", "*"):
+        await db.memory_add(
+            FridayState(channel_id=channel, agent="operator"),
+            f"test.apero is staging for {channel}",
+            kind=MemoryKind.FACT, origin=MemoryOrigin.ADMIN,
+        )
+    said = build_input(await build_light_context(
+        db, channel_id="watched", turn=[make_event(text="api lỗi")],
+    ))
 
-    assert "apero" not in said.replace("the reelme api", "")  # topic itself may say "apero"
     assert "staging" not in said
 
 
@@ -413,26 +411,22 @@ def test_build_input_renders_a_real_turn_as_multiple_lines():
         make_event(message_id="1", text="api lỗi rồi anh ơi"),
         make_event(message_id="2", text="curl -X GET /pay trả 500"),
     ]
-    said = build_input(LightContext(turn=turn, room=None))
+    said = build_input(LightContext(turn=turn, summary=None))
 
     assert "api lỗi rồi anh ơi" in said
     assert "curl -X GET /pay trả 500" in said
     assert said.count("[") >= 2  # two bracketed timestamps, two lines
 
 
-async def test_decide_resolves_the_room_from_its_own_context_store():
-    """`Triage` holds the store, resolves the room per call from the event's
-    channel — the same split `Extractor` uses: a store lives as long as the
-    process, a room lasts one call."""
-    from friday.memory.channel_context import ChannelContext
+async def test_decide_resolves_the_room_from_its_own_store():
+    """`Triage` holds what it reads summaries from, and resolves the room per
+    call from the event's channel: a store lives as long as the process, a
+    room lasts one call."""
 
-    class _Store:
-        def context(self, channel_id):
+    class _Summaries:
+        async def room_summary(self, channel_id):
             return (
-                ChannelContext(
-                    channel_id=channel_id, base={}, overrides={},
-                    derived={"summary": {"topic": "the reelme api"}},
-                )
+                summary_row(channel_id, topic="the reelme api")
                 if channel_id == "watched"
                 else None
             )
@@ -449,7 +443,7 @@ async def test_decide_resolves_the_room_from_its_own_context_store():
         def stream_response(self, *a, **kw):
             raise NotImplementedError
 
-    triage = Triage(config=CONFIG, model=_Capturing(), context=_Store())
+    triage = Triage(config=CONFIG, model=_Capturing(), summaries=_Summaries())
 
     await triage.decide(make_event(text="api lỗi", channel_id="watched"))
     said = str(seen[0])
@@ -500,55 +494,52 @@ async def test_decide_renders_the_given_turn_not_just_the_one_event():
 # --- ticket 14: the light context is gathered in one place ----------------
 
 
-def test_light_context_holds_exactly_the_turn_and_the_room():
-    from friday.memory.channel_context import ChannelContext
+def test_light_context_holds_exactly_the_turn_and_the_summary():
     from friday.triage.context import LightContext
 
     turn = [make_event(text="api lỗi")]
-    room = ChannelContext(channel_id="watched", base={}, derived={}, overrides={})
+    row = summary_row()
 
-    context = LightContext(turn=turn, room=room)
+    context = LightContext(turn=turn, summary=row)
 
     assert context.turn == turn
-    assert context.room is room
+    assert context.summary is row
 
 
-def test_build_light_context_is_the_only_place_that_resolves_a_room():
-    from friday.memory.channel_context import ChannelContext
+async def test_build_light_context_is_the_only_place_that_resolves_a_room():
     from friday.triage.context import build_light_context
 
-    class _Store:
-        def context(self, channel_id):
+    class _Summaries:
+        async def room_summary(self, channel_id):
             return (
-                ChannelContext(
-                    channel_id=channel_id, base={}, overrides={},
-                    derived={"summary": {"topic": "the reelme api"}},
-                )
+                summary_row(channel_id, topic="the reelme api")
                 if channel_id == "watched"
                 else None
             )
 
     turn = [make_event(text="api lỗi")]
 
-    context = build_light_context(_Store(), channel_id="watched", turn=turn)
+    context = await build_light_context(_Summaries(), channel_id="watched", turn=turn)
     assert context.turn == turn
-    assert context.room.derived["summary"]["topic"] == "the reelme api"
+    assert context.summary.data["topic"] == "the reelme api"
 
-    elsewhere = build_light_context(_Store(), channel_id="somewhere-else", turn=turn)
-    assert elsewhere.room is None, "a room leaked into another channel"
+    elsewhere = await build_light_context(
+        _Summaries(), channel_id="somewhere-else", turn=turn
+    )
+    assert elsewhere.summary is None, "a room leaked into another channel"
 
 
-def test_build_light_context_with_no_store_carries_no_room():
-    """An eval script or a bare test with nothing to resolve from — the same
-    behaviour a channel with no context file yet already gets."""
+async def test_build_light_context_with_no_store_carries_no_room():
+    """A bare test with nothing to resolve from — the same behaviour a room
+    nobody has summarised already gets."""
     from friday.triage.context import build_light_context
 
     turn = [make_event(text="api lỗi")]
 
-    context = build_light_context(None, channel_id="watched", turn=turn)
+    context = await build_light_context(None, channel_id="watched", turn=turn)
 
     assert context.turn == turn
-    assert context.room is None
+    assert context.summary is None
 
 
 def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
@@ -557,7 +548,6 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
     the exact two section calls `build_input` always made — and the new way,
     and compared for equality, not "contains the same words"."""
     from friday.agent.instruction_prompt import assemble, channel_derived, conversation
-    from friday.memory.channel_context import ChannelContext
     from friday.triage.context import LightContext
     from friday.triage.prompt import build_input
 
@@ -565,13 +555,10 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
         make_event(message_id="1", text="api lỗi rồi anh ơi"),
         make_event(message_id="2", text="curl -X GET /pay trả 500"),
     ]
-    room = ChannelContext(
-        channel_id="watched", base={}, overrides={},
-        derived={"summary": {"topic": "the reelme wrapper api"}},
-    )
+    room = summary_row(topic="the reelme wrapper api")
 
     the_old_way = assemble(channel_derived(room), conversation(list(turn), quoted=True))
-    the_new_way = build_input(LightContext(turn=turn, room=room))
+    the_new_way = build_input(LightContext(turn=turn, summary=room))
 
     assert the_new_way == the_old_way
 
@@ -585,9 +572,9 @@ async def test_decide_gathers_context_through_the_one_builder(monkeypatch):
     calls = []
     real = triage_module.build_light_context
 
-    def spy(context_store, *, channel_id, turn):
+    async def spy(summaries, *, channel_id, turn):
         calls.append((channel_id, tuple(turn)))
-        return real(context_store, channel_id=channel_id, turn=turn)
+        return await real(summaries, channel_id=channel_id, turn=turn)
 
     monkeypatch.setattr(triage_module, "build_light_context", spy)
 
@@ -599,27 +586,23 @@ async def test_decide_gathers_context_through_the_one_builder(monkeypatch):
     assert len(calls) == 1
 
 
-def test_build_light_context_logs_counts_and_sizes_never_content(caplog):
+async def test_build_light_context_logs_counts_and_sizes_never_content(caplog):
     """One line per build, at debug level — how many messages, how many
     characters, whether a room summary was present. Never a message body or
     a summary field: that would be a second, unredacted renderer of what
     `model_calls` already records."""
     import logging
 
-    from friday.memory.channel_context import ChannelContext
     from friday.triage.context import build_light_context
 
-    class _Store:
-        def context(self, channel_id):
-            return ChannelContext(
-                channel_id=channel_id, base={}, overrides={},
-                derived={"summary": {"topic": "a secret internal hostname"}},
-            )
+    class _Summaries:
+        async def room_summary(self, channel_id):
+            return summary_row(channel_id, topic="a secret internal hostname")
 
     turn = [make_event(text="the reporter's own secret words")]
 
     with caplog.at_level(logging.DEBUG, logger="friday.triage.context"):
-        build_light_context(_Store(), channel_id="watched", turn=turn)
+        await build_light_context(_Summaries(), channel_id="watched", turn=turn)
 
     (record,) = caplog.records
     assert "the reporter's own secret words" not in record.message
@@ -631,54 +614,46 @@ def test_build_light_context_logs_counts_and_sizes_never_content(caplog):
 # --- prefix stability, one layer up (ticket 09 reverses ticket 26) --------
 
 
-async def test_the_summary_section_does_not_care_how_much_the_room_has_said(db, tmp_path):
+async def test_the_summary_section_does_not_care_how_much_the_room_has_said(db):
     """Ticket 26's guarantee was `relevant_messages`'s: unbounded, so a
     relevant message once included was never evicted and the prefix a model
     saw on call N was still there on call N+1. That guarantee lived at the
     database layer — every new message widened the window a little.
 
-    This one lives at the summary, and does not merely assert `build_input`
-    is a pure function of a fixed object (a first version of this test did
-    exactly that and proved nothing about a real database): it records a
-    hundred real messages into the same room, through a real `ContextStore`,
-    with **no `rebuild_all()` in between** — the heartbeat's own job, which
-    this test deliberately does not call — and checks that what `store.context`
-    hands `build_input` has not moved. `channel_derived` only ever renders
-    `ctx.derived`, and nothing here writes to it except a rebuild the
-    summariser runs on its own schedule, strictly less often than every
-    message.
+    This one lives at the summary row, and does not merely assert
+    `build_input` is a pure function of a fixed object: it records real
+    messages into the same room, through the real store, with **no
+    `rebuild_all()` in between** — the heartbeat's own job, which this test
+    deliberately does not call — and checks that what `build_light_context`
+    hands `build_input` has not moved. `channel_derived` only ever renders the
+    summary row, and nothing writes one but the summariser, on its own
+    schedule, strictly less often than every message.
     """
-    from friday.memory.channel_context import ContextStore
-    from friday.triage.context import LightContext
+    from friday.domain.models import FridayState, MemoryKind
+    from friday.triage.context import build_light_context
     from friday.triage.prompt import build_input
 
-    store = ContextStore(tmp_path)
-    store.init_channel(
-        "watched", overrides={},
+    await db.memory_add(
+        FridayState(channel_id="watched", agent="summary"), "the reelme wrapper api",
+        kind=MemoryKind.SUMMARY,
+        data={"topic": "the reelme wrapper api", "facts": ["x"], "summary_of": "1"},
     )
-    store.rebuild_derived(
-        "watched", {"summary": {"topic": "the reelme wrapper api", "facts": ["x"]}}
-    )
-    store.hold_all()
 
-    first = build_input(
-        LightContext(turn=[make_event(message_id="1", text="a")], room=store.context("watched"))
-    )
+    first = build_input(await build_light_context(
+        db, channel_id="watched", turn=[make_event(message_id="1", text="a")],
+    ))
     # Real messages, recorded into the actual database — not rebuilt from.
-    # If anything here moved the summary, this is where it would show; the
-    # count only has to be more than zero, so it stays small for speed.
     for n in range(2, 12):
         await db.record_message(make_event(message_id=str(n), text=f"noise {n}"))
-    later = build_input(
-        LightContext(
-            turn=[make_event(message_id="11", text="a later mention")],
-            room=store.context("watched"),
-        )
-    )
+    later = build_input(await build_light_context(
+        db, channel_id="watched",
+        turn=[make_event(message_id="11", text="a later mention")],
+    ))
 
     def summary_section(said: str) -> str:
         return said.split("<conversation>")[0]
 
+    assert "the reelme wrapper api" in summary_section(first)
     assert summary_section(first) == summary_section(later)
 
 
@@ -689,20 +664,16 @@ def test_two_turns_against_the_same_room_share_everything_but_the_turn():
     never a running list. What survives between two calls is the summary
     section byte-for-byte, not a growing shared prefix — the property is
     stronger, not merely relocated."""
-    from friday.memory.channel_context import ChannelContext
     from friday.triage.context import LightContext
     from friday.triage.prompt import build_input
 
-    room = ChannelContext(
-        channel_id="watched", base={}, overrides={},
-        derived={"summary": {"topic": "the reelme wrapper api"}},
-    )
+    room = summary_row(topic="the reelme wrapper api")
 
-    said_a = build_input(LightContext(turn=[make_event(message_id="1", text="api lỗi")], room=room))
+    said_a = build_input(LightContext(turn=[make_event(message_id="1", text="api lỗi")], summary=room))
     said_b = build_input(
         LightContext(
             turn=[make_event(message_id="2", text="a completely different report")],
-            room=room,
+            summary=room,
         )
     )
 
@@ -723,27 +694,23 @@ def test_the_shared_prefix_between_two_triage_calls_is_almost_the_whole_prompt()
     and checked the ratio against a hand-rolled prompt stand-in; this one
     holds the summary fixed — what the DAG's own rebuild schedule guarantees
     in production — and varies only the turn."""
-    from friday.memory.channel_context import ChannelContext
     from friday.triage.context import LightContext
     from friday.triage.prompt import build_input
 
     instructions = Triage(config=CONFIG)._run.agent.instructions
-    room = ChannelContext(
-        channel_id="watched", base={}, overrides={},
-        derived={"summary": {
-            "topic": "the reelme wrapper api",
-            "facts": ["test.apero is the staging host"],
-            "decisions": ["traces are looked up by x-request-id"],
-        }},
+    room = summary_row(
+        topic="the reelme wrapper api",
+        facts=["test.apero is the staging host"],
+        decisions=["traces are looked up by x-request-id"],
     )
 
     early = instructions + build_input(
-        LightContext(turn=[make_event(message_id="1", text="api lỗi")], room=room)
+        LightContext(turn=[make_event(message_id="1", text="api lỗi")], summary=room)
     )
     late = instructions + build_input(
         LightContext(
             turn=[make_event(message_id="99", text="a much later, unrelated mention")],
-            room=room,
+            summary=room,
         )
     )
 

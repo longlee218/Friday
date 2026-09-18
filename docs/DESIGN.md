@@ -478,11 +478,14 @@ what changed marked.
 over an SSH tunnel; every *decision* still happens in Discord — task state,
 approvals and classifications are not editable from a browser.
 
-**No longer true: "read-only".** One thing is writable, a channel's context
-`overrides` — the section of `context/<channel>.yaml` the machine never touches
-and which was created for the operator. That reverses this document's own
-premise, and the argument is D7 on the new board: the rule exists so that
-*decisions* have one home, and context is not a decision. It is also why
+**No longer true: "read-only".** One thing is writable: the operator's own
+memory rows (`origin=admin` — facts, constraints, runbooks, services, people),
+through the Rooms screen's memory form. It began as a channel's context
+`overrides`, the section of `context/<channel>.yaml` the machine never
+touched; the YAML files went (board `read-it-the-way-the-operator-does`,
+ticket 10) and every memory is a row. That reverses this document's own
+premise, and the argument is D7 on the `a-window-on-the-whole-path` board: the
+rule exists so that *decisions* have one home, and context is not a decision. It is also why
 `check_exposure` stopped warning and started refusing (D10) — "unauthenticated
 is safe because it is read-only" was an argument about writes, and there are
 now writes.

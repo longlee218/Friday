@@ -520,8 +520,7 @@ async def test_the_fingerprint_is_the_prompt_so_every_input_counts():
     Three things must move it: the reporter's words, the field schema, and the
     room."""
     from friday.extraction import input_fingerprint, registered
-    from friday.memory.channel_context import ChannelContext
-    from tests.test_extraction import _context, _install
+    from tests.test_extraction import _context, _install, _rows
 
     _install("fp_probe", _StandsForAnExtractor())
     try:
@@ -534,9 +533,7 @@ async def test_the_fingerprint_is_the_prompt_so_every_input_counts():
             _context(
                 "API lỗi",
                 ApiIssueParams,
-                room=ChannelContext(
-                    channel_id="watched", base={}, derived={}, overrides={"env": "staging"}
-                ),
+                memories=_rows("env: staging"),
             ),
         )
     finally:
@@ -659,26 +656,23 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
     the extractor could not tell whether `test.apero` was staging or dev, so
     it asked, and nobody answered.
     """
-    import yaml
-
     from friday.dag.prepare import prepare_node
-    from friday.memory.channel_context import ContextStore
+    from friday.domain.models import FridayState, MemoryKind, MemoryOrigin
     from tests.test_extraction import _install
 
-    (tmp_path / "watched.yaml").write_text(
-        yaml.safe_dump({"derived": {}, "overrides": {"test.apero": "staging"}})
+    await db.memory_add(
+        FridayState(channel_id="watched", agent="operator"),
+        "test.apero: staging", kind=MemoryKind.FACT, origin=MemoryOrigin.ADMIN,
     )
-    store = ContextStore(tmp_path).hold_all()
 
     seen: list[str] = []
 
     class _ReadsTheRoom(_StandsForAnExtractor):
         async def run(self, context, *, task_id=None, node=None):
-            # Board `what-the-room-already-knows`, ticket 15: the room now
-            # arrives already resolved on `context.room`, gathered by
-            # `build_full_context` from the `context_store` given to
-            # `prepare_node` below — this double no longer resolves it
-            # itself.
+            # The room arrives already gathered, as the operator's rows in
+            # `context.domain_memories`, read by `build_full_context` through
+            # `deps.db` (board `read-it-the-way-the-operator-does`, ticket
+            # 10) — this double does not resolve it itself.
             said = await self.would_ask(context)
             seen.append(said)
             # Asserted on the *value* and on the section, never on
@@ -686,7 +680,9 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
             # the first version of this test passed with the room never
             # actually reaching the prompt. Only the room can put `staging`
             # here.
-            assert "[channel" in said, f"no room section — room was {context.room!r}"
+            assert "[channel" in said, (
+                f"no room section — rows were {context.domain_memories!r}"
+            )
             assert "staging" in said, "the room's value never reached the prompt"
             return (
                 ApiIssueParams(
@@ -699,7 +695,7 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
 
     _install("api_issue", _ReadsTheRoom())
     task = await _reported(db, text="@Lee kiểm tra cho e curl sau https://test.apero/health")
-    node = prepare_node("api_issue", ApiIssueParams, context_store=store)
+    node = prepare_node("api_issue", ApiIssueParams)
 
     outcome = await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
 
@@ -724,13 +720,10 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     Reproduced with a probe before it was fixed: two passes, one model call,
     `did the new fact reach a model? False`.
     """
-    import yaml
-
     from friday.dag.prepare import prepare_node
-    from friday.memory.channel_context import ContextStore
+    from friday.domain.models import FridayState, MemoryKind, MemoryOrigin
     from tests.test_extraction import _install
 
-    store = ContextStore(tmp_path).hold_all()
     asked: list[str] = []
 
     class _Watching(_StandsForAnExtractor):
@@ -740,7 +733,7 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
 
     _install("api_issue", _Watching())
     task = await _reported(db)
-    node = prepare_node("api_issue", ApiIssueParams, context_store=store)
+    node = prepare_node("api_issue", ApiIssueParams)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
     # `[channel`, not "staging": the field schema's own `doc` for
@@ -749,12 +742,12 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     # That mistake cost two attempts on this ticket already.
     assert len(asked) == 1 and "[channel" not in asked[0]
 
-    # The operator now writes down what the room is, and reloads — which is
-    # what the board's button does (D8: an override takes effect on reload).
-    (tmp_path / "watched.yaml").write_text(
-        yaml.safe_dump({"derived": {}, "overrides": {"test.apero": "staging"}})
+    # The operator now writes down what the room is, on the board's memory
+    # form — a row, live on the next read, with no reload to forget.
+    await db.memory_add(
+        FridayState(channel_id="watched", agent="operator"),
+        "test.apero: staging", kind=MemoryKind.FACT, origin=MemoryOrigin.ADMIN,
     )
-    store.reload()
 
     await node.run(DAGState.empty(), DAGDeps(task=await db.task(task.id), db=db))
 

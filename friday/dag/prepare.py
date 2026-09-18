@@ -47,13 +47,6 @@ def prepare_node(
     *,
     on_ready: Callable[[Params], Params | Action] | None = None,
     budget_tokens: int | None = None,
-    #: Board `what-the-room-already-knows`, ticket 15: closed over like
-    #: `budget_tokens`, for the same reason — one context store serves
-    #: every conversation, and `build_full_context` is the only place this
-    #: node reaches it. `None` for an install with no channel context at
-    #: all, which reads exactly as it did before rooms reached the
-    #: extractor.
-    context_store: Any = None,
 ) -> Node:
     """Node 0: everything the reporter has said, filled in and checked.
 
@@ -84,7 +77,6 @@ def prepare_node(
         # fetch on its own, ticket 08's `known` included.
         context = await build_full_context(
             deps.db,
-            context_store,
             channel_id=deps.task.conversation.channel_id,
             task_id=deps.task.id,
             known=known,
@@ -175,7 +167,7 @@ async def prepare(
     the same `params` it passes here, before this call fills anything
     further, so the schema the model is shown already drops what this
     task's own store has. `channel_id` no longer reaches this function at
-    all — `context.room` is resolved before `prepare` is ever called.
+    all — the room's rows are read before `prepare` is ever called.
     """
     clarify: Clarify | None = None
     if context is not None and context.transcript is not None:

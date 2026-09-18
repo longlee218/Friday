@@ -13,7 +13,7 @@ from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
 
-from friday.memory.channel_context import ContextRebuilder, ContextStore
+from friday.memory.channel_context import ContextRebuilder
 from friday.config import ConfigError, load_config
 from friday.store.db import Database
 from friday.inbox import Inbox
@@ -41,7 +41,7 @@ async def ingest(inbox: Inbox) -> None:
         pass
 
 
-async def serve_board(db, provider, config, sock, context_store, threshold) -> None:
+async def serve_board(db, provider, config, sock, threshold) -> None:
     """The board's server runs in this process like everything else.
 
     Only the JSON API for now: the server-rendered page was deleted with the
@@ -61,10 +61,6 @@ async def serve_board(db, provider, config, sock, context_store, threshold) -> N
         db=db,
         provider_status=status,
         origins=list(config.board_origins),
-        # The same object the agents read from, not a copy — which is what one
-        # process buys. A write here reaches the next prompt assembled in that
-        # room once somebody reloads (board D8).
-        context_store=context_store,
         # Asked of the runner, not read out of config: which knobs triage
         # has is triage's business. The page draws a confidence against this
         # line and must not invent it.
@@ -120,7 +116,6 @@ async def _run(stack: AsyncExitStack) -> None:
         else:
             await db.record_tool_call(**asdict(entry))
 
-    context_store = ContextStore.build(config)
     skills = SkillLibrary.build(config)
 
     provider = DiscordUserProvider(token=token)
@@ -183,7 +178,6 @@ async def _run(stack: AsyncExitStack) -> None:
         still_typing=inbox.still_typing,
         record=record_call,
         spent=db.spent_today,
-        context=context_store,
     )
 
     # Connected here rather than by whoever uses them: a connection has a
@@ -218,13 +212,11 @@ async def _run(stack: AsyncExitStack) -> None:
         config,
         servers={s.name: s for s in servers},
         skills=skills,
-        context_store=context_store,
     )
 
     responder = Responder.build(
         config,
         skills=skills,
-        context_store=context_store,
         db=db,
         record=record_call,
         spent=db.spent_today,
@@ -291,7 +283,6 @@ async def _run(stack: AsyncExitStack) -> None:
         liveness=liveness,
         context_rebuilder=ContextRebuilder.build(
             config,
-            store=context_store,
             db=db,
             record=record_call,
             spent=db.spent_today,
@@ -338,7 +329,7 @@ async def _run(stack: AsyncExitStack) -> None:
             group.create_task(heartbeat.run_forever())
             group.create_task(
                 serve_board(
-                    db, provider, config, board_socket, context_store,
+                    db, provider, config, board_socket,
                     runner.confidence_threshold,
                 )
             )

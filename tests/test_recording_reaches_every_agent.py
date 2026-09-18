@@ -115,7 +115,6 @@ async def test_the_summariser_records(spy):
 
     rebuilder = ContextRebuilder.build(
         _config(summary=CONFIG),
-        store=_Store(),
         db=_LoudChannel(),
         record=SINK,
         spent=LEDGER,
@@ -136,29 +135,22 @@ def _config(**agents):
         agents=agents,
         triage_examples=[],
         sensitive_words=(),
-        ingest=SimpleNamespace(turn_seconds=0),
+        ingest=SimpleNamespace(turn_seconds=0, watched_channels=frozenset({"c1"})),
         workflows=SimpleNamespace(use_responder=True),
         context=SimpleNamespace(summary_max_chars=6000),
     )
 
 
-class _Store:
-    def known_channels(self):
-        return ["c1"]
+class _LoudChannel:
+    """A room never summarised before, so it is worth summarising — which
+    is what makes the harness get built at all."""
 
-    def summary_of(self, channel_id):
-        """Never summarised before, so the room is worth summarising — which
-        is what makes the harness get built at all."""
+    async def room_summary(self, channel_id):
         return None
 
-    def remember_summary_of(self, channel_id, message_id):
-        self.summarised = message_id
+    async def memory_add(self, state, text, **kw):
+        self.summarised = kw.get("data")
 
-    def rebuild_derived(self, channel_id, derived):
-        self.derived = derived
-
-
-class _LoudChannel:
     async def relevant_messages_in_channel(self, provider, channel_id):
         from tests.conftest import make_event
 

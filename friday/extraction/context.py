@@ -17,7 +17,7 @@ its cooldown and its ineffective-compaction bookkeeping (ticket 08) — and
 the extractor's own `would_ask` fetched the room, the domain memories and
 the open questions. Ticket 08's `known` had to thread through five
 signatures to cross from the first place to the second. One gather ends
-that: `build_full_context` does all five reads, and one `FullContext`
+that: `build_full_context` does every read, and one `FullContext`
 travels the whole path from node 0 to `build_input`.
 """
 
@@ -28,7 +28,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, fields
 
 from friday.domain.models import Memory, Params
-from friday.memory.channel_context import ChannelContext
 from friday.store.db import estimated_tokens
 
 __all__ = ["FullContext", "build_full_context"]
@@ -39,9 +38,15 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True, slots=True)
 class FullContext:
     """Everything node 0 is shown about one task: the reporter's transcript,
-    the room, the domain-kind memories written about it, the questions this
-    task has already asked and not had answered, and the parameters it
-    already has.
+    the domain-kind rows written about its room, the questions this task has
+    already asked and not had answered, and the parameters it already has.
+
+    There was a `room` field, the channel's YAML context file. The files are
+    gone (board `read-it-the-way-the-operator-does`, ticket 10): what the
+    operator wrote about a room is rows with `origin=admin`, here or for
+    every room, and they arrive in `domain_memories` beside the ones a model
+    wrote. The summary does not reach the extractor at all — `readers_for`
+    gives it to triage and the responder.
 
     Named `transcript` rather than `text` so it cannot be mistaken for one
     message's body — it is `Database.original_text_for`'s output, already
@@ -57,7 +62,6 @@ class FullContext:
     """
 
     transcript: str | None
-    room: ChannelContext | None
     domain_memories: Sequence[Memory]
     asked: Sequence[str]
     known: Params
@@ -66,7 +70,6 @@ class FullContext:
 
 async def build_full_context(
     db,
-    context_store,
     *,
     channel_id: str | None,
     task_id: int | None,
@@ -85,8 +88,8 @@ async def build_full_context(
 
     `task_id` and `channel_id` are both allowed to be `None` — a bare call
     with nothing to resolve, the same convenience `friday.triage.context
-    .build_light_context` gives a caller with no store. `db` and
-    `context_store` may themselves be `None` for the same reason.
+    .build_light_context` gives a caller with no store. `db` may itself be
+    `None` for the same reason.
     """
     on_cooldown = (
         db is not None
@@ -105,11 +108,6 @@ async def build_full_context(
         and transcript is not None
         and estimated_tokens(transcript) > effective_budget
     )
-    room = (
-        context_store.context(channel_id)
-        if context_store is not None and channel_id is not None
-        else None
-    )
     asked = (
         await db.unanswered_questions(task_id)
         if db is not None and task_id is not None
@@ -122,13 +120,12 @@ async def build_full_context(
     )
     log.debug(
         "full context for task %s: transcript %d chars (~%d tokens, over "
-        "budget: %s), room %s, %d domain memor%s, %d open question%s, "
+        "budget: %s), %d domain memor%s, %d open question%s, "
         "known fields: %s",
         task_id,
         len(transcript or ""),
         estimated_tokens(transcript or ""),
         over_budget,
-        "present" if room is not None and room.derived else "absent",
         len(domain_memories),
         "y" if len(domain_memories) == 1 else "ies",
         len(asked),
@@ -137,7 +134,6 @@ async def build_full_context(
     )
     return FullContext(
         transcript=transcript,
-        room=room,
         domain_memories=domain_memories,
         asked=asked,
         known=known,

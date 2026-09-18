@@ -69,7 +69,6 @@ def build_simple_dag(
     params_cls: type[Params],
     *,
     budget_tokens: int | None = None,
-    context_store: Any = None,
 ) -> DAG:
     """`prepare`, then ask for what is missing or hand the rest over — what
     every type without an investigation needs (D1). There is nothing here
@@ -77,10 +76,11 @@ def build_simple_dag(
     not before.
 
     `budget_tokens` — board `what-the-room-already-knows`, ticket 08 —
-    and `context_store` — ticket 15 — both pass straight through to
-    `prepare_node`, the same for every type: node 0's budget and the
-    channel context store are each one value shared by every task type,
-    not one per type.
+    passes straight through to `prepare_node`, the same for every type: node
+    0's budget is one value shared by every task type, not one per type.
+    (A channel context store travelled beside it until the YAML files went,
+    board `read-it-the-way-the-operator-does`, ticket 10: the room is rows
+    now, read through `deps.db` like everything else node 0 reads.)
     """
     return DAG(
         name=task_type,
@@ -90,7 +90,6 @@ def build_simple_dag(
                 params_cls,
                 on_ready=lambda filled: plan_by_required_parameters(task_type, filled),
                 budget_tokens=budget_tokens,
-                context_store=context_store,
             ),
         ),
     )
@@ -101,7 +100,6 @@ def register_dags(
     *,
     servers: dict[str, Any] | None = None,
     skills: Any = None,
-    context_store: Any = None,
 ) -> None:
     """Register every graph this build knows about.
 
@@ -122,17 +120,6 @@ def register_dags(
     `dag_for` never answers "no graph" for a type this covers, which is every
     classifiable type there is. Build a multi-node graph when there are steps
     worth skipping and somebody has said what they are.
-
-    **`context_store` reaches node 0 by closure now, not through
-    `DAG_DEPS_EXTRA`** (board `what-the-room-already-knows`, ticket 15).
-    This parameter used to be written into `DAG_DEPS_EXTRA["context_store"]`
-    — a dict keyed by *task type*, per its own annotation — so the value
-    landed under a key no `DAGDeps.extra` lookup, keyed by `task.type`,
-    could ever reach: `deps.extra.get(task.type, {})` never once produced
-    `"context_store"`. Found while wiring `build_full_context`'s own need
-    for it, not by anything that had been reading it — nothing was. Passed
-    straight to `build_simple_dag` instead, the same way `budget_tokens`
-    already is.
     """
     EDGE_ROUTER.clear()
     budget_tokens = config.context.extraction_budget_tokens
@@ -143,7 +130,6 @@ def register_dags(
                 task_type,
                 params_cls,
                 budget_tokens=budget_tokens,
-                context_store=context_store,
             ),
         )
 

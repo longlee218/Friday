@@ -166,6 +166,9 @@ async def test_a_responder_given_a_store_can_reach_its_own_memory():
     seen = {}
 
     class Store:
+        async def room_summary(self, channel_id):
+            return None
+
         async def memory_search(self, scope, query, kind, limit):
             seen["scope"] = scope
             return []
@@ -208,6 +211,9 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
     from friday.domain.models import FridayState
 
     class Store:
+        async def room_summary(self, channel_id):
+            return None
+
         async def memory_search(self, scope, query, kind, limit):
             return []
 
@@ -269,6 +275,9 @@ def test_a_responder_declares_the_run_state_whether_or_not_it_has_memory(monkeyp
     monkeypatch.setattr(responder_module, "Harness", Spy)
 
     class Store:
+        async def room_summary(self, channel_id):
+            return None
+
         async def memory_search(self, scope, query, kind, limit):
             return []
 
@@ -344,6 +353,9 @@ async def test_a_memory_is_attributed_to_the_responder_whoever_handed_the_state_
     seen = {}
 
     class Store:
+        async def room_summary(self, channel_id):
+            return None
+
         async def memory_search(self, scope, query, kind, limit):
             seen["scope"] = scope
             return []

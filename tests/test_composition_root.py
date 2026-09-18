@@ -182,31 +182,6 @@ def test_the_responder_is_given_the_store_its_memory_tools_need():
     )
 
 
-def test_the_board_is_handed_the_context_store_the_agents_read_from():
-    """The write path is only correct if it writes to the *same* store the
-    responder and the rebuilder hold — one process is what makes that a
-    reference rather than an IPC problem (board D7/D8).
-
-    A second store built here would write files nobody reads until a restart,
-    which is the failure mode that looks like the feature working.
-    """
-    source = pathlib.Path(__file__).resolve().parents[1] / "run_agent.py"
-    tree = ast.parse(source.read_text())
-    call = next(
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "build_api"
-    )
-
-    given = next((kw.value for kw in call.keywords if kw.arg == "context_store"), None)
-    assert isinstance(given, ast.Name), (
-        "build_api is not handed a context store by name — the page would have "
-        "no way to write, or would write to a store nothing reads"
-    )
-
-
 def test_every_name_a_module_level_coroutine_uses_is_one_it_can_see():
     """`serve_board` is called from `_run` but defined beside it, so a local
     of `_run` referenced inside it is a `NameError` at runtime and nothing

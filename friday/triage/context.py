@@ -21,8 +21,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from friday.domain.models import InboundEvent
-from friday.memory.channel_context import ChannelContext
+from friday.domain.models import InboundEvent, Memory
 
 __all__ = ["LightContext", "build_light_context"]
 
@@ -37,16 +36,21 @@ class LightContext:
 
     `turn` is the messages of this person's turn, oldest first, exactly as
     `TriageRunner.turn_from` computed it — this value does not recompute a
-    turn and never will (see `build_light_context`). `room` is the channel's
-    context, or `None` for a channel with no context file yet.
+    turn and never will (see `build_light_context`). `summary` is the room's
+    active `summary` row, or `None` for a room nobody has summarised.
+
+    It was `room`, a whole `ChannelContext` of which triage rendered one
+    section. The file is gone (board `read-it-the-way-the-operator-does`,
+    ticket 10), and the summary is the one kind `readers_for` gives triage,
+    so it is the one thing this carries.
     """
 
     turn: Sequence[InboundEvent]
-    room: ChannelContext | None
+    summary: Memory | None
 
 
-def build_light_context(
-    context_store, *, channel_id: str, turn: Sequence[InboundEvent]
+async def build_light_context(
+    summaries, *, channel_id: str, turn: Sequence[InboundEvent]
 ) -> LightContext:
     """The one place triage resolves a room.
 
@@ -58,16 +62,19 @@ def build_light_context(
     their own fallback before calling this; it is not this function's
     business.
 
-    `context_store` is `None` for a caller with nothing to resolve from — an
-    eval script, a test with no store wired — and the result carries no room,
-    the same as a channel with no context file yet gets.
+    `summaries` is the store, or anything with `room_summary(channel_id)`;
+    `None` for a caller with nothing to resolve from — a test with no store
+    wired — and the result carries no summary, the same as a room nobody
+    has summarised gets.
     """
-    room = context_store.context(channel_id) if context_store is not None else None
+    summary = (
+        await summaries.room_summary(channel_id) if summaries is not None else None
+    )
     log.debug(
         "light context for %s: %d message(s), %d chars, room summary %s",
         channel_id,
         len(turn),
         sum(len(e.text) for e in turn),
-        "present" if room is not None and room.derived else "absent",
+        "present" if summary is not None else "absent",
     )
-    return LightContext(turn=turn, room=room)
+    return LightContext(turn=turn, summary=summary)

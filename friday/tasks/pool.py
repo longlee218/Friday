@@ -359,10 +359,13 @@ class Pool:
         who = await self._db.reporter_of(task.id)
         if who is None:
             return False
-        author_id, name = who
-        named = getattr(self._responder, "knows", lambda *_: False)(
-            task.conversation.channel_id, name
-        )
+        author_id, _ = who
+        # Written down is a `person` row keyed on their Discord id, here or
+        # for every room. It was a name in a channel file's `people:` map,
+        # asked of the responder; the files are gone (board
+        # `read-it-the-way-the-operator-does`, ticket 10) and a row is the
+        # store's to answer.
+        named = await self._db.knows_person(task.conversation.channel_id, author_id)
         return not named and not await self._db.has_exchanged_with(author_id)
 
     async def _plan(self, task: Task) -> Action:
