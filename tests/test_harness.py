@@ -372,8 +372,9 @@ async def test_a_model_that_never_answers_becomes_work_for_a_person():
     """A run is bounded here, and nowhere else.
 
     The OpenAI client defaults to ten minutes and retries past that, and the
-    pool works one task at a time — so an unbounded run does not stall one
-    task, it stalls every task, while the heartbeat goes on reporting the
+    pool works a small fixed number of tasks at once, one run of a harness at
+    a time — so an unbounded run does not stall one task, it stalls every task
+    behind it, while the heartbeat goes on reporting the
     process alive. The bound is per agent and configured, because a
     classification and a drafted reply are not the same wait.
 
@@ -1184,3 +1185,101 @@ def test_an_agent_with_a_shape_may_not_have_its_mechanism_overridden():
     # An agent that declares neither is untouched: `max_tokens` and anything
     # else in `model_settings` still reaches the model.
     assert build(model_settings={"max_tokens": 64}).agent.model_settings.max_tokens == 64
+
+
+class _Slow(Model):
+    """Answers every call with the prompt it was given, after a pause long
+    enough for a second run of the same harness to start meanwhile."""
+
+    async def get_response(self, system_instructions, input, *a, **kw):
+        import asyncio
+
+        from agents.items import ModelResponse
+        from agents.usage import Usage
+        from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+
+        await asyncio.sleep(0.02)
+        said = input if isinstance(input, str) else str(input)
+        return ModelResponse(
+            output=[
+                ResponseOutputMessage(
+                    id="1", role="assistant", status="completed", type="message",
+                    content=[ResponseOutputText(
+                        text=said, type="output_text", annotations=[]
+                    )],
+                )
+            ],
+            usage=Usage(requests=1, input_tokens=5, output_tokens=2),
+            response_id=None,
+        )
+
+    def stream_response(self, *a, **kw):
+        raise NotImplementedError
+
+
+async def test_two_runs_of_one_harness_each_write_down_their_own_call():
+    """The pool works tasks side by side (ticket 13), and one extractor — one
+    responder — serves every task of its kind, so two runs of one harness at
+    once is the ordinary case now, not a hypothetical.
+
+    The hooks that build a run's `ModelCall` hang off the one shared agent.
+    A second run that starts meanwhile replaced them, so the first run's call
+    was written down under the second run's task — `model_calls` saying one
+    task asked what another did, which is a record that disagrees with the
+    work it records.
+    """
+    import asyncio
+
+    recorded: list = []
+
+    async def sink(call) -> None:
+        recorded.append(call)
+
+    run = Harness(config=CONFIG, instructions="i", model=_Slow(), record=sink)
+
+    first, second = await asyncio.gather(
+        run.run("about task one", task_id=1),
+        run.run("about task two", task_id=2),
+    )
+
+    assert "task one" in first.final_output
+    assert "task two" in second.final_output
+    assert sorted(c.task_id for c in recorded) == [1, 2]
+    for call in recorded:
+        expected = "task one" if call.task_id == 1 else "task two"
+        assert expected in call.prompt, (call.task_id, call.prompt)
+
+
+async def test_why_a_run_failed_survives_a_second_run_starting():
+    """`last_error`, `refusal` and `unfit` live on the harness and are read by
+    the caller the moment the run returns. A second run of the same harness
+    clears them as it begins — so one that began while the first was still
+    writing its record down wiped the first's reason, and the caller read
+    "no error" off a run that had none to give. For an extractor that is
+    "the model could not answer" in place of the reason it did not.
+    """
+    import asyncio
+    from dataclasses import replace as _replace
+
+    async def slow_sink(call) -> None:
+        await asyncio.sleep(0.05)
+
+    run = Harness(
+        config=_replace(CONFIG, max_attempts=1),
+        instructions="i",
+        model=_flaky(_rejected()),
+        record=slow_sink,
+    )
+
+    async def first():
+        said = await run.run("go")
+        return said, run.last_error
+
+    async def second():
+        await asyncio.sleep(0.01)
+        return await run.run("go again")
+
+    (said, why), _ = await asyncio.gather(first(), second())
+
+    assert said is None
+    assert why is not None and "not acceptable" in why

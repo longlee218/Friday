@@ -489,3 +489,27 @@ async def test_the_cap_counts_only_active_memories_not_every_superseded_generati
         current = await db.memory_supersede(ROOM, current.id, f"the queue is generation {n}")
 
     assert await db.memory_add(ROOM, "well under the cap") is not None
+
+
+async def test_two_writes_racing_for_the_last_slot_do_not_both_land(db):
+    """D18's cap holds when two writes arrive at once, not only one by one.
+
+    The pool works tasks side by side now (ticket 13), and a reaction marking
+    a candidate right writes through here from the gateway while a responder
+    run may be writing too — so the count and the insert cannot be two steps
+    something else can land between.
+    """
+    import asyncio
+
+    from friday.store.db import Database
+
+    for n in range(Database.MEMORY_PER_CHANNEL - 1):
+        await db.memory_add(ROOM, f"fact {n}")
+
+    first, second = await asyncio.gather(
+        db.memory_add(ROOM, "one more"), db.memory_add(ROOM, "and another")
+    )
+
+    assert [first is None, second is None].count(True) == 1
+    live = await db.memory_search(ROOM, "", limit=1000, kind=MemoryKind.VOICE)
+    assert len(live) == Database.MEMORY_PER_CHANNEL

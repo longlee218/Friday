@@ -10,6 +10,7 @@ stalls ingestion.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from dataclasses import replace
@@ -129,6 +130,9 @@ class Database:
     def __init__(self, engine, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._engine = engine
         self._sessions = sessions
+        #: Held across `memory_add`'s count and insert, which are two awaits
+        #: apart — see there.
+        self._memory_slots = asyncio.Lock()
 
     @classmethod
     async def connect(cls, path: str, *, create: bool = False) -> "Database":
@@ -1216,15 +1220,15 @@ class Database:
         freed its slot, the same rule `test_deleting_a_memory_frees_its_slot`
         pins for deletion.
 
-        The count and the insert are not one atomic check-and-set: two calls
-        for the same channel racing between the `await` on the count and the
-        write could both land under the cap. Not a bound this method enforces
-        itself, because nothing today makes that race possible — `Pool`
-        drains pending tasks one at a time (`for task in ...: await
-        self._act(task)`), so only one `Responder.draft()`, the tool's only
-        caller, is ever in flight. It becomes a real question the day a
-        second memory-tool-bearing agent runs concurrently with the pool's
-        loop, which is not true of anything wired today.
+        **The count and the insert happen under one lock**, because they are
+        two awaits apart and two calls for one channel could otherwise both
+        read 199 and both write. This said the race could not happen, since
+        the pool drained its tasks one at a time; ticket 13 made the pool work
+        tasks side by side, and a reaction marking a candidate right writes
+        through here from the gateway whatever the pool is doing. One process
+        and one `Database` (the constraint this whole store rests on), so an
+        `asyncio.Lock` is the whole of it — not a database lock, which SQLite
+        would only turn into a `database is locked` for one of the two.
 
         Checked against `check_not_instruction_shaped` before either the cap
         or the write (board `what-the-room-already-knows`, ticket 11, D25):
@@ -1233,7 +1237,7 @@ class Database:
         rather than being a rule each caller has to remember.
         """
         check_not_instruction_shaped(text)
-        async with self._sessions.begin() as session:
+        async with self._memory_slots, self._sessions.begin() as session:
             count = await session.scalar(
                 select(func.count()).select_from(schema.Memory).where(
                     schema.Memory.channel_id == state.channel_id,

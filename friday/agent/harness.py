@@ -293,6 +293,25 @@ class Harness:
         #: time it answers a question about a run that is not the one you are
         #: asking about.
         self.unfit: Unfit | None = None
+        #: **One run of this harness at a time**, taken by `_settle` for the
+        #: whole of a run — the budget check, the provider, the record.
+        #:
+        #: The pool works tasks side by side (ticket 13), and one extractor
+        #: per type and one responder serve every task, so two runs of one
+        #: harness at once became the ordinary case. Two things here are per
+        #: run and live on the instance: the hooks that build a run's
+        #: `ModelCall` hang off the one shared agent, so a second run replaced
+        #: the first's and its call was written down under the other task;
+        #: and the three flags above, which a second run clears as it begins.
+        #:
+        #: **Serialised rather than made local**, because the flags are read by
+        #: the caller *after* the run returns, and that is safe only because
+        #: nothing awaits between `_settle` releasing this lock and the caller
+        #: reading them — a run waiting for it cannot start until the loop
+        #: turns. The cost is that two tasks of one type take turns at the
+        #: model; tasks of different types, whose harnesses differ, still run
+        #: side by side, which is what ticket 13 was for.
+        self._one_run = asyncio.Lock()
         #: The catalogue, for whoever builds this agent's instructions. Read
         #: off the same object the tools came from, so the prompt and the
         #: tools cannot describe different skills.
@@ -432,9 +451,9 @@ class Harness:
         outage arrive at the caller identically, which is exactly the pair D20
         exists to keep apart.
 
-        On the instance, beside `last_error` and `refusal`, and with the same
-        caveat they carry: two runs of one harness at once would overwrite each
-        other. Every caller here runs one at a time.
+        On the instance, beside `last_error` and `refusal`, and safe there for
+        the same reason they are: `_settle` lets one run of a harness happen
+        at a time, and the caller reads the flag before anything awaits.
         """
         self.unfit = problem
 
@@ -706,7 +725,24 @@ class Harness:
         and written down (D2). `AgentHooks` cannot do either: `on_llm_start`
         fires after the decision to spend has been made and `on_llm_end` after
         the money is gone, and neither can refuse a call or cut one short.
+
+        One at a time per harness — see `_one_run`. The wait for it is outside
+        `timeout_seconds`, which bounds the run and not the queue for it; a
+        run waiting here waits at most for runs that are themselves bounded.
         """
+        async with self._one_run:
+            return await self._settle_alone(
+                input_, context=context, max_turns=max_turns, about=about
+            )
+
+    async def _settle_alone(
+        self,
+        input_: Any,
+        *,
+        context: Any,
+        max_turns: int,
+        about: "_About | None" = None,
+    ) -> Any | None:
         # Deferred: `llm_log` reaches `Hooks` through this module, so importing
         # it at module load time would be a cycle.
         from friday.agent.llm_log import LogHooks
@@ -731,9 +767,11 @@ class Harness:
         progress = _Progress()
         try:
             # The timeout bounds the whole run, retries included, rather than
-            # each try. The pool works one task at a time, so what has to stay
-            # bounded is how long a task can hold it — three tries at sixty
-            # seconds would be three minutes of every task waiting. The cost
+            # each try. The pool works a small, fixed number of tasks at once,
+            # and one run of a harness at a time, so what has to stay bounded
+            # is how long a run can hold a slot and this harness — three tries
+            # at sixty seconds would be three minutes of every task behind it
+            # waiting. The cost
             # is that a hiccup late in the budget leaves little room to try
             # again, which is the right way round: the run was already slow.
             return await asyncio.wait_for(

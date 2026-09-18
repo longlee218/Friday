@@ -137,7 +137,8 @@ class AgentConfig:
     #: which bounds the whole run rather than each try, so a long backoff
     #: spends the budget waiting instead of asking. The outbox retries over
     #: minutes because a send can wait; a task cannot, since the pool works
-    #: one at a time.
+    #: only `workflows.concurrency` at once and one run of a harness at a
+    #: time, so a slow run holds the tasks queued behind it.
     max_attempts: int = 3
     retry_backoff_seconds: float = 1.0
     #: What this agent may spend in a day, in tokens in and out. `None` is no
@@ -154,7 +155,8 @@ class AgentConfig:
     #: A number chosen here rather than inherited. The OpenAI client defaults
     #: to ten minutes and retries, so an unbounded run could hold the pool for
     #: half an hour while the heartbeat went on saying "alive" — the pool works
-    #: one task at a time, so that is every task, not one. Sixty seconds is
+    #: only `workflows.concurrency` tasks at once and one run of each harness
+    #: at a time, so that is every task behind it, not one. Sixty seconds is
     #: long for a classification and short enough that a stall surfaces the
     #: same day.
     timeout_seconds: float = 60.0
