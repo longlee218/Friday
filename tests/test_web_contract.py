@@ -385,3 +385,25 @@ async def test_a_stuck_tasks_compaction_state_is_reachable(client, db):
 
     stuck = client.get(f"/api/tasks/{task.id}/compaction").json()
     assert stuck == {"ineffective_count": 2, "on_cooldown": True}
+
+
+# --- the operator's memory rows (board `read-it-the-way-the-operator-does`,
+# ticket 09) -----------------------------------------------------------------
+
+
+def test_the_page_and_the_memory_routes_agree(client):
+    """A row the operator writes comes back in the same shape the list
+    renders, and the form's description of each kind matches its types."""
+    made = client.post(
+        "/api/channels/c1/memories",
+        json={"kind": "person", "data": {"discord_id": "1", "name": "Lan",
+                                          "role": "backend", "team": "orders"}},
+    ).json()
+    (listed,) = client.get("/api/channels/c1/memories").json()
+    kinds = client.get("/api/memory-kinds").json()
+
+    assert set(made) == declared("Memory")
+    assert set(listed) == declared("Memory")
+    assert all(set(k) == declared("MemoryKindForm") for k in kinds)
+    fields = [f for k in kinds for f in k["fields"]]
+    assert fields and all(set(f) == declared("MemoryField") for f in fields)

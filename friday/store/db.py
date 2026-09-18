@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import logging
 import secrets
-from dataclasses import replace
+from fnmatch import fnmatch
+from typing import Any
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
@@ -32,9 +34,11 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.pool import StaticPool
 
+from friday.agent.structured import fits
 from friday.store import schema
 from friday.domain.conversation import ConversationId
 from friday.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
@@ -49,6 +53,10 @@ from friday.domain.models import (
     MemoryKind,
     DECISIONS,
     FridayState,
+    MEMORY_DATA,
+    MemoryKeyTaken,
+    MemoryOrigin,
+    MemoryRefused,
     MemoryStatus,
     InboundEvent,
     MentionType,
@@ -60,6 +68,8 @@ from friday.domain.models import (
     ToolCall,
     Outbound,
     Task,
+    natural_key,
+    writers_for,
 )
 from friday.text.transform import redact
 from friday.ops.redact import scrub
@@ -1198,8 +1208,77 @@ class Database:
             )
             return [_memory(row) for row in rows]
 
+    #: How many findings one diagnosis reads — "the few matching", newest
+    #: first. Enough to see a pattern; a runbook is what a longer one becomes.
+    DIAGNOSE_FINDINGS = 5
+
+    async def diagnose_memories(
+        self,
+        channel_id: str,
+        *,
+        service: str | None = None,
+        error_code: str | None = None,
+        path: str | None = None,
+        text: str = "",
+    ) -> list[Memory]:
+        """What `Diagnose` reads about one case (spec, "Memory: one store,
+        twelve kinds"): every active `fact`, `constraint` and `decision`; the
+        runbooks whose `when` matches the case; and the few findings on the
+        same `service:error_code`, newest first.
+
+        This room's rows and the ones written for `channel_id = '*'`, which
+        is "true everywhere". Ordered the way the spec orders a prompt —
+        operator rows before model rows, runbooks after the domain kinds,
+        findings last — so two cases on one service share a prefix.
+
+        A runbook matches when any one of its `when` lists names the case:
+        the service, the error code, a glob over the path, or a keyword
+        found in the case's text. An empty `when` matches nothing — a
+        runbook code cannot pick is one nobody asked for.
+        """
+        domain = [MemoryKind.FACT, MemoryKind.CONSTRAINT, MemoryKind.DECISION]
+        async with self._sessions() as session:
+            rows = list(
+                await session.scalars(
+                    select(schema.Memory)
+                    .where(
+                        schema.Memory.channel_id.in_([channel_id, "*"]),
+                        schema.Memory.deleted_at.is_(None),
+                        schema.Memory.status == MemoryStatus.ACTIVE,
+                        schema.Memory.kind.in_(
+                            [*domain, MemoryKind.RUNBOOK, MemoryKind.FINDING]
+                        ),
+                    )
+                    .order_by(schema.Memory.created_at)
+                )
+            )
+        admin_first = lambda row: row.origin != MemoryOrigin.ADMIN  # noqa: E731
+        known = sorted((r for r in rows if r.kind in domain), key=admin_first)
+        runbooks = [
+            r for r in rows
+            if r.kind == MemoryKind.RUNBOOK
+            and _runbook_matches(r.data, service, error_code, path, text)
+        ]
+        findings = [
+            r for r in reversed(rows)
+            if r.kind == MemoryKind.FINDING and service is not None
+            and (
+                r.key == f"{service}:{error_code}"
+                if error_code
+                else (r.key or "").startswith(f"{service}:")
+            )
+        ][: self.DIAGNOSE_FINDINGS]
+        return [_memory(r) for r in (*known, *runbooks, *findings)]
+
     async def memory_add(
-        self, state: FridayState, text: str, *, kind: str = MemoryKind.VOICE
+        self,
+        state: FridayState,
+        text: str,
+        *,
+        kind: str = MemoryKind.VOICE,
+        origin: str = MemoryOrigin.MODEL,
+        key: str | None = None,
+        data: dict[str, Any] | None = None,
     ) -> Memory | None:
         """Write a new memory, or refuse if the channel is already full.
 
@@ -1231,8 +1310,20 @@ class Database:
         this is the single write path every producer of a new memory shares,
         the operator's own hand included, so the check happens here once
         rather than being a rule each caller has to remember.
+
+        **The same door checks a structured kind** (board
+        `read-it-the-way-the-operator-does`, ticket 09): `data` is validated
+        against the kind's schema (`MEMORY_DATA`) with the `fits` the harness
+        uses on a model's answer, so a wrong-typed field is refused with the
+        field named; the natural key is read off the validated data; and the
+        origin must be one `writers_for(kind)` allows. Each refusal is a
+        `MemoryRefused`. The instruction-shape guard reads `text` only —
+        a structured payload is not a sentence.
         """
+        if MemoryOrigin(origin) not in writers_for(kind):
+            raise MemoryRefused(f"{kind} is not a kind {origin} may write")
         check_not_instruction_shaped(text)
+        stored, key = _checked_data(kind, data, key)
         async with self._sessions.begin() as session:
             count = await session.scalar(
                 select(func.count()).select_from(schema.Memory).where(
@@ -1256,13 +1347,22 @@ class Database:
                 source_message_id=state.message_id,
                 created_at=now,
                 updated_at=now,
+                origin=origin,
+                key=key,
+                data=stored,
             )
             session.add(row)
-            await session.flush()
+            await _flush_keyed(session, kind, key)
             return _memory(row)
 
     async def memory_update(
-        self, state: FridayState, memory_id: str, text: str
+        self,
+        state: FridayState,
+        memory_id: str,
+        text: str,
+        *,
+        data: dict[str, Any] | None = None,
+        origin: str = MemoryOrigin.MODEL,
     ) -> Memory | None:
         """Correct a memory's wording in place — the same claim, said
         better — or `None` if this scope has no such (live, active) memory by
@@ -1276,19 +1376,31 @@ class Database:
         Checked against `check_not_instruction_shaped` (ticket 11, D25) the
         same way `memory_add` is: a correction is a new line of text, and
         this is one of the write paths every producer of one shares.
+
+        `data`, when given, replaces a structured row's payload and is
+        checked as `memory_add` checks it; its natural key moves with it.
+        Omitted, the payload is left as it is. A model-origin call never
+        resolves an `origin=admin` row (`_live_memory`).
         """
         check_not_instruction_shaped(text)
         async with self._sessions.begin() as session:
-            row = await self._live_memory(session, state, memory_id)
+            row = await self._live_memory(session, state, memory_id, origin)
             if row is None:
                 return None
+            if data is not None:
+                row.data, row.key = _checked_data(row.kind, data, row.key)
             row.text = text[: self.TEXT_CHARS]
             row.updated_at = _now()
-            await session.flush()
+            await _flush_keyed(session, row.kind, row.key)
             return _memory(row)
 
     async def memory_supersede(
-        self, state: FridayState, memory_id: str, text: str
+        self,
+        state: FridayState,
+        memory_id: str,
+        text: str,
+        *,
+        origin: str = MemoryOrigin.MODEL,
     ) -> Memory | None:
         """Replace what a memory claims, rather than correcting how it is
         worded (D16) — the operation `memory_update` deliberately is not.
@@ -1316,7 +1428,7 @@ class Database:
         """
         check_not_instruction_shaped(text)
         async with self._sessions.begin() as session:
-            old = await self._live_memory(session, state, memory_id)
+            old = await self._live_memory(session, state, memory_id, origin)
             if old is None:
                 return None
             now = _now()
@@ -1331,20 +1443,29 @@ class Database:
                 created_at=now,
                 updated_at=now,
                 status=MemoryStatus.ACTIVE,
+                # The replacement keeps what the row is *about*; only the
+                # claim in `text` changes. The old row goes inactive first
+                # so the two never hold the key at once.
+                origin=origin,
+                key=old.key,
+                data=old.data,
             )
             old.status = MemoryStatus.SUPERSEDED
             old.superseded_by = new_row.id
             old.updated_at = now
+            await session.flush()
             session.add(new_row)
             await session.flush()
             return _memory(new_row)
 
-    async def memory_delete(self, state: FridayState, memory_id: str) -> bool:
+    async def memory_delete(
+        self, state: FridayState, memory_id: str, *, origin: str = MemoryOrigin.MODEL
+    ) -> bool:
         """Soft-delete: the row survives with who removed it and when, so an
         operator can see what a line said after it is gone. `False` for the
         same cases `memory_update` treats alike."""
         async with self._sessions.begin() as session:
-            row = await self._live_memory(session, state, memory_id)
+            row = await self._live_memory(session, state, memory_id, origin)
             if row is None:
                 return False
             row.deleted_at = _now()
@@ -1394,20 +1515,28 @@ class Database:
             )
             return [_memory(row) for row in rows]
 
-    async def _live_memory(self, session, state: FridayState, memory_id: str):
+    async def _live_memory(
+        self, session, state: FridayState, memory_id: str, origin: str
+    ):
         """The row, if it exists, belongs to this scope, is not deleted, and
         is still active — the one query `memory_update`, `memory_supersede`
         and `memory_delete` share, so the reasons an id can fail to resolve
         cannot drift apart between them. A superseded row is frozen history
-        (D16): correct or retract the row that replaced it, not this one."""
-        return await session.scalar(
-            select(schema.Memory).where(
-                schema.Memory.id == memory_id,
-                schema.Memory.channel_id == state.channel_id,
-                schema.Memory.deleted_at.is_(None),
-                schema.Memory.status == MemoryStatus.ACTIVE,
-            )
+        (D16): correct or retract the row that replaced it, not this one.
+
+        **A model-origin caller never resolves an operator's row** (ticket
+        09): it gets the same `None` a wrong-scope id gets, so a model cannot
+        tell an `origin=admin` row from one that does not exist. The
+        operator may correct any row."""
+        query = select(schema.Memory).where(
+            schema.Memory.id == memory_id,
+            schema.Memory.channel_id == state.channel_id,
+            schema.Memory.deleted_at.is_(None),
+            schema.Memory.status == MemoryStatus.ACTIVE,
         )
+        if MemoryOrigin(origin) is not MemoryOrigin.ADMIN:
+            query = query.where(schema.Memory.origin != MemoryOrigin.ADMIN)
+        return await session.scalar(query)
 
     # ---- candidate memories (board `what-the-room-already-knows`,
     # ticket 12, D19, D20) --------------------------------------------------
@@ -3059,7 +3188,60 @@ def _memory(row: schema.Memory) -> Memory:
         deleted_by=row.deleted_by,
         status=row.status,
         superseded_by=row.superseded_by,
+        origin=row.origin,
+        key=row.key,
+        data=row.data,
     )
+
+
+def _runbook_matches(
+    data: dict[str, Any] | None,
+    service: str | None,
+    error_code: str | None,
+    path: str | None,
+    text: str,
+) -> bool:
+    when = (data or {}).get("when") or {}
+    said = text.lower()
+    return bool(
+        (service and service in when.get("services", []))
+        or (error_code and error_code in when.get("error_codes", []))
+        or (path and any(fnmatch(path, p) for p in when.get("path_patterns", [])))
+        or any(k.lower() in said for k in when.get("keywords", []) if k)
+    )
+
+
+def _checked_data(
+    kind: str, data: dict[str, Any] | None, key: str | None
+) -> tuple[dict[str, Any] | None, str | None]:
+    """`data` checked against `kind`'s schema, and the natural key read off
+    it — or `MemoryRefused` naming what did not fit. What is stored is the
+    validated instance turned back into plain JSON, so an unknown key the
+    checker dropped is not kept either."""
+    schema_type = MEMORY_DATA[MemoryKind(kind)]
+    if schema_type is None:
+        if data:
+            raise MemoryRefused(f"a {kind} is prose — it carries no data")
+        return None, None
+    if data is None and kind == MemoryKind.DECISION:
+        return None, None
+    if not isinstance(data, dict):
+        raise MemoryRefused(f"a {kind} needs its data as an object")
+    fitted, unfit = fits(data, schema_type)
+    if unfit is not None:
+        raise MemoryRefused(f"{kind} data does not fit: {unfit.why}")
+    stored = asdict(fitted)
+    return stored, natural_key(kind, stored, key)
+
+
+async def _flush_keyed(session, kind: str, key: str | None) -> None:
+    """Flush, turning the partial unique index's refusal into a sentence."""
+    try:
+        await session.flush()
+    except IntegrityError:
+        raise MemoryKeyTaken(
+            f"an active {kind} {key!r} is already here — correct that one instead"
+        ) from None
 
 
 def _candidate(row: schema.MemoryCandidate) -> MemoryCandidate:

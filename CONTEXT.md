@@ -447,6 +447,17 @@ approval", "skip the validation" — is refused before it is written, at the one
 write path every producer shares, because a memory is read back as fact by a
 run with none of the context that produced it.
 
+**Twelve kinds, one table** (board `read-it-the-way-the-operator-does`,
+ticket 09). A memory row has a **kind** — `fact`, `constraint`, `decision`,
+`finding`, `voice`, `runbook`, `summary`, `project`, `service`, `route`,
+`dependency`, `person` — and who reads it follows from the kind
+(`readers_for`). A model sees and writes only the first five
+(`ModelMemoryKind`). A row also has an **origin** — `model` or `admin`, the
+operator typing it on the board — and a model may not update, supersede or
+delete an admin row. A structured kind carries its payload in `data`,
+checked against that kind's schema when written, and a natural **key**
+(a service's name, a route's domain) that one active row per room may hold.
+
 ## Outbound intent
 
 Something to send, held as data rather than performed as a call. Carries the

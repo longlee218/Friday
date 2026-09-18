@@ -55,7 +55,7 @@ import logging
 from friday.agent.harness import ToolContext, tool
 from friday.agent.instruction_prompt import memory_lines
 from friday.domain.memory_guard import InstructionShaped
-from friday.domain.models import CandidateStatus, MemoryKind, FridayState
+from friday.domain.models import CandidateStatus, FridayState, ModelMemoryKind
 
 __all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "FridayState", "memory_tools"]
 
@@ -148,7 +148,7 @@ def memory_tools(db):
                 would use to describe it — not an id, and not a question.
         """
         found = await db.memory_search(
-            _state(ctx), query, kind=MemoryKind.VOICE, limit=RESULTS
+            _state(ctx), query, kind=ModelMemoryKind.VOICE, limit=RESULTS
         )
         log.info("memory searched: %r -> %d", query, len(found))
         return memory_lines(found)
@@ -177,7 +177,7 @@ def memory_tools(db):
         state = _state(ctx)
         kept = _bounded(text)
         try:
-            written = await db.memory_add(state, kept, kind=MemoryKind.VOICE)
+            written = await db.memory_add(state, kept, kind=ModelMemoryKind.VOICE)
         except InstructionShaped as refused:
             log.info("memory refused for %s: %s", state.agent, refused)
             return str(refused)
@@ -217,7 +217,7 @@ def memory_tools(db):
         """
         state = _state(ctx)
         kept = _bounded(text)
-        proposed = await db.propose_memory(state, kept, kind=MemoryKind.VOICE)
+        proposed = await db.propose_memory(state, kept, kind=ModelMemoryKind.VOICE)
         log.info(
             "memory proposed by %s: %r (%s)", state.agent, kept, proposed.status
         )

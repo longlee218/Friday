@@ -212,11 +212,17 @@ export interface Room {
  *  rather than the row removed, so the operator can see what was forgotten
  *  and who forgot it.
  *
- *  `kind` is one of `fact` / `constraint` / `finding` / `decision` / `voice`
- *  — who reads a row follows from this. `status` is `active` or
- *  `superseded`; a superseded row's `superseded_by` names the row that
- *  replaced it, and the row itself survives so the board can show what it
- *  used to say and when (`updated_at`). */
+ *  `kind` is one of twelve — `fact` / `constraint` / `finding` /
+ *  `decision` / `voice`, and the operator's `runbook` / `project` /
+ *  `service` / `route` / `dependency` / `person`, plus `summary` — and who
+ *  reads a row follows from it. `status` is `active` or `superseded`; a
+ *  superseded row's `superseded_by` names the row that replaced it, and the
+ *  row itself survives so the board can show what it used to say and when
+ *  (`updated_at`).
+ *
+ *  `origin` is `model` or `admin` (the operator, through this page). A
+ *  structured kind carries its payload in `data` and its natural key in
+ *  `key`; both are `null` for prose. */
 export interface Memory {
   id: string;
   channel_id: string;
@@ -226,10 +232,35 @@ export interface Memory {
   status: string;
   superseded_by: string | null;
   task_id: number | null;
+  source_message_id: string | null;
+  origin: string;
+  key: string | null;
+  data: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
   deleted_by: string | null;
+}
+
+/** One kind the operator may write, and what its form asks for — served by
+ *  `/api/memory-kinds`, read off the same schemas the store checks. `prose`
+ *  kinds are a text area alone; `names_key` is the runbook, whose key is a
+ *  name the operator gives rather than one read off its data. */
+export interface MemoryKindForm {
+  kind: string;
+  prose: boolean;
+  names_key: boolean;
+  fields: MemoryField[];
+}
+
+/** One form field. `name` is dotted for a nested object (`prod.cluster`).
+ *  `type` is `text`, `number`, `list` (comma-separated), `choice` (one of
+ *  `choices`) or `json` (a list of objects, typed by hand). */
+export interface MemoryField {
+  name: string;
+  type: string;
+  required: boolean;
+  choices: string[];
 }
 
 /** A memory an agent proposed, waiting for the operator's mark — or already

@@ -22,6 +22,13 @@ and none of them is reachable by any verb here. The consequence is
 `check_exposure` at the foot of this file, which stopped warning and started
 refusing: "unauthenticated is safe because it is read-only" was always an
 argument about writes, and there is now a write.
+
+**A second thing enters since** (board `read-it-the-way-the-operator-does`,
+ticket 09): the operator's own memory rows — `origin=admin`, the knowledge
+only they have — through `POST/PUT/DELETE /api/channels/{id}/memories`. Like
+`overrides` it is context rather than a decision, and it goes through the
+store's one write door, so the schema check and the instruction-shape guard
+bind the operator's hand as they bind a model's.
 """
 
 from __future__ import annotations
@@ -31,8 +38,10 @@ import logging
 import socket
 import pathlib
 from collections.abc import Callable
-from dataclasses import asdict
-from typing import Any
+from contextlib import contextmanager
+from dataclasses import MISSING, asdict, is_dataclass
+from dataclasses import fields as dataclass_fields
+from typing import Any, Literal, get_args, get_origin, get_type_hints
 
 from fastapi import Body, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import StreamingResponse
@@ -44,7 +53,19 @@ from friday.agent.instruction_prompt import channel_sections
 from friday.domain.conversation import ConversationId
 from friday.domain.memory_guard import InstructionShaped
 from friday.store.db import Database
-from friday.domain.models import InboundEvent, Outbound, Task
+from friday.domain.models import (
+    MEMORY_DATA,
+    FridayState,
+    InboundEvent,
+    Memory,
+    MemoryKeyTaken,
+    MemoryKind,
+    MemoryOrigin,
+    MemoryRefused,
+    Outbound,
+    Task,
+    writers_for,
+)
 from friday.outbox import FAILED
 from friday.ops.redact import scrub
 from friday.domain.states import TaskState
@@ -91,7 +112,11 @@ def build_api(
         # nothing that *decides* anything is reachable by either verb, and the
         # guard that made an unauthenticated board defensible moved to
         # `check_exposure` below, which stopped warning and started refusing.
-        allow_methods = ["GET"] if context_store is None else ["GET", "PUT", "POST"]
+        #
+        # `DELETE` and the unconditional widening came with the operator's
+        # own memory rows (board `read-it-the-way-the-operator-does`, ticket
+        # 09): those routes exist whether or not a context store does.
+        allow_methods = ["GET", "PUT", "POST", "DELETE"]
         api.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
@@ -381,13 +406,77 @@ def build_api(
         ever had rather than with what it currently holds.
         """
         return _clean([
-            asdict(m) | {
-                "created_at": m.created_at,
-                "updated_at": m.updated_at,
-                "deleted_at": m.deleted_at,
-            }
+            _memory_row(m)
             for m in await db.memories_for_channel(channel_id, limit=limit)
         ])
+
+    @api.get("/api/memory-kinds")
+    async def memory_kinds() -> list[dict]:
+        """The kinds an operator may write, and the fields each one's form
+        needs — read off the same schemas `Database.memory_add` checks
+        against, so the page cannot offer a field the store does not know.
+        """
+        return _clean([_kind_form(k) for k in MemoryKind if ADMIN in writers_for(k)])
+
+    @api.post("/api/channels/{channel_id}/memories", status_code=201)
+    async def add_memory(
+        channel_id: str = Path(...), body: dict[str, Any] = Body(...)
+    ) -> dict:
+        """Write a row as the operator (`origin=admin`) — the knowledge only
+        they have: a runbook, a service's placement, who someone is.
+
+        Through `Database.memory_add`, the one door, so the operator's hand
+        meets the same schema check and instruction-shape guard a model's
+        does. Each refusal comes back with the store's own reason: 422 for a
+        payload that does not fit or a line that reads as an instruction,
+        409 for a key an active row already holds or a full room.
+        """
+        kind = body.get("kind")
+        if kind not in {k.value for k in MemoryKind}:
+            raise HTTPException(422, f"kind must be one of {', '.join(MemoryKind)}")
+        text = body.get("text") or ""
+        if not isinstance(text, str):
+            raise HTTPException(422, "text must be a string")
+        with _refusals():
+            written = await db.memory_add(
+                _operator(channel_id), text, kind=kind, origin=ADMIN,
+                key=body.get("key"), data=body.get("data"),
+            )
+        if written is None:
+            raise HTTPException(
+                409, f"{channel_id}'s memory is full — remove something first"
+            )
+        return _clean(_memory_row(written))
+
+    @api.put("/api/channels/{channel_id}/memories/{memory_id}")
+    async def update_memory(
+        channel_id: str = Path(...),
+        memory_id: str = Path(...),
+        body: dict[str, Any] = Body(...),
+    ) -> dict:
+        """Correct a row in place, as the operator. `data`, when sent,
+        replaces a structured row's payload and is checked again."""
+        text = body.get("text") or ""
+        if not isinstance(text, str):
+            raise HTTPException(422, "text must be a string")
+        with _refusals():
+            updated = await db.memory_update(
+                _operator(channel_id), memory_id, text,
+                data=body.get("data"), origin=ADMIN,
+            )
+        if updated is None:
+            raise HTTPException(404, f"no memory {memory_id!r} in {channel_id}")
+        return _clean(_memory_row(updated))
+
+    @api.delete("/api/channels/{channel_id}/memories/{memory_id}")
+    async def delete_memory(
+        channel_id: str = Path(...), memory_id: str = Path(...)
+    ) -> dict:
+        """Remove a row, as the operator — soft, like every deletion here,
+        so the row stays listed with who removed it."""
+        if not await db.memory_delete(_operator(channel_id), memory_id, origin=ADMIN):
+            raise HTTPException(404, f"no memory {memory_id!r} in {channel_id}")
+        return _clean({"id": memory_id, "deleted": True})
 
     @api.get("/api/channels/{channel_id}/candidates")
     async def channel_candidates(
@@ -702,6 +791,76 @@ def _mount_context(api: FastAPI, store: Any) -> None:
         # they pasted into it.
         problems = store.reload()
         return _clean({"reloaded": store.known_channels(), "problems": problems})
+
+
+#: Who the board's own memory routes write as.
+ADMIN = MemoryOrigin.ADMIN
+
+
+def _operator(channel_id: str) -> FridayState:
+    return FridayState(channel_id=channel_id, agent="operator")
+
+
+@contextmanager
+def _refusals():
+    """The store's refusals as the 422 they are, carrying its reason —
+    except a key already held, which is a 409 like any other conflict."""
+    try:
+        yield
+    except InstructionShaped as refused:
+        raise HTTPException(422, str(refused)) from None
+    except MemoryKeyTaken as taken:
+        raise HTTPException(409, str(taken)) from None
+    except MemoryRefused as refused:
+        raise HTTPException(422, str(refused)) from None
+
+
+def _memory_row(m: Memory) -> dict:
+    return asdict(m) | {
+        "created_at": m.created_at,
+        "updated_at": m.updated_at,
+        "deleted_at": m.deleted_at,
+    }
+
+
+def _kind_form(kind: MemoryKind) -> dict:
+    """One kind's form: prose, a key the operator names, and its fields."""
+    shape = MEMORY_DATA[kind]
+    return {
+        "kind": kind.value,
+        "prose": shape is None,
+        "names_key": kind is MemoryKind.RUNBOOK,
+        "fields": _form_fields(shape) if shape is not None else [],
+    }
+
+
+def _form_fields(shape: type, prefix: str = "") -> list[dict]:
+    """A dataclass flattened to form fields: a nested dataclass becomes
+    dotted names, a list of strings a comma-separated line, a `Literal` a
+    choice, and anything else (a list of objects) JSON typed by hand."""
+    hints = get_type_hints(shape)
+    found = []
+    for f in dataclass_fields(shape):
+        name, hint = f"{prefix}{f.name}", hints[f.name]
+        args = [a for a in get_args(hint) if a is not type(None)]
+        optional = type(None) in get_args(hint) or f.default is not MISSING or (
+            f.default_factory is not MISSING
+        )
+        if is_dataclass(hint):
+            found += _form_fields(hint, f"{name}.")
+            continue
+        if get_origin(hint) is Literal:
+            entry = {"type": "choice", "choices": list(get_args(hint))}
+        elif get_origin(hint) is list and args == [str]:
+            entry = {"type": "list"}
+        elif set(args or [hint]) <= {int, float}:
+            entry = {"type": "number"}
+        elif set(args or [hint]) <= {str}:
+            entry = {"type": "text"}
+        else:
+            entry = {"type": "json"}
+        found.append({"name": name, "required": not optional, "choices": [], **entry})
+    return found
 
 
 def _message(message: InboundEvent, call) -> dict:
