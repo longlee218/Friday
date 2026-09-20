@@ -217,6 +217,11 @@ async def _run(stack: AsyncExitStack) -> None:
         config,
         servers={s.name: s for s in servers},
         skills=skills,
+        # `api_issue`'s one model node is built here, the same way the
+        # extractors and the responder are — so its calls are recorded and
+        # counted against the same daily budget as everybody else's.
+        record=record_call,
+        spent=db.spent_today,
     )
 
     responder = Responder.build(

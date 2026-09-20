@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -203,6 +203,32 @@ class MCPServerConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ApiIssueConfig:
+    """What the `api_issue` graph reaches outside this process with.
+
+    Every field is empty or a default on purpose: a fresh install has no dev
+    host and no Loki server, and every node that needs one skips with a
+    reason rather than failing. That is the difference between this graph and
+    the five-node one the operator deleted, where the skipping was silent.
+    """
+
+    #: The SSH alias `kubectl` runs behind, from `~/.ssh/config`. Empty means
+    #: dev logs are not read at all — measured 2026-09-18: there is no
+    #: kubeconfig for dev on this machine, so this is the only way in.
+    ssh_host: str = ""
+    #: Which configured MCP server carries the Loki tools, and which of its
+    #: tools answers a range query. A name, not code, because the session
+    #: that measured the server read its catalogue without running a query
+    #: through it — so this is the field most likely to be wrong, and it
+    #: should be correctable without a release.
+    loki_server: str = "devops-generic"
+    loki_tool: str = "loki_query_range"
+    #: Where a run's report is written. Beside the database, for the same
+    #: reason: state this process produced, not source.
+    reports_dir: str = "./data/reports"
+
+
+@dataclass(frozen=True, slots=True)
 class OutboxConfig:
     #: How many times to try one message before handing it to a person.
     max_attempts: int = 3
@@ -253,6 +279,7 @@ class Config:
     workflows: WorkflowConfig = field(default_factory=WorkflowConfig)
     outbox: OutboxConfig = field(default_factory=OutboxConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
+    api_issue: ApiIssueConfig = field(default_factory=ApiIssueConfig)
     mcp_servers: tuple[MCPServerConfig, ...] = ()
     #: Classifications the operator wrote by hand, as `(message, task type)`.
     #: Used whether or not anything has been marked in Discord — a fresh
@@ -342,6 +369,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             else int(raw.get("summary_at_hour", 9))
         ),
         keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
+        api_issue=_api_issue(raw.get("api_issue") or {}),
         mcp_servers=_mcp_servers(_expand(raw.get("mcp_servers") or {})),
         triage_examples=_triage_examples(raw.get("triage_examples") or []),
         sensitive_words=_sensitive_words(raw.get("sensitive_words") or []),
@@ -461,6 +489,27 @@ def _mention_type(value: str) -> MentionType:
         raise ConfigError(
             f"Unknown mention type {value!r}. Known types: {known}"
         ) from exc
+
+
+def _api_issue(raw: dict) -> ApiIssueConfig:
+    """The api_issue block, or its defaults. An unknown key is refused rather
+    than ignored: a misspelled `ssh_host` that reads as absent is a graph
+    that silently stops reading dev logs."""
+    if not isinstance(raw, dict):
+        raise ConfigError("api_issue: expected a block of settings")
+    known = {f.name for f in fields(ApiIssueConfig)}
+    unknown = sorted(set(raw) - known)
+    if unknown:
+        raise ConfigError(
+            f"api_issue: unknown setting(s) {unknown} (known: {sorted(known)})"
+        )
+    # `ssh_host:` with nothing after it parses as `None`, and `str(None)` is
+    # `"None"` — a truthy hostname that turns every dev task into a failed
+    # `ssh None`. An empty setting means "not configured", which is what a
+    # blank line in a config file plainly means.
+    return ApiIssueConfig(
+        **{k: "" if v is None else str(v) for k, v in raw.items()}
+    )
 
 
 def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:

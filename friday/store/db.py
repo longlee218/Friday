@@ -1298,6 +1298,54 @@ class Database:
             )
             return _memory(row) if row is not None else None
 
+    async def structured_memory(
+        self, channel_id: str, *, kind: str, key: str
+    ) -> Any | None:
+        """One structured row as its own type, by its natural key — this
+        room's, or the one written for every room.
+
+        `route`, `service` and `project` are read by code and never by a model
+        (`readers_for`), and what code wants is the typed object, not a
+        `Memory` whose `data` dict every call site would rebuild. So this
+        returns the `MEMORY_DATA` instance, or `None`.
+
+        Checked again on the way out although it was checked on the way in: a
+        row written before a schema changed is an ordinary thing, and a graph
+        node that reads one should hand over naming the row rather than raise
+        `TypeError` two nodes later. An unfit row reads as absent here, which
+        is the outcome that already has a hand-over behind it.
+
+        This room's row wins over the `'*'` one. Two rows can hold the same
+        key — that is what `'*'` is for — and the more specific is the one
+        somebody wrote about this room on purpose.
+        """
+        schema_type = MEMORY_DATA[MemoryKind(kind)]
+        if schema_type is None:
+            raise ValueError(f"a {kind} is prose — it has no structured data")
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                select(schema.Memory)
+                .where(
+                    schema.Memory.channel_id.in_([channel_id, "*"]),
+                    schema.Memory.deleted_at.is_(None),
+                    schema.Memory.status == MemoryStatus.ACTIVE,
+                    schema.Memory.kind == MemoryKind(kind),
+                    schema.Memory.key == key,
+                )
+                # The room's own row first; `'*'` sorts before any real
+                # channel id, so this is descending rather than ascending.
+                .order_by(schema.Memory.channel_id.desc())
+            )
+            for row in rows:
+                fitted, unfit = fits(row.data or {}, schema_type)
+                if unfit is None:
+                    return fitted
+                log.warning(
+                    "memory %s: a %s row no longer fits its schema — %s",
+                    row.id, kind, unfit.why,
+                )
+            return None
+
     async def knows_person(self, channel_id: str, discord_id: str) -> bool:
         """Whether the operator wrote this person down, for this room or for
         every room — an active `person` row keyed on their Discord id. What a

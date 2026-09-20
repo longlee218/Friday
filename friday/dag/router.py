@@ -17,6 +17,7 @@ a task, and with it the branch that used to read that `None`.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from friday.config import ConfigError
@@ -153,11 +154,19 @@ def build_simple_dag(
     )
 
 
-def _graphs(config: Any) -> dict[str, DAG]:
-    """Every type's graph, built from the configuration."""
+def _graphs(config: Any, *, diagnose_harness: Any = None) -> dict[str, DAG]:
+    """Every type's graph, built from the configuration.
+
+    One of them is not the one-node graph: `api_issue` has an investigation
+    past node 0 again (ticket 00). Which nodes those are is that package's
+    business — this function asks it for a graph and registers what it gets.
+    """
+    from friday.dag.api_issue import TASK_TYPE as API_ISSUE, build_api_issue_dag
+
     budget_tokens = config.context.extraction_budget_tokens
     extractor = config.agents.get("extractor")
-    return {
+    settings = getattr(config, "api_issue", None)
+    graphs = {
         task_type: build_simple_dag(
             task_type,
             params_cls,
@@ -165,7 +174,19 @@ def _graphs(config: Any) -> dict[str, DAG]:
             extractor=extractor,
         )
         for task_type, params_cls in PARAMS.items()
+        if task_type != API_ISSUE
     }
+    if API_ISSUE in PARAMS:
+        graphs[API_ISSUE] = build_api_issue_dag(
+            extractor=extractor,
+            diagnose=config.agents.get("diagnose"),
+            diagnose_harness=diagnose_harness,
+            budget_tokens=budget_tokens,
+            reports_dir=(
+                None if settings is None else Path(settings.reports_dir)
+            ),
+        )
+    return graphs
 
 
 def check_graphs(config: Any) -> None:
@@ -182,6 +203,12 @@ def register_dags(
     *,
     servers: dict[str, Any] | None = None,
     skills: Any = None,
+    #: Where a node's model call is recorded, and what it has already spent —
+    #: the same two the extractors and the responder are built with. `None`
+    #: for both is a build with no `diagnose` agent, which is every test that
+    #: does not set one up.
+    record: Any = None,
+    spent: Any = None,
 ) -> None:
     """Register every graph this build knows about.
 
@@ -192,29 +219,50 @@ def register_dags(
     that mattered (ticket 13). Starting from empty states the same intention
     and leaves the guard live for everyone else.
 
-    Every entry in `PARAMS` gets the same one-node graph. There was a
-    five-node `api_issue` investigation — read the logs, find the code,
-    analyse, propose a patch, compose a reply — and the operator removed it:
-    it was a workflow nobody had described, built from a guess at what
-    investigating an API fault looks like, and every node of it skipped on
-    every run because no tool server was ever configured.
+    Every entry in `PARAMS` gets the same one-node graph except `api_issue`,
+    which has an investigation past node 0 (ticket 00).
+
+    There was a five-node `api_issue` graph before this one — read the logs,
+    find the code, analyse, propose a patch, compose a reply — and the
+    operator removed it: "a workflow nobody had described, built from a guess
+    at what investigating an API fault looks like, and every node of it
+    skipped on every run because no tool server was ever configured". The
+    graph registered here answers both halves of that. It is a transcription
+    of the operator's own routine, taken one question at a time; and a node
+    with nothing to read skips **out loud** — an envelope with a reason,
+    rendered on the board and carried into the report — rather than silently.
+
+    It is still a slice, and it is allowed to be thrown away: five past cases
+    are what decide whether the shape is right.
 
     `dag_for` never answers "no graph" for a type this covers, which is every
     classifiable type there is. Build a multi-node graph when there are steps
     worth skipping and somebody has said what they are.
     """
+    from friday.dag.api_issue import (
+        TASK_TYPE as API_ISSUE,
+        build_diagnose_harness,
+        build_log_sources,
+    )
+
     EDGE_ROUTER.clear()
-    for task_type, dag in _graphs(config).items():
+    for task_type, dag in _graphs(
+        config,
+        diagnose_harness=build_diagnose_harness(config, record=record, spent=spent),
+    ).items():
         register_dag(task_type, dag)
 
     check_node_clocks(EDGE_ROUTER.values(), config.agents)
 
-    # No node past node 0 has an agent any more — the ones that did were
-    # `api_issue`'s investigation, and it is gone; node 0 reaches its
-    # extractor through `friday.extraction`'s registry, not through here. `DAG_DEPS_EXTRA` stays empty and the
-    # dict stays, because it is what a graph's agents would be handed down
-    # through, and `Pool` reads it either way.
+    # Node 0 reaches its extractor through `friday.extraction`'s registry,
+    # not through here, and `Diagnose` is handed its harness when the graph is
+    # built. What travels in `DAG_DEPS_EXTRA` is what a *run* needs and a
+    # graph cannot hold: the log sources, which wrap connections this process
+    # opened and closes.
     DAG_DEPS_EXTRA.clear()
+    sources = build_log_sources(config, dict(servers or {}))
+    if sources:
+        DAG_DEPS_EXTRA[API_ISSUE] = {"log_sources": sources}
     # Replaced, not merged. Merging means a second call — a test, a restart in
     # the same process — leaves the previous run's servers reachable, and a
     # closed connection that is still in the dict is worse than an absent one:

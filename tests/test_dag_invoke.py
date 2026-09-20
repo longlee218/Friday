@@ -510,10 +510,18 @@ async def test_a_credential_in_a_node_exception_never_reaches_the_task_db(db, ap
 
 
 def _config_with(agent_timeout: float):
+    """A configuration with one model agent, for the clock check alone.
+
+    The agent is called `analyse` rather than `diagnose`, and the name is not
+    arbitrary any more: `api_issue` has a real `diagnose` agent since ticket
+    00, and `register_dags` builds a `Harness` for it — which a
+    `SimpleNamespace` standing in for an `AgentConfig` cannot survive. A
+    stand-in that collides with a real name stops standing in for anything.
+    """
     from types import SimpleNamespace
 
     return SimpleNamespace(
-        agents={"diagnose": SimpleNamespace(timeout_seconds=agent_timeout)},
+        agents={"analyse": SimpleNamespace(timeout_seconds=agent_timeout)},
         context=SimpleNamespace(extraction_budget_tokens=None),
     )
 
@@ -529,9 +537,9 @@ def _model_graph(node_timeout: float):
             name=task_type,
             nodes=(
                 Node("prepare", _ready),
-                Node("diagnose", diagnose, agent="diagnose", timeout_seconds=node_timeout),
+                Node("analyse", diagnose, agent="analyse", timeout_seconds=node_timeout),
             ),
-            edges=(Edge("prepare", "diagnose"),),
+            edges=(Edge("prepare", "analyse"),),
         )
 
     return build
@@ -549,7 +557,7 @@ def test_config_load_refuses_a_model_node_whose_clock_is_not_past_its_harness(
 
     monkeypatch.setattr(router, "build_simple_dag", _model_graph(node_timeout))
 
-    with pytest.raises(ConfigError, match="diagnose"):
+    with pytest.raises(ConfigError, match="analyse"):
         router.register_dags(_config_with(agent_timeout=60.0))
 
 
@@ -560,7 +568,9 @@ def test_a_model_node_with_room_past_its_harness_is_accepted(monkeypatch):
 
     router.register_dags(_config_with(agent_timeout=60.0))
 
-    assert router.dag_for("api_issue").node("diagnose").timeout_seconds == 90.0
+    # `doc_question`, not `api_issue`: the patched builder is what every type
+    # *without* an investigation is built by, and `api_issue` has one again.
+    assert router.dag_for("doc_question").node("analyse").timeout_seconds == 90.0
 
 
 def test_a_model_node_naming_an_agent_nobody_configured_is_refused(monkeypatch):
@@ -571,7 +581,7 @@ def test_a_model_node_naming_an_agent_nobody_configured_is_refused(monkeypatch):
 
     monkeypatch.setattr(router, "build_simple_dag", _model_graph(90.0))
 
-    with pytest.raises(ConfigError, match="diagnose"):
+    with pytest.raises(ConfigError, match="analyse"):
         router.register_dags(
             SimpleNamespace(agents={}, context=SimpleNamespace(extraction_budget_tokens=None))
         )
@@ -628,5 +638,5 @@ def test_the_clocks_are_checked_from_the_configuration_alone(monkeypatch):
 
     monkeypatch.setattr(router, "build_simple_dag", _model_graph(30.0))
 
-    with pytest.raises(ConfigError, match="diagnose"):
+    with pytest.raises(ConfigError, match="analyse"):
         router.check_graphs(_config_with(agent_timeout=60.0))

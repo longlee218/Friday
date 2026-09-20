@@ -13,8 +13,9 @@ slice's numbers.
 "nine tickets' worth of green suite did not catch three bugs" (`CLAUDE.md`),
 and this design has changed four times in two days without running once.
 
-**Status:** ready-for-agent — cases 2–5, and case 1's cause, are
-`ready-for-human`
+**Status:** the code is built (2026-09-20, see the last section); the five
+runs are not. `ready-for-human`: cases 2–5, case 1's cause, and the `route`
+and `service` rows the slice reads
 
 ## What is in, and what is deliberately out
 
@@ -118,3 +119,102 @@ Until that is answered, this slice's `FindRequestLog` has two branches, not
 three — by id, or by path and timestamp — and a case with neither ends in
 `not_checked` naming what it did not try. Case 1 is the test of whether that
 is enough to be useful.
+
+## Built 2026-09-20 — the code, not the runs
+
+`friday/dag/api_issue/` exists again: six nodes, one module each, its own
+prompt, and the one agent behind `Diagnose` built from its own declaration.
+`api_issue` is no longer a one-node graph.
+
+**What each node does, and where it stops.**
+
+- `resolve` — environment from the domain by rule in code (D1: `dev`,
+  `production`, `external`); `route` → `service` rows for where it runs (D3).
+  Hands over on an external domain, a missing row, a row whose `env`
+  contradicts the domain, and on a report with no URL at all (D2: findable is
+  not routable).
+- `find_request_log` — `SshKubectlSource` for dev, `LokiSource` for
+  production, both read-only. **The window is measured back from the
+  reporter's message**, not from now (D5), which is what makes the slice
+  runnable against five *past* cases at all: 30 minutes back, widened once to
+  six hours when the first cut holds neither an error nor a stack. A source
+  that is not configured **skips out loud**.
+- `distil` — the recall-first rule as a pure function over lines, which is
+  what lets ticket 16's coverage test reach it. Two bugs its own tests
+  found: production log lines are JSON and spell it `"level":"error"`, so the
+  match is case-insensitive; and a stack frame is decisive in its own right,
+  not only when the line around it says ERROR.
+- `read_failing_code` — frame → file in the operator's clone, at HEAD, and it
+  says in `not_checked` that HEAD is not the running tag. A frame that
+  resolves outside the clone is never opened: it arrives from a log line, and
+  a log line carries whatever somebody got the service to print.
+- `diagnose` — one model call over fixed evidence, no tools, answering
+  `Diagnosis{cause, confidence (five rungs), conclusive, refs, next_checks}`.
+  **The grounding gate**, and `refs` are **pointers, not quotes**: every line
+  in the prompt carries an id, the model names ids, and code puts the text
+  back. That is the spec's own measurement (ticket 16 — the configured model
+  quotes a JSON log line right 32 times in 40 and points at one 20 times in
+  20), and the first version of this node was built against the design that
+  measurement replaced. A pointer that resolves to nothing voids the answer;
+  so does calling an answer conclusive while pointing at nothing.
+  `not_checked` is code-authored rather than asked of the model — the nodes
+  already know what they skipped.
+- `report` — writes `data/reports/<task>-<when>.md` and hands over. Nothing
+  is sent to anybody.
+
+**Configuration.** `api_issue:` in `config.yaml` (`ssh_host`, `loki_server`,
+`loki_tool`, `reports_dir`) and an `agents.diagnose` block. Comment the agent
+block out and the graph still runs: every node says what it could not do.
+
+**Verified.** Whole suite `1325 passed, 1 skipped`. Seven guards deleted one
+at a time and watched go red — the grounding gate, the clone-root check, the
+route/domain disagreement, the recall-first cap, the `resolve` edge, the
+one-widening rule, and the room-over-`*` precedence. The clone-root check was
+**green** on its first mutation: the traversal in the test landed on a file
+that did not exist, so `is_file()` was refusing it and not the guard. The
+test now escapes to a file that is really there.
+
+**What the review changed.** Two subagents read this before it was
+committed. Eight real faults between them, all fixed here: the log window was
+anchored to `now` rather than to the reporter's message (D5 — fatal for five
+old cases); `refs` were verbatim quotes, the design the spec had already
+retired on a measurement; stack frames were truncated to three *before*
+`node_modules` was dropped, so a NestJS trace buried its own throw site; an
+empty `repo_path` turned the clone-root check into "anywhere under the
+process's working directory"; `ssh_host:` left blank in YAML became the
+truthy string `"None"`; a killed SSH child was never reaped; the report file
+ignored D10's `<task_id>.md`; and a comment promised configurable Loki
+argument names that are hardcoded. Two of those were guards that had stopped
+guarding while still looking like guards.
+
+**Still divergent from the spec, on purpose and named here.**
+
+- **`≤ 12 lines` of dossier is not reached.** The spec gets there with an
+  error-code histogram — counts, not lines — which is ticket 05's. What this
+  does instead is cap the loud lines belonging to *other* requests at 20 and
+  report the rest as a count.
+- **No `alternatives_rejected`** in the answer shape; the spec's build order
+  names it. Ticket 05.
+- **`ReadFailingCode` reads ±15 lines around the first frame** but not the
+  enclosing function's name or one hop of callers — both need CodeGraph,
+  which is ticket 04.
+- **Answer 3 (dossier tokens, wall time per node, model calls) is not in the
+  report.** It is in the database — `node_runs` per attempt, `model_calls`
+  per call — so the five runs can still answer it; the report carries lines
+  kept of lines offered.
+
+**Not done, and not hidden.**
+
+- **The five runs.** Cases 2–5 do not exist and case 1 has no cause. Nothing
+  here has been run against a real cluster; every log source in the suite is
+  a fake. The four questions this ticket asks are still unanswered.
+- **`memories` is empty.** Until two `route` rows and one `service` row are
+  typed in, every real run hands over on "no route row" — which is the
+  designed behaviour, and also means the slice cannot be exercised yet.
+- **The Loki branch has never been called.** `loki_tool` is a guess with a
+  default; ticket 16 read the server's catalogue without running a query
+  through it. The first production case will either work or name the tool it
+  could not find.
+- **The reporter's curl is still stored with its token** (ticket 17) and is
+  still the model's retyping of it (ticket 18). Case 1 cannot be scored until
+  18 lands.

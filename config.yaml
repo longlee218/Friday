@@ -155,23 +155,59 @@ agents:
       temperature: 0
     max_turns: 1
 
-  # ── The api_issue graph's node agents ─────────────────────────────────────
-  # Removed 2026-09-07. There were four blocks here — `dag_read_logs`,
-  # `dag_find_code`, `dag_analyze`, `dag_compose`, plus a commented-out
-  # `dag_fix` — one per node of a five-node `api_issue` investigation. That
-  # graph is gone: the operator removed it as "a workflow nobody had
-  # described, built from a guess at what investigating an API fault looks
-  # like, and every node of it skipped on every run because no tool server was
-  # ever configured" (`friday/dag/router.py`).
+  # ── The api_issue graph's one model node ──────────────────────────────────
+  # There were four blocks here once — `dag_read_logs`, `dag_find_code`,
+  # `dag_analyze`, `dag_compose` — one per node of a five-node `api_issue`
+  # investigation the operator removed on 2026-09-07 as "a workflow nobody
+  # had described, built from a guess at what investigating an API fault
+  # looks like, and every node of it skipped on every run because no tool
+  # server was ever configured".
   #
-  # The blocks outlived it and nothing read them. Kept as this note rather
-  # than deleted quietly, because a knob that vanishes without a reason is one
-  # somebody adds back. `tests/test_repo_hygiene.py` now fails on an agent
-  # block nothing builds, so the next one cannot sit here unread.
+  # `diagnose` is not one of those coming back. The graph it belongs to
+  # (board `read-it-the-way-the-operator-does`, ticket 00) is a transcription
+  # of the operator's own routine, and it is the *only* node of that graph
+  # that calls a model: reading a domain, finding a pod, cutting a log down
+  # and opening a file are all code. One model node, one prompt, one shape it
+  # has to answer — which is also what makes it measurable (ticket 14).
   #
-  # Every task type gets the same one-node graph now: extract, validate, then
-  # ask for what is missing or hand over. Build a multi-node graph when there
-  # are steps worth skipping and somebody has said what they are.
+  # **Comment this block out and the graph still runs.** Every node that
+  # cannot do its job says so in its envelope, the report is still written,
+  # and `Diagnose` skips with "no diagnose agent is configured". That is the
+  # difference from the graph that was deleted: the skipping is not silent.
+  #
+  # Slow on purpose, like the responder and for the same reason: it reads a
+  # dossier and a file rather than writing a label, and a truncated run costs
+  # the whole investigation. Its node's clock is derived from this number
+  # plus five seconds, so raising it here moves the node's with it.
+  diagnose:
+    timeout_seconds: 150
+    api_key: ${TRIAGE_API_KEY}
+    base_url: "https://api.minimax.io/v1"
+    model: "MiniMax-M3"
+    settings:
+      temperature: 0
+    max_turns: 1
+
+# ── The api_issue graph ────────────────────────────────────────────────────
+# What the investigation reaches outside this process with. Everything here
+# is optional: a node with no source skips and says which one it wanted.
+api_issue:
+  # The SSH alias `kubectl` runs behind. Measured 2026-09-18: there is no
+  # kubeconfig for dev on this machine — `kubectl` runs on the dev host, so
+  # this is the only way in. Empty means dev logs are not read at all.
+  ssh_host: "dev"
+  # Which MCP server under `mcp_servers:` carries the Loki tools, and which
+  # of its tools answers a range query. Nothing is read from production until
+  # that server block exists.
+  #
+  # The tool name is the field most likely to be wrong here: the session that
+  # measured the devops MCP (ticket 16) read its catalogue without running a
+  # query through it. A wrong name is a node that says so, correctable here
+  # without a release.
+  loki_server: "devops-generic"
+  loki_tool: "loki_query_range"
+  # Where each run's report is written. Nothing in it is sent to anybody.
+  reports_dir: "./data/reports"
 
 # ── Workflows ──────────────────────────────────────────────────────────────
 # How often to say the process is alive and what it is holding.

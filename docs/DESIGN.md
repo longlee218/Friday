@@ -82,7 +82,7 @@ only and reached with `ssh -N -L 8086:127.0.0.1:8086 <host>`.
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py`, `bot.py`, `normalise.py`. `__init__.py` stays empty on purpose |
 | `friday/triage/` | Classification only, plus its sensitive-word prefilter and the untriaged-message loop. `context.py` gathers what a mention is shown; `prompt.py` renders it |
 | `friday/extraction/` | Everything a task knows, lifted out of the reporter's own words. One extractor per task type, each owning its prompt and `Params` schema; one `extractor` config block serves all of them. `context.py` is node 0's gather function: transcript, domain memories (this room and `'*'`), outstanding questions and `known`, one call, one frozen `FullContext` |
-| `friday/dag/` | `engine.py` — nodes, edges, checkpointed resume, and `DAGRunner._invoke`, the one way a node runs (timeout, retry, result envelope). `state.py` what a run accumulates. `prepare.py` builds the entry node every graph shares. `router.py` maps task type to graph — every type currently gets the same one-node graph — and checks node clocks against agent timeouts |
+| `friday/dag/` | `engine.py` — nodes, edges, checkpointed resume, and `DAGRunner._invoke`, the one way a node runs (timeout, retry, result envelope). `state.py` what a run accumulates. `prepare.py` builds the entry node every graph shares. `router.py` maps task type to graph and checks node clocks against agent timeouts. `api_issue/` is the one graph with an investigation past node 0 — resolve, find the log, read the code, diagnose, report — owning its nodes, its prompt and its one agent |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs, up to `workflows.concurrency` at once, never taking one task twice while its graph runs. Decides nothing about what a graph decides |
 | `friday/tools/` | Every tool an agent may call, one module per subject: skills (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), memory (`memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder). `tests/test_tools.py` asserts the full list and forbids declaring a tool anywhere else (one exemption, below) |
 | `friday/responder/` | Drafts a reply in the operator's voice |
@@ -201,8 +201,26 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   mid-run where its retry loop cannot see it. Node 0 is a model node (the
   extractor). Checked at config load (`check_graphs`) and again at
   `register_dags`.
-- **Every task type is a graph, and every type currently gets one node** —
-  extract, validate, then ask or hand over.
+- **Every task type is a graph. All but one get a single node** — extract,
+  validate, then ask or hand over.
+- **`api_issue` has an investigation past node 0**: `Prepare → Resolve →
+  FindRequestLog → ReadFailingCode → Diagnose → Report`, in
+  `friday/dag/api_issue/`, which owns its nodes, its prompt and the one agent
+  behind them. Three rules hold it together, and each replaces a way the
+  deleted five-node graph went wrong:
+  - **The environment comes from the domain, by rule, in code** (D1); where a
+    service runs comes from `route` and `service` rows the operator wrote
+    (D3). **A missing row is a hand-over, not a guess** — guessing which pod
+    serves a domain reads another product's logs.
+  - **A node that cannot do its job skips out loud**: an envelope with a
+    reason, rendered on the board and carried into the report. The graph that
+    was deleted skipped every node on every run and said nothing.
+  - **A diagnosis must point at evidence it was shown.** `Diagnosis.refs` is
+    checked against the dossier and the source excerpts; an invented ref
+    voids the answer rather than reporting it.
+  Only `Diagnose` calls a model. It is a slice (board
+  `read-it-the-way-the-operator-does`, ticket 00) and is allowed to be thrown
+  away once five real cases have been run through it.
 
 ### Outbound & approval
 
@@ -591,7 +609,10 @@ One workflow per type, **deterministic Python** — branching, not reasoning:
 ```
 api_issue:
     missing correlation_id and curl  → ask for them
-    otherwise                        → trace, then answer
+    a domain that is not ours        → hand over, having read nothing
+    no route row for the domain      → hand over, naming the missing row
+    otherwise                        → read the log, read the code,
+                                       diagnose, write a report
 ```
 
 Agentic workflows are a later step, taken per type once the deterministic one is

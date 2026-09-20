@@ -520,3 +520,51 @@ async def test_two_writes_racing_for_the_last_slot_do_not_both_land(db):
     assert [first is None, second is None].count(True) == 1
     live = await db.memory_search(ROOM, "", limit=1000, kind=MemoryKind.VOICE)
     assert len(live) == Database.MEMORY_PER_CHANNEL
+
+
+# --- structured rows, read by code (ticket 00) ------------------------------
+
+
+async def test_a_structured_row_comes_back_as_its_own_type(db):
+    """`route`, `service` and `project` are read by code, never by a model,
+    and what code wants is the typed object rather than a `data` dict every
+    call site rebuilds."""
+    from friday.domain.models import MemoryOrigin
+
+    await db.memory_add(
+        ROOM, "ReelMe on dev", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
+        data={"domain": "api.dev.aperogroup.ai", "env": "dev", "service": "be"},
+    )
+
+    found = await db.structured_memory(
+        "c1", kind=MemoryKind.ROUTE, key="api.dev.aperogroup.ai"
+    )
+
+    assert (found.env, found.service) == ("dev", "be")
+
+
+async def test_this_rooms_row_wins_over_the_one_written_for_every_room(db):
+    """Two rows can hold one key — that is what `'*'` is for — and the more
+    specific is the one somebody wrote about this room on purpose."""
+    from friday.domain.models import MemoryOrigin
+
+    everywhere = FridayState(channel_id="*", agent="admin")
+    for state, service in ((everywhere, "shared"), (ROOM, "this-room")):
+        await db.memory_add(
+            state, "route", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
+            data={"domain": "api.aperogroup.ai", "env": "production",
+                  "service": service},
+        )
+
+    found = await db.structured_memory(
+        "c1", kind=MemoryKind.ROUTE, key="api.aperogroup.ai"
+    )
+
+    assert found.service == "this-room"
+
+
+async def test_a_prose_kind_has_no_structured_data_to_ask_for(db):
+    import pytest
+
+    with pytest.raises(ValueError, match="prose"):
+        await db.structured_memory("c1", kind=MemoryKind.FACT, key="anything")
