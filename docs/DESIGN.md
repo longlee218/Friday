@@ -82,6 +82,7 @@ only and reached with `ssh -N -L 8086:127.0.0.1:8086 <host>`.
 | `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py`, `bot.py`, `normalise.py`. `__init__.py` stays empty on purpose |
 | `friday/triage/` | Classification only, plus its sensitive-word prefilter and the untriaged-message loop. `context.py` gathers what a mention is shown; `prompt.py` renders it |
 | `friday/extraction/` | Everything a task knows, lifted out of the reporter's own words. One extractor per task type, each owning its prompt and `Params` schema; one `extractor` config block serves all of them. `context.py` is node 0's gather function: transcript, domain memories (this room and `'*'`), outstanding questions and `known`, one call, one frozen `FullContext` |
+| **`friday/sources/`** | Where facts come from, and the only place that reaches an outside read surface: `logs.py` (`LokiSource`, `SshKubectlSource`), `code.py` (a stack frame mapped into the operator's clone, and the window around it). Read-only by construction — no verb here writes — and holds no judgement: which window, which service, which frame all arrive as arguments. May not import `friday/agent/`, `friday/dag/` or `friday/tasks/`. `tests/test_sources_are_the_only_door.py` is the guard |
 | `friday/dag/` | `engine.py` — nodes, edges, checkpointed resume, and `DAGRunner._invoke`, the one way a node runs (timeout, retry, result envelope). `state.py` what a run accumulates. `prepare.py` builds the entry node every graph shares. `router.py` maps task type to graph and checks node clocks against agent timeouts. `api_issue/` is the one graph with an investigation past node 0 — resolve, find the log, read the code, diagnose, report — owning its nodes, its prompt and its one agent |
 | `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs, up to `workflows.concurrency` at once, never taking one task twice while its graph runs. Decides nothing about what a graph decides |
 | `friday/tools/` | Every tool an agent may call, one module per subject: skills (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), memory (`memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder). `tests/test_tools.py` asserts the full list and forbids declaring a tool anywhere else (one exemption, below) |
@@ -215,12 +216,24 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   - **A node that cannot do its job skips out loud**: an envelope with a
     reason, rendered on the board and carried into the report. The graph that
     was deleted skipped every node on every run and said nothing.
-  - **A diagnosis must point at evidence it was shown.** `Diagnosis.refs` is
-    checked against the dossier and the source excerpts; an invented ref
-    voids the answer rather than reporting it.
+  - **A diagnosis must point at evidence it was shown.** `Diagnosis.refs` are
+    line ids, not quotes — measured (ticket 16): the configured model quotes
+    a JSON log line right 32 times in 40 and points at one 20 times in 20, so
+    the model names lines and code puts the text back. A pointer that
+    resolves to nothing voids the answer.
   Only `Diagnose` calls a model. It is a slice (board
   `read-it-the-way-the-operator-does`, ticket 00) and is allowed to be thrown
   away once five real cases have been run through it.
+- **Three layers, and the graph is the top one.** A **source**
+  (`friday/sources/`) is a capability: it reads one kind of thing and decides
+  nothing. A **check** is a formula over sources — `FindRequestLog` is "the
+  correlationId's lines, else path plus identifier, in a window measured back
+  from the reporter's message". A **node** is the frame a run is
+  checkpointed, timed and retried in. Reuse lives in the first layer, not the
+  third: whatever a node returns is written to `dag_state` on every run, so a
+  node is a boundary, not a unit of reuse. Reordering a graph is a change to
+  its `edges` in one function, and `DAG.version` is a digest of the shape, so
+  it discards the checkpoints that no longer apply by itself.
 
 ### Outbound & approval
 

@@ -1,0 +1,213 @@
+"""Log lines, from the two places this system may read them (D4).
+
+Production through the devops MCP's Loki tools; dev through `kubectl` on the
+dev host, reached by `ssh dev` — not a kubeconfig on this machine, which the
+spec assumed and ticket 16 measured to be wrong.
+
+Both are reads, and the guard is the absence of a verb rather than a line in
+a prompt: there is nothing here that writes to a cluster. Neither knows what
+it is being read for.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import shlex
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+
+from friday.sources import Placement
+
+__all__ = ["LokiSource", "SshKubectlSource"]
+
+log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class SshKubectlSource:
+    """Dev: `kubectl` on the dev host, over SSH.
+
+    Measured on 2026-09-18 from the operator's Mac (ticket 16): `get pods -A`
+    1.5 s, `logs --tail=200` 1.2 s, `logs --since=6h` 1.5 s, each including
+    the handshake. Two round trips per read, because the pod name is a
+    pattern until something looks it up.
+
+    The host is an alias in `~/.ssh/config`, non-interactive with the agent
+    loaded. Nothing here supplies a password or a key: if the alias does not
+    resolve, the command fails and the node's envelope says so.
+    """
+
+    name: str = "kubectl"
+    host: str = "dev"
+    timeout_seconds: float = 30.0
+
+    async def lines(
+        self, placement: Placement, *, since: datetime, until: datetime, limit: int
+    ) -> list[str]:
+        pod = await self._run(
+            f"kubectl -n {shlex.quote(placement.namespace)} get pods "
+            f"-o name | grep {shlex.quote(placement.pod_pattern)} | head -1"
+        )
+        pod = pod.strip()
+        if not pod:
+            raise RuntimeError(
+                f"no pod matching {placement.pod_pattern!r} in namespace "
+                f"{placement.namespace!r} on {self.host}"
+            )
+        # `--since-time` rather than `--since`: kubectl's relative form is
+        # relative to *now*, and the window this node wants is around the
+        # reporter's message. There is no `--until`, so lines after the
+        # window are dropped here rather than on the host.
+        out = await self._run(
+            f"kubectl -n {shlex.quote(placement.namespace)} logs "
+            f"{shlex.quote(pod)} "
+            f"--since-time={shlex.quote(_rfc3339(since))} "
+            f"--tail={int(limit)}"
+        )
+        return out.splitlines()
+
+    async def _run(self, remote: str) -> str:
+        proc = await asyncio.create_subprocess_exec(
+            "ssh",
+            "-o", "BatchMode=yes",
+            self.host,
+            remote,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            out, err = await asyncio.wait_for(
+                proc.communicate(), timeout=self.timeout_seconds
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            proc.kill()
+            # Reaped, not merely killed: without this the child stays a
+            # zombie for the life of the process, and this runs on every
+            # dev task.
+            await proc.wait()
+            raise
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"ssh {self.host}: exit {proc.returncode} — "
+                f"{err.decode(errors='replace').strip()[:400]}"
+            )
+        return out.decode(errors="replace")
+
+
+@dataclass(frozen=True, slots=True)
+class LokiSource:
+    """Production: the devops MCP's Loki tools.
+
+    **The tool's name is configuration; its arguments are not.** The session
+    that measured this server (ticket 16) read its catalogue but did not run a
+    query through it, so the one thing that would make either safe — a call
+    that came back — has not happened. The name is the half an operator can
+    correct in `config.yaml`; wrong argument names are a release, and ticket
+    02 is where they stop being a guess.
+
+    Bounded on purpose: `loki_series` over seven days is ~780 KB, and the
+    spec says never to ask it unbounded from a graph.
+    """
+
+    server: Any
+    name: str = "loki"
+    tool: str = "loki_query_range"
+    #: LogQL. `{...}` is filled with the placement's labels.
+    query: str = '{{cluster="{cluster}", namespace="{namespace}", app="{app}"}}'
+
+    async def lines(
+        self, placement: Placement, *, since: datetime, until: datetime, limit: int
+    ) -> list[str]:
+        selector = self.query.format(
+            cluster=placement.cluster,
+            namespace=placement.namespace,
+            app=placement.app,
+        )
+        result = await self.server.call_tool(
+            self.tool,
+            {
+                "query": selector,
+                "start": _rfc3339(since),
+                "end": _rfc3339(until),
+                "limit": int(limit),
+            },
+        )
+        return _text_of(result).splitlines()
+
+
+def _reported_at(task: Any) -> datetime:
+    """When the reporter said something — what D5's window is measured back
+    from.
+
+    The task's own creation time, which is within seconds of the message that
+    opened it. `now` is the fallback for a task with no timestamp at all, and
+    it is the wrong answer often enough to be worth a log line rather than a
+    silent substitution.
+    """
+    at = getattr(task, "created_at", None)
+    if isinstance(at, str):
+        try:
+            at = datetime.fromisoformat(at)
+        except ValueError:
+            at = None
+    if not isinstance(at, datetime):
+        log.warning(
+            "task %s has no usable created_at — reading the log around now "
+            "instead, which is not when this was reported",
+            getattr(task, "id", "?"),
+        )
+        return datetime.now(timezone.utc)
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def _said(window: timedelta) -> str:
+    hours, seconds = divmod(int(window.total_seconds()), 3600)
+    return f"{hours}h" if hours and not seconds else f"{seconds // 60}m"
+
+
+def _rfc3339(at: datetime) -> str:
+    """The one time format both sides of this module speak."""
+    return at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _text_of(result: Any) -> str:
+    """Whatever an MCP tool answered, as text.
+
+    Duck-typed rather than imported: `friday/agent/harness.py` is the one
+    module that imports the SDK, and a second one here would make the SDK's
+    result shape load-bearing in a graph node.
+    """
+    content = getattr(result, "content", result)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            part if isinstance(part, str) else str(getattr(part, "text", part))
+            for part in content
+        )
+    return str(content)
+
+
+def _rfc3339(at: datetime) -> str:
+    """The one time format both back ends speak."""
+    return at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _text_of(result: Any) -> str:
+    """Whatever an MCP tool answered, as text.
+
+    Duck-typed rather than imported: `friday/agent/harness.py` is the one
+    module that may import the SDK, and this package may not import
+    `friday/agent/` at all.
+    """
+    content = getattr(result, "content", result)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            part if isinstance(part, str) else str(getattr(part, "text", part))
+            for part in content
+        )
+    return str(content)

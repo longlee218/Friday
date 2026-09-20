@@ -52,3 +52,29 @@ form, `Investigate`, which is withdrawn.
 - `model_calls` holds a row per Collector attempt, correlated to the task.
 - Eval: collects = 0 vs 3, reported side by side. If collects do not pay for
   themselves, the ceiling ships at 0 and says so.
+
+
+## Already built by the slice (ticket 00, 2026-09-20)
+
+`friday/sources/` exists, with the first of the six protocols and the guard:
+
+- **`LogSource`** and both its back ends — `LokiSource` (devops MCP, tool
+  name from `config.yaml`) and `SshKubectlSource` (`ssh <host> kubectl -n
+  <ns> logs <pod> --since-time …`, composed in code). `Placement` — the
+  address they read from — lives here too, so a source never imports the
+  graph that calls it.
+- **`CodeSource`'s `read` primitive**: a stack frame mapped into the
+  operator's clone, with the root check that refuses a frame climbing out of
+  it, and the window around the line. `grep`, `explore` and `doc` are ticket
+  04's; they are not declared as empty protocols here, because a shape with
+  one implementation and no second caller is a guess about the second one.
+- **The `ast` test this ticket's Verify asks for**, in
+  `tests/test_sources_are_the_only_door.py`: nothing outside
+  `friday/sources/` starts a process or calls a tool on a server, and no
+  source imports `friday/agent/`, `friday/dag/` or `friday/tasks/`. Both
+  halves deleted once and watched go red.
+
+Still this ticket's: `DbSource`, `MetricSource`, `DeploySource`,
+`ConfigSource`; the wrapped tools in `friday/tools/`; `collect`; the
+Collector and its prompt. The slice's checks are formulas over the two
+sources that exist, which is the shape the rest are meant to arrive in.

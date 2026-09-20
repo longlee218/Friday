@@ -31,3 +31,18 @@ read tools, and a graph node that finds the reporter's request in Loki.
 - Scripted transport tests for each search branch; one for the resume.
 - A recorded real query against `backend-reelme-v2` in a test marked to skip
   without the MCP.
+
+## Owed by the slice (ticket 00, 2026-09-20)
+
+- **The error-code histogram.** The spec's table gives `FindRequestLog` a
+  ceiling of `≤ 12 lines`, reached by the request's own lines plus a
+  histogram of ±5 min — counts, not lines. The slice has no histogram: it
+  keeps the request's lines, caps loud lines belonging to *other* requests at
+  20 and reports the rest as a count. That is the part of the idea a cap can
+  do; the histogram is this ticket's.
+- **The Loki call has never been made.** `friday/dag/api_issue/logs.py`'s
+  `LokiSource` names its tool from `config.yaml` (`api_issue.loki_tool`,
+  default `loki_query_range`) and passes `query`/`start`/`end`/`limit` —
+  every one of those a guess, since ticket 16 read the server's catalogue
+  without running a query through it. The first production case either works
+  or names the tool it could not find.

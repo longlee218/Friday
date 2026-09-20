@@ -58,3 +58,32 @@ and routes it (spec, same section).
   escalates.
 - The `Reply`-construction anchor test stays green: this node writes no
   `Reply`.
+
+## Owed by the slice (ticket 00, 2026-09-20)
+
+The slice built `Diagnose` as one model call over fixed evidence, no tools,
+answering `Diagnosis{cause, confidence, conclusive, refs, next_checks}` with
+**pointers, not quotes** — every line of the prompt carries an id, the model
+names ids, code puts the text back, and a pointer that resolves to nothing
+voids the answer. So does calling an answer conclusive while pointing at
+nothing.
+
+Still owed here:
+
+- **`alternatives_rejected`**, and with it `hypotheses` and
+  `distinguishing_check`. The spec's build order is "minimal prompt, the
+  dossier with its budget, the shape with `alternatives_rejected`, the
+  grounding gate"; the slice shipped the first and the last.
+- **The dossier budget.** The slice uses fixed line caps
+  (`friday/dag/api_issue/logs.py`), not `diagnose.dossier_budget_tokens` and
+  the priority order, and no check is cut with a "cut for budget" line.
+- **`not_checked` as `[{kind, reason}]`.** The slice's is a list of strings,
+  written by code rather than by the model — the nodes already know what they
+  skipped, and that half is worth keeping.
+- **Moving the grounding gate into the answer tool**, so a bad pointer is
+  corrected inside the model's own turn budget instead of voiding the run
+  after it (D8).
+- **The numbers ticket 00 asks for in its answer 3** — dossier tokens, wall
+  time per node, model calls — are in `node_runs` and `model_calls` but not
+  in the report file. Whichever of the two is the operator's reading surface
+  should carry them.

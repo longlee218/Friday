@@ -23,9 +23,9 @@ from typing import Any
 from friday.dag.engine import DAGDeps, DAGState, Node, envelope
 from friday.domain.actions import HandOver
 from friday.domain.models import MemoryKind
+from friday.sources import Placement
 
 __all__ = [
-    "Placement",
     "domain_of",
     "environment_of",
     "path_of",
@@ -45,25 +45,6 @@ _OURS = ("aperogroup.ai", "apero.vn")
 _DEV_LABEL = "dev"
 
 _URL = re.compile(r"https?://(?P<host>[\w.-]+)")
-
-
-@dataclass(frozen=True, slots=True)
-class Placement:
-    """Where one service's logs are, for the environment in hand.
-
-    Flattened out of `ServiceData`'s two halves on purpose: every reader past
-    this node wants one place, and a node that has to remember which half to
-    read is a node that one day reads the other.
-    """
-
-    env: str
-    service: str
-    #: Production: the Loki labels. Dev: empty.
-    cluster: str = ""
-    namespace: str = ""
-    app: str = ""
-    #: Dev: the pod name pattern to grep for. Production: empty.
-    pod_pattern: str = ""
 
 
 def resolved(result: Any) -> tuple[Placement, dict[str, Any] | None]:

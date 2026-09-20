@@ -28,3 +28,21 @@ from `DeploySource`, which this ticket owns, not from the log check.)
 - A test that the tools in this ticket are all reads: no tool here takes a
   path it writes to except under `data/checkouts/`.
 - The frame-to-file mapping tested on the two real frames in the spec.
+
+## Owed by the slice (ticket 00, 2026-09-20)
+
+The slice's `read_failing_code` reads **±15 lines around the first frame that
+resolves in the clone**, drops `node_modules` and framework frames before
+capping at five, and names the frames further down the stack in
+`not_checked` rather than opening them.
+
+Still owed here, from the spec's own rule for this check — "±15 lines around
+the first frame, **the enclosing function's name, one hop of callers**":
+
+- The enclosing function's name and one hop of callers, which is what
+  `codegraph explore` is for and why this ticket owns it.
+- The `/app/dist/src/x/y.js:80` → `src/x/y.ts` mapping. The slice strips a
+  container root (`/app`, `/usr/src/app`, `/srv/app`) and joins the rest to
+  the clone, so a compiled `dist` frame does not reach its TypeScript source.
+- The running version. The slice reads HEAD and says so in `not_checked`;
+  `DeploySource` and the detached worktree are this ticket's.

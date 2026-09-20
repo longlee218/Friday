@@ -126,6 +126,17 @@ is enough to be useful.
 prompt, and the one agent behind `Diagnose` built from its own declaration.
 `api_issue` is no longer a one-node graph.
 
+**Three layers, after the operator's reading of the first draft** (2026-09-20):
+a **source** (`friday/sources/`) is a capability that reads one kind of thing
+and decides nothing; a **check** is a formula over sources; a **node** is the
+frame a run is checkpointed, timed and retried in. The first draft had the
+two log back ends and the clone reader inside `api_issue/`, which is what
+ticket 15 says must live in one package nothing else touches — they moved,
+and `tests/test_sources_are_the_only_door.py` now holds the line. Nodes kept
+their names: whatever a node returns is written to `dag_state` on every run,
+so a node is a boundary rather than a unit of reuse, and reordering is
+already a change to `edges` in one function.
+
 **What each node does, and where it stops.**
 
 - `resolve` — environment from the domain by rule in code (D1: `dev`,

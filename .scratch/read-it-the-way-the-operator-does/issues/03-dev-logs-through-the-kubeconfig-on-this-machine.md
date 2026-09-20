@@ -28,3 +28,13 @@ than the window. Measured round trip ~1.5 s.
 
 - Tests with a fake `kubectl` on `PATH`.
 - `tests/test_tools.py`'s asserted list grows by exactly these names.
+
+## Owed by the slice (ticket 00, 2026-09-20)
+
+- **The error-code histogram**, as ticket 02 owes it for Loki: the slice caps
+  other requests' loud lines at 20 and counts the rest instead.
+- **`SshKubectlSource` exists and has never run against the host.** Two round
+  trips per read (pod pattern → pod name, then logs), `--since-time` anchored
+  to the reporter's message, `-o BatchMode=yes`. This ticket owns proving it
+  against the real `ssh dev`, and the `command=` restriction in the host's
+  `authorized_keys` the spec calls the second lock.
