@@ -38,8 +38,18 @@ class Sensitive:
 
     def __init__(self, words: Iterable[str]) -> None:
         self._words = tuple(w for w in (w.strip() for w in words) if w)
+        # Two patterns per word, run against two spellings of the message.
+        # Folding alone made `luồng` (a flow) the same word as `lương`
+        # (salary) and `thường` (usual) the same as `thưởng` (bonus) — both
+        # everyday words in a backend channel, both silently held from the
+        # model. What folding is *for* is the message typed without
+        # diacritics, so that is the only place it is allowed to decide.
         self._patterns = tuple(
-            (word, re.compile(rf"(?<![\w-]){_fold(word)}(?![\w-])"))
+            (
+                word,
+                re.compile(rf"(?<![\w-]){re.escape(_lower(word))}(?![\w-])"),
+                re.compile(rf"(?<![\w-]){re.escape(_fold(word))}(?![\w-])"),
+            )
             for word in self._words
         )
 
@@ -53,11 +63,46 @@ class Sensitive:
         told *why* their message was held. The message itself is never part of
         that explanation — it is the thing being kept quiet.
         """
-        folded = _fold(text)
-        for word, pattern in self._patterns:
-            if pattern.search(folded):
+        lowered = _lower(text)
+        folded, accented = _fold_marked(lowered)
+        for word, exact, folded_pattern in self._patterns:
+            if exact.search(lowered):
                 return word
+            # The folded spelling decides only where the message wrote no
+            # diacritics of its own. `luồng` must not match `lương` because
+            # both fold to `luong`; `luong` still must.
+            for hit in folded_pattern.finditer(folded):
+                if not any(accented[hit.start():hit.end()]):
+                    return word
         return None
+
+
+def _lower(text: str) -> str:
+    """Lowercase and collapse spaces, diacritics kept.
+
+    The message's own spelling, for the exact half of the match.
+    """
+    return re.sub(r"\s+", " ", text.lower().replace("đ", "d"))
+
+
+def _fold_marked(lowered: str) -> tuple[str, list[bool]]:
+    """The folded spelling, and one flag per folded character saying whether
+    it carried a diacritic in the message.
+
+    Character by character rather than over the whole string, because a
+    message mixes the two spellings freely — "luồng thanh toan" is both — and
+    the question is about the word that matched, not about the message.
+    """
+    out: list[str] = []
+    marked: list[bool] = []
+    for ch in lowered:
+        decomposed = unicodedata.normalize("NFD", ch)
+        base = "".join(c for c in decomposed if not unicodedata.combining(c))
+        has_mark = len(decomposed) > len(base)
+        for c in base or ch:
+            out.append(c)
+            marked.append(has_mark)
+    return "".join(out), marked
 
 
 def _fold(text: str) -> str:

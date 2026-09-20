@@ -824,7 +824,10 @@ def test_every_decision_the_model_may_name_carries_its_own_description():
 
     assert set(described["enum"]) == set(DECISIONS)
     for name, params_cls in PARAMS.items():
-        assert params_cls.__doc__.strip() in described["description"], name
+        # Whitespace collapsed, the way `_means` renders it: a definition long
+        # enough to be worth writing is wrapped in the source, and the enum
+        # keeps one line per label.
+        assert " ".join(params_cls.__doc__.split()) in described["description"], name
     assert "skip" in described["description"]
 
 
@@ -1048,3 +1051,33 @@ async def test_a_type_the_model_actually_invented_is_still_counted():
     )
 
     assert (await decide(triage)).out_of_set
+
+
+async def test_an_accented_word_is_not_a_different_accented_word():
+    """Folding diacritics away was meant to catch `luong` written without
+    them. It also made `luồng` (a flow) the same word as `lương` (salary),
+    and `thường` (usual) the same as `thưởng` (bonus) — both everyday words
+    here. Measured on the operator's own channel, 2026-09-20: "tài liệu về
+    luồng duyệt task ở đâu vậy" and "không có gì bất thường" were held from
+    the model and the reporters got silence.
+
+    The rule the folding is for still holds: a message typed without
+    diacritics still matches a listed word that has them.
+    """
+    triage, model = guarded()
+
+    for innocent in (
+        "tài liệu về luồng duyệt task ở đâu vậy",
+        "không có gì bất thường",
+        "luồng thanh toán Midas lỗi rồi",
+    ):
+        assert WORDS.found(innocent) is None, innocent
+
+    for held in ("lương tháng này về chưa", "luong thang nay ve chua", "thuong tet"):
+        assert WORDS.found(held) is not None, held
+
+    # A message mixes the two spellings freely, so the question is about the
+    # word that matched, not about the message.
+    assert WORDS.found("luồng thanh toan bị lỗi") is None
+    assert WORDS.found("luong thanh toán về chưa") == "lương"
+    assert WORDS.found("Mật Khẩu của e sai") == "mật khẩu"
