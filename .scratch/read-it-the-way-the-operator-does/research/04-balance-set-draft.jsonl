@@ -1,0 +1,18 @@
+{"text": "a ơi cho e xin quyền vào repo BE-ReelMe-V2 với ạ", "expected": "access_request"}
+{"text": "e không vào được con staging, báo 403 Forbidden, a add quyền cho e với", "expected": "access_request"}
+{"text": "@Lee (Long Lê) a ơi cho e xin api key của môi trường dev để e test", "expected": "needs_human"}
+{"text": "add giúp em vào channel #incidents với ạ, em mới join team", "expected": "access_request"}
+{"text": "spec của luồng thanh toán Midas nằm ở đâu v a", "expected": "doc_question"}
+{"text": "@Lee (Long Lê) tài liệu mô tả các mã lỗi ERR3xx có ở đâu không a", "expected": "doc_question"}
+{"text": "trong docs có ghi thứ tự gọi api khi tạo đơn POD không a nhỉ, e chưa gọi thử", "expected": "doc_question"}
+{"text": "a ơi, cái runbook deploy service reelme là file nào trong repo v", "expected": "doc_question"}
+{"text": "api reelme hôm nay nhanh phết a nhỉ", "expected": "skip"}
+{"text": "cảm ơn a nhiều nhé, e làm được rồi", "expected": "skip"}
+{"text": "@Lee (Long Lê) chúc a cuối tuần vui vẻ ạ", "expected": "skip"}
+{"text": "team mình ai đi ăn trưa không, quán cũ nhé", "expected": "skip"}
+{"text": "e vừa deploy xong bản mới lên dev rồi nhé a, không có gì bất thường", "expected": "skip"}
+{"text": "@Lee (Long Lê) api tạo đơn trả 500, e gửi a curl đây", "expected": "api_issue"}
+{"text": "@Lee (Long Lê) e mua gói sub lúc 15h mà 30 phút sau vẫn chưa được cộng coin a ạ", "expected": "api_issue"}
+{"text": "a ơi endpoint /v1/pod/orders/init này dùng khi nào v a, e nên gọi trước hay sau khi tạo preview", "expected": "api_issue"}
+{"text": "@Lee (Long Lê) a check hộ e cái này với [image: Screenshot 2026-09-20.png]", "expected": "api_issue"}
+{"text": "a ơi", "expected": "api_issue", "turn": [["a ơi", false], ["curl -X POST -H \"Content-Type: application/json\" --data '{\"items\":[{\"skuKey\":\"phone_case\"}]}' \"https://api-reelme-v2.dev.aperogroup.ai/v1/pod/orders/init\"", false]]}

@@ -15,6 +15,17 @@ asks for missing details and sends approved replies as the watched account.
 It runs on the operator's own machine, on branch `main`, with a passing
 suite.
 
+**Triage, as of 2026-09-20.** Scored 100% on `evals/triage.jsonl` and on a
+second, deliberately balanced draft set, three runs each, after the label
+definitions were rewritten from the operator's own account of the work, the
+thinking flow gained the arrival prior (what reaches triage was addressed to
+us, so work is the normal case), the sensitive-word prefilter stopped
+treating `luồng` as `lương`, and ten worked examples went into
+`config.yaml`. It read 81.0% with 11.4 points of run-to-run spread before
+that. The balance set is a draft in
+`.scratch/read-it-the-way-the-operator-does/research/04-balance-set-draft.jsonl`
+and its labels are the operator's to confirm before it moves into `evals/`.
+
 **Boards** under `.scratch/<feature-slug>/issues/`:
 
 - `discord-mention-triage/` (from `docs/SPEC.md`) — the original board. Done.
