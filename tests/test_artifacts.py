@@ -418,3 +418,78 @@ async def test_a_parameter_that_names_no_artifact_is_left_alone(db):
 
     assert filled.curl == "curl https://x/y"
     assert filled.environment == "dev"
+
+
+# --- the reporter's own credential (ticket 17, finding C) -------------------
+
+TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImJmYzViOGQyIn0.m825WQCL"
+TOKENED = (
+    "curl -X POST -H 'Authorization: Bearer %s' "
+    "https://api-reelme-v2.dev.aperogroup.ai/v1/pod/orders/init" % TOKEN
+)
+
+
+def _tokened_event(**kwargs):
+    kwargs.setdefault("mention_type", MentionType.DIRECT)
+    event = make_event(**kwargs)
+    return _with_code(
+        event, code=(TOKENED,), text=f"lỗi rồi\n```\n{TOKENED}\n```\n"
+    )
+
+
+async def test_an_artifact_never_stores_the_reporters_token(db):
+    """Finding C. `sensitive_words` deliberately does not match
+    `Authorization: Bearer …` — the prefilter decides whether a message may
+    reach a third-party API at all, and a curl must reach it — so nothing
+    stopped the token being written down. `scrub` already knew the pattern;
+    what was missing was a place it ran."""
+    event = _tokened_event(message_id="m1")
+
+    await db.record_message(event)
+
+    (artifact,) = await db.artifacts_for_message("fake", "m1")
+    assert TOKEN not in artifact.content
+    assert "orders/init" in artifact.content, "the request itself survives"
+    assert "Authorization" in artifact.content, "that one was sent is evidence"
+
+
+async def test_the_token_reaches_neither_the_prompt_nor_the_parameters(db):
+    """The two places finding C names that `scrub` did not cover: the prompt
+    sent to the provider, and the task's stored parameters."""
+    from friday.dag.prepare import resolve_artifacts
+    from friday.domain.models import ApiIssueParams
+
+    conversation = ConversationId("fake", "watched")
+    task = await db.create_task(
+        conversation=conversation, type="api_issue", state="pending",
+        confidence=0.9, params={},
+    )
+    event = _tokened_event(message_id="m1")
+    await db.record_message(event)
+    await db.mark_triaged(event, task.id, decision={"type": "api_issue"})
+    (artifact,) = await db.artifacts_for_message("fake", "m1")
+
+    shown = await db.original_text_for(task.id)
+    filled = await resolve_artifacts(db, task.id, ApiIssueParams(curl=artifact.id))
+
+    assert TOKEN not in shown
+    assert TOKEN not in (filled.curl or "")
+    assert "orders/init" in (filled.curl or "")
+
+
+async def test_a_token_typed_inline_with_no_fence_is_covered_too(db):
+    """A reporter who pastes the request without a code fence produces no
+    artifact, so the artifact path cannot be the only place this runs."""
+    conversation = ConversationId("fake", "watched")
+    task = await db.create_task(
+        conversation=conversation, type="api_issue", state="pending",
+        confidence=0.9, params={},
+    )
+    event = make_event(message_id="m1", text=f"em gọi thế này: {TOKENED}")
+    await db.record_message(event)
+    await db.mark_triaged(event, task.id, decision={"type": "api_issue"})
+
+    shown = await db.original_text_for(task.id)
+
+    assert TOKEN not in shown
+    assert "orders/init" in shown

@@ -256,7 +256,22 @@ class Database:
                 channel_id=event.channel_id,
                 provider=event.provider,
                 source_message_id=event.provider_message_id,
-                content=body,
+                # Finding C: the reporter's curl carries their own Bearer
+                # token, and `sensitive_words` deliberately does not match it
+                # — the prefilter decides whether a message may reach a
+                # third-party API at all, and a curl must reach it. So
+                # nothing stopped the credential being written down. `scrub`
+                # already knew the pattern; this is a place it runs.
+                #
+                # Here rather than further downstream because this row is
+                # what every later reader copies from: the parameter, the
+                # extractor's prompt, the outbox row that quotes the request,
+                # the report file. Scrubbed once, at the write, is the only
+                # version of this that cannot be forgotten at a call site.
+                # The request itself survives whole — only the credential
+                # goes, and the header's name stays, because *that* one was
+                # sent is evidence a diagnosis often turns on.
+                content=scrub(body),
                 description=description,
                 # Microseconds apart, not all at `now`: several spans from
                 # one message would otherwise tie on `created_at`, and
@@ -2876,7 +2891,12 @@ class Database:
                 session, conversation_id, author_id, opened_at
             )
             texts = [
-                _with_artifact_ids(redacted, original, held)
+                # Scrubbed here as well as at the artifact, because a
+                # reporter who pastes a request without a code fence produces
+                # no artifact at all, and this is the read that becomes the
+                # prompt (finding C: "`scrub` covers logs and the board, not
+                # the prompt sent to the provider").
+                scrub(_with_artifact_ids(redacted, original, held))
                 for redacted, original in rows
                 if (redacted or original)
             ]

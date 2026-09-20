@@ -6,7 +6,7 @@ messages; where a word had two meanings, this file picks one.
 
 # Project state
 
-What is running and what is open, as of 2026-09-18. This part goes stale
+What is running and what is open, as of 2026-09-20. This part goes stale
 fastest — check each ticket's own `**Status:**` line before trusting it.
 Architecture is in `docs/DESIGN.md`; how to work is in `CLAUDE.md`.
 
@@ -52,15 +52,20 @@ and its labels are the operator's to confirm before it moves into `evals/`.
   **00 is not finished**: its five runs on five past cases have not happened,
   because the cases are the operator's to pick, and the Loki branch has never
   been called against the real server.
-  Two defects the live task 6 exposed are their own tickets: 17 (the
-  reporter's Bearer token is stored and re-sent verbatim) and 18 (the curl is
-  retyped by the model, and task 6's copy lost a character). One open
-  question, the operator's: may Friday replay a request when no log line can
-  be found? Waiting on the operator: 07 (confirm the drafted knowledge rows
-  in `research/03-seed-rows.md`, write the runbooks), the two `route` rows and
-  one `service` row the slice reads — `memories` is empty, so every run hands
-  over on a missing row until they exist — cases 2–5 and case 1's cause. The
-  order is in its `execution-plan.md`.
+  The two defects the live task 6 exposed are **done**: 18 (the extractor
+  now names the artifact holding the request and code copies it, so nothing
+  retypes a verbatim span) and 17 (the reporter's own Bearer token is
+  scrubbed where the artifact is written and where the extractor reads,
+  with migration `b7c1a4e93f02` clearing the rows already written — it runs
+  on the next start). Case 1 is no longer blocked: the reporter's real curl
+  was never lost, it is `artifacts.af85b208fd70e`. One open question, the
+  operator's: may Friday replay a request when no log line can be found?
+
+  Waiting on the operator: 07 (confirm the drafted knowledge rows in
+  `research/03-seed-rows.md`, write the runbooks); the two `route` rows and
+  one `service` row the slice reads — `memories` is empty, so every real run
+  hands over on a missing row until they exist; cases 2–5, and case 1's
+  cause. The order is in its `execution-plan.md`.
 
 # Vocabulary
 

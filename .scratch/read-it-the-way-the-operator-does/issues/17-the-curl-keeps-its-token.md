@@ -7,7 +7,7 @@ them.
 
 **Blocked by:** nothing. **Decisions:** finding C, which ticket 16
 confirmed is still owed.
-**Status:** ready-for-agent
+**Status:** done 2026-09-20
 
 ## Why
 
@@ -76,3 +76,59 @@ Rows 4 and 6 are the only ones today, and both tokens are dead. Either a
 migration rewrites the two `params.curl` values, or the operator deletes the
 two tasks. The ticket picks one and says which; this is not worth an
 Alembic revision if the operator would rather drop them.
+
+
+## Done
+
+**`scrub` already knew the pattern. What was missing was a place it ran.**
+`friday/ops/redact.py` has matched `Bearer <token>` and bare JWTs since it
+was written, on every log record and on what the model layer stores — and
+`artifacts.content`, `tasks.params` and `outbox.text` were none of those.
+So this ticket added no pattern. It added two call sites and a migration.
+
+- **At the write.** `_record_artifacts` stores `scrub(body)`. That row is
+  what every later reader copies from — the parameter, the extractor's
+  prompt, the outbox row that quotes the request, the report file — so
+  scrubbing once, at the write, is the only version of this that cannot be
+  forgotten at a call site.
+- **At the extractor's read.** `original_text_for` scrubs what it returns,
+  because a reporter who pastes a request *without* a code fence produces no
+  artifact at all, and this is the read that becomes the prompt. That is
+  finding C's "not the prompt sent to the provider", closed.
+- **The request survives whole**; only the credential goes. Measured on the
+  live `af85b208fd70e`: 1155 characters down to 480, every header name kept,
+  `"https://…/v1/pod/orders/init"` untouched, `Authorization: [REDACTED]`.
+
+**One deviation from what this ticket asked for.** It asked for
+`Authorization: Bearer [REDACTED]`, keeping the scheme. `scrub`'s existing
+pattern consumes `Bearer <token>` as one match, so the result is
+`Authorization: [REDACTED]`. Narrowing that regex is a change to the one
+function standing between this system and the operator's Discord token, for
+the sake of one word — not worth it. The header's *name* survives, which is
+what `Diagnose` needs: that an `Authorization` header was sent is evidence;
+its value never is.
+
+**Backfill: migration `b7c1a4e93f02`**, data only, rewriting
+`artifacts.content`, `tasks.params` and `outbox.text` through the same
+`scrub`. Run against a copy of the live database: **0 rows of any of the
+three still hold a JWT**, down from three artifacts, two tasks and one
+outbox row. It does not repair ticket 18's retyped curl — that needs a join
+and a judgement about which artifact belongs to which task, and a judgement
+does not belong in a migration. The downgrade does nothing and says why: a
+credential this removed is gone from the row it was in.
+
+**It reaches the live database on the next `run_agent.py` start**, which
+upgrades to head before anything opens the database.
+
+**Verified.** Suite `1336 passed, 1 skipped`. Both call sites deleted once
+and watched go red.
+
+## Noticed, not changed
+
+`messages.text` and `messages.original_text` still hold what the reporter
+actually typed, token included. That is deliberate and worth stating rather
+than fixing quietly: those two columns are the record of what was said, the
+board that renders them is loopback-only, and every path that *derives*
+anything from them — artifact, parameter, prompt, outbox row, report — is
+now scrubbed. Whether the raw record should be scrubbed too is a different
+decision, and it is the operator's.
