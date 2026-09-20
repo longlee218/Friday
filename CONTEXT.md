@@ -46,9 +46,16 @@ and its labels are the operator's to confirm before it moves into `evals/`.
   context files gone), 11 (one invoke in the runner), 12 (approval per
   outbox row), 13 (bounded pool concurrency), 16 (measurements and the model
   probe, except the reporter-delay measurement). **Next: 00**, a vertical
-  slice on five past cases the operator picks. Waiting on the operator: 07
+  slice on five past cases the operator picks; case 1 is written into the
+  ticket already — task 6, a live `api_issue` that stopped at the one-node
+  graph's hand-over on 2026-09-20. Two defects it exposed are their own
+  tickets: 17 (the reporter's Bearer token is stored and re-sent verbatim)
+  and 18 (the curl is retyped by the model, and task 6's copy lost a
+  character). One open question, the operator's: may Friday replay a
+  request when no log line can be found? Waiting on the operator: 07
   (confirm the drafted knowledge rows in `research/03-seed-rows.md`, write
-  the runbooks). The order is in its `execution-plan.md`.
+  the runbooks), cases 2–5 and case 1's cause. The order is in its
+  `execution-plan.md`.
 
 # Vocabulary
 
