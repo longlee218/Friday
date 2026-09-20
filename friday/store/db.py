@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import secrets
 from fnmatch import fnmatch
 from typing import Any
@@ -305,6 +306,55 @@ class Database:
                 .order_by(schema.Artifact.created_at)
             )
             return [_artifact(row) for row in rows]
+
+    async def _artifact_contents(
+        self, session, conversation_id: str, author_id: str, opened_at
+    ) -> dict[str, str]:
+        """Artifact id -> content, for one reporter's messages in one
+        conversation. The query `original_text_for` and `artifacts_for_task`
+        share, so what a transcript references and what a parameter may name
+        cannot drift apart."""
+        theirs = select(schema.Message.provider_message_id).where(
+            schema.Message.conversation_id == conversation_id,
+            schema.Message.author_id == author_id,
+            schema.Message.created_at >= opened_at,
+        )
+        rows = await session.execute(
+            select(schema.Artifact.id, schema.Artifact.content)
+            .where(schema.Artifact.source_message_id.in_(theirs))
+            .order_by(schema.Artifact.created_at)
+        )
+        return {artifact_id: content for artifact_id, content in rows}
+
+    async def artifacts_for_task(self, task_id: int) -> dict[str, str]:
+        """Every verbatim span this task's reporter sent, by artifact id.
+
+        The same reach as `original_text_for` — same conversation, same
+        author, from the opening message onwards — because these are the
+        references that appear in what the extractor was shown, and a
+        parameter may only name one of those. An id from another room is an
+        id this returns nothing for, which is what makes naming one useless.
+        """
+        async with self._sessions() as session:
+            opening = (
+                await session.execute(
+                    select(
+                        schema.Message.conversation_id,
+                        schema.Message.author_id,
+                        schema.Message.created_at,
+                    )
+                    .where(schema.Message.task_id == task_id)
+                    .order_by(schema.Message.created_at)
+                    .limit(1)
+                )
+            ).first()
+            if opening is None:
+                return {}
+            conversation_id, author_id, opened_at = opening
+
+            return await self._artifact_contents(
+                session, conversation_id, author_id, opened_at
+            )
 
     async def messages(
         self, conversation: ConversationId | None = None, *, limit: int | None = None
@@ -2764,6 +2814,29 @@ class Database:
         `budget_tokens=None` — the default, and unset in `config.yaml` unless
         the operator sets it — means no compaction at all (D7): exactly
         today's behaviour, bounded by `limit` alone.
+
+        **Every verbatim span carries its artifact id, above the span
+        itself** (board `read-it-the-way-the-operator-does`, ticket 18):
+
+            [artifact ab12cd34: a curl command]
+            curl -X POST …
+
+        The span stays, and that is not a compromise — it is the requirement.
+        A correlationId usually arrives *inside* the response the reporter
+        pasted (D2), so an extractor shown only a reference could not lift
+        one out; a first attempt at this ticket hid the content and two tests
+        said so immediately.
+
+        What the id buys is that nothing has to be **retyped**. Task 6, on
+        2026-09-20, carried 678 characters of Bearer token in its message and
+        stored 676 in `params.curl`: one character gone out of a base64
+        segment, because everything on the path from here to a parameter went
+        through a model and the model copied it out by hand. The stored
+        request then fails a signature nobody broke. So a field that is a
+        whole verbatim span — `curl` — asks for the id, and
+        `friday.dag.prepare.resolve_artifacts` puts the content back; a field
+        that is a *value inside* one — `correlation_id` — is still read from
+        the text, which is a copy short enough to be right.
         """
         async with self._sessions() as session:
             opening = (
@@ -2785,8 +2858,10 @@ class Database:
             ours = select(schema.Outbound.sent_message_id).where(
                 schema.Outbound.sent_message_id.is_not(None)
             )
-            said = await session.scalars(
-                select(schema.Message.original_text)
+            said = await session.execute(
+                select(
+                    schema.Message.redacted_text, schema.Message.original_text
+                )
                 .where(
                     schema.Message.conversation_id == conversation_id,
                     schema.Message.author_id == author_id,
@@ -2796,7 +2871,15 @@ class Database:
                 .order_by(schema.Message.created_at)
                 .limit(limit)
             )
-            texts = [text for text in said if text]
+            rows = list(said)
+            held = await self._artifact_contents(
+                session, conversation_id, author_id, opened_at
+            )
+            texts = [
+                _with_artifact_ids(redacted, original, held)
+                for redacted, original in rows
+                if (redacted or original)
+            ]
         if not texts:
             return None
         if budget_tokens is not None:
@@ -3350,6 +3433,38 @@ class Database:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+#: `[artifact <id>: <what it is>]`, as `_record_artifacts` writes it.
+_ARTIFACT_REF = re.compile(r"\[artifact ([0-9a-f]+): [^\]]*\]")
+
+
+def _with_artifact_ids(
+    redacted: str | None, original: str, held: dict[str, str]
+) -> str:
+    """One message's text with each verbatim span named by its artifact id
+    and then shown.
+
+    Built from the reference `_record_artifacts` already wrote rather than by
+    re-splitting the text: re-splitting is what that method's own docstring
+    warns can disagree with the first split, and a disagreement here would
+    put a span under the wrong id.
+
+    A message with no `redacted_text` — no code, or recorded before that
+    column existed — is its own text, unchanged and unnamed. A reference
+    whose artifact has gone is left as it is: a name for something nobody can
+    read is still better than a silent gap where a curl used to be.
+    """
+    if not redacted:
+        return original
+    return _ARTIFACT_REF.sub(
+        lambda found: (
+            f"{found.group(0)}\n{held[found.group(1)]}"
+            if found.group(1) in held
+            else found.group(0)
+        ),
+        redacted,
+    )
 
 
 def _memory_id() -> str:

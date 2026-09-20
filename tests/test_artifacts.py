@@ -306,3 +306,115 @@ async def test_a_split_that_disagrees_on_re_read_degrades_rather_than_crashes(
         event.provider, event.channel_id
     )
     assert through_summariser.text == event.text  # the known, narrow fallback
+
+
+# --- the curl in the params is the artifact, not a retyping of it -----------
+# Board `read-it-the-way-the-operator-does`, ticket 18.
+
+
+async def test_the_extractor_is_shown_each_span_under_its_artifact_id(db):
+    """The span **stays**, and that is the requirement rather than a
+    compromise.
+
+    A first attempt at ticket 18 replaced it with the reference alone, and
+    two tests in this file said so within a minute: a correlationId usually
+    arrives *inside* the response the reporter pasted (D2), so an extractor
+    shown only a reference cannot lift one out.
+
+    What the id buys is that nothing has to be *retyped*. Task 6, 2026-09-20:
+    the message carried 678 characters of Bearer token and `params.curl`
+    stored 676 — one character gone out of a base64 segment, because the path
+    from text to parameter runs through a model and the model copied it by
+    hand. A field whose whole value is a span can name the id instead.
+    """
+    conversation = ConversationId("fake", "watched")
+    task = await db.create_task(
+        conversation=conversation, type="api_issue", state="pending",
+        confidence=0.9, params={},
+    )
+    event = _curl_event(message_id="m1")
+    await db.record_message(event)
+    await db.mark_triaged(event, task.id, decision={"type": "api_issue"})
+    (artifact,) = await db.artifacts_for_message("fake", "m1")
+
+    said = await db.original_text_for(task.id)
+
+    assert CURL in said, "the extractor still reads what is inside the span"
+    assert artifact.id in said, "and now knows what to call it"
+    assert said.index(artifact.id) < said.index(CURL), "the name comes first"
+
+
+async def test_the_artifact_a_task_carries_is_reachable_by_its_id(db):
+    conversation = ConversationId("fake", "watched")
+    task = await db.create_task(
+        conversation=conversation, type="api_issue", state="pending",
+        confidence=0.9, params={},
+    )
+    event = _curl_event(message_id="m1")
+    await db.record_message(event)
+    await db.mark_triaged(event, task.id, decision={"type": "api_issue"})
+
+    held = await db.artifacts_for_task(task.id)
+
+    assert list(held.values()) == [CURL]
+
+
+async def test_a_named_artifact_becomes_the_parameter_byte_for_byte(db):
+    """The end this ticket exists for: what the model names, code copies."""
+    from conftest import ScriptedHarness
+    from friday.domain.models import ApiIssueParams
+    from friday.extraction import build_extractor
+    from friday.extraction.answer import answer_shape
+    from friday.dag.prepare import resolve_artifacts
+    from tests.test_extraction import _context
+
+    conversation = ConversationId("fake", "watched")
+    task = await db.create_task(
+        conversation=conversation, type="api_issue", state="pending",
+        confidence=0.9, params={},
+    )
+    event = _curl_event(message_id="m1")
+    await db.record_message(event)
+    await db.mark_triaged(event, task.id, decision={"type": "api_issue"})
+    (artifact,) = await db.artifacts_for_message("fake", "m1")
+    said = await db.original_text_for(task.id)
+
+    class StubResult:
+        final_output = '{"curl": "%s"}' % artifact.id
+
+    class StubHarness(ScriptedHarness):
+        tool_turns = 0
+        last_error = None
+
+        async def run(self, prompt, **kwargs):
+            return StubResult()
+
+    ext = build_extractor(
+        params_cls=ApiIssueParams,
+        harness=StubHarness(answers=answer_shape(ApiIssueParams)),  # type: ignore[arg-type]
+        name="stub",
+    )
+    filled, _ = await ext.run(_context(said, ApiIssueParams), task_id=task.id)
+    filled = await resolve_artifacts(db, task.id, filled)
+
+    assert filled.curl == CURL
+
+
+async def test_a_parameter_that_names_no_artifact_is_left_alone(db):
+    """A reporter who typed their curl inline rather than in a fence has no
+    artifact, and what the model copied is all there is."""
+    from friday.domain.models import ApiIssueParams
+    from friday.dag.prepare import resolve_artifacts
+
+    conversation = ConversationId("fake", "watched")
+    task = await db.create_task(
+        conversation=conversation, type="api_issue", state="pending",
+        confidence=0.9, params={},
+    )
+
+    filled = await resolve_artifacts(
+        db, task.id, ApiIssueParams(curl="curl https://x/y", environment="dev")
+    )
+
+    assert filled.curl == "curl https://x/y"
+    assert filled.environment == "dev"

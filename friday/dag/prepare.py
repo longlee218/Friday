@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, replace
 from typing import Any, get_args, get_type_hints
 
 from friday.dag.engine import DAGDeps, DAGState, Node
@@ -32,7 +32,13 @@ from friday.extraction import (
 )
 from friday.extraction.context import FullContext, build_full_context
 
-__all__ = ["plan_by_required_parameters", "prepare", "prepare_node", "prepared_ok"]
+__all__ = [
+    "plan_by_required_parameters",
+    "prepare",
+    "prepare_node",
+    "prepared_ok",
+    "resolve_artifacts",
+]
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +113,7 @@ def prepare_node(
             node="prepare",
         )
 
+        filled = await resolve_artifacts(deps.db, deps.task.id, filled)
         merged = {**deps.task.params, **asdict(filled)}
         if merged != deps.task.params:
             await deps.db.set_task_params(deps.task.id, merged)
@@ -116,6 +123,47 @@ def prepare_node(
         return on_ready(filled) if on_ready else filled
 
     return Node("prepare", _prepare, agent=agent, timeout_seconds=timeout_seconds)
+
+
+async def resolve_artifacts(db: Any, task_id: int, params: Params) -> Params:
+    """Swap any field that names an artifact for the artifact's content.
+
+    **Nothing between the reporter's message and a parameter retypes a
+    verbatim span** (board `read-it-the-way-the-operator-does`, ticket 18).
+    The extractor is shown each span under its id — see
+    `Database.original_text_for` — and a field whose whole value *is* a span
+    asks for that id instead of the span. This is where the id becomes the
+    span again.
+
+    What makes it one producer rather than two, which is the shape
+    `friday/text/param_hygiene.py` records as deleted for good reason: the
+    model still decides **which** span is the curl, and nothing here
+    recognises a curl. Copying is not a judgement. If this ever reaches for a
+    pattern that spots a curl in the text, it has drifted into the design
+    that `_merge` and nineteen direct messages paid for.
+
+    A value that names no artifact is left exactly as it is — a reporter who
+    typed their request inline rather than in a fence produced no artifact,
+    and what the model copied is all there is.
+    """
+    named = {
+        value for f in fields(params)
+        if isinstance(value := getattr(params, f.name), str) and value
+    }
+    if not named:
+        return params
+    held = await db.artifacts_for_task(task_id)
+    if not held:
+        return params
+    swaps = {
+        f.name: held[value]
+        for f in fields(params)
+        if isinstance(value := getattr(params, f.name), str) and value in held
+    }
+    if not swaps:
+        return params
+    log.info("task %s: %s came from artifacts, not retyped", task_id, sorted(swaps))
+    return replace(params, **swaps)
 
 
 def prepared_ok(state: DAGState) -> bool:

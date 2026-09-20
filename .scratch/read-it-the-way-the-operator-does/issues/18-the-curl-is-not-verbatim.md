@@ -6,7 +6,8 @@ model token by token.
 
 **Blocked by:** nothing. **Decisions:** none yet — this is a defect found
 on 2026-09-20, not a decision already taken.
-**Status:** ready-for-agent
+**Status:** done 2026-09-20, except the backfill, which ticket 17 carries
+because it rewrites the same two rows
 
 ## Why
 
@@ -94,3 +95,50 @@ it was only visible because task 4 held the same token intact to compare
 against. There is no check anywhere that a copied-out field still matches
 its source. Whether that deserves a general guard, or only this one field,
 is the ticket's to answer.
+
+
+## Done
+
+**The span stays; only the retyping goes.** The first attempt replaced the
+verbatim span with its reference, and two tests in `tests/test_artifacts.py`
+refused it within a minute: a correlationId usually arrives *inside* the
+response the reporter pasted (D2), so an extractor shown only a reference
+cannot lift one out. What ships instead is the span under its name:
+
+```
+[artifact ab12cd34: a curl command]
+curl -X POST …
+```
+
+- `Database.original_text_for` — the extractor's one read — builds that from
+  the `redacted_text` `_record_artifacts` already wrote, rather than by
+  re-splitting the text. Re-splitting is what that method's own docstring
+  warns can disagree with the first split, and a disagreement would file a
+  span under the wrong id.
+- `ApiIssueParams.curl` asks for the id, not the command. A reporter who
+  typed their request inline with no fence produced no artifact, and the
+  field still takes what the model copied — that path is unchanged.
+- `friday.dag.prepare.resolve_artifacts` swaps any field whose whole value
+  names one of this task's artifacts for that artifact's content, and node 0
+  calls it before it writes the parameters back. **The model decides which
+  span is the curl; code does the copying, and nothing here recognises a
+  curl** — which is what keeps this on the right side of the deleted
+  `find_curl` design `friday/text/param_hygiene.py` records.
+- `Database.artifacts_for_task` has the same reach as `original_text_for`,
+  so what a transcript references and what a parameter may name cannot drift
+  apart. An id from another room resolves to nothing.
+
+**The reporter's real curl was never lost.** `artifacts` holds it whole:
+`af85b208fd70e`, from message `1551090724089503787`, 1155 characters with
+its 678-character token — against the 676 in `tasks` row 6. So task 6 can
+be scored against the request the reporter actually sent, and ticket 00's
+case 1 is not blocked on this after all.
+
+**Verified.** Suite `1333 passed, 1 skipped`. Guards deleted one at a time
+and watched go red: the span-naming in `original_text_for`, the swap in
+`resolve_artifacts`, and — separately, because the first version of this
+test called the function directly and the *wiring* was what went missing —
+node 0's call to it.
+
+**Not done:** rewriting rows 4 and 6. Ticket 17 rewrites the same two rows
+for the token, so one pass does both or the operator deletes the two tasks.

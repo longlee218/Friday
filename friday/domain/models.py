@@ -198,9 +198,18 @@ class ApiIssueParams:
     curl: str | None = field(
         default=None,
         metadata={
-            "doc": "The curl command or raw request they included, verbatim "
-            "with its line breaks — somebody will paste it into a terminal. "
-            "null if absent.",
+            # Board `read-it-the-way-the-operator-does`, ticket 18. This used
+            # to say "verbatim with its line breaks — somebody will paste it
+            # into a terminal", and that is still what the field has to hold;
+            # it is no longer what the model is asked to produce. Task 6
+            # stored 676 characters of a 678-character Bearer token because
+            # copying it out by hand is a thing a model does imperfectly and
+            # a thing code does not do at all.
+            "doc": "The id of the artifact holding the request they pasted — "
+            "the `ab12cd34` in `[artifact ab12cd34: …]`, on its own, nothing "
+            "else. Do not copy the request itself: it is put back for you. "
+            "If they typed it inline with no artifact around it, give the "
+            "command as they wrote it. null if there is no request at all.",
             "ask": "the curl you used",
         },
     )

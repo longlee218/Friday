@@ -84,12 +84,14 @@ missing, so `plan_by_required_parameters` has nothing to `Ask` and returns
 why Friday stopped. It is not; it is a one-line description of the message.
 If that reading recurs, it belongs in the monitor's board, not here.
 
-**The curl it stored is not the curl that was sent.** Found while writing
-this case up: `params.curl` dropped one character out of the Bearer token's
-base64, so the stored request fails its signature check and returns 401 —
-an error the reporter never saw. Ticket 18. This case cannot be scored
-until that is fixed or the curl is corrected by hand, because the slice's
-whole premise is reaching the reporter's own request.
+**The curl it stored is not the curl that was sent** — but the one that was
+sent is still here. `params.curl` dropped one character out of the Bearer
+token's base64, so the stored request fails its signature check and returns
+401, an error the reporter never saw. Ticket 18 fixed the mechanism, and
+while fixing it found that the reporter's own bytes were never lost:
+`artifacts.af85b208fd70e`, from message `1551090724089503787`, holds the
+curl whole — 1155 characters, its token the full 678. **So this case is not
+blocked.** Score it against the artifact, not against `tasks` row 6.
 
 **The harder branch.** There is no correlationId, because the reporter
 pasted the *request*, not the response — exactly what D2 predicts. So

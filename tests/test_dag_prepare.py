@@ -843,3 +843,41 @@ async def test_two_ineffective_compactions_stop_a_third_from_being_attempted(db)
     assert await db.compaction_ineffective_count(task.id) == 2, (
         "a pass on cooldown must not check the budget at all"
     )
+
+
+async def test_node_0_puts_the_artifact_back_rather_than_storing_a_retyping(db):
+    """Board `read-it-the-way-the-operator-does`, ticket 18.
+
+    The extractor names the artifact holding the request; node 0 writes the
+    artifact's content into the task's parameters. What is stored has to be
+    the reporter's own bytes — task 6 stored 676 characters of a
+    678-character Bearer token, and a request that 401s on a signature nobody
+    broke sends the operator down a path the reporter never went down.
+
+    Driven through `prepare_node` rather than `resolve_artifacts` on purpose:
+    the call that was missing is the wiring, not the function.
+    """
+    from dataclasses import replace as _replace
+
+    from conftest import make_event
+    from friday.dag.prepare import prepare_node
+    from tests.test_extraction import _install
+    from tests.test_pool import make_task
+
+    curl = "curl -X POST /v1/pod/orders/init -H 'Authorization: Bearer eyJhbGci.zzz'"
+    event = _replace(
+        make_event(message_id="m1", text=f"lỗi rồi anh ơi\n```\n{curl}\n```"),
+        code=(curl,),
+    )
+    task = await make_task(db)
+    await db.record_message(event)
+    await db.mark_triaged(event, task.id, decision={"type": "api_issue"})
+    (artifact,) = await db.artifacts_for_message("fake", "m1")
+
+    _install("api_issue", _CountingExtractor(ApiIssueParams(curl=artifact.id)))
+    node = prepare_node("api_issue", ApiIssueParams)
+
+    await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
+
+    stored = await db.task(task.id)
+    assert stored.params["curl"] == curl
