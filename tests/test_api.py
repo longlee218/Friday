@@ -7,6 +7,8 @@ catch a credential.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -530,3 +532,77 @@ async def test_naming_works_for_a_room_with_no_conversation_row_yet(client, db):
 
     assert saved.status_code == 200
     assert client.get("/api/conversations").json()[0]["name"] == "ops"
+
+
+async def test_each_message_says_which_task_it_belongs_to(client, inbox, provider, db):
+    """The board used to pick a task card's text by *room*: the first message
+    in the task's conversation. Two tasks in one room with no summary — the
+    operator's two `doc_question`s on 2026-09-18 — then showed the same
+    message and opened the same flow, which read as one task listed twice.
+    A card can only find its own message if each message says whose it is."""
+    provider.emit(make_event(message_id="10", text="where is the POD type?"))
+    provider.emit(make_event(message_id="11", text="and the homepage one?"))
+    provider.emit(make_event(message_id="12", text="just chatting"))
+    await captured(inbox)
+    first = await db.create_task(
+        conversation=WATCHED, type="doc_question", state=TaskState.PENDING,
+        confidence=0.9, params={},
+    )
+    second = await db.create_task(
+        conversation=WATCHED, type="doc_question", state=TaskState.PENDING,
+        confidence=0.9, params={},
+    )
+    await db.mark_triaged(make_event(message_id="10"), task_id=first.id)
+    await db.mark_triaged(make_event(message_id="11"), task_id=second.id)
+
+    by_id = {m["provider_message_id"]: m for m in client.get("/api/board").json()["messages"]}
+
+    assert by_id["10"]["task_id"] == first.id
+    assert by_id["11"]["task_id"] == second.id
+    assert by_id["12"]["task_id"] is None
+
+
+async def test_a_task_carries_its_opening_message_past_the_boards_window(
+    client, inbox, provider, db
+):
+    """The board loads the newest 25 messages and up to 200 tasks, so a card
+    cannot find its task's opening message among the loaded ones — the
+    reviewer found task #1's own at position 28, and the card opening
+    position 23 instead. The server says which message opened each task."""
+    # Distinct times, oldest first: `make_event`'s default gives every message
+    # one timestamp, which made "earliest" a tie SQLite settled by row order —
+    # a descending sort passed this test too (second review, 2026-09-18).
+    start = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    provider.emit(make_event(message_id="1", text="api tạo mới user bị 500", created_at=start))
+    for n in range(2, 32):
+        provider.emit(make_event(
+            message_id=str(n), text=f"later {n}", created_at=start + timedelta(minutes=n),
+        ))
+    await captured(inbox)
+    old = await db.create_task(
+        conversation=WATCHED, type="api_issue", state=TaskState.PENDING,
+        confidence=0.9, params={},
+    )
+    new = await db.create_task(
+        conversation=WATCHED, type="doc_question", state=TaskState.PENDING,
+        confidence=0.9, params={},
+    )
+    bare = await db.create_task(
+        conversation=WATCHED, type="doc_question", state=TaskState.PENDING,
+        confidence=0.9, params={},
+    )
+    await db.mark_triaged(make_event(message_id="1"), task_id=old.id)
+    await db.mark_triaged(make_event(message_id="5"), task_id=old.id)
+    await db.mark_triaged(make_event(message_id="31"), task_id=new.id)
+
+    board = client.get("/api/board").json()
+    assert "1" not in {m["provider_message_id"] for m in board["messages"]}
+    by_id = {t["id"]: t for t in board["tasks_by_state"]["pending"]}
+
+    assert by_id[old.id]["opening"] == {
+        "provider": "fake", "provider_message_id": "1", "text": "api tạo mới user bị 500",
+    }
+    assert by_id[new.id]["opening"]["provider_message_id"] == "31"
+    assert by_id[bare.id]["opening"] is None
+    (listed,) = [t for t in client.get("/api/tasks").json() if t["id"] == old.id]
+    assert listed["opening"]["provider_message_id"] == "1"

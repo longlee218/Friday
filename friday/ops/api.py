@@ -126,6 +126,7 @@ def build_api(
             m.provider_message_id for m in messages
         )
         tasks = await db.tasks(limit=MAX_PAGE)
+        openings = await db.opening_messages(t.id for t in tasks)
         return _clean(
             {
                 "status": provider_status(),
@@ -136,7 +137,9 @@ def build_api(
                 "full_memory_channels": await db.full_memory_channels(),
                 "failed": [_outbound(row) for row in await db.outbound(FAILED, limit=50)],
                 "tasks_by_state": {
-                    state.value: [_task(t) for t in tasks if t.state == state]
+                    state.value: [
+                        _task(t, openings.get(t.id)) for t in tasks if t.state == state
+                    ]
                     for state in TaskState
                 },
                 "messages": [
@@ -280,13 +283,18 @@ def build_api(
             raise HTTPException(
                 status_code=404, detail=f"no message {message_id!r} from {provider!r}"
             )
+        opening = (
+            (await db.opening_messages([flow.task.id])).get(flow.task.id)
+            if flow.task
+            else None
+        )
         return _clean(
             {
                 "message": _message(flow.message, None),
                 "turn": [_message(m, None) for m in flow.turn],
                 "decision": flow.decision,
                 "triaged_at": flow.triaged_at,
-                "task": _task(flow.task) if flow.task else None,
+                "task": _task(flow.task, opening) if flow.task else None,
                 "model_calls": [
                     asdict(c) | {"created_at": c.created_at} for c in flow.model_calls
                 ],
@@ -526,7 +534,8 @@ def build_api(
             if state is not None
             else await db.tasks(limit=limit)
         )
-        return _clean([_task(t) for t in found])
+        openings = await db.opening_messages(t.id for t in found)
+        return _clean([_task(t, openings.get(t.id)) for t in found])
 
     @api.get("/api/spend")
     async def spend() -> dict:
@@ -717,6 +726,10 @@ def _message(message: InboundEvent, call) -> dict:
         # while processing this message". Both render as glyphs on the
         # message row.
         "is_task": message.task_id is not None,
+        # Which task, not only whether: a board card finds its own message
+        # by this. Matching on the room instead gave two tasks in one room
+        # the same message (the operator's report, 2026-09-18).
+        "task_id": message.task_id,
         "is_enrichment": message.is_enrichment,
         # A summary only. The prompt is a separate request, on purpose.
         "model_call": (
@@ -732,7 +745,7 @@ def _message(message: InboundEvent, call) -> dict:
     }
 
 
-def _task(task: Task) -> dict:
+def _task(task: Task, opening: dict | None = None) -> dict:
     return {
         "id": task.id,
         "conversation": str(task.conversation),
@@ -750,6 +763,10 @@ def _task(task: Task) -> dict:
         # reads them.
         "last_activity_at": task.last_activity_at,
         "attempts": task.attempts,
+        # The message that opened this task (`Database.opening_messages`), so
+        # a board card shows and opens its own message rather than one it
+        # found among the newest loaded — `None` when no message is linked.
+        "opening": opening,
     }
 
 

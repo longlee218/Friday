@@ -62,6 +62,7 @@ async def test_the_page_and_the_board_route_agree(client, inbox, provider, db):
         sender="discord_user", text="which environment?",
     )
     await db.fail_outbound(row.id, "boom")
+    await db.mark_triaged(make_event(message_id="10"), task_id=task.id)
 
     board = client.get("/api/board").json()
 
@@ -77,6 +78,7 @@ async def test_the_page_and_the_board_route_agree(client, inbox, provider, db):
     assert isinstance(board["counts"]["outbound"], dict)
     assert set(board["messages"][0]) == declared("Message")
     assert set(board["tasks_by_state"]["pending"][0]) == declared("Task")
+    assert set(board["tasks_by_state"]["pending"][0]["opening"]) == declared("TaskOpening")
     assert set(board["failed"][0]) == declared("Outbound")
 
 

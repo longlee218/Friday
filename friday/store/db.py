@@ -881,13 +881,44 @@ class Database:
                     schema.Message.provider_message_id,
                 )
                 .where(schema.Message.task_id == task_id)
-                .order_by(schema.Message.created_at)
+                .order_by(*_OLDEST_FIRST)
                 .limit(1)
             )
             row = result.first()
             if row is None:
                 return None
             return row[0], row[1]
+
+    async def opening_messages(self, task_ids) -> dict[int, dict[str, str]]:
+        """The message that opened each of these tasks — the earliest one
+        linked to it — as `provider`, `provider_message_id` and `text`.
+
+        One query for the lot, like `tools_for_tasks`: the board renders up
+        to two hundred tasks but loads only the newest messages, so a card
+        cannot find its own opening message among those (the operator's
+        report, 2026-09-18). A task with no linked message is absent.
+        """
+        wanted = list(task_ids)
+        if not wanted:
+            return {}
+        async with self._sessions() as session:
+            rows = await session.execute(
+                select(
+                    schema.Message.task_id,
+                    schema.Message.provider,
+                    schema.Message.provider_message_id,
+                    schema.Message.text,
+                )
+                .where(schema.Message.task_id.in_(wanted))
+                .order_by(schema.Message.task_id, *_OLDEST_FIRST)
+            )
+            found: dict[int, dict[str, str]] = {}
+            for task_id, provider, message_id, text in rows:
+                found.setdefault(
+                    task_id,
+                    {"provider": provider, "provider_message_id": message_id, "text": text},
+                )
+            return found
 
     async def tools_for_tasks(self, task_ids) -> dict[int, list[ToolCall]]:
         """What each of these tasks reached for, oldest first within a task.
@@ -2135,7 +2166,7 @@ class Database:
             return await session.scalar(
                 select(schema.Message.provider_message_id)
                 .where(schema.Message.task_id == task_id)
-                .order_by(schema.Message.created_at)
+                .order_by(*_OLDEST_FIRST)
                 .limit(1)
             )
 

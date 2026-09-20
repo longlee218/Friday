@@ -24,6 +24,9 @@ export interface Message {
   is_own: boolean;
   /** This message opened a task. Marked on the Rooms row with a task glyph. */
   is_task: boolean;
+  /** The task this message belongs to, or null. A board card finds its own
+   *  message by this, never by the room. */
+  task_id: number | null;
   /** An agent wrote a memory while processing this message. Marked with an enrichment glyph. */
   is_enrichment: boolean;
   model_call: ModelCallSummary | null;
@@ -34,6 +37,12 @@ export interface ModelCallSummary {
   model: string;
   input_tokens: number;
   output_tokens: number;
+}
+
+export interface TaskOpening {
+  provider: string;
+  provider_message_id: string;
+  text: string;
 }
 
 export interface Task {
@@ -54,6 +63,10 @@ export interface Task {
    * Monitor screen renders this as a small badge so a stuck task is
    * distinguishable from a finished one at a glance. */
   attempts: number;
+  /** The message that opened this task, from the server — never looked up
+   *  among the board's loaded messages, which are only the newest. `null`
+   *  when no message is linked to the task. */
+  opening: TaskOpening | null;
 }
 
 export interface Outbound {

@@ -56,15 +56,13 @@ export function BoardScreen({
 
   const newest = new Map<number, string | null>();
   for (const m of it.messages) {
-    // A task's own `created_at` is when it opened, not when the room last
+    // A task's own `created_at` is when it opened, not when somebody last
     // said something about it — and the second is the one that tells you
-    // whether it has gone cold.
-    for (const [, tasks] of Object.entries(it.tasks_by_state)) {
-      for (const t of tasks) {
-        if (t.conversation === m.conversation && !newest.has(t.id)) {
-          newest.set(t.id, m.created_at);
-        }
-      }
+    // whether it has gone cold. Matched on the task, not the room: two
+    // tasks in one room would otherwise share one "last spoke". Messages
+    // arrive newest first, so the first match is the latest.
+    if (m.task_id !== null && !newest.has(m.task_id)) {
+      newest.set(m.task_id, m.created_at);
     }
   }
 
@@ -129,7 +127,6 @@ export function BoardScreen({
             tasks={tasks}
             lastSpoke={newest}
             onOpen={onOpenFlow}
-            messages={it.messages}
             names={names}
           />
         ))}
@@ -142,14 +139,12 @@ function Column({
   state,
   tasks,
   lastSpoke,
-  messages,
   names,
   onOpen,
 }: {
   state: string;
   tasks: Task[];
   lastSpoke: Map<number, string | null>;
-  messages: Board["messages"];
   names: Map<string, string | null>;
   onOpen: (provider: string, id: string) => void;
 }) {
@@ -177,7 +172,6 @@ function Column({
               task={task}
               spokeAt={lastSpoke.get(task.id) ?? task.created_at}
               onOpen={onOpen}
-              messages={messages}
               names={names}
             />
           ))
@@ -190,17 +184,18 @@ function Column({
 function TaskCard({
   task,
   spokeAt,
-  messages,
   names,
   onOpen,
 }: {
   task: Task;
   spokeAt: string | null;
-  messages: Board["messages"];
   names: Map<string, string | null>;
   onOpen: (provider: string, id: string) => void;
 }) {
-  const from = messages.find((m) => m.conversation === task.conversation);
+  // The server says which message opened this task; the loaded `messages`
+  // are only the newest, so looking the card's message up among them gave
+  // tasks in one room each other's text (the operator's report, 2026-09-18).
+  const from = task.opening;
   const summary =
     (task.params["summary"] as string) ??
     (task.params["question"] as string) ??
@@ -220,7 +215,7 @@ function TaskCard({
       title={
         from
           ? "Open the path this task came from"
-          : "No captured message for this task"
+          : "No message is linked to this task"
       }
     >
       <div className="row wrap">
