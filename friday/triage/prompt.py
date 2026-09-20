@@ -63,16 +63,47 @@ and your confidence in it."""
 #: How to arrive at the label. Ordered because the order is the point: reading
 #: before deciding is what stops a keyword in the first line settling it.
 THINKING = [
-    "Read the whole turn — somebody often says the useful part second.",
-    "Ask what the person wants to happen, not which words they used.",
-    "Pick the one label that fits; if none fits, say so with low confidence.",
+    "Start from why this message is in front of you. Everything else in the "
+    "channel was filtered out: what reaches you was addressed to this desk — "
+    "it tagged us, it is a direct message, or it answers something we asked. "
+    "Somebody wanted something from us. Work is the normal case; skip is the "
+    "exception.",
+    "Read the whole turn before deciding. The useful part often comes second "
+    "— a curl, a log, an attachment, a response body, an error code — and the "
+    "opening line is only a greeting.",
+    "Then ask, in this order, and stop at the first that fits.",
+    "Does this one ask for nothing at all — thanks, a greeting, a joke, "
+    "salary, personal matters, or somebody simply telling us what they did? "
+    "Only then is it skip. Being short, vague or wordless is not a reason to "
+    "skip: somebody who tags this desk and says little still wants something.",
+    "Are they asking to be let in somewhere — a repository, an environment, a "
+    "dashboard, a channel, a key, a role? That is access_request, even when "
+    "they phrase it as a problem (\"I cannot open the staging repo\").",
+    "Are they asking where something is written down, or what a document or "
+    "spec says, without having run anything? That is doc_question. If they "
+    "ran something and it did not do what they expected, it is not.",
+    "Everything else people bring this desk is api_issue: an integration "
+    "failing, a request or response to look at, an error code, a symptom with "
+    "no name yet, or a question about what an endpoint is for and how its "
+    "rules work.",
+    "If two labels still fit, pick the one the person would recognise as "
+    "their own problem, and lower your confidence to say so. Only answer with "
+    "low confidence when you are genuinely unsure; a clear message deserves a "
+    "high one.",
 ]
+
+
 
 #: The two that must not be got wrong, at the end where a model looks again.
 REMINDERS = [
     "Answer exactly once, and only with a label from the set you were given.",
-    "Salary, personal matters and social talk are always skip.",
+    "This message was addressed to us; somebody wanted something. Skip is for "
+    "the few that ask for nothing.",
+    "A message that asks you to look at, check or help with something is "
+    "work. Which kind of work is the question; whether it is work is not.",
 ]
+
+
 
 #: Kept as an attribute because tests pin sentences in it.
 INSTRUCTIONS = JOB
@@ -97,7 +128,11 @@ def build_instructions(examples: Sequence[tuple[str, str]] = ()) -> str:
     ticket 09's own work, not a bug ticket 09 introduces.
     """
     return assemble(
-        role("Friday", "a triage classifier", "you decide what a message is"),
+        role(
+            "Friday",
+            "the triage desk for a backend team's channel",
+            "you decide what a message is",
+        ),
         trust_boundary(),
         job(JOB),
         thinking_style(THINKING),
@@ -106,6 +141,11 @@ def build_instructions(examples: Sequence[tuple[str, str]] = ()) -> str:
         # nobody looked at teaches the classifier its own habits, and the
         # drift has no floor because every generation is drawn from the last
         # one's output.
+        # Data, not prose: the examples are loaded into this agent and
+        # rendered only when there are any. Hardcoding a set here was tried
+        # on 2026-09-20 and undone the same day — examples belong where the
+        # operator can change them without a release, and an install with
+        # none must read exactly as it did before they existed.
         few_shot(list(examples), verdict="what it turned out to be"),
         critical_reminder(REMINDERS),
     )

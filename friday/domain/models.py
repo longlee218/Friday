@@ -137,7 +137,14 @@ class ApiIssueParams:
     #: it as this type's description, one line each, the same place its
     #: fields are defined. `AccessRequestParams` and `DocQuestionParams`
     #: carry the same pattern.
-    """An API is behaving incorrectly: an error, a wrong response, a failure."""
+    """Something this team's systems did, or did not do, that somebody wants
+    looked at: an integration failing, a request, log, curl or response with
+    an error code to check, a symptom with no name yet ("I bought the plan
+    at 15:00 and half an hour later the coins are still not there"), or a
+    question about what an endpoint is for, which one fits their case, and
+    how its rules behave — an API is business logic reachable over HTTP, so
+    a question about that logic belongs here rather than in
+    doc_question."""
 
     #: Every field has a default, because nothing fills them in at
     #: construction time any more. Triage classifies and stops; the task is
@@ -227,7 +234,12 @@ class ApiIssueParams:
 
 @dataclass(frozen=True, slots=True)
 class AccessRequestParams:
-    """Someone is asking for permission or access to a project or repository."""
+    """Someone wants to be let in somewhere: a repository, an environment, a
+    dashboard, a channel, an API key, a role, a permission — for themselves
+    or for somebody joining. Asked outright ("can I get write access to the
+    payments repo") or told as a complaint ("I cannot open the staging
+    repo"); either way what unblocks them is being granted something, not
+    something being fixed."""
 
     project: str = field(
         default="",
@@ -256,7 +268,11 @@ class AccessRequestParams:
 
 @dataclass(frozen=True, slots=True)
 class DocQuestionParams:
-    """A question about documentation, a specification, or intended behaviour."""
+    """Someone asks where something is written down, or what a document,
+    spec or runbook says: the answer is a pointer to writing, or a line out
+    of it. They have not run anything and are reporting no behaviour. If
+    they tried something and it did not do what they expected, or they ask
+    what an endpoint is for and how its rules work, that is api_issue."""
 
     question: str = field(
         default="",

@@ -412,8 +412,33 @@ sensitive_words:
 # A mark takes effect on the next restart: examples belong in the stable
 # front of the prompt, and a list that changed per call would cost the cache
 # hit on everything after it. See `agents.triage.examples` for how many.
-triage_examples: []
-  # - "the checkout api is 500ing on prod": api_issue
-  # - "can I get write access to the payments repo": access_request
-  # - "where's the spec for the refund flow": doc_question
-  # - "anyone want lunch": skip
+# Worked examples, in pairs that differ by one thing — the boundaries are
+# what a list of label names cannot teach. Written in the words people
+# actually use in this channel, because that is what the classifier reads.
+#
+# **Nothing here may appear in `evals/triage.jsonl`.** Scoring the classifier
+# on a sentence it was shown the answer to measures nothing;
+# `evals/build_triage_set.py` drops any overlap on a refresh, and this list
+# is what it drops against.
+#
+# No name of the watched account either: triage is told nothing about who it
+# speaks for (`tests/test_agent_voice.py`), and each pair teaches its lesson
+# without the @-mention that carried it.
+triage_examples:
+  # Addressed to us and vague — still work. This is the pair the classifier
+  # used to get wrong: it read "short" as "nothing to do".
+  - "a ơi bị lỗi api rồi": api_issue
+  - "a xem giúp e request này với ạ [image: postman.png]": api_issue
+  # A symptom told as a story, no error code, no curl.
+  - "e mua gói sub lúc 15h mà 30 phút sau vẫn chưa được cộng coin a ạ": api_issue
+  # Findings offered rather than asked — still ours to act on.
+  - "nguyên nhân là do request thiếu selling_region nên catalog trả rỗng a nhé": api_issue
+  # What a term means, and where a document lives: the answer is writing.
+  - "correlationId là cái gì a nhỉ, e ko biết": doc_question
+  - "a ơi tài liệu mô tả webhook của Midas nằm ở repo nào v": doc_question
+  # Being let in — asked outright, and told as a complaint.
+  - "cho em xin quyền vào repo BE-Midas với ạ": access_request
+  - "e không mở được Grafana của dev, a add quyền giúp e với": access_request
+  # Nothing is being asked of us: a closing reply, and congratulations.
+  - "ok a, e hiểu rồi ạ": skip
+  - "chúc mừng a lên chức ạ": skip

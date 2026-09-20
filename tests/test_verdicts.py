@@ -270,7 +270,10 @@ def test_no_examples_means_no_examples():
     from friday.triage.prompt import build_instructions
 
     # No examples means no examples section at all — not an empty tag for the
-    # model to read as "there were examples, and none of them".
+    # model to read as "there were examples, and none of them". Hardcoding a
+    # built-in set in the prompt module was tried on 2026-09-20 and undone:
+    # examples are data the operator edits, and this assertion is what says
+    # so.
     assert "<examples>" not in build_instructions(())
 
 

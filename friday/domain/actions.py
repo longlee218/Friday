@@ -100,15 +100,21 @@ def _means(name: str, params_cls: type) -> str:
             f"the class's own constructor signature, which is an instruction "
             f"to guess"
         )
-    return f"    {name}: {doc}"
+    # One line per label, whatever shape the class's own docstring has: a
+    # definition long enough to be worth writing is worth wrapping in the
+    # source, and a raw newline here would break the enum's layout — the
+    # second and later lines would sit at column zero, reading as prose
+    # about nothing rather than as this label's meaning.
+    return f"    {name}: {' '.join(doc.split())}"
 
 
 _TYPE_DOC = "\n".join(
     [
         "which kind of task this is, or `skip` —",
         *(_means(name, cls) for name, cls in PARAMS.items()),
-        f"    {SKIP}: the message needs no action — social talk, salary, or "
-        f"anything off topic.",
+        f"    {SKIP}: nobody is asking you for anything — social talk, "
+        f"thanks, salary, personal matters, or people talking among "
+        f"themselves.",
     ]
 )
 
