@@ -100,13 +100,27 @@ client (`friday-db`, `DB_MCP_CLIENT_SECRET`). Its own client rather than
 `devops-generic`'s on purpose: a role can then be given to one and not the
 other, which is the only reason two identities are worth having.
 
-**Not done, and not guessed.** Its catalogue has never been read. The spec
-already records this as this ticket's first fact to fetch, and the Loki work
-of the same day is the argument for waiting: four guesses about
-`loki_query_range` were right and three other things about it were wrong —
-the label name, the response shape, and the per-line format. A `DbSource`
-declaring tools nobody has seen would be the third time this board paid for
-that.
+**The catalogue, read the same day.** Four tools:
+
+| tool | takes | reads only? |
+|---|---|---|
+| `list_databases` | nothing | yes |
+| `describe_schema` | `db_id` | yes |
+| `execute_mongo_query` | `db_id`, `collection`, `filter?`, `projection?` | **yes, by construction** — "MVP: find only (read-only)" |
+| `execute_query` | `db_id`, **`sql`** | **no. Arbitrary SQL.** |
+
+**`lookup(check_name, key_value)` does not exist.** The primitive ticket 15
+describes is not what this server offers; the only relational tool is raw
+SQL. That is the fact this ticket was told to fetch first, and it is the one
+that changes the design rather than filling in a blank.
+
+**Every database says `"permission": "reader"`.** Eleven of them, across two
+ventures, and the two this room cares about are
+`supermind-postgres-ai-backend-reelme-v2` and
+`supermind-postgres-backend-reelme-payment`. That is the guard that holds
+whatever else does not: a `DELETE` composed by accident, or by an injection
+that reached the string, fails at the database rather than at our
+intentions.
 
 **What is already decided, so that reading the catalogue is the only open
 question** (ticket 15): `DbSource` is `lookup(check_name, key_value)` and
@@ -121,3 +135,38 @@ that difference is enforced.
 server offers anything that writes. `devops-generic` did — fifteen tools
 that change production — and the allow list being one line long is what
 makes that survivable.
+
+
+## What `execute_query` does to "no SQL at any layer"
+
+Ticket 15 says `DbSource` is `lookup(check_name, key_value)` — "no SQL
+parameter exists". The server offers no such thing, so that sentence has to
+be read for its intent rather than its letter, and the intent is worth
+restating precisely now that the layer underneath does take SQL:
+
+- **No model ever composes a query, and no tool a model can reach takes a
+  `sql` parameter.** That part is unchanged and is the whole point.
+- **Code composes it**, from a `DbCheck` the operator wrote — `table`,
+  `key_column`, `state_column` are already fields on that dataclass in
+  `friday/domain/models.py`. The model names a *check* and supplies a *key
+  value*; nothing else about the statement is influenced from outside.
+- **The key value is the one outside-influenced token in the string**, and
+  `execute_query` has no parameter binding — one `sql` string and nothing
+  else. So it has to be escaped where the statement is built, and the
+  `reader` permission is the second lock behind that, not the first.
+
+Three layers, and none of them is a prompt: the statement's shape comes from
+a row the operator typed, the value is escaped by code, and the credential
+cannot write. `friday.sources.Reads` is where the fourth lives — the tool
+name itself has to be declared by the class that calls it.
+
+**One thing that will bite whoever writes it.** This schema is Prisma's, so
+the tables are `PSPLedgerTransaction`, `UsageTransaction`, `Purchase` —
+PascalCase. Postgres folds an unquoted identifier to lower case, so a
+composed statement must double-quote table and column names or fail with
+"relation does not exist" on a table that plainly exists.
+
+**And `describe_schema` is not free to read into a prompt.** The payment
+database alone came back with fifteen tables including `pg_stat_statements`
+and its forty columns. If a check ever needs the schema, it needs one
+table's worth of it, not the database's.

@@ -90,7 +90,29 @@ tracebacks (`File "…", line N`) map directly, Go frames carry the path.
 
 | from | to | via | join_key | db_checks |
 |---|---|---|---|---|
-| backend-reelme-v2 | ai-backend-reelme-payment | http (`/v1/midas/intent` → Midas) and webhook back (`Midas webhook: … BILLING_ERROR` lines) | userId | `transactions` by userId, column `state` — operator to confirm table and column names |
+| backend-reelme-v2 | ai-backend-reelme-payment | http (`/v1/midas/intent` → Midas) and webhook back (`Midas webhook: … BILLING_ERROR` lines) | userId | see the correction below — the drafted `transactions`/`state` is wrong |
+
+**Corrected 2026-09-21, from the real schema** (`describe_schema` on
+`supermind-postgres-backend-reelme-payment`, once the db MCP was
+authenticated). The draft said "`transactions` by userId, column `state`".
+Both halves are wrong:
+
+- **There is no `transactions` table.** The schema is Prisma's, PascalCase,
+  and the tables that carry a payment's fate are `PSPLedgerTransaction`
+  (`userId`, `status`, `purchaseId`, `subscriptionId`, `transactionId`,
+  `eventType`, `retryCount`, `error` jsonb, `processedAt`), `Purchase`
+  (`userId`, `status`, `productId`, `transactionId`) and `Subscription`
+  (`userId`, `status`).
+- **The column is `status`, not `state`** — on all three.
+- `UsageTransaction` looks like a candidate by its name and is not: it is
+  keyed on `walletId`/`accountId` and carries **no `userId`** at all.
+
+So the `db_check` the operator still has to choose is between
+`PSPLedgerTransaction` and `Purchase`, on `userId`, reading `status` — and
+`PSPLedgerTransaction.error` is the column that would say *why*, which is
+what a diagnosis is after. That is a choice about which table answers "did
+this user's payment go through", and it is the operator's; the table and
+column names are no longer a guess.
 
 ## `fact` (drafts, channel ReelMe)
 
