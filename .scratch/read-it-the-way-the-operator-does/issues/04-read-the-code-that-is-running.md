@@ -72,3 +72,51 @@ lines from a branch nobody deployed.
 `default_branch` keeps its job on **dev**, where the main clone is what is
 running — which is what the slice already does, and already says in
 `not_checked`.
+
+
+## Done — the frame mapping, 2026-09-21
+
+`/app/dist/src/x/y.js:80` now reaches `src/x/y.ts` **at the line somebody
+wrote**, not at line 80 of the build.
+
+**The line is the part that matters, and it is why this is not a path
+rewrite.** Measured on the operator's own clone:
+`workflow-credit.service.js:60` is `workflow-credit.service.ts:109` —
+forty-nine lines away, and both land on the same closing brace. Mapping the
+file and carrying the line would have handed `Diagnose` fifteen lines of the
+wrong place and called it the throw site: the same shape as reading
+yesterday's log window and reporting it as this request's.
+
+`friday/sources/code.py:original` decodes the source map beside the compiled
+file — v3, base64 VLQ, every field a delta on the last. No dependency; it is
+fifty lines and the format is stable. The clone builds with maps: 1,725 of
+them beside `dist/src`, measured the same day.
+
+**No map is "read the built file and say so", never a guess.** A frame whose
+map is missing or unreadable is read as it is, with a `not_checked` line
+saying it is the built line and not the one you wrote.
+
+### What the review found in the decoder
+
+Three, all of them "answers instead of refusing", which is this board's
+recurring shape:
+
+- **A `sources` holding `null`** (legal in v3 beside `sourcesContent`) and a
+  source index the deltas ran past the end of both raised out of the graph
+  node, past the `try` that wraps the read. The whole walk is inside one now,
+  and the contract — `None`, never an exception — holds.
+- **An unknown character returned what it had decoded so far.** Every field
+  is a delta on the last, so a half-read segment is dropped *with the deltas
+  it carried* and every later segment is computed from the wrong base: a
+  corrupt map answered with a confident wrong line, which is the one thing
+  the function exists to prevent. It rejects the map now.
+- **The mapped path was never checked against the clone.** `repo_file`
+  refuses a stack frame that climbs out of it and this module's docstring
+  makes that the rule — and a `.map` naming `../../../../../../etc/hosts`
+  is the same climb by a quieter route, which `original` followed and
+  `excerpt` then read. `original` takes the root now, and it is not optional.
+
+**Still this ticket's:** the running image's tag — `release_status` /
+`release_resolve` through the devops MCP, which waits on the Keycloak client
+— the detached worktree under `data/checkouts/`, CodeGraph, repo docs, and
+the enclosing function and caller hop.

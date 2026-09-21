@@ -14,6 +14,8 @@ whatever it got back.
 
 from __future__ import annotations
 
+import pytest
+
 from friday.domain.models import MemoryKind, FridayState
 
 ROOM = FridayState(channel_id="c1", task_id=7, agent="responder")
@@ -531,6 +533,10 @@ async def test_a_structured_row_comes_back_as_its_own_type(db):
     call site rebuilds."""
     from friday.domain.models import MemoryOrigin
 
+    # The service comes first: ticket 19's check refuses a route naming one
+    # that does not exist, which is the whole of why this order now matters.
+    await _project(db, "p")
+    await _service(db, "be", "p")
     await db.memory_add(
         ROOM, "ReelMe on dev", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
         data={"domain": "api.dev.aperogroup.ai", "env": "dev", "service": "be"},
@@ -548,7 +554,14 @@ async def test_this_rooms_row_wins_over_the_one_written_for_every_room(db):
     specific is the one somebody wrote about this room on purpose."""
     from friday.domain.models import MemoryOrigin
 
+    # A `'*'` row may only name another `'*'` row — ticket 19's third open
+    # question, answered: "true everywhere" cannot depend on something that
+    # exists in one room only, or it resolves for that room and nowhere else.
     everywhere = FridayState(channel_id="*", agent="admin")
+    await _project(db, "p", channel="*")
+    await _service(db, "shared", "p", channel="*")
+    await _project(db, "p")
+    await _service(db, "this-room", "p")
     for state, service in ((everywhere, "shared"), (ROOM, "this-room")):
         await db.memory_add(
             state, "route", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
@@ -568,3 +581,199 @@ async def test_a_prose_kind_has_no_structured_data_to_ask_for(db):
 
     with pytest.raises(ValueError, match="prose"):
         await db.structured_memory("c1", kind=MemoryKind.FACT, key="anything")
+
+
+# --- a row that names another row (ticket 19) -------------------------------
+
+
+async def _project(db, name: str, channel: str = "c1"):
+    from friday.domain.models import MemoryOrigin
+
+    return await db.memory_add(
+        FridayState(channel_id=channel, agent="operator"), f"repo {name}",
+        kind=MemoryKind.PROJECT, origin=MemoryOrigin.ADMIN,
+        data={"name": name, "repo_path": f"~/{name}",
+              "default_branch": "main", "stack": "NestJS"},
+    )
+
+
+async def _service(db, name: str, project: str, channel: str = "c1"):
+    from friday.domain.models import MemoryOrigin
+
+    return await db.memory_add(
+        FridayState(channel_id=channel, agent="operator"), f"service {name}",
+        kind=MemoryKind.SERVICE, origin=MemoryOrigin.ADMIN,
+        data={
+            "name": name, "project": project,
+            "prod": {"cluster": "c", "namespace": "n", "app": name},
+            "dev": {"kube_context": "d", "namespace": "dev",
+                    "pod_pattern": f"{name}-"},
+        },
+    )
+
+
+async def test_a_row_naming_a_row_that_does_not_exist_is_refused(db):
+    """Ticket 19. `service.project` is matched against a `project` row's key
+    by string equality, and the form asked for it as free text — a question
+    whose wrong answers look exactly like its right ones. It failed on the
+    first six rows ever typed."""
+    from friday.domain.models import MemoryRefused
+
+    with pytest.raises(MemoryRefused, match="reelme-v2"):
+        await _service(db, "backend-reelme-v2", "reelme-v2")
+
+
+async def test_the_same_row_is_accepted_once_what_it_names_exists(db):
+    await _project(db, "reelme-v2")
+
+    written = await _service(db, "backend-reelme-v2", "reelme-v2")
+
+    assert written is not None
+
+
+async def test_a_row_written_for_every_room_satisfies_one_room(db):
+    """`'*'` is "true everywhere", and it is the scope `structured_memory`
+    already reads by — so what the check accepts and what a lookup will find
+    cannot be two different things."""
+    await _project(db, "shared", channel="*")
+
+    assert await _service(db, "backend", "shared") is not None
+
+
+async def test_renaming_a_row_another_row_names_is_refused(db):
+    """The second mismatch, twenty minutes after the first was fixed. A
+    structured row's key *is* its data, so renaming it orphans every row that
+    names it — and those rows are ones nobody touched. A dropdown cannot help
+    here: the operator is editing the row being named."""
+    from friday.domain.models import MemoryRefused
+
+    project = await _project(db, "reelme-v2")
+    await _service(db, "backend-reelme-v2", "reelme-v2")
+
+    with pytest.raises(MemoryRefused, match="backend-reelme-v2"):
+        await db.memory_update(
+            FridayState(channel_id="c1", agent="operator"), project.id,
+            text="repo", data={**project.data, "name": "renamed"},
+            origin="admin",
+        )
+
+
+async def test_renaming_a_row_nobody_names_is_fine(db):
+    project = await _project(db, "lonely")
+
+    changed = await db.memory_update(
+        FridayState(channel_id="c1", agent="operator"), project.id,
+        text="repo", data={**project.data, "name": "renamed"}, origin="admin",
+    )
+
+    assert changed.key == "renamed"
+
+
+async def test_editing_a_row_without_moving_its_key_is_fine(db):
+    """Correcting a repo path must not require unpicking every service."""
+    project = await _project(db, "reelme-v2")
+    await _service(db, "backend-reelme-v2", "reelme-v2")
+
+    changed = await db.memory_update(
+        FridayState(channel_id="c1", agent="operator"), project.id,
+        text="repo", data={**project.data, "repo_path": "~/moved"},
+        origin="admin",
+    )
+
+    assert changed.data["repo_path"] == "~/moved"
+
+
+async def test_deleting_a_row_another_row_names_is_refused(db):
+    """Refused rather than allowed-and-handed-over later: the breakage would
+    otherwise surface hours afterwards, inside a graph run, which is the
+    failure this whole check exists to stop. A soft delete makes the
+    work-around cheap — remove the service first."""
+    from friday.domain.models import MemoryRefused
+
+    project = await _project(db, "reelme-v2")
+    await _service(db, "backend-reelme-v2", "reelme-v2")
+
+    with pytest.raises(MemoryRefused, match="backend-reelme-v2"):
+        await db.memory_delete(
+            FridayState(channel_id="c1", agent="operator"), project.id,
+            origin="admin",
+        )
+
+
+async def test_a_deleted_row_no_longer_holds_its_dependants_hostage(db):
+    project = await _project(db, "reelme-v2")
+    service = await _service(db, "backend-reelme-v2", "reelme-v2")
+    await db.memory_delete(
+        FridayState(channel_id="c1", agent="operator"), service.id,
+        origin="admin",
+    )
+
+    assert await db.memory_delete(
+        FridayState(channel_id="c1", agent="operator"), project.id,
+        origin="admin",
+    )
+
+
+async def test_superseding_cannot_move_a_key_another_row_names(db):
+    """The same hole as renaming, reached by a different door: this path
+    takes `data` as well, so it can move a key. Found by review rather than
+    by a test — the first version checked `memory_update` and `memory_delete`
+    and left this one open."""
+    from friday.domain.models import MemoryRefused
+
+    project = await _project(db, "reelme-v2")
+    await _service(db, "backend-reelme-v2", "reelme-v2")
+
+    with pytest.raises(MemoryRefused, match="backend-reelme-v2"):
+        await db.memory_supersede(
+            FridayState(channel_id="c1", agent="operator"), project.id,
+            "a better description", origin="admin",
+            data={**project.data, "name": "renamed"},
+        )
+
+
+async def test_superseding_without_moving_the_key_is_still_allowed(db):
+    """D16's whole point: a row is corrected by the row that replaces it."""
+    project = await _project(db, "reelme-v2")
+    await _service(db, "backend-reelme-v2", "reelme-v2")
+
+    new = await db.memory_supersede(
+        FridayState(channel_id="c1", agent="operator"), project.id,
+        "a better description", origin="admin",
+        data={**project.data, "repo_path": "~/moved"},
+    )
+
+    assert new.key == "reelme-v2" and new.data["repo_path"] == "~/moved"
+
+
+async def test_a_shared_row_cannot_be_removed_while_one_room_names_it(db):
+    """A `'*'` row is named from everywhere, so its dependants are searched
+    everywhere. Scoped to `[channel_id, '*']` with `channel_id == '*'` that
+    collapses to `'*'` alone, and a shared project could be removed while one
+    room's service still named it. Found by review."""
+    from friday.domain.models import MemoryRefused
+
+    await _project(db, "shared", channel="*")
+    await _service(db, "c1-service", "shared", channel="c1")
+    shared = [
+        m for m in await db.memories_for_channel("*")
+        if m.kind == MemoryKind.PROJECT
+    ][0]
+
+    with pytest.raises(MemoryRefused, match="c1-service"):
+        await db.memory_delete(
+            FridayState(channel_id="*", agent="operator"), shared.id,
+            origin="admin",
+        )
+
+
+async def test_a_row_for_every_room_may_not_name_one_room_s_row(db):
+    """Ticket 19's third open question, answered in code rather than in a
+    comment: "true everywhere" cannot depend on something that exists in one
+    room, or it resolves for that room and nowhere else."""
+    from friday.domain.models import MemoryRefused
+
+    await _project(db, "only-here", channel="c1")
+
+    with pytest.raises(MemoryRefused, match="only-here"):
+        await _service(db, "shared-service", "only-here", channel="*")

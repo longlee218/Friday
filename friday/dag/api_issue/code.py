@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from friday.dag.engine import DAGDeps, DAGState, Node, envelope
-from friday.sources.code import NOT_OURS, excerpt, repo_file
+from friday.sources.code import NOT_OURS, excerpt, original, repo_file
 
 __all__ = ["code_of", "read_failing_code_node"]
 
@@ -49,10 +49,17 @@ def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
         ][:MAX_FRAMES]
 
         if project is None:
+            # **Naming it is the whole of this line.** The first six rows
+            # ever typed had a service pointing at `reelme-v2` and a project
+            # called `backend-reelme-v2`, and this message — without the
+            # name — was the only symptom. Ticket 19 stops that being
+            # writable; this is what makes the rows already written legible.
+            placement, _ = resolved(state["resolve"])
             return envelope(
                 "skipped",
-                "no project row names a repository on this machine, so no "
-                "code was read",
+                f"the service {placement.service!r} names a project no row "
+                f"here is called, so no repository was found and no code was "
+                f"read",
             )
         if not frames:
             return envelope(
@@ -87,8 +94,24 @@ def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
             if path is None:
                 not_checked.append(f"{file} is not in this clone — not read")
                 continue
+            # A NestJS frame names `dist/src/x/y.js:80`, and line 80 of the
+            # TypeScript is not that code. Mapping the file and keeping the
+            # line would hand `Diagnose` fifteen lines of the wrong place and
+            # call it the throw site — measured on the operator's own clone,
+            # one frame moved 49 lines.
+            mapped = original(path, int(line), repo_path)
+            if mapped is not None:
+                path, line = mapped
+                shown = f"{path.name}:{line} (compiled frame was {file})"
+            else:
+                shown = f"{file}:{line}"
+                if path.suffix == ".js":
+                    not_checked.append(
+                        f"{file} is compiled and has no source map beside it, "
+                        f"so this is the built line, not the one you wrote"
+                    )
             try:
-                pieces.append(f"--- {file}:{line}\n{excerpt(path, int(line))}")
+                pieces.append(f"--- {shown}\n{excerpt(path, int(line))}")
             except OSError as exc:  # noqa: PERF203 — one bad file is not the run
                 not_checked.append(f"{file} could not be read: {exc}")
 

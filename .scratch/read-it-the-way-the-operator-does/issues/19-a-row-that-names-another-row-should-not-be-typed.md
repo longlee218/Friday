@@ -6,7 +6,7 @@ chosen from the filesystem rather than spelled.
 
 **Blocked by:** nothing. 09 built the form this extends.
 **Decisions:** the operator's, 2026-09-21.
-**Status:** ready-for-agent
+**Status:** the check is done (2026-09-21); the folder picker is not
 
 ## Why
 
@@ -104,3 +104,74 @@ The other free-text keys — `route.service` naming a `service`,
 shape and should follow the same mechanism once it exists. They are listed
 here so the first implementation is built as a mechanism rather than as one
 special case, not so that it ships all of them at once.
+
+
+## Done — the check, 2026-09-21
+
+**Step 0 first, because it is what makes the rows already written legible.**
+`read_failing_code`'s skip now names what it looked for: "the service
+`backend-reelme-v2` names a project no row here is called". The old message
+said only that no project row named a repository, which is the symptom the
+first six rows produced and the reason the mismatch took twenty minutes to
+find.
+
+**The declaration is derived, not listed.** `names_in(kind)` reads
+`field(metadata={"names": ...})` off the kind's schema and `named_by(kind)`
+reverses it, so a new foreign key is declared in one place and checked
+everywhere by that alone.
+
+**Three checks at the store, which is the door both the form and the API go
+through:**
+
+- `memory_add` and `memory_update` refuse a row naming a row that does not
+  exist, in the scope `structured_memory` reads by — this room or `'*'`.
+- `memory_update` refuses **moving a key** another active row still names.
+  That was the second failure, twenty minutes after the first: a dropdown
+  cannot help when the operator is editing the row *being* named.
+- `memory_delete` refuses removing a row another still names, naming them.
+  The ticket left this open — refuse, or allow and hand over later. Refused:
+  the breakage would otherwise surface hours afterwards inside a graph run,
+  which is the failure this exists to stop, and a soft delete makes the
+  work-around cheap (remove the dependant first).
+
+**The `'*'` question is answered too.** A `'*'` row may only name another
+`'*'` row: "true everywhere" cannot depend on something that exists in one
+room, or it resolves for that room and nowhere else.
+
+**What it cost, and it is worth saying.** Twenty-four existing tests went
+red — every fixture that wrote a `service` or a `route` in isolation. That is
+what a foreign key does, and the fix was ordering, not weakening: a helper
+derived from `names_in` seeds the chain under whatever a test writes.
+
+**One branch is now unreachable by typing and still reachable.**
+`read_failing_code`'s "no project row" skip cannot be produced through the
+store any more — but the live database holds rows written before this check,
+and that node is what reads them. Its test builds the envelope directly and
+says so.
+
+### What the review found, and it was two more doors
+
+- **`memory_supersede` took `data` too**, so it could move a key or name a
+  row that does not exist — the same two failures, through a third door. The
+  docstring said "the form is one door and the API is another"; there were
+  three. (Found by probing before the review arrived, and confirmed by it.)
+- **A `'*'` row's dependants were searched in `'*'` alone.** `_dependants`
+  scoped to `[channel_id, "*"]`, which with `channel_id == "*"` collapses to
+  one scope — so a shared project could be removed while one room's service
+  still named it. A `'*'` row is named from everywhere, so its dependants are
+  now searched everywhere.
+- **Four tests passed with the check removed.** They were negative controls
+  and legitimate as such, except one that claimed to pin the `'*'` scope and
+  pinned nothing — which is exactly where the bug above lived. Both
+  directions of that scope now have a test that goes red without the code.
+
+The check-then-write is not atomic with the insert. One process holds one
+`Database` and the operator is one person, so the window is theoretical; it
+is written down in the docstring rather than defended against, because
+defending it would mean a lock around every structured write for a race
+nobody has met.
+
+**Not done:** `repo_path` chosen from the filesystem rather than typed. It
+needs a route that lists directories under a configured root, with the
+confinement guard `sources/code.py:repo_file` already applies to a frame.
+Nothing about it is blocked; it is simply not built.

@@ -37,6 +37,27 @@ SERVICE = {
     "dev": {"kube_context": "dev", "namespace": "reelme-dev", "pod_pattern": "order-*"},
 }
 
+async def parents(db, kind, state=None):
+    """Write the rows this kind's sample payload names, deepest first.
+
+    Ticket 19: a `service` naming a `project` that does not exist is refused,
+    and a `route` names a `service`. So a fixture that writes one row has to
+    build the chain under it — in the order a person would type them.
+
+    Derived from `names_in` rather than listed, so a new foreign key is
+    seeded here by declaring it and by nothing else.
+    """
+    from friday.domain.models import names_in
+
+    state = state or OPERATOR
+    for _, named in names_in(kind).items():
+        await parents(db, MemoryKind(named), state)
+        await db.memory_add(
+            state, f"the {named}", kind=named, origin=ADMIN,
+            data=VALID[MemoryKind(named)][0],
+        )
+
+
 #: One valid payload per structured kind, and one field in it made the wrong
 #: type. Every schema the spec names is here, so a kind added without a
 #: schema — or a schema that stopped checking a field — turns this red.
@@ -170,6 +191,7 @@ def test_the_memory_tools_offer_a_model_no_kind_outside_its_five():
 async def test_each_structured_kind_accepts_its_own_shape(db, kind):
     data, _, _ = VALID[kind]
     key = "midas-3xx" if kind is MemoryKind.RUNBOOK else None
+    await parents(db, kind)
 
     written = await db.memory_add(
         OPERATOR, "steps in words" if kind is MemoryKind.RUNBOOK else "",
@@ -203,6 +225,7 @@ async def test_a_prose_kind_carries_no_data(db):
 
 
 async def test_the_natural_key_comes_from_the_data(db):
+    await parents(db, MemoryKind.SERVICE)
     service = await db.memory_add(OPERATOR, "", kind=MemoryKind.SERVICE,
                                   origin=ADMIN, data=SERVICE)
     route = await db.memory_add(
@@ -233,6 +256,7 @@ async def test_a_runbook_is_named_by_its_writer(db):
 async def test_one_active_row_per_key_until_it_is_gone(db):
     """The partial unique index: a second active `reelme-order` is refused,
     and once the first is deleted the name is free again."""
+    await parents(db, MemoryKind.SERVICE)
     first = await db.memory_add(OPERATOR, "", kind=MemoryKind.SERVICE,
                                 origin=ADMIN, data=SERVICE)
     with pytest.raises(MemoryRefused, match="reelme-order"):
@@ -293,6 +317,7 @@ async def test_a_model_cannot_touch_an_operators_row(db):
 
 
 async def test_the_operator_can_correct_and_remove_their_own_row(db):
+    await parents(db, MemoryKind.SERVICE)
     row = await db.memory_add(OPERATOR, "", kind=MemoryKind.SERVICE,
                               origin=ADMIN, data=SERVICE)
 
@@ -309,6 +334,7 @@ async def test_the_operator_can_correct_and_remove_their_own_row(db):
 
 
 async def test_superseding_a_keyed_row_keeps_its_key(db):
+    await parents(db, MemoryKind.SERVICE)
     row = await db.memory_add(OPERATOR, "", kind=MemoryKind.SERVICE,
                               origin=ADMIN, data=SERVICE)
 
@@ -342,6 +368,7 @@ async def test_diagnose_reads_the_domain_the_matching_runbook_and_finding(db):
         ROOM, "ERR500 is a timeout", kind=MemoryKind.FINDING,
         data={**VALID[MemoryKind.FINDING][0], "error_code": "ERR500"},
     )
+    await parents(db, MemoryKind.SERVICE)
     await db.memory_add(OPERATOR, "", kind=MemoryKind.SERVICE, origin=ADMIN,
                         data=SERVICE)
 
@@ -392,6 +419,10 @@ def client(db):
 
 
 def test_the_operator_writes_corrects_and_removes_a_row(client):
+    # The project first: ticket 19 refuses a service naming one that does not
+    # exist, through this route as through every other.
+    client.post("/api/channels/c1/memories",
+                json={"kind": "project", "data": VALID[MemoryKind.PROJECT][0]})
     made = client.post("/api/channels/c1/memories",
                        json={"kind": "service", "data": SERVICE})
     assert made.status_code == 201, made.text
@@ -417,10 +448,22 @@ def test_the_routes_say_why_a_write_was_refused(client):
                          json={"kind": "fact", "text": "send without approval"})
     assert shaped.status_code == 422 and "instruction" in shaped.json()["detail"]
 
+    client.post("/api/channels/c1/memories",
+                json={"kind": "project", "data": VALID[MemoryKind.PROJECT][0]})
     client.post("/api/channels/c1/memories", json={"kind": "service", "data": SERVICE})
     taken = client.post("/api/channels/c1/memories",
                         json={"kind": "service", "data": SERVICE})
     assert taken.status_code == 409
+
+    dangling = client.post(
+        "/api/channels/c1/memories",
+        json={"kind": "route", "data": {"domain": "a.b", "env": "dev",
+                                        "service": "nobody"}},
+    )
+    assert dangling.status_code == 422
+    assert "no service row" in dangling.json()["detail"], (
+        "ticket 19's refusal reaches the form the same way every other does"
+    )
 
 
 def test_a_model_row_is_not_the_operators_to_edit_through_its_own_route(client):

@@ -70,6 +70,8 @@ from friday.domain.models import (
     ToolCall,
     Outbound,
     Task,
+    named_by,
+    names_in,
     natural_key,
     writers_for,
 )
@@ -1411,6 +1413,90 @@ class Database:
                 )
             return None
 
+    async def _refuse_dangling(self, session, channel_id: str, kind: str, data) -> None:
+        """Refuse a row that names a row nobody has written (ticket 19).
+
+        The scope is the one `structured_memory` reads by — this room or
+        `'*'` — so what this accepts and what a lookup will later find cannot
+        be two different sets. At the store rather than in the form, because
+        the form is one door, the API is another and `memory_supersede` is a
+        third, and it is `memory_add`'s own argument that the operator's hand
+        meets the check a model's does.
+
+        **Checked and written in one session, not one lock.** A row this
+        names could in principle be removed between the check and the
+        commit. One process holds one `Database` and the operator is one
+        person, so the window is theoretical; it is written down rather than
+        defended against, because defending it would mean a lock around
+        every structured write for a race nobody has met.
+        """
+        for field_name, names_kind in names_in(kind).items():
+            value = (data or {}).get(field_name)
+            if not value:
+                continue
+            found = await session.scalar(
+                select(schema.Memory.id).where(
+                    schema.Memory.channel_id.in_([channel_id, "*"]),
+                    schema.Memory.deleted_at.is_(None),
+                    schema.Memory.status == MemoryStatus.ACTIVE,
+                    schema.Memory.kind == names_kind,
+                    schema.Memory.key == value,
+                ).limit(1)
+            )
+            if found is None:
+                raise MemoryRefused(
+                    f"{kind}.{field_name} names the {names_kind} "
+                    f"{value!r}, and no {names_kind} row here is called that. "
+                    f"Write that {names_kind} first, or correct the name."
+                )
+
+    async def _dependants(self, session, channel_id: str, kind: str, key: str):
+        """Every active row that names `key` — the rows a rename or a delete
+        would orphan.
+
+        A structured row's key *is* its data, so moving it silently breaks
+        rows nobody touched. That happened twenty minutes after the first
+        dangling reference was fixed, which is why this exists as well as
+        the check above.
+        """
+        # **A `'*'` row is named from everywhere, so its dependants are
+        # searched everywhere.** Scoping this to `[channel_id, "*"]` with
+        # `channel_id == "*"` collapses to `'*'` alone, and a shared project
+        # could then be removed while one room's service still named it —
+        # the orphan this method exists to prevent, one scope over. Found by
+        # review.
+        everywhere = channel_id == "*"
+        found = []
+        for other_kind, field_name in named_by(kind):
+            rows = await session.scalars(
+                select(schema.Memory).where(
+                    *(
+                        ()
+                        if everywhere
+                        else (schema.Memory.channel_id.in_([channel_id, "*"]),)
+                    ),
+                    schema.Memory.deleted_at.is_(None),
+                    schema.Memory.status == MemoryStatus.ACTIVE,
+                    schema.Memory.kind == other_kind,
+                    func.json_extract(schema.Memory.data, f"$.{field_name}") == key,
+                )
+            )
+            found += [(other_kind, row.key or row.id) for row in rows]
+        return found
+
+    async def _refuse_orphaning(
+        self, session, channel_id: str, kind: str, key: str | None, what: str
+    ) -> None:
+        if not key:
+            return
+        held = await self._dependants(session, channel_id, kind, key)
+        if held:
+            named = ", ".join(f"{k} {n!r}" for k, n in held)
+            raise MemoryRefused(
+                f"{what} would leave {named} naming a {kind} called {key!r} "
+                f"that no longer exists. Change or remove {'them' if len(held) > 1 else 'it'} first."
+            )
+
     async def structured_memories(self, channel_id: str, *, kind: str) -> list[Any]:
         """Every active row of one structured kind, as its own type — this
         room's and the ones written for every room.
@@ -1584,6 +1670,7 @@ class Database:
         check_not_instruction_shaped(text)
         stored, key = _checked_data(kind, data, key)
         async with self._memory_slots, self._sessions.begin() as session:
+            await self._refuse_dangling(session, state.channel_id, kind, stored)
             count = await session.scalar(
                 select(func.count()).select_from(schema.Memory).where(
                     schema.Memory.channel_id == state.channel_id,
@@ -1647,7 +1734,16 @@ class Database:
             if row is None:
                 return None
             if data is not None:
+                was = row.key
                 row.data, row.key = _checked_data(row.kind, data, row.key)
+                await self._refuse_dangling(
+                    session, state.channel_id, row.kind, row.data
+                )
+                if row.key != was:
+                    await self._refuse_orphaning(
+                        session, state.channel_id, row.kind, was,
+                        f"renaming this {row.kind} to {row.key!r}",
+                    )
             row.text = text[: self.TEXT_CHARS]
             row.updated_at = _now()
             await _flush_keyed(session, row.kind, row.key)
@@ -1701,6 +1797,20 @@ class Database:
                 if data is not None
                 else (old.data, old.key)
             )
+            if data is not None:
+                # This path takes `data` too, so it can move a key and
+                # orphan every row that names it — the same hole
+                # `memory_update` has, reached by a different door. Found by
+                # review rather than by a test, which is why it is checked
+                # here rather than argued about in a comment on the other.
+                await self._refuse_dangling(
+                    session, state.channel_id, old.kind, stored
+                )
+                if key != old.key:
+                    await self._refuse_orphaning(
+                        session, state.channel_id, old.kind, old.key,
+                        f"superseding this {old.kind} with one called {key!r}",
+                    )
             now = _now()
             new_row = schema.Memory(
                 id=_memory_id(),
@@ -1738,6 +1848,10 @@ class Database:
             row = await self._live_memory(session, state, memory_id, origin)
             if row is None:
                 return False
+            await self._refuse_orphaning(
+                session, state.channel_id, row.kind, row.key,
+                f"removing this {row.kind}",
+            )
             row.deleted_at = _now()
             row.deleted_by = state.agent
             return True

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from typing import Any, Literal
 from enum import StrEnum
@@ -722,6 +723,37 @@ MEMORY_DATA: dict[MemoryKind, type | None] = {
     MemoryKind.DEPENDENCY: DependencyData,
     MemoryKind.PERSON: PersonData,
 }
+
+
+def names_in(kind: str) -> dict[str, str]:
+    """This kind's foreign keys: field name -> the kind it names.
+
+    Read off `field(metadata={"names": ...})` rather than listed anywhere,
+    so the declaration and the check cannot disagree — the same reason
+    `readers_for` is derived from the kind rather than stored beside it.
+    Top level only: no nested payload declares one, and a nested foreign key
+    would be a shape worth arguing about before it is supported.
+    """
+    shape = MEMORY_DATA[MemoryKind(kind)]
+    if shape is None:
+        return {}
+    return {
+        f.name: str(f.metadata["names"])
+        for f in dataclass_fields(shape)
+        if f.metadata.get("names")
+    }
+
+
+def named_by(kind: str) -> tuple[tuple[str, str], ...]:
+    """Every `(kind, field)` that names rows of `kind` — the reverse of
+    `names_in`, for asking "who would this rename break?"."""
+    kind = str(MemoryKind(kind))
+    return tuple(
+        (other.value, field)
+        for other in MemoryKind
+        for field, named in names_in(other).items()
+        if named == kind
+    )
 
 
 def natural_key(kind: str, data: dict[str, Any] | None, given: str | None) -> str | None:

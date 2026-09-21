@@ -81,8 +81,14 @@ async def write_environment_rows(db, channel_id: str = "watched"):
 
 
 async def write_rows(db, *, env: str = "dev", repo: str | None = None):
-    """The rows ticket 00 says are typed by hand: the environment table, one
-    route, one service, and the project the service belongs to."""
+    """The rows ticket 00 says are typed by hand: the environment table, the
+    project, the service, and the route into it.
+
+    **In that order, and ticket 19 is why.** A `route` names a `service` and
+    a `service` names a `project`; the store refuses a row naming one that
+    does not exist yet, so the order a person would naturally type them in is
+    the order this has to build them.
+    """
     state = FridayState(channel_id="watched", agent="admin")
     await write_environment_rows(db)
     domain = (
@@ -90,8 +96,12 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
         else "api-reelme-v2.aperogroup.ai"
     )
     await db.memory_add(
-        state, "ReelMe v2 on dev", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
-        data={"domain": domain, "env": env, "service": "backend-reelme-v2"},
+        state, "the ReelMe repository", kind=MemoryKind.PROJECT,
+        origin=MemoryOrigin.ADMIN,
+        data={
+            "name": "reelme", "repo_path": repo or "/nowhere",
+            "default_branch": "main", "stack": "NestJS",
+        },
     )
     await db.memory_add(
         state, "the ReelMe v2 backend", kind=MemoryKind.SERVICE,
@@ -103,15 +113,10 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
             "dev": {"kube_context": "dev", "namespace": "dev", "pod_pattern": "backend-reelme-v2"},
         },
     )
-    if repo is not None:
-        await db.memory_add(
-            state, "the ReelMe repository", kind=MemoryKind.PROJECT,
-            origin=MemoryOrigin.ADMIN,
-            data={
-                "name": "reelme", "repo_path": repo,
-                "default_branch": "main", "stack": "NestJS",
-            },
-        )
+    await db.memory_add(
+        state, "ReelMe v2 on dev", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
+        data={"domain": domain, "env": env, "service": "backend-reelme-v2"},
+    )
 
 
 @dataclass
@@ -196,8 +201,16 @@ async def test_a_missing_route_row_is_a_hand_over_not_a_guess(db):
 async def test_a_route_row_that_disagrees_with_the_domain_is_refused(db):
     """One of the two is wrong, and picking either silently is how a
     production search runs against dev."""
-    await write_environment_rows(db)
+    # The service first: ticket 19 refuses a route naming one that does not
+    # exist, so the row this test is about can only be written after it.
+    await write_rows(db)
     state = FridayState(channel_id="watched", agent="admin")
+    await db.memory_delete(
+        state,
+        [m for m in await db.memories_for_channel("watched")
+         if m.kind == MemoryKind.ROUTE][0].id,
+        origin=MemoryOrigin.ADMIN,
+    )
     await db.memory_add(
         state, "mistyped", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
         data={
@@ -474,11 +487,20 @@ async def test_a_project_row_with_no_repository_path_reads_nothing(db):
 
 
 async def test_no_project_row_means_no_code_is_read(db):
-    await write_rows(db)  # no project row
-    resolve = await resolve_node().run(prepared(), deps_for(db))
+    """**Not reachable through the store any more, and still reachable.**
+    Ticket 19 refuses a `service` naming a `project` that does not exist and
+    refuses removing one that is still named — so this state cannot be
+    *typed*. It can still be *met*: the live database holds rows written
+    before that check, and this node is what reads them. So the envelope is
+    built here rather than through `write_rows`, which can no longer produce
+    it."""
     state = (
         prepared()
-        .with_result("resolve", resolve)
+        .with_result("resolve", {
+            "status": "ok", "reason": "",
+            "placement": {"env": "dev", "service": "backend-reelme-v2"},
+            "project": None,
+        })
         .with_result(
             "find_request_log",
             {"status": "ok", "reason": "", "frames": [["/app/orders.ts", 1]]},
@@ -488,6 +510,10 @@ async def test_no_project_row_means_no_code_is_read(db):
     result = await read_failing_code_node().run(state, deps_for(db))
 
     assert status_of(result) == "skipped"
+    # Ticket 19, step 0: the message names what it looked for. Without it,
+    # the first six rows ever typed gave "no project row names a repository"
+    # and no way to tell which name was wrong.
+    assert "backend-reelme-v2" in result["reason"]
 
 
 # --- diagnose ---------------------------------------------------------------
@@ -995,3 +1021,172 @@ def test_what_a_server_is_filtered_to_is_read_off_the_readers():
 
     assert declared() == LokiSource.TOOLS | DbSource.TOOLS
     assert "execute_mongo_query" not in declared(), "no caller yet"
+
+
+# --- a compiled frame is not the code anybody wrote (ticket 04) --------------
+
+
+def _built(root, *, ts_lines=20, js_line=3, ts_line=11):
+    """A tiny `dist/x.js` with a real source map back to `src/x.ts`."""
+    import json
+
+    (root / "src").mkdir(parents=True, exist_ok=True)
+    (root / "dist").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "x.ts").write_text(
+        "\n".join(f"ts line {i}" for i in range(1, ts_lines + 1))
+    )
+    (root / "dist" / "x.js").write_text(
+        "\n".join(f"js line {i}" for i in range(1, 6))
+    )
+    # One segment on the `js_line`th generated line, pointing at `ts_line`.
+    # Every field is a delta and `A` is zero, so the third field carries the
+    # original line: `ts_line - 1` encoded, and this builds it by hand.
+    def vlq(n: int) -> str:
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        value, out = (abs(n) << 1) | (1 if n < 0 else 0), ""
+        while True:
+            digit, value = value & 31, value >> 5
+            out += alphabet[digit | (32 if value else 0)]
+            if not value:
+                return out
+
+    segment = "A" + "A" + vlq(ts_line - 1) + "A"
+    (root / "dist" / "x.js.map").write_text(json.dumps({
+        "version": 3, "file": "x.js", "sourceRoot": "",
+        "sources": ["../src/x.ts"], "names": [],
+        "mappings": ";" * (js_line - 1) + segment,
+    }))
+
+
+def test_a_compiled_frame_is_translated_back_to_the_source(tmp_path):
+    """Measured on the operator's own clone: `workflow-credit.service.js:60`
+    is `workflow-credit.service.ts:109`, forty-nine lines away. Mapping the
+    file and keeping the line would hand `Diagnose` the wrong place and call
+    it the throw site."""
+    from friday.sources.code import original
+
+    _built(tmp_path, js_line=3, ts_line=11)
+
+    found = original(tmp_path / "dist" / "x.js", 3, tmp_path)
+
+    assert found == ((tmp_path / "src" / "x.ts").resolve(), 11)
+
+
+def test_a_compiled_file_with_no_map_beside_it_is_not_translated(tmp_path):
+    """`None` means "read the built file and say so", never "guess"."""
+    from friday.sources.code import original
+
+    _built(tmp_path)
+    (tmp_path / "dist" / "x.js.map").unlink()
+
+    assert original(tmp_path / "dist" / "x.js", 3, tmp_path) is None
+
+
+def test_a_map_that_does_not_parse_is_not_translated(tmp_path):
+    from friday.sources.code import original
+
+    _built(tmp_path)
+    (tmp_path / "dist" / "x.js.map").write_text("{ not json")
+
+    assert original(tmp_path / "dist" / "x.js", 3, tmp_path) is None
+
+
+async def test_the_node_reads_the_typescript_and_says_where_it_came_from(db, tmp_path):
+    _built(tmp_path, js_line=3, ts_line=11)
+    state = (
+        prepared()
+        .with_result("resolve", {
+            "status": "ok", "reason": "",
+            "placement": {"env": "dev", "service": "backend-reelme-v2"},
+            "project": {"name": "reelme", "repo_path": str(tmp_path)},
+        })
+        .with_result("find_request_log", {
+            "status": "ok", "reason": "", "frames": [["/app/dist/x.js", 3]],
+        })
+    )
+
+    result = await read_failing_code_node().run(state, deps_for(db))
+
+    assert "ts line 11" in result["code"], "the source, at the mapped line"
+    assert "js line 3" not in result["code"]
+    assert "x.ts:11" in result["code"] and "/app/dist/x.js" in result["code"]
+
+
+async def test_a_built_frame_with_no_map_says_it_is_the_built_line(db, tmp_path):
+    _built(tmp_path)
+    (tmp_path / "dist" / "x.js.map").unlink()
+    state = (
+        prepared()
+        .with_result("resolve", {
+            "status": "ok", "reason": "",
+            "placement": {"env": "dev", "service": "s"},
+            "project": {"name": "reelme", "repo_path": str(tmp_path)},
+        })
+        .with_result("find_request_log", {
+            "status": "ok", "reason": "", "frames": [["/app/dist/x.js", 3]],
+        })
+    )
+
+    result = await read_failing_code_node().run(state, deps_for(db))
+
+    assert "js line 3" in result["code"]
+    assert any("not the one you wrote" in line for line in result["not_checked"])
+
+
+def test_a_map_naming_a_file_outside_the_clone_is_refused(tmp_path):
+    """`repo_file` refuses a stack frame that climbs out of the clone, and a
+    `.map` naming `../../../../etc/hosts` is the same climb by a quieter
+    route. The rule was written at the top of that module and then not
+    applied to the function added under it — found by review."""
+    import json
+
+    from friday.sources.code import original
+
+    _built(tmp_path, js_line=3, ts_line=11)
+    map_file = tmp_path / "dist" / "x.js.map"
+    loaded = json.loads(map_file.read_text())
+    loaded["sources"] = ["../" * 12 + "etc/hosts"]
+    map_file.write_text(json.dumps(loaded))
+
+    assert original(tmp_path / "dist" / "x.js", 3, tmp_path) is None
+
+
+def test_a_map_whose_sources_hold_null_is_not_followed(tmp_path):
+    """Legal in v3 beside `sourcesContent`, and it used to raise a
+    `TypeError` out of the graph node rather than answering `None`."""
+    import json
+
+    from friday.sources.code import original
+
+    _built(tmp_path)
+    map_file = tmp_path / "dist" / "x.js.map"
+    loaded = json.loads(map_file.read_text())
+    loaded["sources"] = [None]
+    map_file.write_text(json.dumps(loaded))
+
+    assert original(tmp_path / "dist" / "x.js", 3, tmp_path) is None
+
+
+def test_a_map_with_a_character_that_is_not_vlq_is_rejected_whole(tmp_path):
+    """Not "decoded as far as it got". Every field is a delta on the last, so
+    a half-read segment is dropped **along with the deltas it carried**, and
+    every later segment is then computed from the wrong base — the map
+    answers with a confident wrong line instead of nothing.
+
+    So the corrupt segment here is on an *earlier* line than the one asked
+    for, carrying a jump the answer would otherwise include. Decoding as far
+    as it got returns line 2; rejecting the map returns nothing.
+    """
+    import json
+
+    from friday.sources.code import original
+
+    _built(tmp_path, js_line=3, ts_line=11)
+    map_file = tmp_path / "dist" / "x.js.map"
+    loaded = json.loads(map_file.read_text())
+    # line 1: a whole segment jumping +40. line 2: the same, corrupted.
+    # line 3: +1 from wherever the carry left off.
+    loaded["mappings"] = "AACA;AA!QA;AACA".replace("!", "!")
+    map_file.write_text(json.dumps(loaded))
+
+    assert original(tmp_path / "dist" / "x.js", 3, tmp_path) is None
