@@ -208,10 +208,12 @@ export interface Room {
  *  rather than the row removed, so the operator can see what was forgotten
  *  and who forgot it.
  *
- *  `kind` is one of twelve — `fact` / `constraint` / `finding` /
+ *  `kind` is one of thirteen — `fact` / `constraint` / `finding` /
  *  `decision` / `voice`, and the operator's `runbook` / `project` /
- *  `service` / `route` / `dependency` / `person`, plus `summary` — and who
- *  reads a row follows from it. `status` is `active` or `superseded`; a
+ *  `service` / `route` / `dependency` / `person` / `environment`, plus
+ *  `summary` — and who reads a row follows from it. The page never spells
+ *  that list out: the dropdown and every field in the form come from
+ *  `/api/memory-kinds`, so a new kind needs no frontend change. `status` is `active` or `superseded`; a
  *  superseded row's `superseded_by` names the row that replaced it, and the
  *  row itself survives so the board can show what it used to say and when
  *  (`updated_at`).
