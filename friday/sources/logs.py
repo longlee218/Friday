@@ -46,7 +46,13 @@ class SshKubectlSource:
     timeout_seconds: float = 30.0
 
     async def lines(
-        self, placement: Placement, *, since: datetime, until: datetime, limit: int
+        self,
+        placement: Placement,
+        *,
+        since: datetime,
+        until: datetime,
+        limit: int,
+        needle: str = "",
     ) -> Lines:
         pod = await self._run(
             f"kubectl -n {shlex.quote(placement.namespace)} get pods "
@@ -69,13 +75,53 @@ class SshKubectlSource:
         # reporter's. The container runtime's own stamp is also
         # format-independent, which the line's own `"time"` field is not:
         # dev is JSON today and Python tracebacks tomorrow.
-        out = await self._run(
+        #
+        # **With a needle, `--tail` is the wrong bound and `grep` is the
+        # right one.** `--tail` is applied by the API server *before*
+        # anything downstream sees a line, so `--tail=400 | grep` searches
+        # the newest 400 lines and not the window. Asking for the whole
+        # window and letting `grep` narrow it on the far side searches all
+        # of it, and only the matching lines cross the network — `head`
+        # keeps the answer bounded whatever matches.
+        #
+        # **`pipefail`, and it is not decoration.** A pipeline exits with its
+        # *last* command's status, so `head` returning 0 would hide whatever
+        # `kubectl` did: a pod that has gone, an RBAC denial, the wrong
+        # container. Each of those would arrive as empty output and be
+        # reported as "the window holds nothing about this request" — the
+        # exact confusion between *not found* and *not searched* that the
+        # retention check upstream exists to prevent. `bash -o pipefail -c`
+        # rather than a bare `set -o pipefail`, because the shell `ssh`
+        # starts is the login shell and need not be one that has it.
+        #
+        # `grep` alone exits 1 when it matches nothing, which under
+        # `pipefail` *would* be an error — so the match is allowed to be
+        # empty explicitly, and only kubectl's own failure is one.
+        read = (
             f"kubectl -n {shlex.quote(placement.namespace)} logs "
             f"{shlex.quote(pod)} --timestamps "
             f"--since-time={shlex.quote(_rfc3339(since))} "
-            f"--tail={int(limit)}"
         )
-        return _within(out.splitlines(), since=since, until=until)
+        if needle:
+            piped = (
+                f"{read} --tail=-1 | "
+                f"{{ grep -F -- {shlex.quote(needle)} || true; }} | "
+                f"head -n {int(limit)}"
+            )
+            out = await self._run(f"bash -o pipefail -c {shlex.quote(piped)}")
+        else:
+            out = await self._run(f"{read} --tail={int(limit)}")
+
+        # **The cap is silent, so it has to be inferred.** `kubectl` says
+        # nothing about having truncated, where Loki says `truncated: true`.
+        # Exactly `limit` lines back from a bound of `limit` is the only
+        # signal there is, and reporting a full read as capped costs a
+        # sentence where missing a capped one costs a dossier believed to be
+        # the window.
+        raw = out.splitlines()
+        return _within(
+            raw, since=since, until=until, truncated=len(raw) >= int(limit)
+        )
 
     async def _run(self, remote: str) -> str:
         proc = await asyncio.create_subprocess_exec(
@@ -147,13 +193,25 @@ class LokiSource:
     )
 
     async def lines(
-        self, placement: Placement, *, since: datetime, until: datetime, limit: int
-    ) -> list[str]:
+        self,
+        placement: Placement,
+        *,
+        since: datetime,
+        until: datetime,
+        limit: int,
+        needle: str = "",
+    ) -> Lines:
         selector = self.query.format(
             cluster=placement.cluster,
             namespace=placement.namespace,
             app=placement.app,
         )
+        if needle:
+            # LogQL's line filter, which runs where the log is. This is the
+            # difference measured on 2026-09-21 between 400 lines covering
+            # three per cent of the window and not containing the request,
+            # and two lines containing all of it with `truncated: false`.
+            selector = f'{selector} |= "{_logql(needle)}"'
         result = await self.server.call(
             self.tool,
             {
@@ -251,6 +309,7 @@ def _streams(answered: str) -> Lines:
 
     stamped: list[tuple[datetime, str]] = []
     oldest: datetime | None = None
+    newest: datetime | None = None
     for stream in answer.get("streams") or []:
         for raw in stream.get("lines") or []:
             at, _, line = str(raw).partition(" ")
@@ -260,18 +319,27 @@ def _streams(answered: str) -> Lines:
                 stamped.append((datetime.max.replace(tzinfo=timezone.utc), str(raw)))
                 continue
             oldest = when if oldest is None else min(oldest, when)
+            newest = when if newest is None else max(newest, when)
             stamped.append((when, line))
     stamped.sort(key=lambda pair: pair[0])
     return Lines(
         tuple(line for _, line in stamped),
         oldest,
+        newest,
         bool(answer.get("truncated")),
     )
 
 
-def _within(stamped: list[str], *, since: datetime, until: datetime) -> Lines:
+def _within(
+    stamped: list[str], *, since: datetime, until: datetime,
+    truncated: bool = False,
+) -> Lines:
     """The lines inside the window, with their stamps taken back off, and the
-    oldest stamp seen whether or not it was inside.
+    span the back end actually handed over.
+
+    `oldest` and `newest` are of what *arrived*, whether or not it was inside
+    the window: they describe the read, and the whole point of them is to be
+    comparable against the window that was asked for.
 
     A line with no stamp is kept: `kubectl` writes one warning of its own
     ("Defaulted container …") ahead of the log, and dropping unparseable
@@ -280,6 +348,7 @@ def _within(stamped: list[str], *, since: datetime, until: datetime) -> Lines:
     """
     kept: list[str] = []
     oldest: datetime | None = None
+    newest: datetime | None = None
     for raw in stamped:
         found = _STAMPED.match(raw)
         if found is None:
@@ -287,9 +356,22 @@ def _within(stamped: list[str], *, since: datetime, until: datetime) -> Lines:
             continue
         at = datetime.fromisoformat(found.group("at").replace("Z", "+00:00"))
         oldest = at if oldest is None else min(oldest, at)
+        newest = at if newest is None else max(newest, at)
         if since <= at <= until:
             kept.append(found.group("line"))
-    return Lines(tuple(kept), oldest)
+    return Lines(tuple(kept), oldest, newest, truncated)
+
+
+def _logql(needle: str) -> str:
+    """A string, safe to sit inside LogQL's double-quoted line filter.
+
+    Go's quoted-string rules, which is what Loki parses: a backslash and a
+    double quote are the two characters that end or extend the literal, and
+    a needle carrying either would otherwise change the query rather than be
+    searched for. Backslash first, or escaping the quote would then have its
+    own backslash escaped.
+    """
+    return needle.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _rfc3339(at: datetime) -> str:

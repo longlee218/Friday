@@ -33,6 +33,24 @@ __all__ = ["Dossier", "distil", "frames"]
 #: first, which is the whole of production — a test said so.
 _LOUD = re.compile(r"\b(ERROR|FATAL|WARN|WARNING|EXCEPTION\w*)\b", re.IGNORECASE)
 
+#: The narrower half: what counts as **evidence that something failed**, which
+#: `WARN` is not.
+#:
+#: Measured on production, 2026-09-21. `backend-reelme-v2` emits about seven
+#: `WARN` lines a minute of routine engine chatter — "Engine returned an
+#: unmappable node status … skipping node", "No credit cost configured …
+#: falling back to 15". Nothing is wrong; that is the service working. With
+#: `WARN` counting as an error, `has_error` is true in every window this
+#: service will ever produce, so `worth_widening` is false in every window
+#: too, and the spec's one automatic widening can never fire. A chatty
+#: service disarmed it permanently and silently.
+#:
+#: Two regexes rather than one because the two questions are different and
+#: only looked alike. *Is this line worth keeping* — yes, a warning is often
+#: the line before the failure, which is why `_LOUD` still carries it. *Did
+#: anything fail in this window* — a warning is not evidence either way.
+_ERROR = re.compile(r"\b(ERROR|FATAL|EXCEPTION\w*)\b", re.IGNORECASE)
+
 #: What an error code looks like in these services' logs — `ERR19`,
 #: `ERR951`, `ERR306`. Measured over 30 days by ticket 16: every one of
 #: 2,104 HTTP 500s carries `ERR19`, and `ERR951`/`ERR955` are 58,000 of
@@ -62,7 +80,9 @@ class Dossier:
     lines: tuple[str, ...]
     #: How many lines the source offered, before the cut.
     total: int
-    #: Whether anything in what survived is an ERROR/WARN line.
+    #: Whether anything in what survived says something *failed* — an ERROR,
+    #: a FATAL, an exception. Not a WARN: see `_ERROR`, where a chatty
+    #: production service made that distinction load-bearing.
     has_error: bool
     #: Whether anything in what survived looks like a stack frame.
     has_stack: bool
@@ -200,7 +220,7 @@ def distil(
     return Dossier(
         lines=survived,
         total=len(lines),
-        has_error=any(_LOUD.search(line) for line in survived),
+        has_error=any(_ERROR.search(line) for line in survived),
         has_stack=any(_FRAME.search(line) for line in survived),
         histogram=tuple(
             sorted(counted.items(), key=lambda pair: (-pair[1], pair[0]))

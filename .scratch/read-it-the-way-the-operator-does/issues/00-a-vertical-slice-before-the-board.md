@@ -290,3 +290,124 @@ guarding while still looking like guards.
 - **The reporter's curl is still stored with its token** (ticket 17) and is
   still the model's retyping of it (ticket 18). Case 1 cannot be scored until
   18 lands.
+
+---
+
+## The first run against production (2026-09-21)
+
+Not one of cases 1–5. Those are on dev, where the pod keeps only what it has
+logged since its last restart, and case 1's request was 27 hours older than
+the oldest line still there. Loki keeps thirty days, so the first real run is
+a case found **in** production rather than one reported about it:
+
+> `POST /v1/onboarding/completed` → 400, `ERR19`,
+> `correlationId=b62ff26d-4b32-4617-a7c1-aa99e0509267`,
+> 2026-09-21T10:35:01.899Z, `backend-reelme-v2` / `vsl` / `oregon-llm`.
+
+### Answer 1 — did the dossier hold the decisive line? **No. Three reasons.**
+
+Run with the node's own parameters — a 35-minute window, `limit=400`:
+
+| asked | got |
+| --- | --- |
+| 10:10:00 → 10:45:00Z, 2,100 seconds | 400 lines spanning **84 seconds** (10:38:20–10:39:44) |
+| the request at 10:35:01 | **not in it** |
+| dossier | 4 lines of an unrelated minute |
+| histogram | empty |
+| `worth_widening` | `False` — the widening never fired |
+
+**A. `limit` is a tail, not a sample.** The service emits ~5.9 lines/second,
+so 400 lines is three per cent of the window, and Loki's default `backward`
+direction makes that three per cent the *end* of it. This is the
+`kubectl --tail` fault of the day before, reborn in the other source: the
+lesson had been fixed in one place instead of being made a rule. It is one
+now — `LogSource.lines` takes a `needle`, and *which* lines is part of the
+read rather than a step after it. Filtering after the read cannot recover a
+line the read never fetched.
+
+**B. `WARN` counted as an error, so the widening was disarmed for ever.**
+`backend-reelme-v2` emits ~7 WARN a minute of routine chatter ("Engine
+returned an unmappable node status … skipping node", "No credit cost
+configured … falling back to 15"). Nothing is wrong; that is the service
+working. With WARN counting, `has_error` is true in *every* window this
+service will ever produce, so `worth_widening` is false in every window too.
+A chatty service switched off the spec's one automatic escape hatch silently.
+`_LOUD` still decides what is kept — a warning is often the line before the
+failure — and a new, narrower `_ERROR` decides whether anything failed.
+
+**C. "A sample of the window" is not an honest enough sentence.** A dossier
+drawn from the last 84 seconds of a 35-minute window reads exactly like a
+dossier of the whole of it. It now names the span it covered, and says which
+claims that limits: the counts and other requests' lines, never this
+request's own, which come from a read narrowed to them.
+
+**The fix, measured on the same case.** `{…} |= "<correlationId>"` returns
+2 lines, `truncated: false`, containing both the `LoggerMiddleware` line and
+the `ExceptionFilter` line with `error.message` and the request body. 174 KB
+→ 2 KB; three per cent of a window → all of one request. Cheaper, not dearer.
+Through the fixed path end to end: an 8-line dossier, `has_stack` true,
+histogram `ERR19×1`, and the decisive line present.
+
+### Answer 3 — sizes
+
+Dossier 8 lines of 402 offered, inside the spec's `≤ 12`. Two Loki calls per
+window instead of one; the narrowed one is the cheap one.
+
+### Answer 4 — which seam broke
+
+**The source, and only the source.** Not the pool, the outbox, the checkpoint
+or the board. Both faults were a back end's bound being taken for the thing
+it bounds — a cap read as a sample, a log level read as a verdict.
+
+This case also answers a question the ticket had not asked. **Every frame in
+its stack is in `node_modules`** (NestJS's `ValidationPipe`), so `NOT_OURS`
+filters all of them and `ReadFailingCode` returns nothing. That is correct,
+and it means the diagnosis has to be drawn from `error.message` in the log.
+A graph that treated an empty code node as a failure would hand back the one
+shape production produces most.
+
+### Still owed
+
+Cases 1–5 remain unanswered: they are dev cases and dev retention cannot
+reach them. Answer 2 (did `Diagnose` cite a real ref, and was the cause
+right?) needs a model call this run did not make.
+
+### What the review changed (the A/B/C fix, 2026-09-21)
+
+Six real faults, all fixed here.
+
+- **The `grep` that narrows a `kubectl` read swallowed `kubectl`'s own
+  failure.** A pipeline exits with its last command's status, so a pod that
+  had gone, an RBAC denial or the wrong container all arrived as empty
+  output and were reported as "the window holds nothing about this request"
+  — the confusion between *not found* and *not searched* this node already
+  existed to prevent. Now `bash -o pipefail -c`, with an empty `grep` match
+  allowed explicitly as the one non-zero that is not a failure.
+- **`kubectl` never set `truncated`, so fix C was dead on dev** — which is
+  where every case this ticket has is logged. It says nothing about having
+  cut, unlike Loki, so the cap is inferred: exactly `limit` lines back from
+  a bound of `limit`.
+- **"of the 30m asked for" was five minutes short.** The read spans
+  `since → reported_at + MARGIN`. A sentence corrected for accuracy that is
+  itself inaccurate is worse than the vague one it replaced.
+- **The seam between the two reads was unmarked**, and in this very case it
+  is a twenty-three minute jump. `distil` keeps a line either side of what
+  it keeps, so it reached across and presented two unrelated spans as one
+  story. Marked now, with a line carrying no error word, no error code and
+  nothing shaped like a frame.
+- **The capped sentence over-claimed the histogram**: the counts cover the
+  window *and* this request's own lines, not the window alone.
+- `_covered`'s docstring described a return value it does not have.
+
+**And five guards that guarded nothing** — each found by deleting the code
+and watching the suite stay green. This is the same fault as the one caught
+on 2026-09-20 and it was made the same way: the mutation pass deleted what
+was *believed* to be the guard rather than each new line. The span in the
+capped sentence, `Lines.newest` in both parsers, the LogQL escaping *at its
+call site* (the test only ever handed `_logql` a uuid), the `not ours.lines`
+clause in the retention check, and `ours.truncated`, which had no test at
+all and was unreachable on dev besides. One more was found the same way
+after the review, while fixing it: the new `truncated` test called `_within`
+directly and so made the inference it was meant to be testing.
+
+Eleven mutations, eleven red. Suite `1449 passed, 1 skipped`.

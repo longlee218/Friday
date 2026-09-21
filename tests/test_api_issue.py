@@ -130,25 +130,52 @@ class FakeSource:
     def __post_init__(self):
         self.asked = []
 
-    #: What the pod's oldest line is, when the fake is standing in for a
-    #: back end that can say. `None` is one that cannot, like Loki.
+    #: What the pod's oldest and newest lines are, when the fake is standing
+    #: in for a back end that can say. `None` is one that cannot.
     oldest: object = None
+    newest: object = None
     truncated: bool = False
 
-    async def lines(self, placement, *, since, until, limit: int):
+    async def lines(self, placement, *, since, until, limit: int, needle: str = ""):
+        """Answers from the script, and **honours `needle` the way a real
+        back end does** — by returning only the lines that carry it.
+
+        Faithful on purpose: the node now reads twice per window, once for
+        the window and once narrowed to the request, and a fake that ignored
+        the narrowing would let the node pass a test it fails against Loki.
+        The script advances per *window*, not per call, because the two reads
+        of one window are two views of the same log.
+
+        `truncated` is the window read's, never the narrowed one's: a cap is
+        hit by asking for everything in a busy window, which is the case the
+        narrowing exists to avoid.
+        """
         from friday.sources import Lines
 
-        self.asked.append((since, until))
-        answer = self.answers[min(len(self.asked) - 1, len(self.answers) - 1)]
-        return Lines(tuple(answer), self.oldest, self.truncated)
+        self.asked.append((since, until, needle))
+        answer = self.answers[min(len(self.windows) - 1, len(self.answers) - 1)]
+        if needle:
+            return Lines(
+                tuple(l for l in answer if needle in l), self.oldest, self.newest
+            )
+        return Lines(
+            tuple(answer), self.oldest, self.newest, truncated=self.truncated
+        )
 
     @property
     def windows(self) -> list[str]:
-        """Each read as "<hours>h" of lookback, for a readable assertion."""
-        return [
-            f"{round((until - since).total_seconds() / 3600, 2)}h"
-            for since, until in self.asked
-        ]
+        """Each *window* as "<hours>h" of lookback, for a readable assertion.
+
+        One entry per window rather than per read — the narrowed read is not
+        a second window, and counting it as one would make every widening
+        assertion in this file read as two.
+        """
+        spans: list[str] = []
+        for since, until, _ in self.asked:
+            said = f"{round((until - since).total_seconds() / 3600, 2)}h"
+            if not spans or spans[-1] != said:
+                spans.append(said)
+        return spans
 
 
 # --- resolve ----------------------------------------------------------------
@@ -335,9 +362,11 @@ async def test_the_window_is_measured_back_from_the_reporters_message(db):
         state, deps_for(db, extra={"log_sources": {"kubectl": source}})
     )
 
-    (since, until), = source.asked
-    assert since == REPORTED_AT - timedelta(minutes=30)
-    assert until == REPORTED_AT + timedelta(minutes=5)
+    # Both reads of the one window — the window itself and the one narrowed
+    # to this request — and both anchored to the message, not to now.
+    assert {(since, until) for since, until, _ in source.asked} == {
+        (REPORTED_AT - timedelta(minutes=30), REPORTED_AT + timedelta(minutes=5))
+    }
 
 
 async def test_a_window_older_than_the_pod_keeps_is_not_reported_as_not_found(db):
@@ -969,10 +998,17 @@ def test_an_answer_loki_never_gave_is_empty_rather_than_a_crash():
     assert _streams('{"streams": null}').lines == ()
 
 
-async def test_a_capped_answer_says_so_in_what_it_did_not_check(db):
+async def test_a_capped_answer_says_which_part_of_the_window_it_covered(db):
+    """Measured against production, 2026-09-21. The sentence used to say "a
+    sample of the window and not all of it" and stop — and a dossier drawn
+    from the last eighty-four seconds of a thirty-five minute window reads
+    exactly like a dossier of the whole of it. The span is the difference
+    between the two, so the span is what it has to say."""
     await write_rows(db)
     source = FakeSource(answers=[["ERROR POST /v1/pod/orders/init 500"]])
     source.truncated = True
+    source.oldest = REPORTED_AT - timedelta(minutes=2)
+    source.newest = REPORTED_AT
     state = prepared().with_result(
         "resolve", await resolve_node().run(prepared(), deps_for(db))
     )
@@ -981,7 +1017,429 @@ async def test_a_capped_answer_says_so_in_what_it_did_not_check(db):
         state, deps_for(db, extra={"log_sources": {"kubectl": source}})
     )
 
-    assert any("a sample of the window" in line for line in result["not_checked"])
+    (said,) = [line for line in result["not_checked"] if "capped" in line]
+    # The span itself, which is the whole of the fix — not merely the word
+    # "capped", which the sentence it replaced also carried.
+    assert "2026-09-20T04:38:46Z–2026-09-20T04:40:46Z" in said
+    # The window asked for is `since`→`reported_at + MARGIN`: 35 minutes, not
+    # the 30 of FIRST_WINDOW. A sentence corrected for accuracy that is five
+    # minutes out is a sentence that still misleads.
+    assert "of the 35m asked for" in said
+    assert "this request's own lines came from a separate read" in said
+
+
+async def test_the_request_is_found_when_the_window_read_misses_it_entirely(db):
+    """**The production shape, measured 2026-09-21.** A thirty-five minute
+    window of `backend-reelme-v2` is ~12,400 lines; `limit=400` returned the
+    newest eighty-four seconds of it, and the 400 under investigation had
+    happened twenty-three minutes earlier. Filtering after the read cannot
+    recover a line the read never fetched, so the read itself is narrowed.
+
+    The fake stands in for that exactly: the window read answers with lines
+    that do not contain the request, and only the narrowed read reaches it.
+    """
+    await write_rows(db)
+
+    class Tail:
+        """A back end whose cap is a tail, and whose filter is not."""
+
+        name = "kubectl"
+        decisive = 'ERROR /v1/pod/orders/init ERR19 "categoryId must be a UUID"'
+
+        async def lines(self, placement, *, since, until, limit, needle=""):
+            from friday.sources import Lines
+
+            if needle:
+                return Lines((self.decisive,), truncated=False)
+            return Lines(
+                tuple(f"INFO later {i}" for i in range(limit)), truncated=True
+            )
+
+    state = prepared().with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": Tail()}})
+    )
+
+    assert status_of(result) == "ok"
+    assert Tail.decisive in result["dossier"]
+
+
+async def test_a_line_both_reads_returned_is_not_counted_or_quoted_twice(db):
+    """The two reads overlap whenever the window was not truncated — which
+    is the ordinary case on a quiet service. The same line arriving twice
+    would be quoted twice in the dossier and counted twice in the
+    histogram, and a doubled `ERR19` is a number nobody can act on."""
+    await write_rows(db)
+    source = FakeSource(answers=[[
+        '{"level":"ERROR","correlationId":"abc-123","errorCode":"ERR19"}'
+    ]])
+    state = prepared(correlation_id="abc-123").with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert result["kept"] == 1
+    assert dict(result["histogram"])["ERR19"] == 1
+
+
+async def test_the_narrowed_read_asks_for_the_correlation_id_over_the_path(db):
+    """Both are substrings a back end can search for, and the correlationId
+    names one request where the path names every call of that endpoint."""
+    await write_rows(db)
+    source = FakeSource(answers=[["ERROR abc-123 /v1/pod/orders/init 500"]])
+    state = prepared(correlation_id="abc-123").with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert [needle for *_, needle in source.asked] == ["", "abc-123"]
+
+
+async def test_with_nothing_naming_the_request_there_is_nothing_to_narrow_to(db):
+    """No correlationId and no curl: the window read is all there is, and
+    asking the back end to search for the empty string would return it."""
+    await write_rows(db)
+    source = FakeSource(answers=[["ERROR something"]])
+    state = prepared(curl=None).with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert [needle for *_, needle in source.asked] == [""]
+
+
+async def test_a_window_of_routine_warnings_is_still_worth_widening(db):
+    """**Measured on production, 2026-09-21.** `backend-reelme-v2` emits
+    about seven WARN lines a minute of routine engine chatter — "Engine
+    returned an unmappable node status … skipping node". With WARN counting
+    as an error, `has_error` was true in every window this service will ever
+    produce, so the spec's one automatic widening could never fire for it.
+    A chatty service disarmed it permanently and silently."""
+    await write_rows(db)
+    chatter = [
+        '{"level":"WARN","msg":"Engine returned an unmappable node status '
+        f'for run {i}: \\"awaiting-callback\\" — skipping node"}}'
+        for i in range(20)
+    ]
+    source = FakeSource(answers=[chatter, ["ERROR /v1/pod/orders/init 500"]])
+    state = prepared().with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert source.windows == ["0.58h", "6.08h"], "the widening fired"
+
+
+async def test_a_request_found_only_by_the_narrowed_read_is_not_out_of_reach(db):
+    """`out_of_reach` means "the log does not go back that far", and it is
+    read off the *window* read — whose lines can all fall outside the window
+    while the narrowed read holds the request. Without this the production
+    shape reports a request it found as one it could not search for."""
+    await write_rows(db)
+
+    class Retained:
+        name = "kubectl"
+
+        async def lines(self, placement, *, since, until, limit, needle=""):
+            from friday.sources import Lines
+
+            if needle:
+                return Lines(("ERROR /v1/pod/orders/init 500",), oldest=since)
+            # Nothing inside the window, and an oldest line newer than it —
+            # which on its own reads as a pod that does not reach back.
+            return Lines((), oldest=until)
+
+    state = prepared().with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": Retained()}})
+    )
+
+    assert status_of(result) == "ok"
+    assert "does not reach back" not in " ".join(result["not_checked"])
+
+
+async def test_the_seam_between_the_two_reads_is_marked(db):
+    """They are put end to end but they are not contiguous — in the case
+    this was built for the join is a twenty-three minute jump, and `distil`
+    keeps a line either side of what it keeps. Unmarked, it reaches across
+    and presents two unrelated spans as one story."""
+    await write_rows(db)
+
+    class Split:
+        name = "kubectl"
+
+        async def lines(self, placement, *, since, until, limit, needle=""):
+            from friday.sources import Lines
+
+            if needle:
+                return Lines(("ERROR abc-123 /v1/pod/orders/init 500",))
+            return Lines(tuple(f"INFO unrelated {i}" for i in range(3)))
+
+    state = prepared(correlation_id="abc-123").with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": Split()}})
+    )
+
+    assert "a separate read narrowed to" in result["dossier"]
+
+
+def _kubectl_returning(count: int):
+    """A `SshKubectlSource` whose back end hands back `count` stamped lines.
+
+    Through `lines()` rather than through `_within` directly: the thing
+    under test is the *inference* that a read which came back exactly as
+    long as its bound was cut short, and a test that hands `_within` the
+    answer has already made that inference itself.
+    """
+    import asyncio
+
+    from friday.sources import Placement
+    from friday.sources.logs import SshKubectlSource
+
+    class Source(SshKubectlSource):
+        async def _run(self, remote):
+            if "get pods" in remote:
+                return "pod/backend-1\n"
+            return "".join(
+                f"2026-09-20T04:40:{i:02d}Z line {i}\n" for i in range(count)
+            )
+
+    return asyncio.run(
+        Source().lines(
+            Placement(env="dev", service="s", namespace="n",
+                      pod_pattern="backend"),
+            since=REPORTED_AT - timedelta(hours=1), until=REPORTED_AT,
+            limit=5,
+        )
+    )
+
+
+def test_kubectl_says_it_capped_because_kubectl_will_not():
+    """Loki says `truncated: true`; `kubectl` says nothing at all. Exactly
+    `limit` lines back from a bound of `limit` is the only signal there is,
+    and without inferring it the honest sentence is dead on dev — which is
+    where every case ticket 00 has is logged."""
+    assert _kubectl_returning(5).truncated
+
+
+def test_a_read_that_came_back_short_of_its_bound_is_not_called_capped():
+    """The other half: reporting every read as a sample would make the
+    sentence noise, and noise is what stops being read."""
+    assert not _kubectl_returning(2).truncated
+
+
+def test_both_parsers_say_which_span_they_handed_over():
+    """`newest` is what lets the capped sentence name a span. A parser that
+    populated only `oldest` would leave it saying "an unknown part", which
+    is the sentence it replaced."""
+    from friday.sources.logs import _streams, _within
+
+    parsed = _streams(
+        '{"streams":[{"labels":{},"lines":['
+        '"2026-09-21T10:38:20Z first","2026-09-21T10:39:44Z last"]}],'
+        '"truncated":true}'
+    )
+    clipped = _within(
+        ["2026-09-21T10:38:20Z first", "2026-09-21T10:39:44Z last"],
+        since=datetime(2026, 9, 21, 10, tzinfo=timezone.utc),
+        until=datetime(2026, 9, 21, 11, tzinfo=timezone.utc),
+    )
+
+    for read in (parsed, clipped):
+        assert read.oldest.minute == 38 and read.newest.minute == 39
+
+
+def test_loki_asks_its_back_end_for_the_lines_that_carry_the_needle():
+    """LogQL's line filter, which runs where the log is. The difference
+    measured against production: 400 lines covering three per cent of the
+    window and not containing the request, against two lines containing all
+    of it with `truncated: false`."""
+    import asyncio
+
+    from friday.sources import Placement, Reads
+    from friday.sources.logs import LokiSource
+
+    class Server:
+        asked: dict = {}
+
+        async def call_tool(self, tool, arguments):
+            Server.asked = arguments
+            return '{"streams":[],"truncated":false}'
+
+    source = LokiSource(server=Reads(Server(), LokiSource.TOOLS))
+    asyncio.run(
+        source.lines(
+            Placement(env="production", service="s", cluster="c",
+                      namespace="n", app="a"),
+            since=REPORTED_AT, until=REPORTED_AT, limit=400,
+            # A needle carrying a quote, so the escaping is guarded **where
+            # it is used** and not only where it is defined: a call site
+            # that dropped `_logql` passed a test that only ever asked it
+            # about a uuid.
+            needle='abc "x" 123',
+        )
+    )
+
+    assert Server.asked["query"].endswith(r'|= "abc \"x\" 123"')
+
+
+def test_a_needle_carrying_a_quote_is_escaped_rather_than_ending_the_filter():
+    """LogQL's filter is a Go quoted string. A needle with a `"` in it would
+    otherwise close the literal and change the query instead of being
+    searched for."""
+    from friday.sources.logs import _logql
+
+    assert _logql('a"b') == 'a\\"b'
+    assert _logql("a\\b") == "a\\\\b"
+
+
+def test_kubectl_searches_the_whole_window_rather_than_its_tail():
+    """`--tail` is applied by the API server *before* anything downstream
+    sees a line, so `--tail=400 | grep` searches the newest 400 lines and
+    not the window. The whole window, narrowed on the far side by `grep`,
+    searches all of it — and `head` keeps the answer bounded."""
+    import asyncio
+
+    from friday.sources import Placement
+    from friday.sources.logs import SshKubectlSource
+
+    ran: list[str] = []
+
+    class Source(SshKubectlSource):
+        async def _run(self, remote):
+            ran.append(remote)
+            return "pod/backend-1\n" if "get pods" in remote else ""
+
+    asyncio.run(
+        Source().lines(
+            Placement(env="dev", service="s", namespace="n",
+                      pod_pattern="backend"),
+            since=REPORTED_AT, until=REPORTED_AT, limit=400, needle="abc-123",
+        )
+    )
+
+    assert "--tail=-1" in ran[-1] and "grep -F -- abc-123" in ran[-1]
+    assert "head -n 400" in ran[-1]
+
+
+def test_a_needle_reaches_the_shell_quoted():
+    """It comes off a curl the reporter pasted. `shlex.quote` is what stands
+    between that and a command line."""
+    import asyncio
+
+    from friday.sources import Placement
+    from friday.sources.logs import SshKubectlSource
+
+    ran: list[str] = []
+
+    class Source(SshKubectlSource):
+        async def _run(self, remote):
+            ran.append(remote)
+            return "pod/backend-1\n" if "get pods" in remote else ""
+
+    asyncio.run(
+        Source().lines(
+            Placement(env="dev", service="s", namespace="n",
+                      pod_pattern="backend"),
+            since=REPORTED_AT, until=REPORTED_AT, limit=10,
+            needle="x; rm -rf /",
+        )
+    )
+
+    # Parsed the way a shell parses it, rather than pattern-matched: the
+    # property is that the needle stays one word, and an assertion about
+    # quote characters can hold while the injection still splits.
+    import shlex
+
+    outer = shlex.split(ran[-1])
+    assert outer[:4] == ["bash", "-o", "pipefail", "-c"]
+    assert "x; rm -rf /" in shlex.split(outer[4])
+    assert "rm" not in shlex.split(outer[4])
+
+
+def test_a_failing_kubectl_is_not_hidden_by_the_pipe_that_narrows_it():
+    """A pipeline exits with its *last* command's status, so `head`
+    returning 0 would hide a pod that has gone, an RBAC denial or the wrong
+    container — each arriving as empty output and reported as "the window
+    holds nothing about this request". That is the confusion between *not
+    found* and *not searched* this node already exists to prevent.
+
+    `grep` matching nothing is the one non-zero that is not a failure, so it
+    is allowed explicitly rather than by leaving the whole pipe unchecked.
+    """
+    import asyncio
+
+    from friday.sources import Placement
+    from friday.sources.logs import SshKubectlSource
+
+    ran: list[str] = []
+
+    class Source(SshKubectlSource):
+        async def _run(self, remote):
+            ran.append(remote)
+            return "pod/backend-1\n" if "get pods" in remote else ""
+
+    asyncio.run(
+        Source().lines(
+            Placement(env="dev", service="s", namespace="n",
+                      pod_pattern="backend"),
+            since=REPORTED_AT, until=REPORTED_AT, limit=10, needle="abc-123",
+        )
+    )
+
+    assert "-o pipefail" in ran[-1]
+    assert "|| true" in ran[-1], "an empty match is not a failed read"
+
+
+async def test_a_capped_narrowed_read_says_the_request_has_more_lines(db):
+    """The other cap, and a different sentence: when even the search for
+    this request hit its bound, the dossier is a prefix of one request
+    rather than a sample of a window."""
+    await write_rows(db)
+
+    class Busy:
+        name = "kubectl"
+
+        async def lines(self, placement, *, since, until, limit, needle=""):
+            from friday.sources import Lines
+
+            if needle:
+                return Lines(("ERROR abc-123 boom",), truncated=True)
+            return Lines(("INFO something",))
+
+    state = prepared(correlation_id="abc-123").with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": Busy()}})
+    )
+
+    assert any(
+        "has more lines than were read" in line
+        for line in result["not_checked"]
+    )
 
 
 async def test_a_reader_may_not_call_a_tool_it_did_not_declare():

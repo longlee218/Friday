@@ -66,6 +66,25 @@ def test_a_quiet_dossier_is_worth_widening_and_a_loud_one_is_not():
     assert not distil(log("at handler (/app/src/orders.ts:12:3)")).worth_widening
 
 
+def test_a_warning_is_kept_but_is_not_evidence_that_anything_failed():
+    """**Measured on production, 2026-09-21.** `backend-reelme-v2` emits
+    about seven WARN lines a minute of routine chatter — "Engine returned an
+    unmappable node status … skipping node", "No credit cost configured …
+    falling back to 15". Nothing is wrong; that is the service working.
+
+    With WARN counting as an error, `has_error` was true in every window this
+    service will ever produce, so the one automatic widening could never fire
+    for it. The two questions only looked alike: a warning is often the line
+    before the failure and is worth *keeping*, and it is not evidence either
+    way about whether anything failed.
+    """
+    warned = distil(log('{"level":"WARN","msg":"falling back to 15"}'))
+
+    assert warned.lines, "still kept — it is often the line before the failure"
+    assert not warned.has_error
+    assert warned.worth_widening
+
+
 def test_matching_identifiers_stand_in_for_a_correlation_id():
     """D2: a curl, *or* an endpoint plus one identifier the log line carries.
     Case 1 of ticket 00 is exactly this shape — a curl and no correlationId."""

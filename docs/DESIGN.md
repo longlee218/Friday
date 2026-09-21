@@ -240,6 +240,18 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   node is a boundary, not a unit of reuse. Reordering a graph is a change to
   its `edges` in one function, and `DAG.version` is a digest of the shape, so
   it discards the checkpoints that no longer apply by itself.
+- **Narrowing a read belongs to the source, because a `limit` is a tail and
+  not a sample.** `LogSource.lines` takes a `needle`; Loki turns it into
+  LogQL's `|=` and `kubectl` into a `grep` on the far side. Measured against
+  production, 2026-09-21: a 35-minute window of `backend-reelme-v2` is
+  ~12,400 lines, `limit=400` returned the newest 84 seconds of it, and the
+  request under investigation had happened 23 minutes earlier — so the node
+  distilled a dossier that could not have contained it. Filtering after the
+  read cannot recover a line the read never fetched. Which back end can
+  narrow a read, and how, is exactly what this layer exists to know; the
+  check's own `distil` still runs either way, which is what lets a source
+  that cannot narrow ignore it. The node reads twice per window, narrowed
+  and whole, because the error-code histogram counts the window.
 
 - **Friday presents its own identity to a tool server, and obtains it
   itself.** Every MCP server here is behind Keycloak; `friday/agent/auth.py`

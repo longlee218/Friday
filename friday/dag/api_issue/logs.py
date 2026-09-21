@@ -21,6 +21,7 @@ from typing import Any
 from friday.dag.api_issue.distil import distil, frames as frames_of
 from friday.dag.api_issue.resolve import path_of, resolved
 from friday.dag.engine import DAGDeps, DAGState, Node, envelope
+from friday.sources import Lines
 
 __all__ = ["dossier_of", "find_request_log_node"]
 
@@ -96,6 +97,51 @@ def histogram_of(result: Any) -> tuple[tuple[str, int], ...]:
     return tuple((str(code), int(n)) for code, n in result.get("histogram", ()))
 
 
+def _merged(window: Lines, ours: Lines) -> list[str]:
+    """The window read and the narrowed read, as one list for the cut.
+
+    The window first, this request's lines after it, and nothing twice. The
+    order is deliberate rather than incidental: `distil` keeps a couple of
+    lines either side of each line it keeps, so what a line's neighbours are
+    decides what context it is given. Putting this request's lines together
+    at the end makes their neighbours *each other* — which is the only
+    grouping that means anything, since the two reads cover different spans
+    and there is no shared clock left on the lines to interleave them by.
+
+    Deduplicated because the two reads overlap whenever the window was not
+    truncated: the same line arriving twice would be counted twice in the
+    histogram and quoted twice in the dossier.
+
+    **The seam is marked**, because putting the two blocks end to end makes
+    them look contiguous and they are not: in the case this was built for,
+    the join is a twenty-three minute jump, and `distil` keeps a line or two
+    either side of everything it keeps — so without a marker it reaches
+    across that jump and presents two unrelated spans as one story. The
+    marker carries no error word, no error code and nothing shaped like a
+    stack frame, so it is inert to every rule that reads these lines and
+    visible to the one reader that matters.
+    """
+    seen = set(window.lines)
+    mine = [line for line in ours.lines if line not in seen]
+    if not mine or not window.lines:
+        return [*window.lines, *mine]
+    return [
+        *window.lines,
+        "--- above: the window read. below: a separate read narrowed to "
+        "this request, from elsewhere in the same window ---",
+        *mine,
+    ]
+
+
+def _covered(read: Lines) -> str:
+    """The span a read actually handed over, for a sentence about what it
+    left out. A back end that would not say gets said so, rather than an
+    invented span or a silence that reads as the whole window."""
+    if read.oldest is None or read.newest is None:
+        return "an unknown part"
+    return f"{_when(read.oldest)}–{_when(read.newest)}"
+
+
 def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
     """Build node 2.
 
@@ -122,20 +168,48 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
         correlation_id = getattr(params, "correlation_id", None)
         reported_at = _reported_at(deps.task)
 
+        # **The one string the source can search for.** The correlationId
+        # when the reporter gave one, else the endpoint path off their curl.
+        # Both are plain substrings of the log line, which is what both back
+        # ends can narrow on without being told the log's format.
+        needle = correlation_id or (needles[0] if needles else "")
+        until = reported_at + MARGIN
+
+        async def read(since: datetime, limit: int) -> tuple[Lines, Lines]:
+            """The window, and — when anything names this request — that
+            request's own lines, fetched separately.
+
+            **Two reads because one cannot be both.** `limit` is a tail: a
+            thirty-five minute window of `backend-reelme-v2` is ~12,400 lines
+            and `limit=400` returns the newest eighty-four seconds of it
+            (measured, 2026-09-21). The request under investigation was
+            twenty-three minutes outside that, so the first read is narrowed
+            to the request and cannot miss it, and the second is the window
+            as before — kept because the error-code histogram counts the
+            window, and a histogram of the request's own lines counts one
+            thing once.
+            """
+            window = await source.lines(
+                placement, since=since, until=until, limit=limit
+            )
+            if not needle:
+                return window, Lines()
+            return window, await source.lines(
+                placement, since=since, until=until, limit=limit, needle=needle,
+            )
+
         since = reported_at - FIRST_WINDOW
         try:
-            found = await source.lines(
-                placement, since=since, until=reported_at + MARGIN,
-                limit=FIRST_LINES,
-            )
+            window, ours = await read(since, FIRST_LINES)
         except Exception as exc:  # noqa: BLE001 — a source that is down is work
             return envelope(
                 "error", f"{wanted} could not be read: {type(exc).__name__}: {exc}"
             )
 
         dossier = distil(
-            found.lines, correlation_id=correlation_id, matching=needles,
-            max_lines=FIRST_LINES, other_error_cap=OTHER_ERRORS,
+            _merged(window, ours), correlation_id=correlation_id,
+            matching=needles, max_lines=FIRST_LINES,
+            other_error_cap=OTHER_ERRORS,
         )
         widened = ()
         if dossier.worth_widening:
@@ -143,10 +217,7 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
             # loud twice is a window that is not the problem.
             since = reported_at - WIDER_WINDOW
             try:
-                found = await source.lines(
-                    placement, since=since, until=reported_at + MARGIN,
-                    limit=WIDER_LINES,
-                )
+                window, ours = await read(since, WIDER_LINES)
             except Exception as exc:  # noqa: BLE001
                 return envelope(
                     "error",
@@ -154,8 +225,9 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
                     f"{type(exc).__name__}: {exc}",
                 )
             dossier = distil(
-                found.lines, correlation_id=correlation_id, matching=needles,
-                max_lines=WIDER_LINES, other_error_cap=OTHER_ERRORS,
+                _merged(window, ours), correlation_id=correlation_id,
+                matching=needles, max_lines=WIDER_LINES,
+                other_error_cap=OTHER_ERRORS,
             )
             widened = (
                 f"the {_said(FIRST_WINDOW)} before {_when(reported_at)} "
@@ -169,15 +241,16 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
         # have held was gone, and saying "nothing names this request" would
         # send the operator looking for a request that was never searched.
         out_of_reach = (
-            found.oldest is not None
-            and not found.lines
-            and found.oldest > since
+            window.oldest is not None
+            and not window.lines
+            and not ours.lines
+            and window.oldest > since
         )
         if out_of_reach:
             return envelope(
                 "empty",
                 f"{wanted} holds nothing from {_when(since)}: its oldest line "
-                f"is {_when(found.oldest)}. On dev that is the pod's last "
+                f"is {_when(window.oldest)}. On dev that is the pod's last "
                 f"restart, so this request was not searched for — it is no "
                 f"longer there to search.",
                 dossier="",
@@ -186,14 +259,34 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
                 not_checked=[*widened, "the log does not reach back to the report"],
             )
 
-        capped = (
-            (
-                f"{wanted} capped what it returned, so these are a sample of "
-                f"the window and not all of it",
+        # **Which part of the window, not merely "a sample".** The first
+        # version of this sentence said a sample and stopped, and a dossier
+        # drawn from the last eighty-four seconds of a thirty-five minute
+        # window reads exactly like a dossier of the whole of it. Naming the
+        # span makes the difference legible — and says which claims it
+        # limits, which is the counts and other requests' lines, never this
+        # request's own: those came from a read narrowed to them.
+        capped = ()
+        if window.truncated:
+            capped = (
+                f"{wanted} capped the window read at {_covered(window)} of the "
+                f"{_said(until - since)} asked for, so the error-code counts "
+                f"and any line belonging to another request cover that part "
+                f"of the window and this request's own lines, not the rest "
+                f"of the window"
+                + (
+                    "; this request's own lines came from a separate read "
+                    "narrowed to it and are not a sample"
+                    if needle
+                    else ""
+                ),
             )
-            if found.truncated
-            else ()
-        )
+        if ours.truncated:
+            capped = (
+                *capped,
+                f"{wanted} capped even the search for {needle!r}, so this "
+                f"request has more lines than were read",
+            )
         not_checked = (*widened, *capped, *dossier.not_checked)
         if not dossier.lines:
             return envelope(

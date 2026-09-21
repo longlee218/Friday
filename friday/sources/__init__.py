@@ -110,10 +110,19 @@ class Lines:
 
     `None` when the source cannot say, which is every source whose back end
     honours the window itself.
+
+    `newest` is the other end, and it is there because `truncated` alone was
+    not enough. A back end that caps at N lines returns the N *newest*, so a
+    thirty-five minute window came back as its last eighty-four seconds and
+    said only "this is a sample". Which eighty-four seconds is the difference
+    between a dossier that could have held the request and one that never
+    could: with both ends the node can say so, and a reader can tell "your
+    request is not in the log" from "your request is not in what was read".
     """
 
     lines: tuple[str, ...] = ()
     oldest: datetime | None = None
+    newest: datetime | None = None
     #: The back end capped what it returned, so this is a sample rather than
     #: the window. Loki says so outright (`truncated: true`, with its own
     #: instruction: "narrow the query rather than assuming you saw
@@ -134,12 +143,32 @@ class LogSource(Protocol):
     source's job because only the source knows how its back end stamps a
     line, and a back end that cannot be asked for an upper bound has to be
     clipped after the fact rather than trusted.
+
+    **`needle` is here, and not left to the caller to filter for, because
+    `limit` is a tail rather than a sample.** Measured against production on
+    2026-09-21: a thirty-five minute window of one busy service is ~12,400
+    lines, `limit=400` returned the newest 400 — eighty-four seconds, three
+    per cent — and the request being investigated was twenty-three minutes
+    outside it. Filtering after the read cannot recover a line the read
+    never fetched. Asking the back end for the lines that carry a string
+    returned that request whole, in two lines, untruncated.
+
+    So *which* lines is part of the read, not a step after it. Which back
+    ends can narrow a read, and how, is exactly the kind of thing this layer
+    exists to know; a source that cannot is free to ignore it, and the
+    caller's own filtering still runs either way.
     """
 
     name: str
 
     async def lines(
-        self, placement: Placement, *, since: datetime, until: datetime, limit: int
+        self,
+        placement: Placement,
+        *,
+        since: datetime,
+        until: datetime,
+        limit: int,
+        needle: str = "",
     ) -> Lines: ...
 
 

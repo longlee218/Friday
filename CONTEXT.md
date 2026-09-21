@@ -49,9 +49,15 @@ and its labels are the operator's to confirm before it moves into `evals/`.
   six-node slice `Prepare → Resolve → FindRequestLog → ReadFailingCode →
   Diagnose → Report`, in `friday/dag/api_issue/`. `api_issue` is no longer a
   one-node graph: a complete report is investigated rather than handed back.
-  **00 is not finished**: its five runs on five past cases have not happened,
-  because the cases are the operator's to pick, and the Loki branch has never
-  been called against the real server.
+  **00 is not finished**, but the Loki branch has now been called against
+  the real server (2026-09-21) and the first production case is written up
+  in the ticket. It found three defects, all fixed: a back end's `limit` is
+  a *tail* and returned 84 seconds of a 35-minute window without the request
+  in it (the search is now pushed into the back end as a `needle`); `WARN`
+  counted as an error, which disarmed the one automatic widening for ever on
+  any chatty service; and "a sample of the window" did not say which part.
+  Cases 1–5 still have not been run — they are dev cases and dev retention
+  cannot reach them, so the operator's pick is still what 00 waits on.
   The two defects the live task 6 exposed are **done**: 18 (the extractor
   now names the artifact holding the request and code copies it, so nothing
   retypes a verbatim span) and 17 (the reporter's own Bearer token is
