@@ -1411,6 +1411,45 @@ class Database:
                 )
             return None
 
+    async def structured_memories(self, channel_id: str, *, kind: str) -> list[Any]:
+        """Every active row of one structured kind, as its own type — this
+        room's and the ones written for every room.
+
+        The sibling of `structured_memory` for a kind that is read as a
+        *table* rather than looked up by key: `environment` is matched by
+        longest suffix, so the caller needs all of them. Room rows first, for
+        the same reason and by the same ordering.
+
+        A row that no longer fits its schema is skipped with a warning rather
+        than raising, exactly as the by-key read does: one bad row must not
+        stop the rest of the table from being read.
+        """
+        schema_type = MEMORY_DATA[MemoryKind(kind)]
+        if schema_type is None:
+            raise ValueError(f"a {kind} is prose — it has no structured data")
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                select(schema.Memory)
+                .where(
+                    schema.Memory.channel_id.in_([channel_id, "*"]),
+                    schema.Memory.deleted_at.is_(None),
+                    schema.Memory.status == MemoryStatus.ACTIVE,
+                    schema.Memory.kind == MemoryKind(kind),
+                )
+                .order_by(schema.Memory.channel_id.desc())
+            )
+            found = []
+            for row in rows:
+                fitted, unfit = fits(row.data or {}, schema_type)
+                if unfit is None:
+                    found.append(fitted)
+                else:
+                    log.warning(
+                        "memory %s: a %s row no longer fits its schema — %s",
+                        row.id, kind, unfit.why,
+                    )
+            return found
+
     async def knows_person(self, channel_id: str, discord_id: str) -> bool:
         """Whether the operator wrote this person down, for this room or for
         every room — an active `person` row keyed on their Discord id. What a

@@ -1,10 +1,21 @@
 """Node 1: which environment, which service, and where it runs.
 
-**The environment comes from the domain, by rule, in code** (D1). Not from
-the reporter, who says "dev" meaning the dev *app* against production, and
-not from a model, which would be asked to reproduce a lookup table it cannot
-be wrong about cheaply. Three outcomes and no fourth: `dev`, `production`,
-`external`.
+**The environment comes from the domain, by a table the operator wrote.**
+Not from the reporter, who says "dev" meaning the dev *app* against
+production, and not from a model, which would be asked to reproduce a lookup
+it cannot be wrong about cheaply. Three outcomes and no fourth: `dev`,
+`production`, `external`.
+
+**This amends D1** ("by rule, in code"), on the operator's call of
+2026-09-21. Two reasons, and the second is the one that settles it. Friday is
+meant to serve more rooms than one company's, and a module naming
+`aperogroup.ai` is an installation compiled into the system. And the rule was
+already wrong about this company: the 2026-09-18 survey found
+`api-mobile-spec-reviewer.aperogroup.ai` served from `dev` with no `.dev` in
+it, and `payment-service` on two domains resolving to different endpoints. A
+longest-suffix table holds the rule and its exceptions with no branch for
+either — `aperogroup.ai → production`, `dev.aperogroup.ai → dev`, and the
+exception is one more row that wins by being longer.
 
 **Where it runs comes from rows the operator wrote** (D3). Domain → `route`
 → `service`, and the service row carries the Loki labels for production and
@@ -17,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -34,15 +46,6 @@ __all__ = [
 ]
 
 log = logging.getLogger(__name__)
-
-#: Ours, and how to tell the two environments apart. In code because D1 says
-#: so, and narrow on purpose: the third outcome is `external`, which ends the
-#: graph rather than guessing, so a domain missing from this tuple costs a
-#: hand-over naming it and never a search of the wrong cluster.
-_OURS = ("aperogroup.ai", "apero.vn")
-
-#: There is no staging anywhere (D1), so this is the whole of the dev rule.
-_DEV_LABEL = "dev"
 
 _URL = re.compile(r"https?://(?P<host>[\w.-]+)")
 
@@ -89,15 +92,28 @@ def path_of(curl: str | None) -> str | None:
     return path or None
 
 
-def environment_of(domain: str | None) -> str:
-    """D1's rule. `external` for anything that is not ours — including an
-    unknown domain that may well be a proxy of ours the table does not know
-    yet, which is the operator's call and not this function's."""
+def environment_of(domain: str | None, known: Sequence[Any]) -> str:
+    """Which environment this domain is, by the longest `environment` row
+    that matches it. `external` when none does.
+
+    Longest wins, and that is the whole mechanism: `aperogroup.ai →
+    production` and `dev.aperogroup.ai → dev` express the convention, and a
+    single row for one host that breaks it wins over both without any code
+    knowing it is an exception.
+
+    `external` covers a third-party service and a proxy of ours the table
+    does not know yet alike, because from here they are the same thing: a
+    domain nobody wrote down. Which of the two it is is the operator's call.
+    """
     if not domain:
         return "external"
-    if not any(domain == own or domain.endswith(f".{own}") for own in _OURS):
+    matched = [
+        row for row in known
+        if domain == row.suffix or domain.endswith(f".{row.suffix}")
+    ]
+    if not matched:
         return "external"
-    return _DEV_LABEL if f".{_DEV_LABEL}." in f".{domain}" else "production"
+    return max(matched, key=lambda row: len(row.suffix)).env
 
 
 def resolve_node(*, timeout_seconds: float | None = None) -> Node:
@@ -105,6 +121,7 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
 
     async def _resolve(state: DAGState, deps: DAGDeps) -> Any:
         params = state["prepare"]
+        channel_id = deps.task.conversation.channel_id
         domain = domain_of(getattr(params, "curl", None))
 
         if domain is None:
@@ -121,17 +138,30 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
                 "correlationId alone does not say."
             )
 
-        env = environment_of(domain)
+        known = await deps.db.structured_memories(
+            channel_id, kind=MemoryKind.ENVIRONMENT
+        )
+        if not known:
+            # Nothing has been written down about any domain. Saying
+            # "external" here would be a claim — that this domain is not ours
+            # — made by a room that knows nothing about any domain at all.
+            return HandOver(
+                f"nothing here says which domains are ours, so I cannot tell "
+                f"what {domain} is. One `environment` row per domain suffix "
+                f"— `aperogroup.ai` is production, `dev.aperogroup.ai` is dev "
+                f"— is what this reads."
+            )
+
+        env = environment_of(domain, known)
 
         if env == "external":
             return HandOver(
-                f"the request goes to {domain or 'a domain nobody named'}, "
-                "which is not one of ours — I have not looked at anything. "
-                "If it is a proxy of ours, the routing table does not know it "
-                "yet."
+                f"the request goes to {domain}, which no `environment` row "
+                "matches — so it is not one of ours and I have not looked at "
+                "anything. If it is a proxy of ours, the table does not know "
+                "it yet."
             )
 
-        channel_id = deps.task.conversation.channel_id
         route = await deps.db.structured_memory(
             channel_id, kind=MemoryKind.ROUTE, key=domain
         )

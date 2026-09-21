@@ -209,10 +209,16 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   `friday/dag/api_issue/`, which owns its nodes, its prompt and the one agent
   behind them. Three rules hold it together, and each replaces a way the
   deleted five-node graph went wrong:
-  - **The environment comes from the domain, by rule, in code** (D1); where a
-    service runs comes from `route` and `service` rows the operator wrote
+  - **Every fact about where a request went is a row, not a rule in code.**
+    `environment` rows say what a domain suffix means, longest suffix
+    winning, so the convention (`aperogroup.ai` is production,
+    `dev.aperogroup.ai` is dev) and its exceptions are the same mechanism;
+    `route` says which service a host is; `service` says where that runs
     (D3). **A missing row is a hand-over, not a guess** — guessing which pod
-    serves a domain reads another product's logs.
+    serves a domain reads another product's logs. This amends D1's
+    "environment from the domain, by rule, in code" (operator, 2026-09-21):
+    a module naming one company's domains is an installation compiled into
+    the system, and the rule was already wrong about that company.
   - **A node that cannot do its job skips out loud**: an envelope with a
     reason, rendered on the board and carried into the report. The graph that
     was deleted skipped every node on every run and said nothing.

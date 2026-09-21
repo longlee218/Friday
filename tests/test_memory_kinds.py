@@ -89,8 +89,13 @@ def _origin_for(kind) -> MemoryOrigin:
 # ---- the kinds and who reads them ------------------------------------------
 
 
-def test_there_are_twelve_kinds_and_a_model_is_offered_five():
-    assert len(MemoryKind) == 12
+def test_there_are_thirteen_kinds_and_a_model_is_offered_five():
+    """Twelve until 2026-09-21, when `environment` made it thirteen: the rule
+    that reads a domain's environment moved out of a module and into rows,
+    because a module naming one company's domains is an installation
+    compiled into the system (amends D1). The number is asserted rather than
+    derived so that a fourteenth is a decision somebody makes on purpose."""
+    assert len(MemoryKind) == 13
     assert {k.value for k in ModelMemoryKind} == {
         "fact", "constraint", "decision", "finding", "voice",
     }
@@ -113,6 +118,7 @@ def test_the_reader_of_each_kind_is_the_spec_table():
         "route": {"code"},
         "dependency": {"code"},
         "person": {"code"},
+        "environment": {"code"},
     }
     assert {k.value: set(readers_for(k)) for k in MemoryKind} == table
     assert all(isinstance(readers_for(k), frozenset) for k in MemoryKind)

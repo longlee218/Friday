@@ -44,3 +44,33 @@ either. The enum lists `staging`, which no project has.
 - `test_web_contract` and the extractor's schema test still green.
 - The `ask` phrases: `test_which_questions_this_rule_binds_is_derived_not_
   counted` still pins the count after the change.
+
+
+## D1 amended, 2026-09-21 — the environment rule is a row, not code
+
+The operator's call, made while walking through what ticket 00 needs typed
+in: **Friday is meant to serve more rooms than one company's**, and a module
+naming `aperogroup.ai` is an installation compiled into the system.
+
+The rule was also already wrong about this company. The 2026-09-18 survey in
+`research/03-seed-rows.md` found `api-mobile-spec-reviewer.aperogroup.ai`
+served from namespace `dev` with no `.dev` in it, and `payment-service` on
+both `aperogroup.ai` and `apero.vn` resolving to different AWS endpoints.
+
+**What shipped** (in the ticket 00 slice, since that is what reads it):
+
+- A thirteenth `MemoryKind`, `environment`, data `{suffix, env}`, keyed on
+  the suffix, written by the operator and read by code alone.
+- `environment_of(domain, rows)` matches by **longest suffix**. The
+  convention is two rows; an exception is one more row that wins by being
+  longer, with no branch anywhere that knows it is an exception.
+- No row matching is `external` — the graph ends promising nothing. **No
+  rows at all is a different answer**, and says so: a room that knows nothing
+  about any domain is not a room that knows this domain is foreign.
+- `_OURS` and `_DEV_LABEL` are gone from `friday/dag/api_issue/resolve.py`.
+
+**What is still this ticket's:** `ApiIssueParams` reshaped to what the
+operator actually uses, and the rest of the routing half. `route.env` is
+kept alongside `environment` on purpose — the two are typed by hand and
+`Resolve` refuses when they disagree rather than picking, since a production
+search run against dev is not a thing to discover from its results.

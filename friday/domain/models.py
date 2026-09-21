@@ -361,16 +361,26 @@ def askable_fields(params_cls: type) -> tuple[str, ...]:
 
 
 class MemoryKind(StrEnum):
-    """What kind of thing a memory is — twelve, closed (board
+    """What kind of thing a memory is — thirteen, closed (board
     `read-it-the-way-the-operator-does`, spec "Memory: one store, twelve
     kinds", widening D14's five).
 
-    The first five are prose a model reads and writes. The seven after them
-    were a YAML file and an operator's head: `runbook` (how the operator
-    reasons about one kind of fault, in words), `summary` (one per room,
-    replacing `derived`), and five structured kinds that never reach a model
-    at all and only parameterise code — `project`, `service`, `route`,
-    `dependency`, `person`.
+    The first five are prose a model reads and writes. The rest were a YAML
+    file and an operator's head: `runbook` (how the operator reasons about
+    one kind of fault, in words), `summary` (one per room, replacing
+    `derived`), and six structured kinds that never reach a model at all and
+    only parameterise code — `project`, `service`, `route`, `dependency`,
+    `person`, `environment`.
+
+    **`environment` is the thirteenth, and it amends D1** ("environment from
+    the domain, by rule, in code"), on the operator's call of 2026-09-21: a
+    rule in code that names `aperogroup.ai` is an installation written into a
+    module, and Friday is meant to serve more rooms than one company's. It is
+    also a rule this company's own domains already break — the 2026-09-18
+    survey found `api-mobile-spec-reviewer.aperogroup.ai` served from `dev`
+    with no `.dev` in it, and `payment-service` on two domains resolving to
+    different endpoints. A longest-suffix table holds both the rule and its
+    exceptions without a branch for either.
 
     **The reader is a function of the kind, not a second column** — see
     `readers_for`. `preference` was considered and rejected: in this domain
@@ -392,6 +402,7 @@ class MemoryKind(StrEnum):
     ROUTE = "route"
     DEPENDENCY = "dependency"
     PERSON = "person"
+    ENVIRONMENT = "environment"
 
 
 class ModelMemoryKind(StrEnum):
@@ -442,6 +453,7 @@ _READERS: dict[MemoryKind, frozenset[str]] = {
     MemoryKind.PROJECT: frozenset({"code"}),
     MemoryKind.SERVICE: frozenset({"code"}),
     MemoryKind.ROUTE: frozenset({"code"}),
+    MemoryKind.ENVIRONMENT: frozenset({"code"}),
     MemoryKind.DEPENDENCY: frozenset({"code"}),
     MemoryKind.PERSON: frozenset({"code"}),
 }
@@ -467,6 +479,7 @@ _WRITERS: dict[MemoryKind, frozenset[MemoryOrigin]] = {
     MemoryKind.PROJECT: frozenset({MemoryOrigin.ADMIN}),
     MemoryKind.SERVICE: frozenset({MemoryOrigin.ADMIN}),
     MemoryKind.ROUTE: frozenset({MemoryOrigin.ADMIN}),
+    MemoryKind.ENVIRONMENT: frozenset({MemoryOrigin.ADMIN}),
     MemoryKind.DEPENDENCY: frozenset({MemoryOrigin.ADMIN}),
     MemoryKind.PERSON: frozenset({MemoryOrigin.ADMIN}),
 }
@@ -556,7 +569,32 @@ class ServiceData:
 
 
 @dataclass(frozen=True, slots=True)
+class EnvironmentData:
+    """What a domain suffix means: ours, and which environment.
+
+    **Longest suffix wins**, which is what lets one table hold a rule and its
+    exceptions with no branch for either. `aperogroup.ai → production` and
+    `dev.aperogroup.ai → dev` are the rule; one row for
+    `api-mobile-spec-reviewer.aperogroup.ai → dev` is an exception, and it
+    wins by being longer rather than by being special.
+
+    A domain no row matches is **external** — not ours, and the graph ends
+    there promising nothing. A room with no rows at all knows nothing about
+    any domain, which is a different thing and says so.
+    """
+
+    suffix: str
+    env: Literal["dev", "production"]
+
+
+@dataclass(frozen=True, slots=True)
 class RouteData:
+    #: The exact host. `environment` answers "ours, and which" for a family
+    #: of hosts; this answers "which service" for one. `env` is carried here
+    #: too, and the redundancy is deliberate: these are two rows an operator
+    #: types by hand, and `Resolve` refuses when they disagree rather than
+    #: picking — a production search run against dev is not a thing to
+    #: discover from its results.
     domain: str
     env: Literal["dev", "production"]
     service: str
@@ -671,6 +709,7 @@ MEMORY_DATA: dict[MemoryKind, type | None] = {
     MemoryKind.PROJECT: ProjectData,
     MemoryKind.SERVICE: ServiceData,
     MemoryKind.ROUTE: RouteData,
+    MemoryKind.ENVIRONMENT: EnvironmentData,
     MemoryKind.DEPENDENCY: DependencyData,
     MemoryKind.PERSON: PersonData,
 }
@@ -698,6 +737,7 @@ def natural_key(kind: str, data: dict[str, Any] | None, given: str | None) -> st
         MemoryKind.PROJECT: lambda: d.get("name"),
         MemoryKind.SERVICE: lambda: d.get("name"),
         MemoryKind.ROUTE: lambda: d.get("domain"),
+        MemoryKind.ENVIRONMENT: lambda: d.get("suffix"),
         MemoryKind.DEPENDENCY: lambda: f"{d.get('from_service')}->{d.get('to_service')}",
         MemoryKind.PERSON: lambda: d.get("discord_id"),
     }.get(kind, lambda: None)()

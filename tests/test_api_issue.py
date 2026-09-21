@@ -66,10 +66,23 @@ def prepared(**params) -> DAGState:
     )
 
 
+async def write_environment_rows(db, channel_id: str = "watched"):
+    """What a domain suffix means. The convention as two rows, longest-suffix
+    wins — which is also how an exception is written (2026-09-21, amending
+    D1)."""
+    state = FridayState(channel_id=channel_id, agent="admin")
+    for suffix, env in (("aperogroup.ai", "production"), ("dev.aperogroup.ai", "dev")):
+        await db.memory_add(
+            state, f"{suffix} is {env}", kind=MemoryKind.ENVIRONMENT,
+            origin=MemoryOrigin.ADMIN, data={"suffix": suffix, "env": env},
+        )
+
+
 async def write_rows(db, *, env: str = "dev", repo: str | None = None):
-    """The rows ticket 00 says are typed by hand: one route, one service, and
-    the project the service belongs to."""
+    """The rows ticket 00 says are typed by hand: the environment table, one
+    route, one service, and the project the service belongs to."""
     state = FridayState(channel_id="watched", agent="admin")
+    await write_environment_rows(db)
     domain = (
         "api-reelme-v2.dev.aperogroup.ai" if env == "dev"
         else "api-reelme-v2.aperogroup.ai"
@@ -147,8 +160,10 @@ async def test_production_reads_the_loki_labels_and_dev_reads_the_pod_pattern(db
 
 
 async def test_a_domain_that_is_not_ours_ends_the_graph_at_once(db):
-    """D1. Sometimes an unknown domain is a proxy of ours the table does not
-    know yet, and that call is the operator's."""
+    """Sometimes an unknown domain is a proxy of ours the table does not know
+    yet, and that call is the operator's."""
+    await write_environment_rows(db)
+
     result = await resolve_node().run(
         prepared(curl='curl "https://api.stripe.com/v1/charges"'), deps_for(db)
     )
@@ -160,6 +175,8 @@ async def test_a_domain_that_is_not_ours_ends_the_graph_at_once(db):
 async def test_a_missing_route_row_is_a_hand_over_not_a_guess(db):
     """D3, and finding G: guessing which pod serves a domain is how a
     diagnosis gets built from another product's logs."""
+    await write_environment_rows(db)
+
     result = await resolve_node().run(prepared(), deps_for(db))
 
     assert isinstance(result, HandOver)
@@ -169,6 +186,7 @@ async def test_a_missing_route_row_is_a_hand_over_not_a_guess(db):
 async def test_a_route_row_that_disagrees_with_the_domain_is_refused(db):
     """One of the two is wrong, and picking either silently is how a
     production search runs against dev."""
+    await write_environment_rows(db)
     state = FridayState(channel_id="watched", agent="admin")
     await db.memory_add(
         state, "mistyped", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
@@ -183,6 +201,34 @@ async def test_a_route_row_that_disagrees_with_the_domain_is_refused(db):
 
     assert isinstance(result, HandOver)
     assert "production" in result.reason and "dev" in result.reason
+
+
+async def test_a_room_that_knows_no_domains_says_that_and_not_external(db):
+    """A room with no `environment` rows knows nothing about any domain.
+    Answering "not ours" there would be a claim rather than a lookup, and it
+    is the claim an operator would act on by looking somewhere else."""
+    result = await resolve_node().run(prepared(), deps_for(db))
+
+    assert isinstance(result, HandOver)
+    assert "which domains are ours" in result.reason
+
+
+async def test_one_row_for_one_host_beats_the_convention_it_breaks(db):
+    """The 2026-09-18 survey found `api-mobile-spec-reviewer.aperogroup.ai`
+    served from `dev` with no `.dev` in it. Longest suffix wins, so the
+    exception is one more row rather than a branch."""
+    from friday.dag.api_issue.resolve import environment_of
+
+    rows = [
+        SimpleNamespace(suffix="aperogroup.ai", env="production"),
+        SimpleNamespace(suffix="dev.aperogroup.ai", env="dev"),
+        SimpleNamespace(suffix="api-mobile-spec-reviewer.aperogroup.ai", env="dev"),
+    ]
+
+    assert environment_of("api-reelme-v2.aperogroup.ai", rows) == "production"
+    assert environment_of("api-reelme-v2.dev.aperogroup.ai", rows) == "dev"
+    assert environment_of("api-mobile-spec-reviewer.aperogroup.ai", rows) == "dev"
+    assert environment_of("api.stripe.com", rows) == "external"
 
 
 async def test_a_report_with_no_curl_says_so_rather_than_blaming_the_domain(db):
@@ -680,6 +726,7 @@ async def test_a_complete_report_is_investigated_rather_than_handed_back(db):
     from friday.tasks.pool import Pool
     from tests.test_pool import make_task
 
+    await write_environment_rows(db)
     await make_task(db, curl=CURL, environment="dev")
 
     await Pool(db=db, auto_ask=True).run_once()
