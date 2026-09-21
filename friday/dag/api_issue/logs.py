@@ -142,6 +142,48 @@ def _covered(read: Lines) -> str:
     return f"{_when(read.oldest)}–{_when(read.newest)}"
 
 
+def _capped(
+    wanted: str, window: Lines, ours: Lines, *, needle: str, asked: timedelta
+) -> tuple[str, ...]:
+    """What each read left out, said in the reader's own terms.
+
+    **Which part of the window, not merely "a sample".** The first version
+    of this sentence said a sample and stopped, and a dossier drawn from the
+    last eighty-four seconds of a thirty-five minute window reads exactly
+    like a dossier of the whole of it. Naming the span makes the difference
+    legible — and says which claims it limits, which is the counts and other
+    requests' lines, never this request's own: those came from a read
+    narrowed to them.
+
+    Out of the node because it is the node's least readable paragraph and
+    none of it depends on the run: two reads, what was asked for, and the
+    sentences that follow.
+    """
+    said: list[str] = []
+    if window.truncated:
+        limits = (
+            f"{wanted} capped the window read at {_covered(window)} of the "
+            f"{_said(asked)} asked for, so the error-code counts and any "
+            f"line belonging to another request cover that part of the "
+            f"window and this request's own lines, not the rest of the window"
+        )
+        if needle:
+            limits += (
+                "; this request's own lines came from a separate read "
+                "narrowed to it and are not a sample"
+            )
+        said.append(limits)
+    if ours.truncated:
+        # A different shape of incompleteness, and worth its own sentence:
+        # the dossier is a prefix of one request rather than a sample of a
+        # window.
+        said.append(
+            f"{wanted} capped even the search for {needle!r}, so this "
+            f"request has more lines than were read"
+        )
+    return tuple(said)
+
+
 def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
     """Build node 2.
 
@@ -259,34 +301,7 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
                 not_checked=[*widened, "the log does not reach back to the report"],
             )
 
-        # **Which part of the window, not merely "a sample".** The first
-        # version of this sentence said a sample and stopped, and a dossier
-        # drawn from the last eighty-four seconds of a thirty-five minute
-        # window reads exactly like a dossier of the whole of it. Naming the
-        # span makes the difference legible — and says which claims it
-        # limits, which is the counts and other requests' lines, never this
-        # request's own: those came from a read narrowed to them.
-        capped = ()
-        if window.truncated:
-            capped = (
-                f"{wanted} capped the window read at {_covered(window)} of the "
-                f"{_said(until - since)} asked for, so the error-code counts "
-                f"and any line belonging to another request cover that part "
-                f"of the window and this request's own lines, not the rest "
-                f"of the window"
-                + (
-                    "; this request's own lines came from a separate read "
-                    "narrowed to it and are not a sample"
-                    if needle
-                    else ""
-                ),
-            )
-        if ours.truncated:
-            capped = (
-                *capped,
-                f"{wanted} capped even the search for {needle!r}, so this "
-                f"request has more lines than were read",
-            )
+        capped = _capped(wanted, window, ours, needle=needle, asked=until - since)
         not_checked = (*widened, *capped, *dossier.not_checked)
         if not dossier.lines:
             return envelope(

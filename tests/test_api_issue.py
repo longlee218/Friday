@@ -153,7 +153,7 @@ class FakeSource:
         from friday.sources import Lines
 
         self.asked.append((since, until, needle))
-        answer = self.answers[min(len(self.windows) - 1, len(self.answers) - 1)]
+        answer = self.answers[min(len(self.spans) - 1, len(self.answers) - 1)]
         if needle:
             return Lines(
                 tuple(l for l in answer if needle in l), self.oldest, self.newest
@@ -163,19 +163,33 @@ class FakeSource:
         )
 
     @property
-    def windows(self) -> list[str]:
-        """Each *window* as "<hours>h" of lookback, for a readable assertion.
+    def spans(self) -> list[tuple]:
+        """The distinct windows asked for, in order.
 
         One entry per window rather than per read — the narrowed read is not
         a second window, and counting it as one would make every widening
         assertion in this file read as two.
+
+        **What the script is keyed on**, deliberately separate from
+        `windows` below. Scripting off a *formatting* helper means changing
+        how a span is rendered silently re-scripts the fake, and a fake that
+        answers differently for a reason nobody wrote down is worse than no
+        fake.
         """
-        spans: list[str] = []
+        seen: list[tuple] = []
         for since, until, _ in self.asked:
-            said = f"{round((until - since).total_seconds() / 3600, 2)}h"
-            if not spans or spans[-1] != said:
-                spans.append(said)
-        return spans
+            if not seen or seen[-1] != (since, until):
+                seen.append((since, until))
+        return seen
+
+    @property
+    def windows(self) -> list[str]:
+        """The same windows as "<hours>h" of lookback, for a readable
+        assertion. Rendering only — nothing depends on its shape."""
+        return [
+            f"{round((until - since).total_seconds() / 3600, 2)}h"
+            for since, until in self.spans
+        ]
 
 
 # --- resolve ----------------------------------------------------------------
