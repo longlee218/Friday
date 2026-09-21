@@ -845,3 +845,47 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
     assert "ERR19 ở orders.init" in text
     assert "line 11" in text, "the source around the frame is in the report"
     assert "HEAD" in text, "and what it did not check"
+
+
+# --- replay_case.py, the tool that answers questions 3 and 4 -----------------
+
+
+def test_a_node_that_ended_the_run_does_not_read_as_one_that_passed_it_on():
+    """`node_runs` records any `Action` as `ok`, because an `Action` carries
+    no envelope. So a `resolve` that handed over — ending the whole run —
+    printed exactly like a `resolve` that succeeded, and the first real use
+    of this tool was ten minutes of reading the wrong thing."""
+    from friday.dag.engine import NodeRun
+    from replay_case import answers
+
+    run = NodeRun(
+        dag_name="api_issue", dag_version="v", node="resolve", attempt=1,
+        status="ok", reason="", duration_ms=6,
+    )
+    final = DAGState.empty().with_result("resolve", HandOver("no service row"))
+
+    found = answers([run], final, wall_s=0.1)
+
+    assert found["nodes"][0]["status"] == "handed over"
+    assert found["nodes"][0]["reason"] == "no service row"
+
+
+def test_a_node_that_failed_is_named_as_a_seam_that_broke():
+    """Question 4. `empty` and `skipped` are nodes doing their job with
+    nothing to work on; `error` and `timed_out` are the seams."""
+    from friday.dag.engine import NodeRun
+    from replay_case import answers
+
+    def run(node, status, reason=""):
+        return NodeRun(
+            dag_name="api_issue", dag_version="v", node=node, attempt=1,
+            status=status, reason=reason, duration_ms=1,
+        )
+
+    found = answers(
+        [run("find_request_log", "error", "ssh: no route to host"),
+         run("read_failing_code", "empty", "no frame")],
+        DAGState.empty(), wall_s=0.1,
+    )
+
+    assert found["broke"] == ["find_request_log: ssh: no route to host"]

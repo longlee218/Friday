@@ -54,6 +54,19 @@ Open questions this raises, to answer in the ticket rather than discover:
 - `'*'` rows pointing at a room's rows, which would resolve for one room and
   not another.
 
+**And a third, found the same day by the next edit.** A structured row's key
+*is* its data — `project`'s key is `data.name` — so **renaming a row
+silently orphans every row that names it**. Within twenty minutes of the
+first mismatch being fixed, `service.name` was edited from
+`backend-reelme-v2` to `reelme-v2`, and both `route` rows went on pointing
+at a service that no longer existed. The chain broke one link earlier than
+before, in a row nobody had touched.
+
+A dropdown does not help here: the operator was editing the row being named,
+not the row doing the naming. So the check has to run on the **rename** as
+well as on the write — `memory_update` refusing to move a key that another
+active row still points at, naming the rows that do.
+
 **`service.project` as a choice.** `friday/ops/api.py`'s `_form_fields`
 already emits `{"type": "choice", "choices": [...]}` — it does it for any
 `Literal`, which is how `env` became a dropdown. What is missing is that
