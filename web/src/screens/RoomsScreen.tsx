@@ -365,6 +365,10 @@ function MemoryPanel({ channelId }: { channelId: string }) {
  *  from `/api/memory-kinds`, which reads them off the schemas the store
  *  checks — so a refusal names a field this form actually showed.
  *
+ *  A field picked from the filesystem (`project.repo_path`) is a browser
+ *  over `/api/directories` rather than a text box — the last free-text field
+ *  on this form, and the one whose typo reads exactly like a correct answer.
+ *
  *  A field that names another row (`service.project`) is a dropdown over the
  *  keys this room actually holds, so the operator picks rather than spells.
  *  With no rows of that kind yet the dropdown would be an empty box with no
@@ -463,7 +467,12 @@ function MemoryForm({
             {f.type === "list" ? " — comma-separated" : ""}
             {f.type === "json" ? " — JSON" : ""}
           </span>
-          {f.type === "choice" && f.names && f.choices.length === 0 ? (
+          {f.picks === "directory" ? (
+            <DirectoryPicker
+              value={values[f.name] ?? ""}
+              onPick={(picked) => setValues({ ...values, [f.name]: picked })}
+            />
+          ) : f.type === "choice" && f.names && f.choices.length === 0 ? (
             <p className="mono faint">
               no {f.names} rows in this room yet — add one first
             </p>
@@ -602,4 +611,69 @@ function day(m: Message): string {
     day: "numeric",
     month: "short",
   });
+}
+
+
+/** Choose a directory instead of spelling one (ticket 19).
+ *
+ *  Only ever shows what `/api/directories` returns, which is directories
+ *  under the configured root and nothing else — the server resolves and
+ *  refuses anything landing outside it, so this component has no path rule
+ *  of its own to keep in step.
+ *
+ *  The chosen path stays visible and editable as text: an operator
+ *  correcting a row that already holds a path should not have to walk to it
+ *  again, and a root that was never configured leaves the field exactly as
+ *  it was before this existed. */
+function DirectoryPicker({
+  value,
+  onPick,
+}: {
+  value: string;
+  onPick: (path: string) => void;
+}) {
+  const [at, setAt] = useState("");
+  const [open, setOpen] = useState(false);
+  const listing = useAsync(() => (open ? api.directories(at) : Promise.resolve(null)), [at, open]);
+
+  return (
+    <>
+      <input type="text" value={value} onChange={(e) => onPick(e.target.value)} />
+      <button type="button" onClick={() => setOpen(!open)}>
+        {open ? "done" : "browse"}
+      </button>
+      {open && listing.error && <p className="mono error">{listing.error}</p>}
+      {open && listing.value && (
+        <div className="mono">
+          <p className="faint">{listing.value.absolute}</p>
+          <button
+            type="button"
+            onClick={() => onPick(listing.value!.absolute)}
+          >
+            use this one
+          </button>
+          {at !== "" && (
+            <button
+              type="button"
+              onClick={() => setAt(at.split("/").slice(0, -1).join("/"))}
+            >
+              up
+            </button>
+          )}
+          <ul>
+            {listing.value.directories.map((name) => (
+              <li key={name}>
+                <button
+                  type="button"
+                  onClick={() => setAt(at ? `${at}/${name}` : name)}
+                >
+                  {name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  );
 }

@@ -262,13 +262,30 @@ export interface MemoryKindForm {
  *  fields that are not one, which is most of them. When it is set, `choices`
  *  holds the keys this room's rows of that kind currently have, and an empty
  *  `choices` means none have been written yet rather than that there is
- *  nothing to choose from. */
+ *  nothing to choose from.
+ *
+ *  `picks` is `"directory"` for a field chosen from the filesystem through
+ *  `/api/directories` rather than typed, and `""` for every other. Both are
+ *  declared on the field in `friday/domain/models.py`, so this page needs no
+ *  list of its own and cannot disagree with one. */
 export interface MemoryField {
   name: string;
   type: string;
   required: boolean;
   choices: string[];
   names: string;
+  picks: string;
+}
+
+/** One level of the repository picker, from `/api/directories` (ticket 19).
+ *  Directories only: the operator is choosing a repository, and a file
+ *  listing is a view of their machine nothing here needs. `path` is relative
+ *  to the configured root and `absolute` is what goes in the field. */
+export interface Directories {
+  root: string;
+  path: string;
+  absolute: string;
+  directories: string[];
 }
 
 /** A memory an agent proposed, waiting for the operator's mark — or already

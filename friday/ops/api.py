@@ -90,6 +90,10 @@ def build_api(
     #: silently the first time the operator tuned it — and a confidence
     #: without the threshold beside it is a number nobody can read.
     confidence_threshold: float | None = None,
+    #: Where the directory picker may look, from `config.yaml`'s
+    #: `repo_root`. `None` turns the route off entirely: a board that
+    #: browses `/` by default is one nobody meant to switch on.
+    repo_root: str | None = None,
 ) -> FastAPI:
     api = FastAPI(title="friday", docs_url="/api/docs", redoc_url=None)
 
@@ -407,6 +411,58 @@ def build_api(
             _memory_row(m)
             for m in await db.memories_for_channel(channel_id, limit=limit)
         ])
+
+    @api.get("/api/directories")
+    async def directories(path: str = Query("")) -> dict:
+        """The directories under `repo_root`, for choosing a `repo_path`.
+
+        **Directories only, and the confinement is what makes this
+        defensible.** The board answers on loopback on the operator's own
+        machine, so this is possible here where it would not be on a server;
+        what keeps it from being a filesystem browser is that it resolves
+        first and refuses anything landing outside the root — the same guard
+        `friday/sources/code.py:repo_file` applies to a stack frame, and for
+        the same reason: a path that arrives from outside is a path from
+        outside, whatever it looks like.
+
+        Resolving *first* is also what catches a symlink whose name is
+        inside the root and whose target is not.
+        """
+        if not repo_root:
+            raise HTTPException(
+                404,
+                "no repo_root is configured, so there is nothing to browse. "
+                "Set it in config.yaml to pick a repository rather than "
+                "typing its path.",
+            )
+        # `pathlib.Path`, not the `Path` this module imports from FastAPI —
+        # that one declares a path *parameter*. They differ by a silent
+        # TypeError three lines down.
+        root = pathlib.Path(repo_root).expanduser().resolve()
+        where = (root / path).resolve()
+        try:
+            where.relative_to(root)
+        except ValueError:
+            raise HTTPException(
+                422, f"{path!r} is outside {root}, which is the only place "
+                "this looks"
+            ) from None
+        try:
+            found = sorted(
+                entry.name for entry in where.iterdir()
+                if entry.is_dir() and not entry.name.startswith(".")
+            )
+        except OSError:
+            # Unreadable is empty rather than an error: the operator is
+            # choosing from what they can see, and a permission message here
+            # says more about the machine than it helps.
+            found = []
+        return {
+            "root": str(root),
+            "path": str(where.relative_to(root)) if where != root else "",
+            "absolute": str(where),
+            "directories": found,
+        }
 
     @api.get("/api/channels/{channel_id}/memory-kinds")
     async def memory_kinds(channel_id: str = Path(...)) -> list[dict]:
@@ -750,6 +806,9 @@ def _form_fields(shape: type, prefix: str = "") -> list[dict]:
             # of them. The kind's own name, so the route can fill the
             # choices and the page can say what is missing.
             "names": names,
+            # And empty for every field that is typed rather than chosen.
+            # `directory` sends the page to `/api/directories`.
+            "picks": str(f.metadata.get("picks", "")),
             **entry,
         })
     return found

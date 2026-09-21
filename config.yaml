@@ -222,6 +222,15 @@ board_port: 8086
 # Browser origins allowed to read the API — the frontend in development.
 board_origins: []
 
+# Where the `project` form's repo picker may look (ticket 19). The board
+# answers on loopback on this machine, so listing directories is possible
+# here where it would not be on a server; the route resolves under this root
+# and refuses anything landing outside it, symlinks included.
+#
+# Empty turns the picker off and the field goes back to being typed — which
+# is the field whose typo reads exactly like a correct answer.
+repo_root: "~/Documents/Apero"
+
 heartbeat_seconds: 60
 
 # How long Discord may be down before you are told, and when the daily

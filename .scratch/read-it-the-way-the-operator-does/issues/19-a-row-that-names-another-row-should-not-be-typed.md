@@ -6,7 +6,7 @@ chosen from the filesystem rather than spelled.
 
 **Blocked by:** nothing. 09 built the form this extends.
 **Decisions:** the operator's, 2026-09-21.
-**Status:** the check is done (2026-09-21); the folder picker is not
+**Status:** done 2026-09-21
 
 ## Why
 
@@ -171,7 +171,31 @@ is written down in the docstring rather than defended against, because
 defending it would mean a lock around every structured write for a race
 nobody has met.
 
-**Not done:** `repo_path` chosen from the filesystem rather than typed. It
-needs a route that lists directories under a configured root, with the
-confinement guard `sources/code.py:repo_file` already applies to a frame.
-Nothing about it is blocked; it is simply not built.
+### And the picker, the same day
+
+`repo_path` is chosen now. `GET /api/directories` lists the directories
+under `config.yaml`'s `repo_root` — **directories only**, because the
+operator is choosing a repository and a file listing is a view of their
+machine nothing here needs; dotted ones are left out, because `.git` is
+never the answer to "which repository" and offering it is offering a wrong
+choice that looks like one.
+
+**The confinement is what makes the route defensible**, and it is the guard
+`sources/code.py:repo_file` already applies to a stack frame: resolve
+first, then refuse anything landing outside the root. Resolving *first* is
+what catches a symlink whose name is inside the root and whose target is
+not. A path from a client is a path from outside, whatever it looks like.
+
+**Off unless an operator says where.** No `repo_root`, no route — a board
+that browses `/` by default is one nobody meant to switch on, and the field
+simply goes back to being typed.
+
+Declared on the field (`picks: "directory"`) the way `names` is, so the page
+has no list of its own to disagree with, and the picked path stays editable
+as text: correcting a row that already holds a path should not mean walking
+to it again.
+
+One thing worth remembering from writing it: `friday/ops/api.py` imports
+`Path` from **FastAPI**, where it declares a path *parameter*. Using it as
+`pathlib.Path` is a `TypeError` three lines later, and five tests found it
+at once.

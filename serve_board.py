@@ -48,6 +48,7 @@ async def main() -> None:
         origins=list(config.board_origins),
         # Asked of the runner rather than read out of config, for the reason
         # `run_agent.py` is held to: which knobs triage has is triage's.
+        repo_root=config.repo_root or None,
         confidence_threshold=(
             await TriageRunner.build(config, db=db)
         ).confidence_threshold,

@@ -7,6 +7,7 @@
 
 import type {
   Board,
+  Directories,
   Flow,
   Memory,
   MemoryKindForm,
@@ -50,6 +51,8 @@ export const api = {
   // The operator's own rows (board `read-it-the-way-the-operator-does`,
   // ticket 09). The store checks each one against its kind's schema and the
   // instruction-shape guard; a refusal arrives as `detail` and is thrown.
+  directories: (path: string) =>
+    get<Directories>(`/api/directories?path=${encodeURIComponent(path)}`),
   memoryKinds: (channelId: string) =>
     get<MemoryKindForm[]>(
       `/api/channels/${encodeURIComponent(channelId)}/memory-kinds`,

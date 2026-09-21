@@ -65,6 +65,7 @@ async def serve_board(db, provider, config, sock, threshold) -> None:
         # has is triage's business. The page draws a confidence against this
         # line and must not invent it.
         confidence_threshold=threshold,
+        repo_root=config.repo_root or None,
     )
     # Nothing is mounted at `/` until `web/` exists (board ticket 05). The
     # server-rendered page that used to live there was deleted with the

@@ -314,6 +314,11 @@ class Config:
     board_port: int = 8086
     #: Browser origins allowed to read the API — the frontend in development.
     board_origins: tuple[str, ...] = ()
+    #: Where the `repo_path` picker may look (ticket 19). Empty turns it off:
+    #: a board that browses `/` by default is one nobody meant to switch on.
+    #: The route resolves under this and refuses anything landing outside,
+    #: the same guard a stack frame meets.
+    repo_root: str = ""
     heartbeat_seconds: float = 60.0
     #: How long the gateway may be down before the operator is told. Discord
     #: drops and resumes constantly; alerting on a blip trains you to ignore
@@ -374,6 +379,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
         ),
         board_port=int(raw.get("board_port", 8086)),
         board_origins=tuple(raw.get("board_origins") or ()),
+        repo_root=str(raw.get("repo_root") or ""),
         heartbeat_seconds=float(raw.get("heartbeat_seconds", 60.0)),
         down_after_seconds=float(raw.get("down_after_seconds", 300.0)),
         summary_at_hour=(

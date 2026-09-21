@@ -540,7 +540,12 @@ class RunbookData:
 @dataclass(frozen=True, slots=True)
 class ProjectData:
     name: str
-    repo_path: str
+    #: **Picked, not spelled** (ticket 19). A path on the operator's own
+    #: machine whose typo reads exactly like a correct one: the row looks
+    #: right in the form and `ReadFailingCode` quietly reads nothing.
+    #: Declared here for the same reason `names` is — the form has no list
+    #: of its own to disagree with.
+    repo_path: str = field(metadata={"picks": "directory"})
     default_branch: str
     stack: str
     docs_paths: list[str] = field(default_factory=list)
