@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from friday.dag.engine import DAGDeps, DAGState, Node, envelope
-from friday.sources.code import NOT_OURS, excerpt, original, repo_file
+from friday.sources.code import NOT_OURS, excerpt, meanings, original, repo_file
 
 __all__ = ["code_of", "read_failing_code_node"]
 
@@ -32,6 +32,12 @@ MAX_FRAMES = 5
 def code_of(result: Any) -> tuple[str, tuple[str, ...]]:
     """Node 3's envelope read back: the excerpts, and what it did not read."""
     return result.get("code", ""), tuple(result.get("not_checked", ()))
+
+
+def codes_of(result: Any) -> dict[str, str]:
+    """What the repo says the codes in this window mean."""
+    found = result.get("codes") if isinstance(result, dict) else None
+    return dict(found) if isinstance(found, dict) else {}
 
 
 def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
@@ -61,11 +67,26 @@ def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
                 f"here is called, so no repository was found and no code was "
                 f"read",
             )
+        # What the codes in this window mean, from the repo's own document.
+        # Ticket 16 measured every one of 2,104 HTTP 500s carrying `ERR19`,
+        # the generic code — so without this a diagnosis sees a number and
+        # can say nothing about it. Only the codes that turned up: the doc is
+        # 271 lines and a run saw three.
+        codes = meanings(
+            project.get("error_codes_doc") or "",
+            [code for code, _ in found.get("histogram") or ()],
+            project.get("repo_path") or "",
+        ) if project.get("error_codes_doc") else {}
+
         if not frames:
+            # Still worth an envelope with the codes in it: a business error
+            # — a 4xx with a domain message — carries no stack at all, and
+            # what its code means is the whole of what there is to read.
             return envelope(
                 "empty",
                 "the dossier carries no stack frame, so there is no file to "
                 "open",
+                codes=codes,
             )
 
         repo_path = project.get("repo_path") or ""
@@ -119,10 +140,12 @@ def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
             return envelope(
                 "empty",
                 "no frame in the dossier names a file in this clone",
+                codes=codes,
                 not_checked=not_checked,
             )
         return envelope(
-            "ok", "", code="\n\n".join(pieces), not_checked=not_checked
+            "ok", "", code="\n\n".join(pieces), codes=codes,
+            not_checked=not_checked,
         )
 
     return Node("read_failing_code", _read, timeout_seconds=timeout_seconds)

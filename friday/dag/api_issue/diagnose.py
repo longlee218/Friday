@@ -27,8 +27,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from friday.dag.api_issue.code import code_of
-from friday.dag.api_issue.logs import dossier_of
+from friday.dag.api_issue.code import code_of, codes_of
+from friday.dag.api_issue.logs import dossier_of, histogram_of
 from friday.dag.api_issue.prompt import build_input, numbered
 from friday.dag.engine import DAGDeps, DAGState, Node, envelope
 
@@ -162,10 +162,12 @@ def diagnose_node(
             )
 
         dossier, log_not_checked = dossier_of(state["find_request_log"])
+        histogram = histogram_of(state["find_request_log"])
         code, code_not_checked = code_of(state["read_failing_code"])
+        codes = codes_of(state["read_failing_code"])
         not_checked = (*log_not_checked, *code_not_checked)
 
-        if not dossier and not code:
+        if not dossier and not code and not codes:
             # Nothing to reason over. A model asked to diagnose an empty
             # dossier writes a plausible cause from the endpoint's name
             # alone, and it reads exactly like one built from evidence.
@@ -184,6 +186,8 @@ def diagnose_node(
                 dossier=shown_dossier,
                 code=shown_code,
                 not_checked=not_checked,
+                histogram=histogram,
+                codes=codes,
             ),
             task_id=deps.task.id,
             node="diagnose",

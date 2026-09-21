@@ -105,3 +105,28 @@ offers `release_apply`, `release_rollback`, `release_rollout`,
 and a name goes on that list when something calls it, never ahead of that.
 Ticket 04 will want `release_status` and `release_resolve` for the running
 image tag.
+
+
+## The histogram, 2026-09-21
+
+Built, and it is the reason this check can reach its `≤ 12 lines`.
+
+`Dossier.histogram` counts every error code in the **window** — before the
+cut, because counting what survived would be counting the cut — and the
+sample of *other* requests' error lines is capped at eight and reported as
+"8 of N". The first real run quoted sixty-one lines of another endpoint's
+errors and called it a dossier; the same window now reads as eleven lines
+and a list of counts.
+
+Surroundings go to **this request's** lines only. Two lines either side of a
+sampled error belong to somebody else's story, and they are what pushed the
+first version to thirteen lines where the spec allows twelve.
+
+The pattern is `\bERR\d+\b`, a module constant rather than a row: it is an
+install's shape rather than a room's, unlike the domain rule the operator
+moved into memory. It becomes configuration the day a second stack
+disagrees, and a pattern that matches nothing yields an empty histogram,
+which is the honest outcome.
+
+**Still this ticket's:** the same-user and same-path fallback, and the Loki
+call itself, which waits on the Keycloak client.

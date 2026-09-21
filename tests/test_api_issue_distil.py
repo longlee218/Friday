@@ -101,3 +101,50 @@ def test_json_log_lines_match_by_substring_rather_than_being_parsed():
 
     assert kept.lines == tuple(lines)
     assert kept.has_error is True
+
+
+# --- the histogram: counts, not lines (tickets 02 and 03) -------------------
+
+
+def test_the_error_codes_in_the_window_are_counted_not_quoted():
+    """The spec's answer to a noisy window, and the reason `FindRequestLog`
+    is capped at twelve lines: "an error-code histogram of ±5 min — counts,
+    not lines; the raw window is a median 58 lines, up to 885". The first
+    real run kept 61 lines of other requests' errors and called it a
+    dossier."""
+    lines = log(
+        *[f'{{"errorCode":"ERR951"}}' for _ in range(40)],
+        *[f'{{"errorCode":"ERR19"}}' for _ in range(3)],
+        '{"errorCode":"ERR306","correlationId":"abc"}',
+    )
+
+    kept = distil(lines, correlation_id="abc", other_error_cap=2)
+
+    assert kept.histogram == (("ERR951", 40), ("ERR19", 3), ("ERR306", 1))
+
+
+def test_the_histogram_counts_the_whole_window_not_what_survived():
+    """Counting what survived would be counting the cut, which says nothing
+    about the window it was cut from."""
+    lines = log(*[f'{{"errorCode":"ERR951"}}' for _ in range(40)], "ERROR abc")
+
+    kept = distil(lines, correlation_id="abc", other_error_cap=1)
+
+    assert dict(kept.histogram)["ERR951"] == 40
+    assert kept.kept < 40
+
+
+def test_the_sample_of_other_requests_says_how_many_it_stands_for():
+    """"8 of N", not a silent 8. A sample nobody is told is a sample reads as
+    everything."""
+    lines = log(*[f"ERROR {i}" for i in range(30)], "the request abc")
+
+    kept = distil(lines, correlation_id="abc", other_error_cap=8)
+
+    assert any("8 of 30" in line for line in kept.not_checked)
+
+
+def test_a_window_with_no_codes_has_no_histogram():
+    kept = distil(log("GET /v1/x 200", "ERROR something unstructured"))
+
+    assert kept.histogram == ()

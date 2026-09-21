@@ -62,3 +62,9 @@ than the window. Measured round trip ~1.5 s.
 building out at all, given that a report usually arrives after the pod that
 served it has restarted. That is ticket 16's measurement 2, and ticket 00's
 open question about replay.
+
+
+## The histogram, 2026-09-21
+
+Shared with ticket 02 — it is a rule over lines, so it does not know which
+back end produced them. See that ticket for what was built and why.

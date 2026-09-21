@@ -33,6 +33,18 @@ __all__ = ["Dossier", "distil", "frames"]
 #: first, which is the whole of production — a test said so.
 _LOUD = re.compile(r"\b(ERROR|FATAL|WARN|WARNING|EXCEPTION\w*)\b", re.IGNORECASE)
 
+#: What an error code looks like in these services' logs — `ERR19`,
+#: `ERR951`, `ERR306`. Measured over 30 days by ticket 16: every one of
+#: 2,104 HTTP 500s carries `ERR19`, and `ERR951`/`ERR955` are 58,000 of
+#: 90,000 exceptions.
+#:
+#: **Configuration on the day a second stack disagrees, and not before.**
+#: It is an install's shape rather than a room's — the operator's own call
+#: about the environment rule was that a *room's* knowledge belongs in rows,
+#: and this is neither `aperogroup.ai` nor a domain. A pattern that matches
+#: nothing yields an empty histogram, which is the honest outcome.
+_CODE = re.compile(r"\bERR\d+\b")
+
 #: A stack frame, in the two shapes this codebase's services produce: Node's
 #: `at fn (/app/src/x.ts:12:3)` and a bare `/app/src/x.ts:12:3`.
 _FRAME = re.compile(r"(?P<file>(?:/|\./|[A-Za-z]:\\)[\w./\\-]+\.\w+):(?P<line>\d+)")
@@ -54,6 +66,15 @@ class Dossier:
     has_error: bool
     #: Whether anything in what survived looks like a stack frame.
     has_stack: bool
+    #: Every error code in the **window**, counted, most frequent first —
+    #: the spec's answer to a noisy window, and how this check reaches its
+    #: `≤ 12 lines`. Counts rather than lines because the raw window is a
+    #: median 58 lines and up to 885, and because forty repetitions of
+    #: `ERR951` say one thing that forty lines say forty times.
+    #:
+    #: Counted before the cut, not after: counting what survived would be
+    #: counting the cut, which says nothing about the window it came from.
+    histogram: tuple[tuple[str, int], ...] = ()
     not_checked: tuple[str, ...] = ()
 
     @property
@@ -92,8 +113,8 @@ def distil(
     max_lines: int = 400,
     #: How many loud lines that do **not** name this request are worth
     #: carrying. The spec's answer to a noisy window is an error-code
-    #: histogram — counts, not lines — reaching `≤ 12 lines` in context; the
-    #: histogram is ticket 05's, and this is the part of it a cap can do:
+    #: histogram — counts, not lines — reaching `≤ 12 lines` in context. The
+    #: histogram is `Dossier.histogram` now; this is the cap beside it:
     #: keep a sample, count the rest, and say so. Without it a busy window
     #: is the ~12,000-token dossier the spec measured and refused.
     other_error_cap: int = 20,
@@ -108,6 +129,10 @@ def distil(
     decisive: set[int] = set()
     ours: set[int] = set()
     needles = [n for n in (correlation_id, *matching) if n]
+    counted: dict[str, int] = {}
+    for line in lines:
+        for code in _CODE.findall(line):
+            counted[code] = counted.get(code, 0) + 1
 
     for i, line in enumerate(lines):
         # A stack frame is decisive in its own right, not only when the line
@@ -131,18 +156,27 @@ def distil(
             decisive.discard(i)
         dropped_others = len(others) - other_error_cap
 
-    # Surroundings, in one pass over what was already chosen. A line that is
-    # both decisive and somebody else's surroundings stays decisive.
+    # **Surroundings belong to this request's lines, not to the sample.**
+    # A sampled error from somebody else's request is quoted to show the
+    # shape of the window; the two lines either side of it are that other
+    # request's story, and they are what pushed the first version to thirteen
+    # lines where the spec allows twelve. With no needle at all there is
+    # nothing that is "ours", so everything loud keeps its context — that is
+    # the case where the surroundings are all the story there is.
     kept |= decisive
-    for i in sorted(decisive):
+    around = ours if needles else decisive
+    for i in sorted(around):
         for j in range(max(0, i - context_lines), min(len(lines), i + context_lines + 1)):
             kept.add(j)
 
     not_checked: list[str] = []
     if dropped_others:
+        # "8 of N", never a silent 8: a sample nobody is told is a sample
+        # reads as everything, which is the whole failure this rule guards.
         not_checked.append(
-            f"{dropped_others} more error lines in the window belong to other "
-            f"requests and were not read"
+            f"{other_error_cap} of {other_error_cap + dropped_others} error "
+            f"lines in the window belong to other requests; the rest are in "
+            f"the counts above, not quoted"
         )
     if not needles:
         not_checked.append(
@@ -168,6 +202,9 @@ def distil(
         total=len(lines),
         has_error=any(_LOUD.search(line) for line in survived),
         has_stack=any(_FRAME.search(line) for line in survived),
+        histogram=tuple(
+            sorted(counted.items(), key=lambda pair: (-pair[1], pair[0]))
+        ),
         not_checked=tuple(not_checked),
     )
 

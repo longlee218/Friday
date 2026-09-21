@@ -1190,3 +1190,228 @@ def test_a_map_with_a_character_that_is_not_vlq_is_rejected_whole(tmp_path):
     map_file.write_text(json.dumps(loaded))
 
     assert original(tmp_path / "dist" / "x.js", 3, tmp_path) is None
+
+
+async def test_the_counts_reach_the_model_and_the_report(db, tmp_path):
+    """The histogram is evidence of a different kind: a code appearing forty
+    times in the window is background, and the one appearing once beside this
+    request is not. Forty lines say that forty times; one count says it
+    once."""
+    seen: list[str] = []
+
+    class Reads:
+        last_error = None
+
+        async def run_structured(self, prompt, **kw):
+            seen.append(prompt)
+            return Diagnosis(
+                cause="ERR306 là Midas nói qua ExceptionFilter",
+                confidence="likely", conclusive=False, refs=["L1"],
+            )
+
+    state = (
+        prepared()
+        .with_result("find_request_log", {
+            "status": "ok", "reason": "", "dossier": "ERROR ERR306 abc",
+            "histogram": [["ERR951", 40], ["ERR306", 1]], "not_checked": [],
+        })
+        .with_result("read_failing_code", {"status": "empty", "reason": ""})
+    )
+
+    result = await diagnose_node(harness=Reads()).run(state, deps_for(db))
+    await report_node(reports_dir=tmp_path).run(
+        state.with_result("diagnose", result), deps_for(db)
+    )
+
+    assert "ERR951: 40" in seen[0] and "ERR306: 1" in seen[0]
+    written = (tmp_path / "1.md").read_text()
+    assert "`ERR951`: 40" in written
+
+
+async def test_the_window_s_counts_survive_a_cut_that_drops_the_lines(db):
+    """Counted before the cut. The point of counting is to say what the
+    window held, which is not what survived being cut out of it."""
+    await write_rows(db)
+    # `"level":"error"` so these are loud lines and therefore candidates to
+    # be quoted — `"errorCode"` alone is not, because `\berror\b` does not
+    # match inside `errorCode`, and the histogram counts a wider set than the
+    # cut ever considers quoting.
+    source = FakeSource(answers=[[
+        *[f'{{"level":"error","errorCode":"ERR951","n":{i}}}' for i in range(40)],
+        '{"level":"error","errorCode":"ERR306","path":"/v1/pod/orders/init"}',
+    ]])
+    state = prepared().with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert dict(result["histogram"])["ERR951"] == 40
+    assert result["kept"] <= 12, "the spec's ceiling for this check"
+    assert any("of 40" in line for line in result["not_checked"])
+
+
+# --- what a code means (ticket 04, the repo's own docs) ---------------------
+
+CODES_DOC = """# Error codes
+
+Branch on `errorCode`, never on `message`.
+
+## General
+
+| Code     | Name                | Meaning                        |
+| -------- | ------------------- | ------------------------------ |
+| `ERR16`  | `INVALID_INPUT`     | Invalid input                  |
+| `ERR19`  | `INTERNAL_ERROR`    | Something failed server-side   |
+
+## Midas
+
+| Code     | Name                | Meaning                        |
+| `ERR306` | `BILLING_ERROR`     | Midas refused the charge       |
+"""
+
+
+def test_only_the_codes_that_turned_up_are_read_out_of_the_doc(tmp_path):
+    """Ticket 16 measured 2,104 of 2,104 HTTP 500s carrying `ERR19` — the
+    generic code — so the doc is what turns a code into an answer. The whole
+    doc is 271 lines; a run needs the three lines it saw."""
+    from friday.sources.code import meanings
+
+    doc = tmp_path / "docs" / "error-codes.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text(CODES_DOC)
+
+    found = meanings(doc, ("ERR19", "ERR306"), tmp_path)
+
+    assert found == {
+        "ERR19": "INTERNAL_ERROR — Something failed server-side",
+        "ERR306": "BILLING_ERROR — Midas refused the charge",
+    }
+
+
+def test_a_code_the_doc_does_not_list_is_absent_rather_than_invented(tmp_path):
+    from friday.sources.code import meanings
+
+    doc = tmp_path / "error-codes.md"
+    doc.write_text(CODES_DOC)
+
+    assert meanings(doc, ("ERR999",), tmp_path) == {}
+
+
+def test_a_doc_outside_the_clone_is_not_read(tmp_path):
+    """`error_codes_doc` is a path from a row somebody typed, and this module
+    checks a path before it opens it — the same rule as a stack frame."""
+    from friday.sources.code import meanings
+
+    outside = tmp_path / "outside" / "error-codes.md"
+    outside.parent.mkdir(parents=True)
+    outside.write_text(CODES_DOC)
+    (tmp_path / "clone").mkdir()
+
+    assert meanings(outside, ("ERR19",), tmp_path / "clone") == {}
+
+
+async def test_the_node_carries_the_meanings_of_what_it_saw(db, tmp_path):
+    doc = tmp_path / "error-codes.md"
+    doc.write_text(CODES_DOC)
+    state = (
+        prepared()
+        .with_result("resolve", {
+            "status": "ok", "reason": "",
+            "placement": {"env": "dev", "service": "s"},
+            "project": {
+                "name": "reelme", "repo_path": str(tmp_path),
+                "error_codes_doc": str(doc),
+            },
+        })
+        .with_result("find_request_log", {
+            "status": "ok", "reason": "", "frames": [],
+            "histogram": [["ERR19", 2104], ["ERR999", 1]],
+        })
+    )
+
+    result = await read_failing_code_node().run(state, deps_for(db))
+
+    assert result["codes"] == {"ERR19": "INTERNAL_ERROR — Something failed server-side"}
+    assert "ERR999" not in result["codes"], "not in the doc, not invented"
+
+
+def test_a_two_column_table_is_read_as_well_as_a_three(tmp_path):
+    """The real document has both — 130 rows of `code | name | meaning` and
+    69 of `code | meaning`. Wanting three silently dropped every Midas code,
+    `ERR306` among them, which ticket 16 counted 3,455 times in 30 days."""
+    from friday.sources.code import meanings
+
+    doc = tmp_path / "error-codes.md"
+    doc.write_text(
+        "| Code | Meaning |\n"
+        "| ---- | ------- |\n"
+        "| `ERR306` | Content pack required |\n"
+    )
+
+    assert meanings(doc, ("ERR306",), tmp_path) == {
+        "ERR306": "Content pack required"
+    }
+
+
+async def test_what_a_code_means_reaches_the_model(db):
+    """`ERR19` is on every one of this service's HTTP 500s, so the number
+    alone is not evidence of anything. What the repository says it means is
+    the repository's word, not the model's recollection."""
+    seen: list[str] = []
+
+    class Reads:
+        last_error = None
+
+        async def run_structured(self, prompt, **kw):
+            seen.append(prompt)
+            return Diagnosis(
+                cause="ERR19", confidence="possible", conclusive=False, refs=[],
+            )
+
+    state = (
+        prepared()
+        .with_result("find_request_log", {
+            "status": "ok", "reason": "", "dossier": "ERROR ERR19",
+            "histogram": [["ERR19", 2104]], "not_checked": [],
+        })
+        .with_result("read_failing_code", {
+            "status": "empty", "reason": "no frame",
+            "codes": {"ERR19": "INTERNAL_SERVER_ERROR — Internal server error"},
+        })
+    )
+
+    await diagnose_node(harness=Reads()).run(state, deps_for(db))
+
+    assert "ERR19: INTERNAL_SERVER_ERROR" in seen[0]
+    assert "from the repository" in seen[0]
+
+
+async def test_a_business_error_with_no_stack_is_still_worth_diagnosing(db):
+    """A 4xx with a domain message carries no stack at all, and what its code
+    means is the whole of what there is to read. Refusing to think without a
+    dossier would refuse exactly the case the operator says is harder."""
+    class Reads:
+        last_error = None
+
+        async def run_structured(self, prompt, **kw):
+            return Diagnosis(
+                cause="ERR306: content pack required", confidence="likely",
+                conclusive=True, refs=[],
+            )
+
+    state = (
+        prepared()
+        .with_result("find_request_log", {"status": "empty", "reason": "no line"})
+        .with_result("read_failing_code", {
+            "status": "empty", "reason": "no frame",
+            "codes": {"ERR306": "Content pack required"},
+        })
+    )
+
+    result = await diagnose_node(harness=Reads()).run(state, deps_for(db))
+
+    assert status_of(result) == "empty", "conclusive with no ref is still refused"
+    assert "pointed at nothing" in result["reason"]

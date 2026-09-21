@@ -120,3 +120,33 @@ recurring shape:
 `release_resolve` through the devops MCP, which waits on the Keycloak client
 — the detached worktree under `data/checkouts/`, CodeGraph, repo docs, and
 the enclosing function and caller hop.
+
+
+## The repository's own error codes, 2026-09-21
+
+`ERR19` is on **every one of 2,104 HTTP 500s** this service returned in 30
+days (ticket 16). A diagnosis that sees the number and nothing else can say
+nothing, so node 3 now reads what the repository says it means.
+
+`friday/sources/code.py:meanings` takes the codes this run's histogram
+actually saw and pulls their rows out of `project.error_codes_doc` — **only
+those**, because the real document is 271 lines and a run sees three, which
+is the rule `describe_schema` already got.
+
+Two things it found by being run against the real file:
+
+- The document has **two-column and three-column tables** — 130 rows of
+  `code | name | meaning` and 69 of `code | meaning`. A parser wanting three
+  silently dropped every Midas code, `ERR306` among them, which ticket 16
+  counted 3,455 times in 30 days.
+- A code the document does not list is **absent rather than explained**. The
+  gap is the honest answer: a model told "nothing is known about ERR999" has
+  been told something; a model shown nothing for it has not.
+
+Confined to the clone like everything else this module opens — the path
+arrives from a `project` row somebody typed, and a path somebody typed is
+still a path.
+
+A frame-less run still carries the codes: a business error, a 4xx with a
+domain message, has no stack at all and what its code means is the whole of
+what there is to read.

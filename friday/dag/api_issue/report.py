@@ -98,6 +98,16 @@ def render(state: DAGState, *, task_id: int, at: datetime) -> str:
                 if status_of(node) in {"skipped", "empty", "error"}:
                     not_checked.append(f"{node.get('reason', '')}")
 
+    explained = (read.get("codes") or {}) if isinstance(read, dict) else {}
+    counted = found.get("histogram") or []
+    if counted:
+        lines += ["", "## Every error code in the window, counted", ""]
+        lines += [
+            f"- `{code}`: {n}"
+            + (f" — {explained[code]}" if code in explained else "")
+            for code, n in counted
+        ]
+
     lines += ["", "## What it did not check", ""]
     lines += [f"- {line}" for line in not_checked if line] or ["- nothing recorded"]
 

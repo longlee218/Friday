@@ -107,6 +107,8 @@ def build_input(
     dossier: str,
     code: str,
     not_checked: tuple[str, ...],
+    histogram: tuple[tuple[str, int], ...] = (),
+    codes: dict[str, str] | None = None,
 ) -> str:
     """The case, as one prompt: what was reported, what the log said, what the
     code says, and what nobody looked at.
@@ -127,6 +129,26 @@ def build_input(
         "## Source around the stack frames",
         user_input(code) or "(none — no frame named a file in the clone)",
     ]
+    if histogram:
+        # Counts, not lines, and they are evidence of a different kind: a
+        # code appearing 40 times in the window is background, and the one
+        # appearing once beside this request is not. Unquoted because it is
+        # this process's own arithmetic over what it read, not something a
+        # reporter wrote.
+        parts += [
+            "",
+            "## Every error code in the window, counted",
+            *(f"- {code}: {n}" for code, n in histogram),
+        ]
+    if codes:
+        # The repository's own document, not the model's recollection of
+        # what a code means. `ERR19` is on every one of this service's HTTP
+        # 500s, so without this the number is all there is.
+        parts += [
+            "",
+            "## What those codes mean, from the repository",
+            *(f"- {code}: {meaning}" for code, meaning in sorted(codes.items())),
+        ]
     if not_checked:
         parts += [
             "",

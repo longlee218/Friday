@@ -20,9 +20,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections.abc import Sequence
 from pathlib import Path
 
-__all__ = ["CONTAINER_ROOTS", "NOT_OURS", "excerpt", "original", "repo_file"]
+__all__ = [
+    "CONTAINER_ROOTS", "NOT_OURS", "excerpt", "meanings", "original",
+    "repo_file",
+]
 
 log = logging.getLogger(__name__)
 
@@ -187,3 +192,54 @@ def _walk(
         if number > line:
             break
     return None
+
+
+#: A markdown table row: `| \`ERR19\` | NAME | Meaning |`. The repo's own
+#: `docs/llm/error-codes.md` is this shape, and a doc that is not yields
+#: nothing — which the node reports rather than guessing a format.
+_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
+
+
+def meanings(
+    doc: Path | str, codes: Sequence[str], root: Path | str
+) -> dict[str, str]:
+    """What the repo says each of these error codes means.
+
+    **Only the codes that turned up.** Ticket 16 measured every one of 2,104
+    HTTP 500s carrying `ERR19` — the generic code — so without this a
+    diagnosis sees a number and can say nothing; and the doc it comes from
+    is 271 lines, which is not a thing to put in a prompt to explain three.
+    The same rule `describe_schema` gets: a check that needs a document needs
+    the rows it asked about.
+
+    Confined to `root` like everything else this module opens. The path
+    arrives from a `project` row somebody typed, and a path somebody typed is
+    still a path.
+
+    A code the doc does not list is simply absent. The gap is the honest
+    answer — a model told "ERR999 means nothing is known" has been told
+    something; a model shown nothing for it has not.
+    """
+    where = Path(doc).expanduser().resolve()
+    try:
+        where.relative_to(Path(root).expanduser().resolve())
+        text = where.read_text(errors="replace")
+    except (ValueError, OSError):
+        log.warning("%s is not a document inside %s", doc, root)
+        return {}
+
+    wanted = {code.strip().upper() for code in codes if code}
+    found: dict[str, str] = {}
+    for line in text.splitlines():
+        row = _ROW.match(line)
+        if row is None:
+            continue
+        cells = [cell.strip().strip("`").strip() for cell in row.group("cells").split("|")]
+        # **Two cells or three.** The real document has both: 130 rows of
+        # `code | name | meaning` and 69 of `code | meaning`, and a parser
+        # that wanted three silently dropped every Midas code — `ERR306`
+        # among them, which ticket 16 measured 3,455 times in 30 days.
+        if len(cells) < 2 or cells[0].upper() not in wanted:
+            continue
+        found[cells[0].upper()] = " — ".join(part for part in cells[1:3] if part)
+    return found

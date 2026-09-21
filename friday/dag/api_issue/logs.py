@@ -42,6 +42,11 @@ MARGIN = timedelta(minutes=5)
 FIRST_LINES = 400
 WIDER_LINES = 2000
 
+#: How many of *other* requests' error lines are worth quoting beside the
+#: counts. The spec's own number, and the reason there is a histogram: the
+#: first real run quoted sixty-one and called it a dossier.
+OTHER_ERRORS = 8
+
 
 def _reported_at(task: Any) -> datetime:
     """When the reporter said something — what D5's window is measured back
@@ -83,6 +88,14 @@ def dossier_of(result: Any) -> tuple[str, tuple[str, ...]]:
     return result.get("dossier", ""), tuple(result.get("not_checked", ()))
 
 
+def histogram_of(result: Any) -> tuple[tuple[str, int], ...]:
+    """The window's error codes and their counts, as `Diagnose` is shown
+    them."""
+    if not isinstance(result, dict):
+        return ()
+    return tuple((str(code), int(n)) for code, n in result.get("histogram", ()))
+
+
 def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
     """Build node 2.
 
@@ -122,7 +135,7 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
 
         dossier = distil(
             found.lines, correlation_id=correlation_id, matching=needles,
-            max_lines=FIRST_LINES,
+            max_lines=FIRST_LINES, other_error_cap=OTHER_ERRORS,
         )
         widened = ()
         if dossier.worth_widening:
@@ -142,7 +155,7 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
                 )
             dossier = distil(
                 found.lines, correlation_id=correlation_id, matching=needles,
-                max_lines=WIDER_LINES,
+                max_lines=WIDER_LINES, other_error_cap=OTHER_ERRORS,
             )
             widened = (
                 f"the {_said(FIRST_WINDOW)} before {_when(reported_at)} "
@@ -200,6 +213,7 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
             total=dossier.total,
             kept=dossier.kept,
             has_stack=dossier.has_stack,
+            histogram=[[code, n] for code, n in dossier.histogram],
             # Read here rather than by the code node, off the `Dossier` that
             # is still an object — the envelope carries text, and a second
             # pattern re-finding frames in it is a second pattern to keep in
