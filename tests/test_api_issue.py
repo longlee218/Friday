@@ -987,8 +987,11 @@ def test_a_raw_server_cannot_be_handed_to_a_reader_by_mistake():
 
 
 def test_what_a_server_is_filtered_to_is_read_off_the_readers():
-    """A list beside the classes is a list that disagrees with them."""
+    """A list beside the classes is a list that disagrees with them — so the
+    set grows when a reader is added and by no other means."""
     from friday.sources import declared
+    from friday.sources.db import DbSource
     from friday.sources.logs import LokiSource
 
-    assert declared() == LokiSource.TOOLS
+    assert declared() == LokiSource.TOOLS | DbSource.TOOLS
+    assert "execute_mongo_query" not in declared(), "no caller yet"

@@ -78,3 +78,52 @@ Still this ticket's: `DbSource`, `MetricSource`, `DeploySource`,
 `ConfigSource`; the wrapped tools in `friday/tools/`; `collect`; the
 Collector and its prompt. The slice's checks are formulas over the two
 sources that exist, which is the shape the rest are meant to arrive in.
+
+
+## `DbSource` reversed, 2026-09-21 — the model picks the table
+
+This ticket said `DbSource` is `lookup(check_name, key_value)` and "no SQL at
+any layer", in **both** columns of the table above: the check *and* the
+Collector tool were pre-declared. The database was the one source where a
+model was not allowed to decide what to look for.
+
+**The operator reversed it, and the argument is short.** Which table answers
+a question is reasoning. A payment failure might be in `PSPLedgerTransaction`
+or `Purchase` or `Subscription`, and which one depends on what the log said —
+no table of pre-declared checks enumerates that in advance. "The difference
+is who decides what to look for, never what is called" is this ticket's own
+sentence, and the database was the exception to it.
+
+**The reason for the exception was writes, and it does not hold.** Every
+database this server offers answers `"permission": "reader"` — measured, not
+assumed. A statement that is not a read fails at the database.
+
+**Built:** `friday/sources/db.py`, three primitives —`databases()`,
+`schema(db_id, table?)`, `query(db_id, sql)` — with four rules that are code
+rather than prompt, each answering something a *read* can still get wrong:
+
+| rule | what it is for |
+|---|---|
+| only this room's `db_id`s, and none if none are written down | eleven databases across two ventures; a missing row is a hand-over |
+| `select`/`with` only, one statement | not to stop a write — the credential does that — but to make a model that misunderstood its job say so loudly |
+| the rows are capped after they arrive, and say so | **measured: this server does not honour `LIMIT`** — `SELECT * FROM (three rows) LIMIT 2` came back with three |
+| personal columns are `[REDACTED]` by name, the name kept | `scrub` catches a credential and not an address |
+
+**`DbCheck` keeps its place and changes its job.** `table`, `key_column`,
+`state_column` are still on the dataclass, and a declared check is still
+worth having — but as the shortcut for a question asked every week, run by
+code for no tokens and no reasoning, not as the only way to ask.
+
+**Two things this does not fix, written down rather than solved.**
+
+- A wrong query answers confidently. `UsageTransaction` is the best-named
+  table in the payment schema and carries no `userId`; a model that picks it
+  gets nothing and concludes there was no transaction. The grounding gate
+  does not help — the empty result *is* evidence it was shown.
+- The cap protects the prompt and **not the database**. A heavy read is
+  still heavy on the far side, and nothing on this side can make it lighter
+  while `LIMIT` is ignored. Worth raising with whoever runs the MCP.
+
+**Still this ticket's:** the wrapped tool a model actually holds, the
+`collect` tool, and the Collector. `DbSource` has no caller yet — it is the
+capability, and `InspectDatabase` is ticket 05.

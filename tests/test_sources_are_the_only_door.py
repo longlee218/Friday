@@ -27,6 +27,7 @@ PACKAGE = Path(__file__).resolve().parent.parent / "friday"
 ALLOWED = {
     "sources/logs.py",
     "sources/code.py",
+    "sources/db.py",
     # `Reads` is the narrowing every other call goes through — the one place
     # allowed to hold a server and pass a call on, and the place that refuses
     # a tool no reader declared.

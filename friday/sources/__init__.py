@@ -151,9 +151,12 @@ def declared() -> frozenset[str]:
     off the classes rather than listed here: a list beside the classes is a
     list that disagrees with them.
     """
+    from friday.sources.db import DbSource
     from friday.sources.logs import LokiSource
 
-    return frozenset().union(*(source.TOOLS for source in (LokiSource,)))
+    return frozenset().union(
+        *(source.TOOLS for source in (LokiSource, DbSource))
+    )
 
 
 #: The same set, resolved once for a caller that wants a constant.
