@@ -107,12 +107,20 @@ Both halves are wrong:
 - `UsageTransaction` looks like a candidate by its name and is not: it is
   keyed on `walletId`/`accountId` and carries **no `userId`** at all.
 
-So the `db_check` the operator still has to choose is between
-`PSPLedgerTransaction` and `Purchase`, on `userId`, reading `status` — and
-`PSPLedgerTransaction.error` is the column that would say *why*, which is
-what a diagnosis is after. That is a choice about which table answers "did
-this user's payment go through", and it is the operator's; the table and
-column names are no longer a guess.
+The operator's answer, 2026-09-21: **`PSPLedgerTransaction`**, on `userId`,
+reading `status`, with `error` as the column that says why.
+
+**It was not a question worth asking, and that is the part worth keeping.**
+`db_checks` exists for the design where `InspectDatabase` runs pre-declared
+checks — the operator says in advance which table answers which question.
+That design was reversed the day before (ticket 15): which table answers a
+question is reasoning, so the model reads `describe_schema` and chooses.
+Asking for it anyway put back the work the reversal had just removed, and
+`grep` says no code reads `db_checks` at all — it is a field in a schema and
+a line in a test fixture.
+
+Kept because the operator answered and the answer is theirs on record, not
+because anything is waiting on it.
 
 ## `fact` (drafts, channel ReelMe)
 

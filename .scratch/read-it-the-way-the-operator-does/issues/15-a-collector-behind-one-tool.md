@@ -114,6 +114,15 @@ rather than prompt, each answering something a *read* can still get wrong:
 worth having — but as the shortcut for a question asked every week, run by
 code for no tokens and no reasoning, not as the only way to ask.
 
+**Nothing reads it today, and nothing should be asked for it.** The day
+after the reversal the operator was asked to choose between two tables for
+a `dependency` row's `db_checks` — which is the work the reversal had just
+removed, for a field `grep` finds in a schema and a test fixture and nowhere
+else. They answered (`PSPLedgerTransaction`, on `userId`, `status`, with
+`error` saying why) and it is recorded in `research/03-seed-rows.md`. The
+lesson is the ticket's own rule, which this broke: nothing is kept — or
+asked for — for a caller that has not arrived.
+
 **Two things this does not fix, written down rather than solved.**
 
 - A wrong query answers confidently. `UsageTransaction` is the best-named
