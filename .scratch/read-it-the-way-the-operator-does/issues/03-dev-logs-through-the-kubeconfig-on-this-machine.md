@@ -38,3 +38,27 @@ than the window. Measured round trip ~1.5 s.
   to the reporter's message, `-o BatchMode=yes`. This ticket owns proving it
   against the real `ssh dev`, and the `command=` restriction in the host's
   `authorized_keys` the spec calls the second lock.
+
+
+## Measured on the real host, 2026-09-21 (ticket 00's first run)
+
+- **A dev pod's history is its last restart, and that is short.** Two probes
+  about an hour apart saw oldest lines of `2026-09-20T20:25Z` and
+  `2026-09-21T07:11:51Z` — a restart in between. A request from
+  `2026-09-20T04:41` was unreachable by either.
+- **`--tail` counts from the newest line, and there is no `--until`.** A
+  window opened 16 hours ago returns the newest N lines of today unless the
+  caller clips. `--timestamps` is what makes clipping possible, and the
+  runtime's own stamp is the right one: the line's `"time"` field exists on
+  this service and not on the next.
+- **Round trip, measured again:** pod lookup plus logs is ~2.5 s, so a read
+  with one widening is ~5 s. Consistent with ticket 16's 1.5 s per hop.
+- `kubectl` writes one warning of its own ahead of the log (`Defaulted
+  container …`), which has no stamp. It is kept rather than dropped —
+  discarding unparseable lines silently is how a format change becomes an
+  empty dossier nobody can explain.
+
+**What this ticket now has to answer:** whether reading dev logs is worth
+building out at all, given that a report usually arrives after the pod that
+served it has restarted. That is ticket 16's measurement 2, and ticket 00's
+open question about replay.

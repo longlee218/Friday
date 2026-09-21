@@ -109,11 +109,10 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
         correlation_id = getattr(params, "correlation_id", None)
         reported_at = _reported_at(deps.task)
 
+        since = reported_at - FIRST_WINDOW
         try:
-            lines = await source.lines(
-                placement,
-                since=reported_at - FIRST_WINDOW,
-                until=reported_at + MARGIN,
+            found = await source.lines(
+                placement, since=since, until=reported_at + MARGIN,
                 limit=FIRST_LINES,
             )
         except Exception as exc:  # noqa: BLE001 — a source that is down is work
@@ -122,18 +121,17 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
             )
 
         dossier = distil(
-            lines, correlation_id=correlation_id, matching=needles,
+            found.lines, correlation_id=correlation_id, matching=needles,
             max_lines=FIRST_LINES,
         )
         widened = ()
         if dossier.worth_widening:
             # One widening, and only one (spec). A window that finds nothing
             # loud twice is a window that is not the problem.
+            since = reported_at - WIDER_WINDOW
             try:
-                lines = await source.lines(
-                    placement,
-                    since=reported_at - WIDER_WINDOW,
-                    until=reported_at + MARGIN,
+                found = await source.lines(
+                    placement, since=since, until=reported_at + MARGIN,
                     limit=WIDER_LINES,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -143,7 +141,7 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
                     f"{type(exc).__name__}: {exc}",
                 )
             dossier = distil(
-                lines, correlation_id=correlation_id, matching=needles,
+                found.lines, correlation_id=correlation_id, matching=needles,
                 max_lines=WIDER_LINES,
             )
             widened = (
@@ -152,12 +150,35 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
                 f"to {_said(WIDER_WINDOW)}",
             )
 
+        # **Out of reach is not the same as not found**, and the first real
+        # run needed the difference. Case 1 was reported sixteen hours before
+        # the oldest line its pod still held: every line the window could
+        # have held was gone, and saying "nothing names this request" would
+        # send the operator looking for a request that was never searched.
+        out_of_reach = (
+            found.oldest is not None
+            and not found.lines
+            and found.oldest > since
+        )
+        if out_of_reach:
+            return envelope(
+                "empty",
+                f"{wanted} holds nothing from {_when(since)}: its oldest line "
+                f"is {_when(found.oldest)}. On dev that is the pod's last "
+                f"restart, so this request was not searched for — it is no "
+                f"longer there to search.",
+                dossier="",
+                source=wanted,
+                total=0,
+                not_checked=[*widened, "the log does not reach back to the report"],
+            )
+
         not_checked = (*widened, *dossier.not_checked)
         if not dossier.lines:
             return envelope(
                 "empty",
-                f"{wanted} returned {dossier.total} lines and none of them "
-                f"names this request",
+                f"{wanted} returned {dossier.total} lines in the window and "
+                f"none of them names this request",
                 dossier="",
                 source=wanted,
                 total=dossier.total,

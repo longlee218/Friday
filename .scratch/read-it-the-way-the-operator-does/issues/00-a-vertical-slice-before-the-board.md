@@ -99,7 +99,66 @@ pasted the *request*, not the response — exactly what D2 predicts. So
 through to "approximately, by path and timestamp", then to replay. See the
 open question.
 
-Answers 1–4: owed, once the slice runs.
+#### The four answers, first run — 2026-09-21
+
+Run against a copy of the live database, from `Resolve` onwards, with the
+real `ssh dev` and **`Diagnose` switched off**: five nodes, 5.1 s wall,
+**0 model calls**.
+
+```
+resolve            ok         5ms
+find_request_log   empty   5123ms   kubectl holds nothing from 2026-09-19T22:41:02Z
+read_failing_code  empty      0ms   no stack frame in the dossier
+diagnose           skipped    0ms   no diagnose agent is configured
+report             ok         5ms
+```
+
+**1. Did the dossier hold the decisive line? No — and the distillation rule
+is not why.** The line is gone. The pod's oldest retained line at run time
+was `2026-09-21T07:11:51Z`; the request was made `2026-09-20T04:41`, about
+**27 hours earlier**. Two probes an hour apart saw two different oldest
+lines, so this is not a retention window but the pod's last restart, and dev
+pods restart often. The slice widened 30m → 6h as designed and neither
+window could reach.
+
+**2. Did `Diagnose` cite a real ref, and was the cause right?** Not asked.
+This pass ran with the agent off on purpose — see "how to run this cheaply"
+below.
+
+**3. Numbers.** 0 dossier tokens and 0 model calls, because nothing was
+found to reason over. `find_request_log` at 5.1 s is four SSH round trips
+(pod lookup + logs, twice, for the widening) against ticket 16's measured
+1.5 s each. Everything else is under 10 ms: this line is I/O and a model,
+never compute.
+
+**4. Which seam broke?** Not the pool, the outbox or the checkpoint. **A
+source did**, and it failed in the worst available way: `kubectl --tail`
+counts from the *newest* line and there is no `--until`, so a window opened
+16 hours ago came back as the newest 400 lines of **today** — errors from
+`/v1/funnelfox/execute-template`, another endpoint entirely — and the node
+returned them as `ok`, 61 lines kept of 400. A diagnosis built on that would
+have been confident, well-evidenced and about someone else's request.
+
+Fixed the same day: `--timestamps` gives the container runtime's own stamp
+(format-independent, unlike the line's `"time"` field, because dev is JSON
+today and a Python traceback tomorrow), the source clips to the window, and
+the node now tells **out of reach** apart from **not found** — "its oldest
+line is X, so this request was not searched for; it is no longer there to
+search".
+
+#### What this case actually taught
+
+**Dev keeps less than the reporter takes to report.** That is not a
+detail — it is the branch. If a dev pod holds a few hours at best and a
+report arrives a day later, `FindRequestLog` on dev will usually find
+nothing, whatever the distillation rule does. Three consequences:
+
+- **Ticket 16's measurement 2 (reporter delay) stops being owed and becomes
+  decisive.** It decides whether the dev branch is worth building out.
+- **The open question above — may Friday replay a request? — is now the main
+  question on dev**, not a corner case. Replay may be the only thing that
+  can answer a dev report at all.
+- The production branch is unaffected: Loki keeps 30 days (ticket 16).
 
 ### Cases 2–5
 

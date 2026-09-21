@@ -123,9 +123,16 @@ class FakeSource:
     def __post_init__(self):
         self.asked = []
 
-    async def lines(self, placement, *, since, until, limit: int) -> list[str]:
+    #: What the pod's oldest line is, when the fake is standing in for a
+    #: back end that can say. `None` is one that cannot, like Loki.
+    oldest: object = None
+
+    async def lines(self, placement, *, since, until, limit: int):
+        from friday.sources import Lines
+
         self.asked.append((since, until))
-        return self.answers[min(len(self.asked) - 1, len(self.answers) - 1)]
+        answer = self.answers[min(len(self.asked) - 1, len(self.answers) - 1)]
+        return Lines(tuple(answer), self.oldest)
 
     @property
     def windows(self) -> list[str]:
@@ -315,6 +322,55 @@ async def test_the_window_is_measured_back_from_the_reporters_message(db):
     (since, until), = source.asked
     assert since == REPORTED_AT - timedelta(minutes=30)
     assert until == REPORTED_AT + timedelta(minutes=5)
+
+
+async def test_a_window_older_than_the_pod_keeps_is_not_reported_as_not_found(db):
+    """Found by the first real run, 2026-09-21. Case 1 was reported sixteen
+    hours before the oldest line its dev pod still held. "Nothing names this
+    request" would send the operator looking for a request that was never
+    searched for; it was not there to search."""
+    await write_rows(db)
+    source = FakeSource(answers=[[]], oldest=REPORTED_AT + timedelta(hours=16))
+    state = prepared().with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert status_of(result) == "empty"
+    assert "oldest line" in result["reason"]
+    assert "not searched for" in result["reason"]
+    assert any("does not reach back" in line for line in result["not_checked"])
+
+
+def test_the_kubectl_window_is_clipped_by_the_runtimes_own_stamps():
+    """`--tail` counts from the newest line and there is no `--until`, so a
+    window that opened sixteen hours ago came back as the newest 400 lines of
+    today — and the node reported them as the reporter's. `--timestamps` is
+    what makes the upper bound possible, and it is the container runtime's
+    stamp rather than the line's own field, because dev is JSON today and a
+    Python traceback tomorrow."""
+    from friday.sources.logs import _within
+
+    since = datetime(2026, 9, 20, 4, 10, tzinfo=timezone.utc)
+    until = datetime(2026, 9, 20, 4, 45, tzinfo=timezone.utc)
+
+    found = _within(
+        [
+            'Defaulted container "backend-reelme-v2" out of: …',
+            "2026-09-21T07:38:50.548Z hôm nay, ngoài cửa sổ",
+            "2026-09-20T04:40:00.000Z đúng request của reporter",
+        ],
+        since=since, until=until,
+    )
+
+    assert found.lines == (
+        'Defaulted container "backend-reelme-v2" out of: …',
+        "đúng request của reporter",
+    ), "kubectl's own warning is kept; the stamp is taken back off"
+    assert found.oldest == datetime(2026, 9, 20, 4, 40, tzinfo=timezone.utc)
 
 
 async def test_a_source_that_fails_is_work_rather_than_a_crash(db):

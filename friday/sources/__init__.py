@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-__all__ = ["LogSource", "Placement"]
+__all__ = ["Lines", "LogSource", "Placement"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +61,25 @@ class Placement:
     pod_pattern: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class Lines:
+    """What a source returned, and what it can say about what it did not.
+
+    `oldest` is the oldest line the back end handed over, **whatever the
+    window asked for** — the first real run needed it. A dev pod keeps only
+    what it has logged since its last restart, and a request from sixteen
+    hours earlier is simply gone; without this the node could not tell "your
+    window holds nothing" from "this pod does not reach back that far", and
+    the second is the one an operator can act on.
+
+    `None` when the source cannot say, which is every source whose back end
+    honours the window itself.
+    """
+
+    lines: tuple[str, ...] = ()
+    oldest: datetime | None = None
+
+
 class LogSource(Protocol):
     """One place log lines come from.
 
@@ -68,10 +87,15 @@ class LogSource(Protocol):
     caller wants is around the reporter's message and not around now (D5).
     Every relative form any of these back ends offers is relative to the
     clock on the far side.
+
+    **A source returns only what is inside the window.** Clipping is the
+    source's job because only the source knows how its back end stamps a
+    line, and a back end that cannot be asked for an upper bound has to be
+    clipped after the fact rather than trusted.
     """
 
     name: str
 
     async def lines(
         self, placement: Placement, *, since: datetime, until: datetime, limit: int
-    ) -> list[str]: ...
+    ) -> Lines: ...

@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shlex
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from friday.sources import Placement
+from friday.sources import Lines, Placement
 
 __all__ = ["LokiSource", "SshKubectlSource"]
 
@@ -45,7 +46,7 @@ class SshKubectlSource:
 
     async def lines(
         self, placement: Placement, *, since: datetime, until: datetime, limit: int
-    ) -> list[str]:
+    ) -> Lines:
         pod = await self._run(
             f"kubectl -n {shlex.quote(placement.namespace)} get pods "
             f"-o name | grep {shlex.quote(placement.pod_pattern)} | head -1"
@@ -58,15 +59,22 @@ class SshKubectlSource:
             )
         # `--since-time` rather than `--since`: kubectl's relative form is
         # relative to *now*, and the window this node wants is around the
-        # reporter's message. There is no `--until`, so lines after the
-        # window are dropped here rather than on the host.
+        # reporter's message.
+        #
+        # `--timestamps` is what makes the upper bound possible at all. There
+        # is no `--until`, and `--tail` counts from the *newest* line — so a
+        # window that opened sixteen hours ago came back as the newest 400
+        # lines of today, and the node reported them as if they were the
+        # reporter's. The container runtime's own stamp is also
+        # format-independent, which the line's own `"time"` field is not:
+        # dev is JSON today and Python tracebacks tomorrow.
         out = await self._run(
             f"kubectl -n {shlex.quote(placement.namespace)} logs "
-            f"{shlex.quote(pod)} "
+            f"{shlex.quote(pod)} --timestamps "
             f"--since-time={shlex.quote(_rfc3339(since))} "
             f"--tail={int(limit)}"
         )
-        return out.splitlines()
+        return _within(out.splitlines(), since=since, until=until)
 
     async def _run(self, remote: str) -> str:
         proc = await asyncio.create_subprocess_exec(
@@ -134,7 +142,10 @@ class LokiSource:
                 "limit": int(limit),
             },
         )
-        return _text_of(result).splitlines()
+        # No clipping and no `oldest`: Loki is asked for both ends of the
+        # window and honours them, so anything this returns is inside it and
+        # nothing here can say what lies before it.
+        return Lines(tuple(_text_of(result).splitlines()))
 
 
 def _reported_at(task: Any) -> datetime:
@@ -188,6 +199,33 @@ def _text_of(result: Any) -> str:
             for part in content
         )
     return str(content)
+
+
+#: `--timestamps` prefixes every line with an RFC3339 stamp and a space.
+_STAMPED = re.compile(r"^(?P<at>\d{4}-\d\d-\d\dT[\d:.]+Z) (?P<line>.*)$")
+
+
+def _within(stamped: list[str], *, since: datetime, until: datetime) -> Lines:
+    """The lines inside the window, with their stamps taken back off, and the
+    oldest stamp seen whether or not it was inside.
+
+    A line with no stamp is kept: `kubectl` writes one warning of its own
+    ("Defaulted container …") ahead of the log, and dropping unparseable
+    lines silently is how a format change becomes an empty dossier nobody
+    can explain.
+    """
+    kept: list[str] = []
+    oldest: datetime | None = None
+    for raw in stamped:
+        found = _STAMPED.match(raw)
+        if found is None:
+            kept.append(raw)
+            continue
+        at = datetime.fromisoformat(found.group("at").replace("Z", "+00:00"))
+        oldest = at if oldest is None else min(oldest, at)
+        if since <= at <= until:
+            kept.append(found.group("line"))
+    return Lines(tuple(kept), oldest)
 
 
 def _rfc3339(at: datetime) -> str:
