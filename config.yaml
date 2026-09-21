@@ -238,28 +238,34 @@ keep_model_calls_days: 14
 # server offers — including its write tools, if it has any. A trace is a
 # read-only act, so name what it may use.
 mcp_servers: {}
-# Empty, and nothing looks for a named server any more: the two below were
-# `loki` and `source`, wanted by the `api_issue` graph's nodes, and that graph
-# was removed (see the note in the agents section). They are left as a worked
-# example of the shape, not as something to switch on.
+# Empty until a token exists for the one server below. `run_agent.py` opens
+# every server here at startup, so a block that cannot authenticate is a boot
+# that fails — uncomment it on the day the token is in `.env`, not before.
 #
-# `allow` is the filter — a prompt is a request and a filter is not, so an
-# agent asked "why did this request fail" is not able to delete a log stream
-# or write a file.
+# **`allow` is the filter, and it is the whole guard.** A prompt is a request
+# and a filter is not. This server offers `release_rollback`,
+# `release_apply`, `godaddy_dns_edit_record`, `vibecode_set_secret` and a
+# dozen more that change production; the list below is one line long because
+# one line is what has a caller. Add a name when something needs it, never
+# ahead of that.
 #
-#  loki:
-#    command: npx
-#    args: ["-y", "<the loki mcp server>"]
-#    env:
-#      LOKI_URL: ${LOKI_URL}
-#    allow: [query_range, labels]
-#
-#  source:
-#    command: npx
-#    args: ["-y", "<a filesystem mcp server>", "/path/to/the/repo"]
-#    # Read-only. Nothing here writes, and the node that would have
-#    # (`dag_fix`, calling `apply_fix`) went with the graph.
-#    allow: [read_file, search_files]
+#  devops-generic:
+#    # Measured 2026-09-21: streamable HTTP, not SSE. The server decides
+#    # which it speaks, and an SSE client against an HTTP one fails at
+#    # connect saying nothing about transports.
+#    url: "https://devops-generic-mcp.aperogroup.ai/mcp"
+#    transport: http
+#    # This server authenticates per person. Nothing in Friday mints a
+#    # credential — a graph that could reach further than the operator meant
+#    # it to is the thing this whole board avoids — so the token is theirs,
+#    # put in `.env` and named here.
+#    headers:
+#      Authorization: "Bearer ${DEVOPS_MCP_TOKEN}"
+#    # `loki_query_range(query, start, end, limit, direction)`, verified
+#    # against the live catalogue. Ticket 04 will want `release_status` and
+#    # `release_resolve` for the running image tag; they are not here yet
+#    # because nothing calls them yet.
+#    allow: [loki_query_range]
 
 outbox:
   # How many times to try one message before handing it to a person.

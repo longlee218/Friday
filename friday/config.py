@@ -199,6 +199,14 @@ class MCPServerConfig:
     args: tuple[str, ...] = ()
     env: dict = field(default_factory=dict)
     url: str = ""
+    #: `http` (streamable HTTP, the default for a `url`) or `sse`. The
+    #: server decides which it speaks; an SSE client against an HTTP server
+    #: fails at connect saying nothing about transports.
+    transport: str = "http"
+    #: Sent with every request — an `Authorization` for a server that wants
+    #: one. `${VAR}` is expanded like any other value, so the token stays in
+    #: `.env` and out of this file.
+    headers: dict = field(default_factory=dict)
     allow: tuple[str, ...] = ()
 
 
@@ -521,7 +529,13 @@ def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
         spec = spec or {}
         if not spec.get("command") and not spec.get("url"):
             raise ConfigError(
-                f"mcp server {name!r} needs either a command (stdio) or a url (sse)."
+                f"mcp server {name!r} needs either a command (stdio) or a url."
+            )
+        transport = str(spec.get("transport", "http"))
+        if transport not in {"http", "sse"}:
+            raise ConfigError(
+                f"mcp server {name!r}: transport {transport!r} is not one of "
+                "http, sse"
             )
         servers.append(
             MCPServerConfig(
@@ -530,6 +544,8 @@ def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
                 args=tuple(spec.get("args") or ()),
                 env=dict(spec.get("env") or {}),
                 url=spec.get("url", ""),
+                transport=transport,
+                headers=dict(spec.get("headers") or {}),
                 allow=tuple(spec.get("allow") or ()),
             )
         )

@@ -173,7 +173,15 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
                 not_checked=[*widened, "the log does not reach back to the report"],
             )
 
-        not_checked = (*widened, *dossier.not_checked)
+        capped = (
+            (
+                f"{wanted} capped what it returned, so these are a sample of "
+                f"the window and not all of it",
+            )
+            if found.truncated
+            else ()
+        )
+        not_checked = (*widened, *capped, *dossier.not_checked)
         if not dossier.lines:
             return envelope(
                 "empty",

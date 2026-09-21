@@ -78,6 +78,12 @@ class Lines:
 
     lines: tuple[str, ...] = ()
     oldest: datetime | None = None
+    #: The back end capped what it returned, so this is a sample rather than
+    #: the window. Loki says so outright (`truncated: true`, with its own
+    #: instruction: "narrow the query rather than assuming you saw
+    #: everything"); a node that does not pass that on is a node quietly
+    #: reasoning over a sample it believes is everything.
+    truncated: bool = False
 
 
 class LogSource(Protocol):

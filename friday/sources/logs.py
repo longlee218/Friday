@@ -12,6 +12,7 @@ it is being read for.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import shlex
@@ -117,13 +118,28 @@ class LokiSource:
 
     Bounded on purpose: `loki_series` over seven days is ~780 KB, and the
     spec says never to ask it unbounded from a graph.
+
+    **Measured against the real server, 2026-09-21.** The tool's name and its
+    four argument names were guesses when this was written and all four came
+    back right. Three things did not:
+
+    - the cluster label is `apero_cluster`, not `cluster`. This Loki
+      aggregates every cluster, so the wrong label name matches nothing and
+      the right one is the difference between one product's logs and seven
+      clusters merged.
+    - the answer is a JSON object of *streams*, one per replica, not a flat
+      block of text. `splitlines()` on it returned JSON fragments.
+    - every line arrives as `"<iso> <line>"`, the same shape `kubectl
+      --timestamps` produces — which is what lets one function strip both.
     """
 
     server: Any
     name: str = "loki"
     tool: str = "loki_query_range"
     #: LogQL. `{...}` is filled with the placement's labels.
-    query: str = '{{cluster="{cluster}", namespace="{namespace}", app="{app}"}}'
+    query: str = (
+        '{{apero_cluster="{cluster}", namespace="{namespace}", app="{app}"}}'
+    )
 
     async def lines(
         self, placement: Placement, *, since: datetime, until: datetime, limit: int
@@ -142,10 +158,12 @@ class LokiSource:
                 "limit": int(limit),
             },
         )
-        # No clipping and no `oldest`: Loki is asked for both ends of the
-        # window and honours them, so anything this returns is inside it and
-        # nothing here can say what lies before it.
-        return Lines(tuple(_text_of(result).splitlines()))
+        # No clipping: Loki is asked for both ends of the window and honours
+        # them. The stamps still come off, and the streams still merge — one
+        # stream per replica, and a dossier that interleaves replicas in
+        # whatever order they arrived is one whose surrounding lines belong
+        # to a different process than the line they surround.
+        return _streams(_text_of(result))
 
 
 def _reported_at(task: Any) -> datetime:
@@ -203,6 +221,47 @@ def _text_of(result: Any) -> str:
 
 #: `--timestamps` prefixes every line with an RFC3339 stamp and a space.
 _STAMPED = re.compile(r"^(?P<at>\d{4}-\d\d-\d\dT[\d:.]+Z) (?P<line>.*)$")
+
+
+def _streams(answered: str) -> Lines:
+    """Loki's compacted answer, as lines in time order.
+
+    `{"streams": [{"labels": …, "lines": ["<iso> <line>", …]}, …],
+    "truncated": bool}` — captured from the real server on 2026-09-21 and
+    kept in `tests/test_api_issue.py` as a fixture, because a shape this
+    module parses is a shape that has to be checked against the thing that
+    produces it rather than against what its documentation says.
+
+    An answer that does not parse is empty rather than an exception: a
+    changed shape should read as "Loki said nothing I understood", which the
+    node reports, and not as a crashed graph.
+    """
+    try:
+        answer = json.loads(answered)
+    except (TypeError, ValueError):
+        log.warning("loki answered something that is not JSON")
+        return Lines()
+    if not isinstance(answer, dict):
+        return Lines()
+
+    stamped: list[tuple[datetime, str]] = []
+    oldest: datetime | None = None
+    for stream in answer.get("streams") or []:
+        for raw in stream.get("lines") or []:
+            at, _, line = str(raw).partition(" ")
+            try:
+                when = datetime.fromisoformat(at.replace("Z", "+00:00"))
+            except ValueError:
+                stamped.append((datetime.max.replace(tzinfo=timezone.utc), str(raw)))
+                continue
+            oldest = when if oldest is None else min(oldest, when)
+            stamped.append((when, line))
+    stamped.sort(key=lambda pair: pair[0])
+    return Lines(
+        tuple(line for _, line in stamped),
+        oldest,
+        bool(answer.get("truncated")),
+    )
 
 
 def _within(stamped: list[str], *, since: datetime, until: datetime) -> Lines:

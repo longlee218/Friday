@@ -47,6 +47,7 @@ from agents.mcp import (
     MCPServer,
     MCPServerSse,
     MCPServerStdio,
+    MCPServerStreamableHttp,
     create_static_tool_filter,
 )
 from agents.tool import default_tool_error_function
@@ -74,6 +75,7 @@ __all__ = [
     "MCPServer",
     "MCPServerSse",
     "MCPServerStdio",
+    "MCPServerStreamableHttp",
     "ToolContext",
     "create_static_tool_filter",
     "tool",

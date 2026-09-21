@@ -126,13 +126,14 @@ class FakeSource:
     #: What the pod's oldest line is, when the fake is standing in for a
     #: back end that can say. `None` is one that cannot, like Loki.
     oldest: object = None
+    truncated: bool = False
 
     async def lines(self, placement, *, since, until, limit: int):
         from friday.sources import Lines
 
         self.asked.append((since, until))
         answer = self.answers[min(len(self.asked) - 1, len(self.answers) - 1)]
-        return Lines(tuple(answer), self.oldest)
+        return Lines(tuple(answer), self.oldest, self.truncated)
 
     @property
     def windows(self) -> list[str]:
@@ -889,3 +890,67 @@ def test_a_node_that_failed_is_named_as_a_seam_that_broke():
     )
 
     assert found["broke"] == ["find_request_log: ssh: no route to host"]
+
+
+# --- Loki, against what the real server actually answers ---------------------
+
+#: Captured from `devops-generic` on 2026-09-21, trimmed to two streams and
+#: three lines. A shape this code parses has to be checked against the thing
+#: that produces it, not against its documentation — three of the guesses in
+#: the first version were wrong and this is what found them.
+LOKI_ANSWER = """{"result_type":"streams","returned":3,"limit":3,
+"truncated":true,"streams":[
+ {"labels":{"apero_cluster":"oregon-llm","namespace":"vsl",
+            "app":"backend-reelme-v2","pod":"backend-reelme-v2-56d5df5c57-jc5fr"},
+  "lines":["2026-09-21T08:27:49.455Z {\\"level\\":\\"INFO\\",\\"path\\":\\"/v2/daily-shot\\"}"]},
+ {"labels":{"apero_cluster":"oregon-llm","namespace":"vsl",
+            "app":"backend-reelme-v2","pod":"backend-reelme-v2-56d5df5c57-dtv9q"},
+  "lines":["2026-09-21T08:27:49.188Z {\\"level\\":\\"INFO\\",\\"path\\":\\"/v1/library\\"}",
+           "2026-09-21T08:27:49.163Z {\\"level\\":\\"INFO\\",\\"path\\":\\"/v1/workflow\\"}"]}]}"""
+
+
+def test_lokis_streams_are_merged_into_one_line_of_time():
+    """One stream per replica. A dossier that interleaves replicas in
+    whatever order they arrived is one whose surrounding lines belong to a
+    different process than the line they surround — and `distil` keeps ±2
+    lines around what it finds."""
+    from friday.sources.logs import _streams
+
+    found = _streams(LOKI_ANSWER)
+
+    assert found.lines[0].endswith('/v1/workflow"}')
+    assert found.lines[-1].endswith('/v2/daily-shot"}')
+    assert found.oldest.isoformat().startswith("2026-09-21T08:27:49.163")
+
+
+def test_the_timestamp_comes_off_and_the_cap_is_reported():
+    from friday.sources.logs import _streams
+
+    found = _streams(LOKI_ANSWER)
+
+    assert not any(line.startswith("2026-") for line in found.lines)
+    assert found.truncated is True
+
+
+def test_an_answer_loki_never_gave_is_empty_rather_than_a_crash():
+    """A changed shape should read as "Loki said nothing I understood",
+    which the node reports, not as a graph that died."""
+    from friday.sources.logs import _streams
+
+    assert _streams("not json").lines == ()
+    assert _streams('{"streams": null}').lines == ()
+
+
+async def test_a_capped_answer_says_so_in_what_it_did_not_check(db):
+    await write_rows(db)
+    source = FakeSource(answers=[["ERROR POST /v1/pod/orders/init 500"]])
+    source.truncated = True
+    state = prepared().with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert any("a sample of the window" in line for line in result["not_checked"])

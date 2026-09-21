@@ -22,6 +22,7 @@ from friday.agent.harness import (
     MCPServer,
     MCPServerSse,
     MCPServerStdio,
+    MCPServerStreamableHttp,
     create_static_tool_filter,
 )
 
@@ -48,9 +49,27 @@ def _one(config: MCPServerConfig) -> MCPServer:
         else None
     )
     if config.url:
-        log.info("mcp server %s over sse: %s", config.name, config.url)
-        return MCPServerSse(
-            params={"url": config.url},
+        # Two ways to speak to a server that is already running, and the
+        # choice is the server's rather than ours. The devops MCP measured on
+        # 2026-09-21 is streamable HTTP; SSE is what this module assumed, and
+        # an SSE client against an HTTP server fails at connect with nothing
+        # about transports in the message.
+        #
+        # `headers` is how a token reaches it. Nothing here obtains one: this
+        # server authenticates per person, and a graph that could mint its
+        # own credential is a graph that can reach further than the operator
+        # meant it to.
+        if config.transport == "sse":
+            log.info("mcp server %s over sse: %s", config.name, config.url)
+            return MCPServerSse(
+                params={"url": config.url, "headers": dict(config.headers)},
+                name=config.name,
+                tool_filter=tool_filter,
+                cache_tools_list=True,
+            )
+        log.info("mcp server %s over http: %s", config.name, config.url)
+        return MCPServerStreamableHttp(
+            params={"url": config.url, "headers": dict(config.headers)},
             name=config.name,
             tool_filter=tool_filter,
             cache_tools_list=True,

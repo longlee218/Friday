@@ -40,9 +40,68 @@ read tools, and a graph node that finds the reporter's request in Loki.
   keeps the request's lines, caps loud lines belonging to *other* requests at
   20 and reports the rest as a count. That is the part of the idea a cap can
   do; the histogram is this ticket's.
-- **The Loki call has never been made.** `friday/dag/api_issue/logs.py`'s
-  `LokiSource` names its tool from `config.yaml` (`api_issue.loki_tool`,
-  default `loki_query_range`) and passes `query`/`start`/`end`/`limit` —
-  every one of those a guess, since ticket 16 read the server's catalogue
-  without running a query through it. The first production case either works
-  or names the tool it could not find.
+- **The Loki call has now been made** — see below. Four guesses were right
+  and three other things were wrong.
+
+
+## Measured against the live server, 2026-09-21
+
+The operator reconnected the MCP, so this stopped being a catalogue read and
+became a query.
+
+**The guesses that were right.** `loki_query_range` is the tool, and its
+arguments are `query`, `start`, `end`, `limit` (plus `direction`). `start`
+and `end` take RFC3339, which is what `friday/sources/logs.py` already
+sends.
+
+**The three that were wrong, all found by one call:**
+
+1. **The cluster label is `apero_cluster`, not `cluster`.** This Loki
+   aggregates every cluster — `loki_label_values` on it returns `byteplus`,
+   `oregon`, `oregon-llm`, `oregon-llm-external`, `virginia`, `vultr-ailab`,
+   `vultr-external` — so the wrong label name matches nothing at all, and the
+   right one is the difference between one product's logs and seven clusters
+   merged. The seed rows' value (`oregon-llm`) was right; only the name was
+   not.
+2. **The answer is a JSON object of streams, one per replica**, not a block
+   of text: `{result_type, returned, limit, truncated, streams: [{labels,
+   lines}]}`. `splitlines()` on it returned JSON fragments. Streams now merge
+   and sort by time — a dossier that interleaves replicas in arrival order is
+   one whose surrounding lines belong to a different process than the line
+   they surround, and `distil` keeps ±2 lines around what it finds.
+3. **Every line arrives as `"<iso> <line>"`**, the same shape `kubectl
+   --timestamps` produces. The stamp comes off before the dossier is built.
+
+**`truncated: true` is the server's own word** for "the limit was hit —
+narrow the query rather than assuming you saw everything", and it now
+reaches `not_checked`. A node reasoning over a sample it believes is
+everything is the failure this board keeps finding in new places.
+
+A real answer, trimmed, is the fixture in `tests/test_api_issue.py`
+(`LOKI_ANSWER`). A shape this code parses has to be checked against the
+thing that produces it.
+
+## What still blocks production, and it is not the query
+
+**Friday cannot connect to this server yet.** Two things, both now
+half-done:
+
+- **Transport.** The server is streamable HTTP; `friday/agent/mcp.py`
+  handled stdio and SSE only, and an SSE client against an HTTP server fails
+  at connect saying nothing about transports. `MCPServerStreamableHttp` is
+  wired now, with `transport: http | sse` and `headers:` on an
+  `mcp_servers` entry.
+- **Authentication.** The server authenticates per person, over OAuth. There
+  is no token Friday can present, and **nothing here mints one on purpose**:
+  a graph that can obtain its own credential can reach further than the
+  operator meant it to. The `config.yaml` block is written out and commented
+  out, waiting on a token in `.env` as `DEVOPS_MCP_TOKEN`.
+
+**The allow list is one line long**: `loki_query_range`. This server also
+offers `release_apply`, `release_rollback`, `release_rollout`,
+`release_set_env`, `godaddy_dns_add_record`, `godaddy_dns_edit_record`,
+`vibecode_set_secret`, `vibecode_release` and more that change production.
+`allow` is the whole guard — a prompt is a request and a filter is not —
+and a name goes on that list when something calls it, never ahead of that.
+Ticket 04 will want `release_status` and `release_resolve` for the running
+image tag.
