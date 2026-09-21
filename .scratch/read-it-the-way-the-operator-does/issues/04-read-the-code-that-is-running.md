@@ -46,3 +46,29 @@ the first frame, **the enclosing function's name, one hop of callers**":
   the clone, so a compiled `dist` frame does not reach its TypeScript source.
 - The running version. The slice reads HEAD and says so in `not_checked`;
   `DeploySource` and the detached worktree are this ticket's.
+
+## The operator answered finding H, 2026-09-21
+
+Finding H recorded the gap as "image tag → git ref is **assumed, not
+known**". The operator's rule, stated while reviewing the first `project`
+row: **the image version is the release tag.** So the mapping this ticket
+needs is not a guess to be built around — it is a rule, and
+`git worktree add --detach data/checkouts/<repo>@<tag> <tag>` can be built
+straight on it.
+
+**And the fallback changes with it.** Finding H's remedy was "unknown →
+default branch and a `not_checked` line". That is wrong on production, and
+the first real `project` row showed why: its `default_branch` is `develop`.
+Falling back there would answer a question about production out of the
+development branch — code that looks right, is not, and says nothing about
+the difference. Logic drift between the two is the ordinary case, not the
+exception.
+
+So, on production: **an unresolvable tag reads no code at all** and says so.
+No branch fallback. A `not_checked` line saying "I could not tell which
+version is running, so I did not read the source" is worth more than forty
+lines from a branch nobody deployed.
+
+`default_branch` keeps its job on **dev**, where the main clone is what is
+running — which is what the slice already does, and already says in
+`not_checked`.
