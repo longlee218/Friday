@@ -86,7 +86,7 @@ def upgrade() -> None:
             connection.execute(
                 _tasks.update()
                 .where(_tasks.c.id == row.id)
-                .values(params=json.dumps(cleaned))
+                .values(params=cleaned)
             )
 
     for row in connection.execute(sa.select(_outbox.c.id, _outbox.c.text)):

@@ -207,3 +207,66 @@ def test_an_approved_task_carries_its_approval_onto_its_reply_rows(tmp_path):
         11: (None, None),
         20: (None, None),
     }
+
+
+def _task_params(path) -> dict[int, tuple[str, str]]:
+    """`json_type` rather than decoding: a dict stored as a JSON string decodes
+    to a `str` through `sa.JSON`, and that is exactly the drift to catch."""
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.connect() as connection:
+        rows = connection.exec_driver_sql(
+            "SELECT id, json_type(params), json_extract(params, '$.curl')"
+            " FROM tasks ORDER BY id"
+        ).all()
+    engine.dispose()
+    return {row[0]: (row[1], row[2]) for row in rows}
+
+
+def _insert_task(path, id: int, params) -> None:
+    engine = create_engine(f"sqlite:///{path}")
+    live = MetaData()
+    live.reflect(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(live.tables["tasks"].insert(), [
+            dict(id=id, conversation_id="discord:1", type="api_issue",
+                 state="needs_human", confidence=0.9, params=params,
+                 created_at="2026-09-01T00:00:00+00:00"),
+        ])
+    engine.dispose()
+
+
+def test_scrubbing_a_credential_leaves_the_params_an_object(tmp_path):
+    """`b7c1a4e93f02` wrote `json.dumps(cleaned)` into a `sa.JSON` column,
+    which encodes again: every task it scrubbed came back as a JSON string,
+    and the pool died on `'str' object has no attribute 'items'` at boot."""
+    path = tmp_path / "scrubbed.db"
+    _alembic(path, "upgrade", "f81f63e7d3ce")
+    _insert_task(path, 1, {"curl": "curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl' https://x"})
+    _insert_task(path, 2, {"summary": "nothing to scrub"})
+
+    # Not `head`: the repair after it would hide this revision's own bug.
+    _alembic(path, "upgrade", "b7c1a4e93f02")
+
+    params = _task_params(path)
+    assert params[1][0] == "object"
+    assert "[REDACTED]" in params[1][1] and "eyJ" not in params[1][1]
+    assert params[2] == ("object", None)
+
+
+def test_params_the_scrub_double_encoded_are_objects_again(tmp_path):
+    """The live database already ran `b7c1a4e93f02` as it was: fixing that
+    revision does not reach rows it has written. This is the state tasks 4 and
+    6 were in on 2026-09-21."""
+    path = tmp_path / "double.db"
+    _alembic(path, "upgrade", "b7c1a4e93f02")
+    _insert_task(path, 4, '{"curl": "curl [REDACTED]", "summary": "x"}')
+    _insert_task(path, 5, {"summary": "untouched"})
+    _insert_task(path, 7, "not json")
+
+    _alembic(path, "upgrade", "head")
+
+    assert _task_params(path) == {
+        4: ("object", "curl [REDACTED]"),
+        5: ("object", None),
+        7: ("text", None),
+    }
