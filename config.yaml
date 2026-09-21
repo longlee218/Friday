@@ -269,6 +269,32 @@ mcp_servers: {}
 #      token_url: "https://<keycloak>/realms/<realm>/protocol/openid-connect/token"
 #      client_id: friday
 #      client_secret: ${DEVOPS_MCP_CLIENT_SECRET}
+#
+#  db-generic:
+#    # The database MCP, `devops-dbx`. Same transport, same grant, its own
+#    # Keycloak client — so a role can be given to one and not the other.
+#    url: "https://devops-dbx.aperogroup.ai/mcp"
+#    transport: http
+#    auth:
+#      kind: keycloak
+#      token_url: "https://<keycloak>/realms/<realm>/protocol/openid-connect/token"
+#      client_id: friday-db
+#      client_secret: ${DB_MCP_CLIENT_SECRET}
+#
+# **Nothing declares a tool on `db-generic` yet, and that is deliberate.**
+# Its catalogue has never been read — the spec records it as "exists and was
+# not authenticated in the session; its tools and whether it is read-only
+# are ticket 05's first fact to fetch". A `DbSource` written against a
+# guessed catalogue is the mistake this board has already paid for twice:
+# `loki_query_range`'s arguments were guessed right and three other things
+# about it were wrong.
+#
+# When it is read, the shape is already decided (ticket 15): `DbSource` is
+# `lookup(check_name, key_value)` and **no SQL exists at any layer**. Friday
+# never composes a query; the operator writes a named check as a `dependency`
+# row and code passes a key into it. A database MCP that accepts raw SQL is
+# exactly why that rule is written down — the tool being able to do
+# something is not the same as this system being able to ask for it.
 
 outbox:
   # How many times to try one message before handing it to a person.

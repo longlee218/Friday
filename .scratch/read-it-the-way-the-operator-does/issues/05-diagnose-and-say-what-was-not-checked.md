@@ -87,3 +87,37 @@ Still owed here:
   time per node, model calls — are in `node_runs` and `model_calls` but not
   in the report file. Whichever of the two is the operator's reading surface
   should carry them.
+
+
+## `db-generic`, 2026-09-21 — the block exists, the catalogue does not
+
+The operator asked for the same treatment `devops-generic` got. Half of it
+is done and the other half cannot be done yet, which is worth separating.
+
+**Done.** `config.yaml` carries a commented `db-generic` block —
+`https://devops-dbx.aperogroup.ai/mcp`, streamable HTTP, its own Keycloak
+client (`friday-db`, `DB_MCP_CLIENT_SECRET`). Its own client rather than
+`devops-generic`'s on purpose: a role can then be given to one and not the
+other, which is the only reason two identities are worth having.
+
+**Not done, and not guessed.** Its catalogue has never been read. The spec
+already records this as this ticket's first fact to fetch, and the Loki work
+of the same day is the argument for waiting: four guesses about
+`loki_query_range` were right and three other things about it were wrong —
+the label name, the response shape, and the per-line format. A `DbSource`
+declaring tools nobody has seen would be the third time this board paid for
+that.
+
+**What is already decided, so that reading the catalogue is the only open
+question** (ticket 15): `DbSource` is `lookup(check_name, key_value)` and
+**no SQL exists at any layer**. Friday never composes a query. The operator
+writes a named check as a `dependency` row — table, key column, state column
+— and code passes a key into it. If the server turns out to accept raw SQL,
+that changes nothing here: a tool being able to do something is not the same
+as this system being able to ask for it, and `friday.sources.Reads` is where
+that difference is enforced.
+
+**The one thing to measure first**, when it is authenticated: whether the
+server offers anything that writes. `devops-generic` did — fifteen tools
+that change production — and the allow list being one line long is what
+makes that survivable.
