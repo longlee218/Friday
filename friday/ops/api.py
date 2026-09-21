@@ -57,6 +57,7 @@ from friday.domain.models import (
     Memory,
     MemoryKeyTaken,
     MemoryKind,
+    natural_key,
     MemoryOrigin,
     MemoryRefused,
     Outbound,
@@ -407,13 +408,36 @@ def build_api(
             for m in await db.memories_for_channel(channel_id, limit=limit)
         ])
 
-    @api.get("/api/memory-kinds")
-    async def memory_kinds() -> list[dict]:
+    @api.get("/api/channels/{channel_id}/memory-kinds")
+    async def memory_kinds(channel_id: str = Path(...)) -> list[dict]:
         """The kinds an operator may write, and the fields each one's form
         needs — read off the same schemas `Database.memory_add` checks
         against, so the page cannot offer a field the store does not know.
+
+        **Scoped to a channel because a field can name another row** (ticket
+        19). `ServiceData.project` is a foreign key onto a `project` row's
+        key, and until this route knew which room it was answering for it
+        could only offer that as free text. A field declaring `names` comes
+        back a `choice` over the keys that room actually holds, so the
+        question stops having wrong answers that look like right ones.
+
+        `names` rides along on the wire, and earns it: a room with no rows of
+        that kind yet gets an empty `choices`, and only `names` tells the
+        page whether that means "nothing to choose" or "this was never a
+        choice". The first six rows ever typed were entered into exactly that
+        empty state.
         """
-        return _clean([_kind_form(k) for k in MemoryKind if ADMIN in writers_for(k)])
+        forms = [_kind_form(k) for k in MemoryKind if ADMIN in writers_for(k)]
+        wanted = {
+            field["names"]
+            for form in forms for field in form["fields"] if field["names"]
+        }
+        keys = {kind: await _row_keys(db, channel_id, kind) for kind in wanted}
+        for form in forms:
+            for field in form["fields"]:
+                if field["names"]:
+                    field["choices"] = keys[field["names"]]
+        return _clean(forms)
 
     @api.post("/api/channels/{channel_id}/memories", status_code=201)
     async def add_memory(
@@ -663,6 +687,19 @@ def _memory_row(m: Memory) -> dict:
     }
 
 
+async def _row_keys(db: Database, channel_id: str, kind: str) -> list[str]:
+    """Every key a room's rows of one kind currently hold, for a field that
+    names one of them.
+
+    Read through the same `structured_memories` the graph reads by, and keyed
+    through the same `natural_key` the store writes by — so what the form
+    offers and what a lookup will find cannot be two different lists.
+    """
+    rows = await db.structured_memories(channel_id, kind=kind)
+    found = {natural_key(kind, asdict(row), None) for row in rows}
+    return sorted(key for key in found if key)
+
+
 def _kind_form(kind: MemoryKind) -> dict:
     """One kind's form: prose, a key the operator names, and its fields."""
     shape = MEMORY_DATA[kind]
@@ -689,7 +726,13 @@ def _form_fields(shape: type, prefix: str = "") -> list[dict]:
         if is_dataclass(hint):
             found += _form_fields(hint, f"{name}.")
             continue
-        if get_origin(hint) is Literal:
+        names = str(f.metadata.get("names", ""))
+        if names:
+            # A foreign key is a choice whatever its annotation says: it is
+            # `str` like any other name, and the thing that makes it not free
+            # text is the declaration, not the type.
+            entry = {"type": "choice"}
+        elif get_origin(hint) is Literal:
             entry = {"type": "choice", "choices": list(get_args(hint))}
         elif get_origin(hint) is list and args == [str]:
             entry = {"type": "list"}
@@ -699,7 +742,16 @@ def _form_fields(shape: type, prefix: str = "") -> list[dict]:
             entry = {"type": "text"}
         else:
             entry = {"type": "json"}
-        found.append({"name": name, "required": not optional, "choices": [], **entry})
+        found.append({
+            "name": name,
+            "required": not optional,
+            "choices": [],
+            # Empty for every field that is not a foreign key, which is most
+            # of them. The kind's own name, so the route can fill the
+            # choices and the page can say what is missing.
+            "names": names,
+            **entry,
+        })
     return found
 
 

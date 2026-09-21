@@ -563,7 +563,15 @@ class DevPlacement:
 @dataclass(frozen=True, slots=True)
 class ServiceData:
     name: str
-    project: str
+    #: **`names` is a foreign key, declared where the field is.** The store
+    #: matches this against a `project` row's own key by string equality, and
+    #: for as long as that was a fact only two call sites knew, the form
+    #: asked for it as free text — a question whose wrong answers look
+    #: exactly like its right ones, and the first six rows ever typed proved
+    #: it (ticket 19). Declared here so the form offers the rows that exist
+    #: and a later check can refuse one that does not, from one statement
+    #: rather than two that have to agree.
+    project: str = field(metadata={"names": "project"})
     prod: ProdPlacement
     dev: DevPlacement
 
@@ -597,7 +605,8 @@ class RouteData:
     #: discover from its results.
     domain: str
     env: Literal["dev", "production"]
-    service: str
+    #: The same foreign key as `ServiceData.project`, and the same reason.
+    service: str = field(metadata={"names": "service"})
 
 
 @dataclass(frozen=True, slots=True)

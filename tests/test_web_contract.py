@@ -394,10 +394,65 @@ def test_the_page_and_the_memory_routes_agree(client):
                                           "role": "backend", "team": "orders"}},
     ).json()
     (listed,) = client.get("/api/channels/c1/memories").json()
-    kinds = client.get("/api/memory-kinds").json()
+    kinds = client.get("/api/channels/c1/memory-kinds").json()
 
     assert set(made) == declared("Memory")
     assert set(listed) == declared("Memory")
     assert all(set(k) == declared("MemoryKindForm") for k in kinds)
     fields = [f for k in kinds for f in k["fields"]]
     assert fields and all(set(f) == declared("MemoryField") for f in fields)
+
+
+# --- a field that names another row (ticket 19) ------------------------------
+
+
+def _field(kinds, kind: str, name: str) -> dict:
+    (form,) = [k for k in kinds if k["kind"] == kind]
+    (found,) = [f for f in form["fields"] if f["name"] == name]
+    return found
+
+
+def test_a_field_that_names_another_row_offers_the_rows_that_exist(client):
+    """Ticket 19. `service.project` is matched against a `project` row's key
+    by string equality, and asking for that as free text is a question whose
+    wrong answers look exactly like its right ones — the first six rows ever
+    typed proved it."""
+    for name in ("reelme-v2", "midas"):
+        client.post("/api/channels/c1/memories", json={
+            "kind": "project", "text": f"repo {name}",
+            "data": {"name": name, "repo_path": f"~/{name}",
+                     "default_branch": "main", "stack": "NestJS"},
+        })
+
+    field = _field(client.get("/api/channels/c1/memory-kinds").json(),
+                   "service", "project")
+
+    assert field["type"] == "choice"
+    assert field["names"] == "project"
+    assert field["choices"] == ["midas", "reelme-v2"]
+
+
+def test_the_choices_are_this_rooms_rows_and_not_another_rooms(client):
+    client.post("/api/channels/c1/memories", json={
+        "kind": "project", "text": "repo", "data": {
+            "name": "reelme-v2", "repo_path": "~/x",
+            "default_branch": "main", "stack": "NestJS"},
+    })
+
+    field = _field(client.get("/api/channels/c2/memory-kinds").json(),
+                   "service", "project")
+
+    assert field["choices"] == []
+
+
+def test_no_rows_yet_is_told_apart_from_nothing_to_choose(client):
+    """Every room starts with no rows, and an empty dropdown with no
+    explanation is where the operator would be left. `names` is what lets the
+    page say which kind is missing instead."""
+    kinds = client.get("/api/channels/c1/memory-kinds").json()
+
+    names = _field(kinds, "service", "project")
+    literal = _field(kinds, "route", "env")
+
+    assert (names["names"], names["choices"]) == ("project", [])
+    assert (literal["names"], literal["choices"]) == ("", ["dev", "production"])

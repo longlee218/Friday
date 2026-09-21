@@ -241,7 +241,10 @@ export interface Memory {
 }
 
 /** One kind the operator may write, and what its form asks for — served by
- *  `/api/memory-kinds`, read off the same schemas the store checks. `prose`
+ *  `/api/channels/{id}/memory-kinds`, read off the same schemas the store
+ *  checks. A field with `names` is a foreign key onto that kind's rows, and
+ *  its `choices` are the keys this room holds — empty meaning none written
+ *  yet, which is why `names` is on the wire at all. `prose`
  *  kinds are a text area alone; `names_key` is the runbook, whose key is a
  *  name the operator gives rather than one read off its data. */
 export interface MemoryKindForm {
@@ -253,12 +256,19 @@ export interface MemoryKindForm {
 
 /** One form field. `name` is dotted for a nested object (`prod.cluster`).
  *  `type` is `text`, `number`, `list` (comma-separated), `choice` (one of
- *  `choices`) or `json` (a list of objects, typed by hand). */
+ *  `choices`) or `json` (a list of objects, typed by hand).
+ *
+ *  `names` is the kind this field is a foreign key onto — `""` for the
+ *  fields that are not one, which is most of them. When it is set, `choices`
+ *  holds the keys this room's rows of that kind currently have, and an empty
+ *  `choices` means none have been written yet rather than that there is
+ *  nothing to choose from. */
 export interface MemoryField {
   name: string;
   type: string;
   required: boolean;
   choices: string[];
+  names: string;
 }
 
 /** A memory an agent proposed, waiting for the operator's mark — or already

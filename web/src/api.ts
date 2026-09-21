@@ -50,7 +50,10 @@ export const api = {
   // The operator's own rows (board `read-it-the-way-the-operator-does`,
   // ticket 09). The store checks each one against its kind's schema and the
   // instruction-shape guard; a refusal arrives as `detail` and is thrown.
-  memoryKinds: () => get<MemoryKindForm[]>("/api/memory-kinds"),
+  memoryKinds: (channelId: string) =>
+    get<MemoryKindForm[]>(
+      `/api/channels/${encodeURIComponent(channelId)}/memory-kinds`,
+    ),
   addMemory: (
     channelId: string,
     body: { kind: string; text: string; key?: string; data?: unknown },

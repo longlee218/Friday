@@ -365,6 +365,12 @@ function MemoryPanel({ channelId }: { channelId: string }) {
  *  from `/api/memory-kinds`, which reads them off the schemas the store
  *  checks — so a refusal names a field this form actually showed.
  *
+ *  A field that names another row (`service.project`) is a dropdown over the
+ *  keys this room actually holds, so the operator picks rather than spells.
+ *  With no rows of that kind yet the dropdown would be an empty box with no
+ *  explanation, which is the state every room starts in — so it says what is
+ *  missing instead.
+ *
  *  Given `editing`, the same form corrects that row in place through the PUT
  *  route: its kind and name are fixed, and its fields start from what the
  *  row holds. A name is not editable because `memory_update` takes none — a
@@ -378,7 +384,7 @@ function MemoryForm({
   onSaved: () => void;
   editing?: Memory;
 }) {
-  const kinds = useAsync(() => api.memoryKinds(), []);
+  const kinds = useAsync(() => api.memoryKinds(channelId), [channelId]);
   const [kind, setKind] = useState(editing?.kind ?? "fact");
   const [text, setText] = useState(editing?.text ?? "");
   const [key, setKey] = useState("");
@@ -457,7 +463,11 @@ function MemoryForm({
             {f.type === "list" ? " — comma-separated" : ""}
             {f.type === "json" ? " — JSON" : ""}
           </span>
-          {f.type === "choice" ? (
+          {f.type === "choice" && f.names && f.choices.length === 0 ? (
+            <p className="mono faint">
+              no {f.names} rows in this room yet — add one first
+            </p>
+          ) : f.type === "choice" ? (
             <select
               value={values[f.name] ?? ""}
               onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
