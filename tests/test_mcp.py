@@ -25,7 +25,6 @@ mcp_servers:
     args: ["-y", "some-loki-mcp"]
     env:
       LOKI_URL: https://logs.example.invalid
-    allow: [query_range, labels]
 """
     )
 
@@ -34,7 +33,28 @@ mcp_servers:
     (loki,) = config.mcp_servers
     assert loki.name == "loki"
     assert loki.command == "npx"
-    assert loki.allow == ("query_range", "labels")
+    assert loki.env == {"LOKI_URL": "https://logs.example.invalid"}
+
+
+def test_an_allow_list_in_the_file_is_refused_and_says_where_it_went(tmp_path):
+    """The operator's call, 2026-09-21: which tools may be called is declared
+    in code, on the class that calls them. A file that can widen a guard is a
+    guard the file's next editor widens by accident — on a server that also
+    offers `release_rollback`. Refused rather than ignored, because an
+    ignored `allow:` reads as one that is being honoured."""
+    (tmp_path / "config.yaml").write_text(
+        """
+database_path: ./x.db
+agents: {}
+mcp_servers:
+  loki:
+    command: npx
+    allow: [query_range]
+"""
+    )
+
+    with pytest.raises(ConfigError, match="declared in code"):
+        load_config(tmp_path / "config.yaml")
 
 
 def test_a_server_reached_over_http_needs_no_command(tmp_path):
@@ -63,22 +83,29 @@ def test_a_server_that_is_neither_is_refused(tmp_path):
         load_config(tmp_path / "config.yaml")
 
 
-def test_an_agent_sees_only_the_tools_it_is_allowed():
-    """An MCP server offers whatever it offers. A trace is read-only, and
-    nothing about it should be able to delete a log stream."""
-    (server,) = build([
-        MCPServerConfig(
-            name="loki", command="npx", args=(), env={},
-            allow=("query_range",),
-        )
-    ])
+def test_a_server_offers_only_what_some_reader_declared():
+    """An MCP server offers whatever it offers. The one this system talks to
+    offers `release_rollback`, `release_apply` and `godaddy_dns_edit_record`
+    beside its log tools, so what reaches an agent is the set the readers in
+    `friday/sources/` say they call — passed in from the composition root,
+    never read from the file."""
+    (server,) = build(
+        [MCPServerConfig(name="loki", command="npx", args=(), env={})],
+        allowed=frozenset({"loki_query_range"}),
+    )
 
     assert server.tool_filter is not None
 
 
-def test_no_filter_means_every_tool_and_that_is_a_choice():
-    (server,) = build([
-        MCPServerConfig(name="loki", command="npx", args=(), env={}, allow=())
-    ])
+def test_there_is_always_a_filter_now_and_that_is_the_reversal():
+    """This module used to say "no filter means every tool the server offers,
+    which is a choice rather than an oversight". The choice could not be
+    justified once the real catalogue was read: fifteen of its tools change
+    production. An empty declaration now means a server that offers
+    nothing."""
+    (server,) = build(
+        [MCPServerConfig(name="loki", command="npx", args=(), env={})],
+        allowed=frozenset(),
+    )
 
-    assert server.tool_filter is None
+    assert server.tool_filter is not None

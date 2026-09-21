@@ -29,6 +29,7 @@ from friday.dag.api_issue.report import report_node
 from friday.dag.api_issue.resolve import resolve_node
 from friday.dag.engine import DAG, DAGState, Edge, status_of
 from friday.dag.prepare import prepare_node
+from friday.sources import Reads
 from friday.sources.logs import LokiSource, SshKubectlSource
 
 __all__ = ["build_api_issue_dag", "build_diagnose_harness", "build_log_sources"]
@@ -146,7 +147,13 @@ def build_log_sources(config: Any, servers: dict[str, Any]) -> dict[str, Any]:
         sources["kubectl"] = SshKubectlSource(host=settings.ssh_host)
     server = servers.get(settings.loki_server)
     if server is not None:
-        sources["loki"] = LokiSource(server=server, tool=settings.loki_tool)
+        # Narrowed here, not inside the source: the source declares what it
+        # calls, and this is where a server meets that declaration. A raw
+        # server has no `.call`, so passing one by mistake fails at the first
+        # read rather than reaching the catalogue whole.
+        sources["loki"] = LokiSource(
+            server=Reads(server, LokiSource.TOOLS), tool=settings.loki_tool
+        )
     if not sources:
         log.info(
             "api_issue: no log source configured — set api_issue.ssh_host for "

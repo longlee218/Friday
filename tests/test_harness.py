@@ -130,7 +130,10 @@ async def test_an_agent_can_be_given_servers_it_did_not_have_to_know_about():
     from friday.config import MCPServerConfig
     from friday.agent.mcp import build
 
-    servers = build([MCPServerConfig(name="loki", command="npx", allow=("q",))])
+    servers = build(
+        [MCPServerConfig(name="loki", command="npx")],
+        allowed=frozenset({"q"}),
+    )
 
     run = Harness(config=CONFIG, instructions="i", mcp_servers=servers)
 

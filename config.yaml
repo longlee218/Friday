@@ -238,16 +238,19 @@ keep_model_calls_days: 14
 # server offers — including its write tools, if it has any. A trace is a
 # read-only act, so name what it may use.
 mcp_servers: {}
-# Empty until a token exists for the one server below. `run_agent.py` opens
-# every server here at startup, so a block that cannot authenticate is a boot
-# that fails — uncomment it on the day the token is in `.env`, not before.
+# Empty until the Keycloak client below exists. `run_agent.py` opens every
+# server here at startup, so a block that cannot authenticate is a boot that
+# fails — uncomment it once the client id and secret are in `.env`.
 #
-# **`allow` is the filter, and it is the whole guard.** A prompt is a request
-# and a filter is not. This server offers `release_rollback`,
-# `release_apply`, `godaddy_dns_edit_record`, `vibecode_set_secret` and a
-# dozen more that change production; the list below is one line long because
-# one line is what has a caller. Add a name when something needs it, never
-# ahead of that.
+# **There is no `allow:` here any more, and that is the point.** Which tools
+# may be called is declared in code, on the class that calls them
+# (`friday/sources/logs.py`'s `LokiSource.TOOLS`), and enforced twice: the
+# server is built with a filter over those names, and every call goes
+# through `friday.sources.Reads`, which refuses one no reader declared. A
+# guard a file can widen is a guard the file's next editor widens by
+# accident — on a server that also offers `release_rollback`,
+# `release_apply`, `godaddy_dns_edit_record` and `vibecode_set_secret`.
+# An `allow:` key here is refused at load rather than ignored.
 #
 #  devops-generic:
 #    # Measured 2026-09-21: streamable HTTP, not SSE. The server decides
@@ -255,17 +258,17 @@ mcp_servers: {}
 #    # connect saying nothing about transports.
 #    url: "https://devops-generic-mcp.aperogroup.ai/mcp"
 #    transport: http
-#    # This server authenticates per person. Nothing in Friday mints a
-#    # credential — a graph that could reach further than the operator meant
-#    # it to is the thing this whole board avoids — so the token is theirs,
-#    # put in `.env` and named here.
-#    headers:
-#      Authorization: "Bearer ${DEVOPS_MCP_TOKEN}"
-#    # `loki_query_range(query, start, end, limit, direction)`, verified
-#    # against the live catalogue. Ticket 04 will want `release_status` and
-#    # `release_resolve` for the running image tag; they are not here yet
-#    # because nothing calls them yet.
-#    allow: [loki_query_range]
+#    # Friday presents its **own** Keycloak client, not the operator's token.
+#    # Its roles are set in Keycloak, it is revocable on its own, and it
+#    # appears in Keycloak's log as Friday rather than as a person — which is
+#    # narrower than a pasted token, not wider. The grant is
+#    # `client_credentials`: no user, no browser, no refresh token, and no
+#    # one to copy a string again when it lapses in five minutes.
+#    auth:
+#      kind: keycloak
+#      token_url: "https://<keycloak>/realms/<realm>/protocol/openid-connect/token"
+#      client_id: friday
+#      client_secret: ${DEVOPS_MCP_CLIENT_SECRET}
 
 outbox:
   # How many times to try one message before handing it to a person.

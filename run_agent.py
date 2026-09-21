@@ -188,7 +188,9 @@ async def _run(stack: AsyncExitStack) -> None:
     # Connected here rather than by whoever uses them: a connection has a
     # lifetime, and something has to close it. The stack unwinds with the run.
     # Before the agents, because one of them is handed this list.
-    servers = build_mcp(config.mcp_servers)
+    from friday.sources import DECLARED
+
+    servers = build_mcp(config.mcp_servers, allowed=DECLARED)
     for server in servers:
         await stack.enter_async_context(server)
     if servers:

@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from friday.dag.api_issue import build_api_issue_dag, build_log_sources
 from friday.dag.api_issue.code import read_failing_code_node, repo_file
 from friday.dag.api_issue.diagnose import (
@@ -954,3 +956,39 @@ async def test_a_capped_answer_says_so_in_what_it_did_not_check(db):
     )
 
     assert any("a sample of the window" in line for line in result["not_checked"])
+
+
+async def test_a_reader_may_not_call_a_tool_it_did_not_declare():
+    """The operator's call, 2026-09-21: which tools may be called is code,
+    not configuration. The server this narrows also offers `release_apply`,
+    `release_rollback` and `godaddy_dns_edit_record` — and a guard a file can
+    widen is one the file's next editor widens by accident."""
+    from friday.sources import Reads
+    from friday.sources.logs import LokiSource
+
+    class Server:
+        async def call_tool(self, tool, arguments):
+            return tool
+
+    narrowed = Reads(Server(), LokiSource.TOOLS)
+
+    assert await narrowed.call("loki_query_range", {}) == "loki_query_range"
+    with pytest.raises(PermissionError, match="release_rollback"):
+        await narrowed.call("release_rollback", {})
+
+
+def test_a_raw_server_cannot_be_handed_to_a_reader_by_mistake():
+    """`Reads` is deliberately not a drop-in for a server: it answers `call`
+    where a server answers `call_tool`, so an unnarrowed server fails at the
+    first read instead of reaching the whole catalogue."""
+    from friday.sources import Reads
+
+    assert hasattr(Reads, "call") and not hasattr(Reads, "call_tool")
+
+
+def test_what_a_server_is_filtered_to_is_read_off_the_readers():
+    """A list beside the classes is a list that disagrees with them."""
+    from friday.sources import declared
+    from friday.sources.logs import LokiSource
+
+    assert declared() == LokiSource.TOOLS

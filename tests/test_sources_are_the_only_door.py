@@ -27,6 +27,10 @@ PACKAGE = Path(__file__).resolve().parent.parent / "friday"
 ALLOWED = {
     "sources/logs.py",
     "sources/code.py",
+    # `Reads` is the narrowing every other call goes through — the one place
+    # allowed to hold a server and pass a call on, and the place that refuses
+    # a tool no reader declared.
+    "sources/__init__.py",
 }
 
 #: Starting a process. The whole of how this system reaches `ssh`, `kubectl`

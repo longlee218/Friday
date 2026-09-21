@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from typing import Any
 
-from friday.config import MCPServerConfig
+from friday.config import ConfigError, MCPServerConfig
 from friday.agent.harness import (
     MCPServer,
     MCPServerSse,
@@ -31,23 +32,63 @@ __all__ = ["build"]
 log = logging.getLogger(__name__)
 
 
-def build(configs: Sequence[MCPServerConfig]) -> list[MCPServer]:
+def build(
+    configs: Sequence[MCPServerConfig], *, allowed: frozenset[str]
+) -> list[MCPServer]:
     """Turn configuration into servers. Nothing is connected yet.
 
     Connecting is the composition root's business, because a connection has a
     lifetime and something has to close it.
+
+    `allowed` is every tool any reader in this build declares it calls, and
+    it is passed in rather than read from configuration: the operator's call
+    of 2026-09-21 moved that list into code, onto the classes that make the
+    calls, so a file cannot widen what a server offers. A server whose
+    catalogue holds `release_rollback` hands over a catalogue that does not.
     """
-    return [_one(config) for config in configs]
+    return [_one(config, allowed) for config in configs]
 
 
-def _one(config: MCPServerConfig) -> MCPServer:
-    # No filter means every tool the server offers, which is a choice rather
-    # than an oversight — it is stated here so it reads as one.
-    tool_filter = (
-        create_static_tool_filter(allowed_tool_names=list(config.allow))
-        if config.allow
-        else None
+def _auth(config: MCPServerConfig) -> Any:
+    """The credential handler for this server, or `None`.
+
+    One kind today. A second would be a second branch here and nothing else,
+    which is the shape worth keeping: whoever adds it does not have to find
+    every place a token is attached.
+    """
+    if not config.auth:
+        return None
+    kind = config.auth.get("kind")
+    if kind != "keycloak":
+        raise ConfigError(
+            f"mcp server {config.name!r}: auth kind {kind!r} is not one of: "
+            "keycloak"
+        )
+    missing = [
+        key for key in ("token_url", "client_id", "client_secret")
+        if not config.auth.get(key)
+    ]
+    if missing:
+        raise ConfigError(
+            f"mcp server {config.name!r}: keycloak auth needs {missing}"
+        )
+    from friday.agent.auth import ClientCredentials
+
+    return ClientCredentials(
+        token_url=config.auth["token_url"],
+        client_id=config.auth["client_id"],
+        client_secret=config.auth["client_secret"],
+        scope=str(config.auth.get("scope", "")),
     )
+
+
+def _one(config: MCPServerConfig, allowed: frozenset[str]) -> MCPServer:
+    # Always a filter, and never an empty one. "No filter means every tool"
+    # was a choice this module used to state and can no longer justify: the
+    # one server it actually talks to offers fifteen tools that change
+    # production.
+    tool_filter = create_static_tool_filter(allowed_tool_names=sorted(allowed))
+    auth = _auth(config)
     if config.url:
         # Two ways to speak to a server that is already running, and the
         # choice is the server's rather than ours. The devops MCP measured on
@@ -62,14 +103,25 @@ def _one(config: MCPServerConfig) -> MCPServer:
         if config.transport == "sse":
             log.info("mcp server %s over sse: %s", config.name, config.url)
             return MCPServerSse(
-                params={"url": config.url, "headers": dict(config.headers)},
+                params={
+                    "url": config.url,
+                    "headers": dict(config.headers),
+                    "auth": auth,
+                },
                 name=config.name,
                 tool_filter=tool_filter,
                 cache_tools_list=True,
             )
         log.info("mcp server %s over http: %s", config.name, config.url)
         return MCPServerStreamableHttp(
-            params={"url": config.url, "headers": dict(config.headers)},
+            params={
+                "url": config.url,
+                "headers": dict(config.headers),
+                # Decided per request rather than baked into a header: a
+                # Keycloak access token lapses in minutes, and a header is
+                # set once when this object is built.
+                "auth": auth,
+            },
             name=config.name,
             tool_filter=tool_filter,
             cache_tools_list=True,

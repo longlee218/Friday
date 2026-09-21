@@ -133,6 +133,11 @@ class LokiSource:
       --timestamps` produces — which is what lets one function strip both.
     """
 
+    #: **What this class may call, declared here and nowhere else.** The
+    #: server is filtered to it and every call is checked against it, so
+    #: `config.yaml` can choose among these names and cannot add one.
+    TOOLS = frozenset({"loki_query_range"})
+
     server: Any
     name: str = "loki"
     tool: str = "loki_query_range"
@@ -149,7 +154,7 @@ class LokiSource:
             namespace=placement.namespace,
             app=placement.app,
         )
-        result = await self.server.call_tool(
+        result = await self.server.call(
             self.tool,
             {
                 "query": selector,

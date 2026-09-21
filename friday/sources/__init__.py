@@ -32,9 +32,45 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
-__all__ = ["Lines", "LogSource", "Placement"]
+__all__ = ["DECLARED", "Lines", "LogSource", "Placement", "Reads", "declared"]
+
+
+@dataclass(frozen=True, slots=True)
+class Reads:
+    """A tool server, narrowed to the calls one reader declared.
+
+    **The allow-list is code, not configuration** (the operator's call,
+    2026-09-21). It was a line in `config.yaml`, and a guard that a file can
+    widen is a guard the file's next editor widens by accident — on a server
+    that also offers `release_rollback` and `godaddy_dns_edit_record`.
+
+    Two layers, and the second is the one that holds. The server is built
+    with a filter over the same declarations, so an agent handed it never
+    sees anything else; and every call goes through here, so code that asks
+    for a tool its class did not declare is refused in this process whatever
+    the filter did. Configuration may still choose *which* declared tool to
+    use — a server that spells the same read differently — and cannot add
+    one.
+    """
+
+    server: Any
+    allowed: frozenset[str]
+
+    async def call(self, tool: str, arguments: dict[str, Any]) -> Any:
+        """Named `call` rather than `call_tool`, which is what the server
+        underneath calls it. A `Reads` is deliberately *not* a drop-in for a
+        raw server: if it were, handing a reader an unnarrowed server would
+        type-check and run, and the narrowing would be the thing somebody
+        forgets. It is an `AttributeError` at the first call instead."""
+        if tool not in self.allowed:
+            raise PermissionError(
+                f"{tool!r} is not declared by this reader: it may call "
+                f"{sorted(self.allowed)}. Add it to the class's own TOOLS if "
+                f"it is a read, and nowhere else."
+            )
+        return await self.server.call_tool(tool, arguments)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,3 +141,20 @@ class LogSource(Protocol):
     async def lines(
         self, placement: Placement, *, since: datetime, until: datetime, limit: int
     ) -> Lines: ...
+
+
+def declared() -> frozenset[str]:
+    """Every tool any reader in this package says it calls.
+
+    What a tool server is filtered down to before anything is handed it, so
+    a server offering forty tools offers the four that have a caller. Read
+    off the classes rather than listed here: a list beside the classes is a
+    list that disagrees with them.
+    """
+    from friday.sources.logs import LokiSource
+
+    return frozenset().union(*(source.TOOLS for source in (LokiSource,)))
+
+
+#: The same set, resolved once for a caller that wants a constant.
+DECLARED = declared()

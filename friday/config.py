@@ -203,11 +203,15 @@ class MCPServerConfig:
     #: server decides which it speaks; an SSE client against an HTTP server
     #: fails at connect saying nothing about transports.
     transport: str = "http"
-    #: Sent with every request — an `Authorization` for a server that wants
-    #: one. `${VAR}` is expanded like any other value, so the token stays in
-    #: `.env` and out of this file.
+    #: Sent with every request. For a header a server wants that is not a
+    #: credential; a credential comes from `auth` instead, because a token
+    #: written here is a token somebody has to rewrite when it lapses.
     headers: dict = field(default_factory=dict)
-    allow: tuple[str, ...] = ()
+    #: How to obtain a credential. `{"kind": "keycloak", "token_url",
+    #: "client_id", "client_secret", "scope"?}` — the client-credentials
+    #: grant, exchanged for a short token and exchanged again when it runs
+    #: out. Empty for a server that wants none.
+    auth: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -531,6 +535,13 @@ def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
             raise ConfigError(
                 f"mcp server {name!r} needs either a command (stdio) or a url."
             )
+        if "allow" in spec:
+            raise ConfigError(
+                f"mcp server {name!r}: `allow` is no longer read here. Which "
+                "tools may be called is declared in code, on the class that "
+                "calls them — see `friday.sources.Reads` — so a file cannot "
+                "widen it."
+            )
         transport = str(spec.get("transport", "http"))
         if transport not in {"http", "sse"}:
             raise ConfigError(
@@ -546,7 +557,7 @@ def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
                 url=spec.get("url", ""),
                 transport=transport,
                 headers=dict(spec.get("headers") or {}),
-                allow=tuple(spec.get("allow") or ()),
+                auth=dict(spec.get("auth") or {}),
             )
         )
     return tuple(servers)

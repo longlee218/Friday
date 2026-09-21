@@ -74,7 +74,7 @@ only and reached with `ssh -N -L 8086:127.0.0.1:8086 <host>`.
 | `friday/config.py` | Loads `config.yaml` and resolves `${VAR}`. Outside the packages because it is read before any of them |
 | **`friday/domain/`** | The vocabulary, nothing else: `models.py` (every dataclass, including the twelve `MemoryKind`s, their data shapes and `RoomSummary`), `conversation.py`, `states.py` (`TaskState`/`OutboundState` transitions), `actions.py` (`Ask`/`Reply`/`HandOver`), `validation.py` (the rule engine, one call site), `memory_guard.py` (refuses instruction-shaped memory text) |
 | **`friday/store/`** | `schema.py` the mapped classes, `db.py` the only store, converting at the edge — nothing above it knows SQLAlchemy exists |
-| **`friday/agent/`** | What it takes to call a model, nothing about what to call it for: `harness.py` (only module that may import the SDK), `structured.py` (declared-shape answers), `instruction_prompt.py`, `skills.py`, `mcp.py`, `llm_log.py` |
+| **`friday/agent/`** | What it takes to call a model, nothing about what to call it for: `harness.py` (only module that may import the SDK), `structured.py` (declared-shape answers), `instruction_prompt.py`, `skills.py`, `mcp.py` (servers from configuration, stdio/SSE/streamable-HTTP), `auth.py` (Friday's own Keycloak client, per request), `llm_log.py` |
 | **`friday/memory/`** | `channel_context.py` — the summariser only: it writes one active `summary` row per watched channel. `verdicts.py` — the operator marking a classification right. Every memory is a row in `memories` |
 | **`friday/ops/`** | Alive and safe, deciding nothing: `liveness.py`, `redact.py`, `api.py` (the board's API, including the operator's memory routes) |
 | **`friday/text/`** | `transform.py` splits code out before cleaning prose; `param_hygiene.py` cleans one value |
@@ -240,6 +240,23 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   node is a boundary, not a unit of reuse. Reordering a graph is a change to
   its `edges` in one function, and `DAG.version` is a digest of the shape, so
   it discards the checkpoints that no longer apply by itself.
+
+- **Friday presents its own identity to a tool server, and obtains it
+  itself.** Every MCP server here is behind Keycloak; `friday/agent/auth.py`
+  holds a `client_credentials` grant, fetched on demand and replaced before
+  it lapses, attached per request rather than baked into a header. The
+  identity is a **Keycloak client of Friday's own** — its own roles,
+  revocable on its own, logged as Friday and not as a person — which is what
+  makes this narrower than the operator pasting a token, not wider.
+  (Operator, 2026-09-21, amending "nothing here mints a credential": that
+  argument was about Friday borrowing the *operator's* identity.)
+- **Which tools a server may be asked for is declared in code**, on the
+  class that calls them (`friday/sources/logs.py`'s `LokiSource.TOOLS`), and
+  enforced twice: the server is built with a filter over those names, and
+  every call goes through `friday.sources.Reads`, which refuses one no
+  reader declared. `config.yaml` may not widen it and an `allow:` key there
+  is refused at load. The server this actually talks to offers
+  `release_rollback` and `godaddy_dns_edit_record` beside its log tools.
 
 ### Outbound & approval
 
