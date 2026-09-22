@@ -75,6 +75,7 @@ def build_api_issue_dag(
     extractor: Any = None,
     diagnose: Any = None,
     diagnose_harness: Any = None,
+    make_diagnose_harness: Any = None,
     budget_tokens: int | None = None,
     reports_dir: Path | None = None,
 ) -> DAG:
@@ -118,6 +119,7 @@ def build_api_issue_dag(
             read_failing_code_node(timeout_seconds=CODE_TIMEOUT_SECONDS),
             diagnose_node(
                 harness=diagnose_harness,
+                make_harness=make_diagnose_harness,
                 agent=None if diagnose is None else "diagnose",
                 timeout_seconds=(
                     ROW_TIMEOUT_SECONDS
@@ -208,7 +210,10 @@ def build_release_source(config: Any, servers: dict[str, Any]) -> Any:
     return ReleaseSource(server=Reads(server, ReleaseSource.TOOLS))
 
 
-def build_diagnose_harness(config: Any, *, record: Any = None, spent: Any = None) -> Any:
+def build_diagnose_harness(
+    config: Any, *, record: Any = None, spent: Any = None,
+    tools: list | None = None,
+) -> Any:
     """The model behind `Diagnose`, or `None` when no `diagnose` agent is
     configured.
 
@@ -232,8 +237,12 @@ def build_diagnose_harness(config: Any, *, record: Any = None, spent: Any = None
 
     return Harness(
         config=agent,
-        instructions=build_instructions(),
+        # **The instructions differ by whether it reads for itself.** A model
+        # told to point at lines it was shown, when it was shown nothing and
+        # has to fetch them, is a model given a rule it cannot follow.
+        instructions=build_instructions(reads=bool(tools)),
         answers=Diagnosis,
+        tools=tools,
         record=record,
         spent=spent,
     )

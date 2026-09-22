@@ -187,8 +187,138 @@ def quoted(diagnosis: Diagnosis, index: dict[str, str]) -> list[str]:
 
 
 
+def _judged(answer: Any, index: dict, not_checked: tuple, deps: Any) -> Any:
+    """The gates, shared by both ways of getting an answer.
+
+    **One copy on purpose.** They are the difference between a diagnosis and
+    a plausible sentence, and two copies is one that stops being updated —
+    which matters most here, where a second path was added precisely to be
+    compared against the first. A gate that held on one and not the other
+    would make the comparison meaningless.
+    """
+    invented = unresolved_refs(answer, index)
+    if invented:
+        log.warning(
+            "task %s: diagnosis points at lines it was not shown: %s",
+            deps.task.id, invented,
+        )
+        return envelope(
+            "empty",
+            "the diagnosis pointed at "
+            + ", ".join(repr(ref) for ref in invented[:3])
+            + ", which names no line it was shown — so it was not built "
+            "on the evidence and is not being reported",
+            not_checked=list(not_checked),
+        )
+    if answer.conclusive and not _rejected(answer):
+        # **The shape forcing the question** (spec, tier 1). A cause
+        # nothing was weighed against is the first thing the evidence
+        # suggested, which is exactly the answer a reader cannot tell
+        # from a considered one. `conclusive` is the claim that the
+        # alternatives were thought about, so it is the claim that has
+        # to show one.
+        return envelope(
+            "empty",
+            "the diagnosis called itself conclusive without naming one "
+            "other explanation it ruled out, so nothing shows it was "
+            "weighed against anything",
+            not_checked=list(not_checked),
+        )
+    if answer.conclusive and not answer.refs:
+        # Otherwise the gate is optional: an answer with no pointers has
+        # nothing to refuse, and "conclusive" is exactly the claim that
+        # needs one.
+        return envelope(
+            "empty",
+            "the diagnosis called itself conclusive and pointed at "
+            "nothing, so there is no evidence behind it to report",
+            not_checked=list(not_checked),
+        )
+
+    return envelope(
+        "ok",
+        "",
+        diagnosis=asdict(answer),
+        # The other half of "pointers, not quotes": the model named
+        # lines, and this is what they said. The report renders these,
+        # never the model's own rendering of them.
+        quotes=quoted(answer, index),
+        not_checked=list(not_checked),
+    )
+
+
+async def _reading(state: DAGState, deps: DAGDeps, make_harness: Any) -> Any:
+    """v3.3: the model fetches its own evidence.
+
+    The same answer shape and the same gates — what changes is where the
+    lines it points at came from. `Evidence` is what makes that possible:
+    every line any tool showed is numbered continuously, so `refs` are
+    checked against what this run was actually shown rather than against a
+    dossier built in advance.
+    """
+    from friday.dag.api_issue.logs import _reported_at
+    from friday.dag.api_issue.prompt import build_reads_input
+    from friday.dag.api_issue.resolve import resolved
+    from friday.tools.investigate import Evidence, investigate_tools
+
+    placement, project = resolved(state["resolve"])
+    if project is None:
+        project = {}
+    evidence = Evidence()
+    tools = investigate_tools(
+        evidence=evidence,
+        placement=placement,
+        project=project,
+        log_sources=deps.extra.get("log_sources", {}),
+        reported_at=_reported_at(deps.task),
+        release_tag=str(state.get("resolve", {}).get("release_tag") or ""),
+    )
+    harness = make_harness(tools=tools)
+    if harness is None:
+        return envelope(
+            "skipped", "no diagnose agent is configured, so nothing was diagnosed"
+        )
+
+    params = state["prepare"]
+    answer = await harness.run_structured(
+        build_reads_input(
+            report=getattr(params, "summary", "") or "",
+            placement=placement,
+            project=project,
+            not_checked=(),
+        ),
+        task_id=deps.task.id,
+        node="diagnose",
+    )
+    # **The honest half is the tools\' own**, not the model\'s. What a read
+    # left out is a fact about the read, and a model asked to remember it
+    # reproduces it unreliably.
+    not_checked = tuple(evidence.not_checked)
+    if answer is None:
+        return envelope(
+            "error",
+            harness.last_error or "the diagnose agent returned no answer",
+            not_checked=list(not_checked),
+        )
+    if not evidence.index:
+        # It answered without reading anything. A cause from an endpoint's
+        # name alone reads exactly like one built from evidence, which is
+        # the whole reason the gates exist.
+        return envelope(
+            "empty",
+            "the diagnosis was written without reading a single line, so "
+            "there is no evidence behind it",
+            not_checked=list(not_checked),
+        )
+    return _judged(answer, evidence.index, not_checked, deps)
+
+
 def diagnose_node(
-    *, harness: Any = None, agent: str | None = None, timeout_seconds: float | None = None
+    *, harness: Any = None, agent: str | None = None,
+    timeout_seconds: float | None = None,
+    #: v3.3: build a harness per run, with this run's tools. Given, the node
+    #: reads for itself and `harness` is not used.
+    make_harness: Any = None,
 ) -> Node:
     """Build node 4.
 
@@ -200,6 +330,8 @@ def diagnose_node(
     """
 
     async def _diagnose(state: DAGState, deps: DAGDeps) -> Any:
+        if make_harness is not None:
+            return await _reading(state, deps, make_harness)
         if harness is None:
             return envelope(
                 "skipped",
@@ -244,55 +376,7 @@ def diagnose_node(
                 not_checked=list(not_checked),
             )
 
-        invented = unresolved_refs(answer, index)
-        if invented:
-            log.warning(
-                "task %s: diagnosis points at lines it was not shown: %s",
-                deps.task.id, invented,
-            )
-            return envelope(
-                "empty",
-                "the diagnosis pointed at "
-                + ", ".join(repr(ref) for ref in invented[:3])
-                + ", which names no line it was shown — so it was not built "
-                "on the evidence and is not being reported",
-                not_checked=list(not_checked),
-            )
-        if answer.conclusive and not _rejected(answer):
-            # **The shape forcing the question** (spec, tier 1). A cause
-            # nothing was weighed against is the first thing the evidence
-            # suggested, which is exactly the answer a reader cannot tell
-            # from a considered one. `conclusive` is the claim that the
-            # alternatives were thought about, so it is the claim that has
-            # to show one.
-            return envelope(
-                "empty",
-                "the diagnosis called itself conclusive without naming one "
-                "other explanation it ruled out, so nothing shows it was "
-                "weighed against anything",
-                not_checked=list(not_checked),
-            )
-        if answer.conclusive and not answer.refs:
-            # Otherwise the gate is optional: an answer with no pointers has
-            # nothing to refuse, and "conclusive" is exactly the claim that
-            # needs one.
-            return envelope(
-                "empty",
-                "the diagnosis called itself conclusive and pointed at "
-                "nothing, so there is no evidence behind it to report",
-                not_checked=list(not_checked),
-            )
-
-        return envelope(
-            "ok",
-            "",
-            diagnosis=asdict(answer),
-            # The other half of "pointers, not quotes": the model named
-            # lines, and this is what they said. The report renders these,
-            # never the model's own rendering of them.
-            quotes=quoted(answer, index),
-            not_checked=list(not_checked),
-        )
+        return _judged(answer, index, not_checked, deps)
 
     return Node(
         "diagnose", _diagnose, agent=agent, timeout_seconds=timeout_seconds

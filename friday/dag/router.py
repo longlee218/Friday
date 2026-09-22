@@ -212,14 +212,21 @@ def build_simple_dag(
     )
 
 
-def _graphs(config: Any, *, diagnose_harness: Any = None) -> dict[str, DAG]:
+def _graphs(
+    config: Any, *, diagnose_harness: Any = None,
+    make_diagnose_harness: Any = None,
+) -> dict[str, DAG]:
     """Every type's graph, built from the configuration.
 
     One of them is not the one-node graph: `api_issue` has an investigation
     past node 0 again (ticket 00). Which nodes those are is that package's
     business — this function asks it for a graph and registers what it gets.
     """
-    from friday.dag.api_issue import TASK_TYPE as API_ISSUE, build_api_issue_dag
+    from friday.dag.api_issue import (
+        TASK_TYPE as API_ISSUE,
+        build_api_issue_dag,
+        build_diagnose_harness,
+    )
 
     budget_tokens = config.context.extraction_budget_tokens
     extractor = config.agents.get("extractor")
@@ -239,6 +246,15 @@ def _graphs(config: Any, *, diagnose_harness: Any = None) -> dict[str, DAG]:
             extractor=extractor,
             diagnose=config.agents.get("diagnose"),
             diagnose_harness=diagnose_harness,
+            # **v3.3, and only when the switch is on.** A factory rather than
+            # a harness, because under v3.3 the tools carry this run's
+            # placement and its numbering — one built at boot would read the
+            # previous case's service.
+            make_diagnose_harness=(
+                make_diagnose_harness
+                if settings is not None and settings.diagnose_reads
+                else None
+            ),
             budget_tokens=budget_tokens,
             reports_dir=(
                 None if settings is None else Path(settings.reports_dir)
@@ -310,6 +326,15 @@ def register_dags(
     for task_type, dag in _graphs(
         config,
         diagnose_harness=build_diagnose_harness(config, record=record, spent=spent),
+        # **A factory, because under v3.3 the tools carry this run's
+        # placement and its numbering.** One harness built at boot would read
+        # the previous case's service. Built here because this is where
+        # `record` and `spent` are — they belong to the composition root, and
+        # a lambda reaching for them from `_graphs` would have been a name
+        # error the moment the switch was turned on.
+        make_diagnose_harness=lambda *, tools: build_diagnose_harness(
+            config, record=record, spent=spent, tools=tools
+        ),
     ).items():
         register_dag(task_type, dag)
 

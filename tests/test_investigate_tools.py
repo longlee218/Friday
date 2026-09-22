@@ -400,3 +400,164 @@ def test_a_clone_missing_the_running_tag_says_so_where_the_node_sees_it(tmp_path
     call(tools["read_code"], file="/app/a.ts", line=1)
 
     assert any("9.9.9" in line for line in evidence.not_checked)
+
+
+# --- Diagnose reading for itself (v3.3, ticket 15) --------------------------
+
+
+def _state(db_rows_written=True):
+    """A run that has resolved a placement and read nothing."""
+    from friday.dag.engine import DAGState
+    from friday.domain.models import ApiIssueParams
+
+    return (
+        DAGState.empty()
+        .with_result("prepare", ApiIssueParams(summary="500 khi init đơn"))
+        .with_result("resolve", {
+            "status": "ok", "reason": "",
+            "placement": {
+                "env": "dev", "service": "backend-reelme-v2",
+                "pod_pattern": "backend-reelme-v2", "namespace": "dev",
+            },
+            "project": {"name": "reelme", "repo_path": "/nowhere"},
+        })
+    )
+
+
+class Answering:
+    """A harness that records the prompt and the tools it was built with."""
+
+    last_error = None
+    seen: dict = {}
+
+    def __init__(self, answer, tools):
+        self.answer = answer
+        self._tools = list(tools or ())
+        Answering.seen = {"tools": [t.name for t in tools or ()]}
+
+    async def run_structured(self, prompt, **_):
+        Answering.seen["prompt"] = prompt
+        return self.answer
+
+
+async def test_the_model_is_given_the_reads_and_told_where_things_live(db):
+    """`Gather` gathers metadata under v3.3 — where the service runs, which
+    clone holds its code — and nothing is read in advance."""
+    from friday.dag.api_issue.diagnose import Diagnosis, diagnose_node
+    from friday.dag.engine import DAGDeps
+    from types import SimpleNamespace
+
+    answer = Diagnosis(cause="x", confidence="likely", conclusive=False, refs=[])
+    node = diagnose_node(make_harness=lambda *, tools: Answering(answer, tools))
+
+    await node.run(_state(), DAGDeps(
+        task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
+        db=db, extra={},
+    ))
+
+    assert set(Answering.seen["tools"]) == {"read_log", "read_code", "what_code_means"}
+    # Each field named, not one string that three of them happen to contain:
+    # asserting the pod pattern alone stayed green with `service:` deleted.
+    said = Answering.seen["prompt"]
+    assert "service: backend-reelme-v2" in said
+    assert "environment: dev" in said
+    assert "repository: /nowhere" in said
+    assert "Nothing has been read for you" in said
+
+
+async def test_an_answer_written_without_reading_anything_is_refused(db):
+    """A cause from an endpoint's name alone reads exactly like one built
+    from evidence, which is the whole reason the gates exist. Under the old
+    pipeline the node checked there was a dossier; here nothing was fetched
+    at all."""
+    from friday.dag.api_issue.diagnose import Diagnosis, diagnose_node
+    from friday.dag.engine import DAGDeps, status_of
+    from types import SimpleNamespace
+
+    answer = Diagnosis(cause="chắc là do cache", confidence="likely",
+                       conclusive=False, refs=[])
+    node = diagnose_node(make_harness=lambda *, tools: Answering(answer, tools))
+
+    result = await node.run(_state(), DAGDeps(
+        task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
+        db=db, extra={},
+    ))
+
+    assert status_of(result) == "empty"
+    assert "without reading a single line" in result["reason"]
+
+
+async def test_both_ways_of_answering_pass_through_the_same_gates(db):
+    """Two copies of the gates is one that stops being updated — and this
+    second path exists precisely to be compared against the first, which a
+    gate holding on one and not the other would make meaningless."""
+    import inspect
+
+    from friday.dag.api_issue import diagnose as module
+
+    source = inspect.getsource(module)
+
+    assert source.count("without naming one") == 1, "the alternatives gate, once"
+    assert source.count("which names no line it was shown") == 1, "the refs gate, once"
+    assert source.count("_judged(") == 3, "defined once, called from both paths"
+
+
+def test_the_instructions_change_when_the_model_fetches_its_own_evidence():
+    """A prompt saying "the lines you were shown" to a model that was shown
+    nothing is a prompt it cannot obey. Asserted on the instructions, not on
+    the run's input — deleting the reads half left every other test green."""
+    from friday.dag.api_issue.prompt import build_instructions
+
+    plain, reading = build_instructions(), build_instructions(reads=True)
+
+    assert "Nothing has been read for you" in reading
+    assert "Nothing has been read for you" not in plain
+    assert "read_log" in reading and "read_log" not in plain
+
+
+async def test_what_a_tool_could_not_check_reaches_the_envelope(db):
+    """The honest half is the tools' own, not the model's: what a read left
+    out is a fact about the read, and a model asked to remember it
+    reproduces it unreliably."""
+    from friday.dag.api_issue.diagnose import Diagnosis, diagnose_node
+    from friday.dag.engine import DAGDeps
+    from types import SimpleNamespace
+
+    answer = Diagnosis(cause="x", confidence="likely", conclusive=False,
+                       refs=["L1"])
+
+    class Reads(Answering):
+        async def run_structured(self, prompt, **kw):
+            # The model reads once; the source is out of reach, which the
+            # tool records where the node will find it.
+            await _tool_named(self, "read_log")(needle="abc")
+            return await super().run_structured(prompt, **kw)
+
+    source = Log([], oldest=AT + timedelta(hours=16))
+    node = diagnose_node(make_harness=lambda *, tools: Reads(answer, tools))
+
+    result = await node.run(_state(), DAGDeps(
+        task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
+        db=db, extra={"log_sources": {"kubectl": source}},
+    ))
+
+    assert any("reach back" in line for line in result["not_checked"])
+
+
+def _tool_named(harness, name):
+    """The tool the harness was built with, callable as the model calls it."""
+    import json
+
+    from agents.tool_context import ToolContext
+
+    tool = next(t for t in harness._tools if t.name == name)
+
+    async def invoke(**kw):
+        arguments = json.dumps(kw)
+        return await tool.on_invoke_tool(
+            ToolContext(context=None, tool_name=name, tool_call_id="1",
+                        tool_arguments=arguments),
+            arguments,
+        )
+
+    return invoke

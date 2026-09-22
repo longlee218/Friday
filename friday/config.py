@@ -274,6 +274,13 @@ class ApiIssueConfig:
     #: 150 of it** — the node gets that plus a margin, and it is the single
     #: biggest term by a distance.
     timeout_seconds: float = 420.0
+    #: **v3.3: let `Diagnose` read for itself** (spec, "Architecture v3.3").
+    #: Off by default, and deliberately so: it replaces a pipeline that
+    #: works with one that costs several model calls and is no longer
+    #: deterministic. The switch is what lets `evals/run_api_issue_eval.py`
+    #: run the same cases both ways and compare, which is the only evidence
+    #: that would justify making it the default.
+    diagnose_reads: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -564,6 +571,7 @@ def _api_issue(raw: dict) -> ApiIssueConfig:
     # Every other setting here is a name or a path and is read as text;
     # `timeout_seconds` is the one number, and `str()` on it would make the
     # boot check compare a string to a sum.
+    reads = raw.pop("diagnose_reads", None)
     clock = raw.pop("timeout_seconds", None)
     settings: dict = {k: "" if v is None else str(v) for k, v in raw.items()}
     if clock is not None:
@@ -577,6 +585,12 @@ def _api_issue(raw: dict) -> ApiIssueConfig:
             raise ConfigError(
                 f"api_issue: timeout_seconds must be positive, not {clock!r}"
             )
+    if reads is not None:
+        if not isinstance(reads, bool):
+            raise ConfigError(
+                f"api_issue: diagnose_reads is true or false, not {reads!r}"
+            )
+        settings["diagnose_reads"] = reads
     return ApiIssueConfig(**settings)
 
 

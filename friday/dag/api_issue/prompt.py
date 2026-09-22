@@ -73,15 +73,76 @@ REMINDERS = [
 ]
 
 
-def build_instructions() -> str:
-    """Who it is, the job, how to read, what not to get wrong."""
+#: What changes when the model fetches its own evidence (spec, v3.3). The
+#: rest of the instructions are the same job; these are the parts that stop
+#: being true when nothing has been handed over in advance.
+READS = [
+    "Nothing has been read for you. Start with `read_log`, using the most "
+    "specific thing the report gives you — a correlationId names one "
+    "request, an id names one user, an endpoint names everyone who called "
+    "it.",
+    "A line only becomes citable once a tool has shown it to you. Point at "
+    "the ids in what came back; there is nothing else to point at.",
+    "Found nothing? Widen `minutes_back`, or search a different string. "
+    "Found nothing twice? That is an answer about the request, and saying "
+    "so beats a cause built from the endpoint's name.",
+    "A stack frame in what you read is worth `read_code`. A frame in "
+    "`node_modules` is somebody else's code and is not.",
+]
+
+
+def build_instructions(*, reads: bool = False) -> str:
+    """Who it is, the job, how to read, what not to get wrong.
+
+    `reads` is the v3.3 mode: the model fetches its own evidence instead of
+    being handed a dossier. Two sets of instructions rather than one that
+    hedges, because the half that changes is the half about where evidence
+    comes from, and a prompt saying "the lines you were shown" to a model
+    that was shown nothing is a prompt it cannot obey.
+    """
     return assemble(
         role("Friday", "a backend diagnostician", "you say what caused a failure"),
         trust_boundary(),
         job(JOB),
-        thinking_style(THINKING),
+        thinking_style(THINKING + (READS if reads else [])),
         critical_reminder(REMINDERS),
     )
+
+
+def build_reads_input(
+    *, report: str, placement: Any, project: dict, not_checked: tuple[str, ...]
+) -> str:
+    """The case as metadata: where it lives, and nothing read yet.
+
+    This is the whole of what `Gather` produces under v3.3 — where the
+    service runs, which clone holds its code, what the reporter said. The
+    evidence is the model's to fetch.
+    """
+    where = [
+        f"environment: {placement.env}",
+        f"service: {placement.service}",
+    ]
+    if placement.app:
+        where.append(f"loki app: {placement.app} in {placement.namespace}")
+    if placement.pod_pattern:
+        where.append(f"pods matching: {placement.pod_pattern}")
+    if project.get("repo_path"):
+        where.append(f"repository: {project['repo_path']}")
+    if project.get("stack"):
+        where.append(f"stack: {project['stack']}")
+
+    said = [
+        "## What was reported", report or "(nothing beyond the parameters)",
+        "", "## Where this service lives", *where,
+    ]
+    if not_checked:
+        said += ["", "## Already known not to have been checked", *not_checked]
+    said += [
+        "", "## Your job",
+        "Read what you need with the tools, then answer the shape. Nothing "
+        "has been read for you.",
+    ]
+    return "\n".join(said)
 
 
 def numbered(dossier: str, code: str) -> tuple[str, str, dict[str, str]]:

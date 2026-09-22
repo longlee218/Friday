@@ -2940,3 +2940,63 @@ def test_git_failing_is_no_ref_rather_than_an_exception(tmp_path, monkeypatch):
 
     monkeypatch.setattr(code_source.subprocess, "run", hang)
     assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "1.0.0") is None
+
+
+def test_the_reads_switch_is_true_or_false_and_nothing_else(tmp_path):
+    """It decides whether a pipeline that works is replaced by one that
+    costs several model calls. A string that happens to be truthy is not a
+    decision anybody made."""
+    import pytest as _pytest
+
+    from friday.config import ConfigError, load_config
+
+    path = tmp_path / "config.yaml"
+    path.write_text("api_issue:\n  diagnose_reads: true\n")
+    assert load_config(path).api_issue.diagnose_reads is True
+
+    path.write_text('api_issue:\n  diagnose_reads: "yes"\n')
+    with _pytest.raises(ConfigError, match="true or false"):
+        load_config(path)
+
+
+async def test_the_switch_decides_which_way_diagnose_answers(db):
+    """Off by default, and the switch is what lets the eval run the same
+    cases both ways — a graph that read for itself regardless would have
+    nothing to compare against.
+
+    Asserted by running the node and seeing whether the factory was reached.
+    The first version of this test built both graphs and asserted `True`; it
+    was written while fixing tests that guarded nothing.
+    """
+    from friday.config import ApiIssueConfig
+    from friday.dag import router
+
+    reached = []
+
+    def factory(*, tools):
+        reached.append(tools)
+        return None  # "no agent configured" — the node skips, which is enough
+
+    state = (
+        prepared()
+        .with_result("resolve", {
+            "status": "ok", "reason": "",
+            "placement": {"env": "dev", "service": "s", "pod_pattern": "p"},
+            "project": {"repo_path": "/nowhere"},
+        })
+        .with_result("find_request_log", {"status": "empty", "reason": "none"})
+        .with_result("read_failing_code", {"status": "empty", "reason": "none"})
+    )
+
+    for reads in (False, True):
+        reached.clear()
+        graphs = router._graphs(
+            SimpleNamespace(
+                context=SimpleNamespace(extraction_budget_tokens=1000),
+                agents={},
+                api_issue=ApiIssueConfig(diagnose_reads=reads),
+            ),
+            make_diagnose_harness=factory,
+        )
+        await graphs["api_issue"].node("diagnose").run(state, deps_for(db))
+        assert bool(reached) is reads, f"diagnose_reads={reads}"
