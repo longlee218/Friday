@@ -100,7 +100,8 @@ suite. Triage scored 100% on `evals/triage.jsonl` on 2026-09-20.
 | --- | --- | --- |
 | Language, packaging | Python 3.13, **uv** | `uv add` only; never hand-edit `pyproject.toml` |
 | Storage | **SQLite** (WAL), **SQLAlchemy 2.0 async**, **Alembic** | the only state store; one process |
-| Models | **openai-agents** 0.22 over **Chat Completions**; **MiniMax-M3** at `api.minimax.io` | provider is `base_url`/`api_key`/`model` |
+| Models | **Pydantic AI** (`pydantic-ai-slim`) over **Chat Completions**; **MiniMax-M3** at `api.minimax.io` | provider is `base_url`/`api_key`/`model` (or a `provider:` shorthand); one module imports the vendor (`friday/agent/harness.py`) |
+| Workflows | **DBOS** (`dbos` 3.0, in-process) durable workflows on their **own SQLite system DB** beside the app db | the hand-written DAG engine is retired; the port is `friday/sdk/workflow.py`, the adapter `friday/workflow/adapter.py` — the one module that imports `dbos` |
 | Chat | **discord.py** (bot: buttons, DMs), **discord-self** (the operator's account: reads and replies) | the self-bot is an accepted risk |
 | Tool servers | **MCP** over streamable HTTP: `devops-generic` (Loki, k8s reads), `db-generic` | the operator's SSO session, refreshed by the process (`authorize.py` once) |
 | Dev logs | `kubectl` on the dev host via `ssh dev` | no kubeconfig on this machine |
@@ -186,10 +187,12 @@ is the premise each board tracks against.
    the plugin migration, not after it** (ADR 0001, reversing the earlier
    order): **Pydantic AI** replaces openai-agents (spike 15/15 on MiniMax-M3
    and the real MCP server, `docs/research/pydantic-ai-migration.md`) as §15
-   step 2, drawing the `ModelProvider`/harness seam; **DBOS** (in-process,
-   SQLite) replaces the hand-written DAG engine as §15 step 3 behind a thin
-   `sdk/workflow.py` port (plugins never import `dbos`) — **a DBOS spike on
-   MiniMax-M3 + SQLite is a precondition, not yet done**; **Jev** as a model
+   step 2 (done, tickets 05/18), drawing the `ModelProvider`/harness seam;
+   **DBOS** (in-process, SQLite) has replaced the hand-written DAG engine as
+   §15 step 3 (done, ticket 06) behind the thin `sdk/workflow.py` port — a
+   graph is a `@DBOS.workflow`, `Ask` suspends the run and the reporter's
+   answer re-runs the asking node; the pool drives durable workflows and the
+   spike precondition is cleared; **Jev** as a model
    via `TypeSafeModel` + `FallbackModel`, shadow-run first
    (`docs/research/jev-decision-models.md`). Not adopted: Harness `Skills`,
    `DynamicWorkflow`. Temporal only on more than one machine. Open: may a
