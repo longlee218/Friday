@@ -403,6 +403,36 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   declaration. Triage has a fixture set of real messages with expected
   labels — the regression net for prompt changes.
 
+## The api_issue decisions, D1–D14
+
+The board `read-it-the-way-the-operator-does` numbered fourteen decisions
+about how an API issue is investigated. They are stated once, in that
+board's `spec.md`, with the measurements behind them; this is the index and
+what became of each, because a summary that restates them is a second copy
+to keep in step.
+
+| | Decision | Where it lives now |
+| --- | --- | --- |
+| **D1** | Environment from the domain, by rule | **Amended 2026-09-21 — a *row*, not code.** `environment_of` reads `environment` memory rows by longest suffix; `friday/dag/api_issue/resolve.py`. Friday serves more rooms than one company's, and a module naming `aperogroup.ai` is an install compiled in |
+| **D2** | Findability, not the curl | The curl, **or** the endpoint plus one id. `ApiIssueParams._RULES["_traceable"]`, as a `OneOf` with a group |
+| **D3** | Routing is knowledge the operator writes | `route → service → project` rows; a missing row hands over rather than guessing |
+| **D4** | Two ways to read a log, and only two | `friday/sources/logs.py`: `LokiSource` for production, `SshKubectlSource` for dev. Neither knows what it is read for |
+| **D5** | Search order, and a bounded window | The window is measured back from the **reporter's message**, not from now; one automatic widening. `friday/dag/api_issue/logs.py`. Amended by measurement: the needle is pushed into the back end, because `limit` is a tail |
+| **D6** | Friday reads code and never writes it | Every tool a graph is given is a read, enforced by the absence of a verb in `friday/sources/` rather than by instruction |
+| **D7** | Read the version that is running | `ReleaseSource.running_tag` and the comparison in the code node — identical, different, or unresolved, and it says which |
+| **D8** | Diagnosis answers a shape | `Diagnosis`, with `refs` as **line pointers, not quotes** (measured: 32/40 quoting against 20/20 pointing), and `alternatives_rejected` required when `conclusive` |
+| **D9** | Dependencies between services are knowledge | Half structured, half prose. The structured half is typed in; the prose half is ticket 07 and is the operator's |
+| **D10** | Three outputs, two of them approved | **One** is approved now, on the operator's call (2026-09-22): the acknowledgement is sent unread because it answers nothing, the operator's finding is a DM, and only the reporter's copy waits |
+| **D11** | No redaction while the agent thinks | `scrub` runs on what goes out and on what the board renders, never on the prompt or the report file |
+| **D12** | Findings are written by the agent, directly | Not built. The report file is, and it is the only output that carries the whole of a run |
+| **D13** | Time is a knob | `api_issue.timeout_seconds`, checked at boot against the sum of the graph's node clocks |
+| **D14** | Friday runs on the operator's machine | With what that machine has — `ssh dev`, the clones under `~/Documents/Apero/`, the MCP sessions they sign in to |
+
+**Two are amended by measurement rather than by argument**, which is the
+distinction worth keeping: D1 became a row because a survey found a domain
+this rule would have got wrong, and D5's search order changed because a
+400-line read of a 35-minute window turned out to cover 84 seconds of it.
+
 # Reasoning
 
 The sections below record why the system took its shape. Kept rather than
