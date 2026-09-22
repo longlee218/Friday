@@ -19,7 +19,7 @@ for suites still to come.
 **Source:** conversation 2026-09-22; `https://pydantic.dev/docs/ai/evals`;
 `evals/README.md` (D7 "frozen, never queried"), `CLAUDE.md` § Verifying rule 4.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] `pydantic-evals` added as a dependency (standalone; not `pydantic-ai-harness`)
 - [x] `run_triage_eval.py` runs the frozen set through a `pydantic-evals` `Dataset` of `Case`s and a task that calls the live `Triage`; the confusion matrix, threshold table and out-of-set number still print, computed by the kept `evals/scoring.py`
@@ -27,7 +27,7 @@ for suites still to come.
 - [x] `evals/scoring.py`, `evals/api_issue.py`, `evals/triage.jsonl` and the D7 "frozen, never queried" rule are unchanged
 - [x] The eval runs deterministically (sequential where a scripted model replays by call order — the triage harness serialises at `_one_run` anyway, so parallelism buys it nothing)
 - [x] Tests rewritten to the new runner surface; `test_eval_scoring.py` and `test_eval_dataset.py` stay green; `uv run pytest -q` passes
-- [ ] A live triage-eval run reported (accuracy, confusion matrix, threshold table) — closes ticket 05's item 7 on the new runner
+- [x] A live triage-eval run reported (accuracy, confusion matrix, threshold table) — closes ticket 05's item 7 on the new runner
 
 ## Comments
 
@@ -41,9 +41,10 @@ unchanged — `test_eval_runner`, `test_eval_scoring`, `test_eval_dataset`,
 suite: 1604 passed, 1 skipped; mypy clean on both runners. `scoring.py`,
 `api_issue.py`, `triage.jsonl` untouched.
 
-**Last box needs the operator:** a live triage-eval run is a billed provider
-call — `uv run python -m evals.run_triage_eval`. Running it also closes ticket
-05's item 7. Not run here.
+**2026-09-22 — Done.** Live run on the new runner: 35 examples, accuracy
+100.0%, clean-diagonal confusion matrix, zero out-of-set, thresholds
+0.5→1/0.6→2/0.7→4/0.8→6/0.9→13. No regression vs the pre-swap known-good; also
+closes ticket 05's item 7.
 
 ## Comments
 

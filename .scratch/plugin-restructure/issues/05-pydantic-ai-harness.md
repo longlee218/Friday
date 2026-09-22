@@ -14,7 +14,7 @@
 - [x] Structured output + the one correction turn still work
 - [x] The kernel chain wraps budget, redaction and recording around every model call
 - [x] `uv run pytest -q` passes
-- [ ] Triage eval re-run and reported (accuracy, confusion matrix, threshold table) — the harness is upstream of the classifier
+- [x] Triage eval re-run and reported (accuracy, confusion matrix, threshold table) — the harness is upstream of the classifier
 
 ## Comments
 
@@ -85,3 +85,14 @@ Two boxes left unticked:
   of the classifier), but the eval scores the *live* classifier — a billed
   provider call the operator triggers: `uv run python -m evals.run_triage_eval`
   against `evals/triage.jsonl`. Not run here; still slice 4's box.
+
+**2026-09-22 — Item 7 done: triage eval re-run on the new harness, no
+regression.** `uv run python -m evals.run_triage_eval` (on the pydantic-evals
+runner, ticket 18): **35 examples, accuracy 100.0%**, confusion matrix a clean
+diagonal (access_request 4/4, api_issue 23/23, doc_question 4/4, skip 4/4), zero
+out-of-set. Thresholds (below → escalate): 0.5→1, 0.6→2, 0.7→4, 0.8→6, 0.9→13.
+Matches the pre-swap known-good (100% since the 2026-09-20 label rewrite), so
+the prompt-shape change the swap introduced — the answer tool's per-field schema
+now conveyed in the tool *description* rather than as wire JSON schema — did not
+cost the classifier anything. **Only item 2 (ModelProvider port) remains** and
+is a decision for the operator, so this ticket is not yet `done`.
