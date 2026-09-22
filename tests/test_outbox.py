@@ -487,6 +487,157 @@ async def test_a_question_still_queued_is_not_yet_a_question(db):
     assert await db.unanswered_questions(task.id) == ()
 
 
+# ── Ticket 07: the outbox as a crash-safe delivery ───────────────────────────
+
+
+class Idempotent(Sender):
+    """A channel that dedupes a repeated send from an idempotency key, so a
+    resume may safely re-send it."""
+
+    supports_idempotency = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.keys: list[str | None] = []
+
+    async def send(self, row, *, idempotency_key=None) -> str:
+        self.keys.append(idempotency_key)
+        return await super().send(row)
+
+
+async def test_a_policy_approved_kind_is_frozen_at_enqueue(db):
+    """A kind that needs no approval is released by policy at enqueue, and its
+    payload is hashed there — so the dispatch check has something to hold it
+    against, the same as a reply gets at approval."""
+    opened = await task(db)
+    await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user", text="which environment?",
+    )
+
+    (row,) = await db.outbound()
+    assert row.approved_payload_hash is not None
+
+
+async def test_a_reply_edited_after_approval_is_not_sent(db):
+    """The frozen hash is the guard: an approved reply whose text changed no
+    longer says what the operator released, so the approval is void and the
+    reply goes to a person instead of out."""
+    opened = await task(db)
+    row = await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
+        sender="discord_user", text="here is your answer",
+    )
+    await db.approve_outbound(row.id, by="operator")
+    # Something changed the message after it was approved.
+    await db._set_outbound(row.id, text="a different answer entirely")
+    sender = Sender()
+
+    await outbox(db, sender).run_once()
+
+    assert sender.sent == []
+    assert (await db.outbound())[0].state == "failed"
+    assert (await db.tasks())[0].state == "needs_human"
+
+
+async def test_a_send_interrupted_mid_call_becomes_delivery_unknown(db):
+    """A row found `dispatching` was interrupted between the channel call and
+    the record of it. On a channel that cannot dedupe, the outcome is unknown,
+    so it goes to the operator — never an automatic retry that might double-post."""
+    opened = await task(db)
+    row = await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user", text="which environment?",
+    )
+    # The marker a crash mid-send would leave behind.
+    await db.mark_outbound_dispatching(row.id)
+    sender = Sender()
+
+    outcome = await outbox(db, sender).deliver_once(row.id)
+
+    assert outcome == "delivery_unknown"
+    assert sender.sent == [], "an unknown send is never retried automatically"
+    assert (await db.outbound())[0].state == "delivery_unknown"
+    assert (await db.tasks())[0].state == "needs_human"
+
+
+async def test_an_idempotent_channel_resends_a_dispatching_row(db):
+    """A channel that dedupes turns a crash mid-send into a safe re-send: the
+    same idempotency key means the channel sees the two sends as one, so the
+    row is delivered rather than handed to the operator."""
+    opened = await task(db)
+    row = await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user", text="which environment?",
+    )
+    await db.mark_outbound_dispatching(row.id)
+    sender = Idempotent()
+
+    outcome = await outbox(db, sender).deliver_once(row.id)
+
+    assert outcome == "sent"
+    assert sender.keys == [f"outbox-{row.id}"], "the key is the row, stable across resends"
+    assert (await db.outbound())[0].state == "sent"
+
+
+async def test_the_delivery_step_marks_dispatching_before_it_calls_the_channel(db):
+    """`dispatching` is written before the send — the ordering the whole crash
+    story rests on. A sender that reads the row's state as it is called sees it."""
+    opened = await task(db)
+    row = await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user", text="which environment?",
+    )
+    seen = {}
+
+    class Peeking(Sender):
+        async def send(self, r) -> str:
+            seen["state"] = (await db.outbound_row(r.id)).state
+            return await super().send(r)
+
+    await outbox(db, Peeking()).deliver_once(row.id)
+
+    assert seen["state"] == "dispatching"
+
+
+async def test_a_row_already_resolved_is_not_delivered_again(db):
+    """A resumed delivery whose row another pass already finished with is a
+    no-op — the guard that lets DBOS re-run the step safely."""
+    opened = await task(db)
+    row = await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user", text="which environment?",
+    )
+    await db.mark_outbound_delivery_unknown(row.id, "already handled")
+    sender = Sender()
+
+    outcome = await outbox(db, sender).deliver_once(row.id)
+
+    assert outcome == "delivery_unknown"
+    assert sender.sent == []
+
+
+async def test_a_reply_approved_before_the_hash_existed_is_not_sent(db):
+    """A row approved before this ticket carries no frozen hash. Fail-closed: an
+    unhashable-against approval is treated as void, so the row goes to a person
+    to re-approve rather than out unchecked."""
+    opened = await task(db)
+    row = await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
+        sender="discord_user", text="here is your answer",
+    )
+    await db.approve_outbound(row.id, by="operator")
+    # A legacy row: approved, but with no hash the migration could backfill.
+    await db._set_outbound(row.id, approved_payload_hash=None)
+    sender = Sender()
+
+    await outbox(db, sender).run_once()
+
+    assert sender.sent == []
+    assert (await db.outbound())[0].state == "failed"
+    assert (await db.tasks())[0].state == "needs_human"
+
+
 def test_the_two_lists_of_what_needs_approval_cannot_drift():
     """**Which kinds wait is answered twice**, and only one of the two is a
     rule anybody reads. `Kind.needs_approval` is where the reasoning lives;

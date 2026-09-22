@@ -112,8 +112,11 @@ def register_graph(
 
 
 def clear_graphs() -> None:
-    """Forget every registered graph — for tests that register their own."""
+    """Forget every registered graph and the outbox delivery callable — for
+    tests that register their own."""
+    global _DELIVER
     _GRAPHS.clear()
+    _DELIVER = None
 
 
 def _timed_out(node: Node) -> dict[str, Any]:
@@ -269,6 +272,57 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
         return dict(live.state.results)
     finally:
         _LIVE.pop(wfid, None)
+
+
+# ── Outbox delivery as a durable workflow (ticket 07) ────────────────────────
+#
+# One delivery = one DBOS workflow, keyed `outbox-{row}-{attempt}`, so DBOS gives
+# it exactly-once. The whole delivery decision — the state guard, the frozen-hash
+# check, the staleness check, `dispatching` before the call, the send, the record
+# after — is `Outbox.deliver_once`, written to be safe to re-run. DBOS re-runs a
+# step it has no recorded result for, which is precisely a send interrupted by a
+# crash: the step re-enters, `deliver_once` reads the `dispatching` marker its
+# own crashed run left, and routes to `delivery_unknown` (or re-sends with the
+# idempotency key, on a channel that dedupes) — never a silent double-post.
+#
+# `deliver_once` holds the live `db`/senders, which do not serialize, so the step
+# takes only the row id and looks the callable up from this module-level slot,
+# the same shape `_GRAPHS` uses for the graph walk.
+_DELIVER: Callable[[int], Awaitable[str]] | None = None
+
+
+def register_outbox(deliver_once: Callable[[int], Awaitable[str]]) -> None:
+    """Wire the outbox's one-attempt delivery in, so the durable step can call
+    it. The composition root passes `Outbox.deliver_once`; tests pass their own."""
+    global _DELIVER
+    _DELIVER = deliver_once
+
+
+@DBOS.step()
+async def _deliver_step(outbound_id: int) -> str:
+    """One delivery attempt as a durable step. DBOS memoizes the outcome, so a
+    completed delivery is not repeated on recovery; an interrupted one re-enters
+    here and `deliver_once` reads its own `dispatching` marker."""
+    assert _DELIVER is not None, "register_outbox was not called"
+    return await _DELIVER(outbound_id)
+
+
+@DBOS.workflow()
+async def _deliver_outbound(outbound_id: int) -> str:
+    return await _deliver_step(outbound_id)
+
+
+async def deliver_outbound(outbound_id: int, attempt: int) -> str:
+    """Deliver one row inside a durable workflow, and wait for the outcome.
+
+    The workflow id carries the attempt so an ordinary retry (the row back to
+    `queued`, its count bumped) is a fresh workflow rather than the memoized
+    result of the last one — while a crash mid-send leaves *this* workflow
+    PENDING for DBOS to resume, its row still `dispatching`."""
+    wfid = f"outbox-{outbound_id}-{attempt}"
+    with SetWorkflowID(wfid):
+        handle = await DBOS.start_workflow_async(_deliver_outbound, outbound_id)
+    return await handle.get_result()
 
 
 async def run_node(

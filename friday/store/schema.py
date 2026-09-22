@@ -282,6 +282,11 @@ class Outbound(Base):
     #: a cause. The outbox reads these rather than each caller checking.
     approved_at: Mapped[datetime | None] = mapped_column(IsoDateTime)
     approved_by: Mapped[str | None]
+    #: The message that was approved, hashed — set when the row becomes sendable
+    #: (at enqueue for a policy-approved kind, at approval for a reply). The
+    #: outbox recomputes it at dispatch: a mismatch means the text changed after
+    #: approval, so the approval is void and the row goes to the operator.
+    approved_payload_hash: Mapped[str | None]
     #: On an approval card, the row it asks about — so pressing the button
     #: approves that reply and nothing queued after it.
     approves: Mapped[int | None]

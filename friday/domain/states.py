@@ -95,7 +95,16 @@ class OutboundState(StrEnum):
     """
 
     QUEUED = "queued"
+    #: The channel call is in flight. Written before the send, so a crash
+    #: mid-call leaves this marker behind: a row found `dispatching` at startup
+    #: was interrupted between the call and the record of it, and its outcome is
+    #: unknown. In the normal flow it is overwritten by `sent` a moment later.
+    DISPATCHING = "dispatching"
     SENT = "sent"
+    #: Interrupted mid-send on a channel with no idempotency key, so we cannot
+    #: know whether it went out. Never auto-retried — retrying might double-post
+    #: and re-sending might not — it goes to the operator to decide by hand.
+    DELIVERY_UNKNOWN = "delivery_unknown"
     FAILED = "failed"
     #: Delivered by a person after we gave up. Kept apart from `failed` so the
     #: audit trail says "a human sent this" rather than "this was abandoned".

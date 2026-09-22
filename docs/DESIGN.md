@@ -946,11 +946,33 @@ over the same rows.
   missing correlationId is the system completing a task's own required
   parameters, not the agent speaking for the operator, so it does not queue
   behind a human.
-- **Delivery is at-least-once.** The row is marked sent after the API call, not
-  before. A crash mid-send may post twice; the alternative loses an approved
-  reply silently, and a lost reply is indistinguishable from working correctly.
-- **Retries are bounded**, with backoff, both configured in `config.yaml`. On
-  exhaustion the row goes `failed` and its task to `needs_human`.
+- **Every delivery is a DBOS workflow** (ticket 07), keyed `outbox-{row}-{attempt}`
+  so DBOS gives it exactly-once. The delivery decision — state guard, frozen-hash
+  check, staleness check, `dispatching` before the call, send, record after — is
+  `Outbox.deliver_once`, written to be safe to re-run; the loop polls
+  `sendable_outbound` and hands each row to the durable step through
+  `adapter.deliver_outbound`. In-process (tests) the same `deliver_once` runs
+  directly, no engine. `friday/workflow/adapter.py` is still the one module that
+  names DBOS.
+- **A crash mid-send no longer double-posts or silently loses a reply.**
+  `dispatching` is written before the channel call, so a send interrupted
+  between the call and the record leaves that marker. On resume DBOS re-enters
+  the step and `deliver_once` reads the marker: on a channel that dedupes (it
+  takes an idempotency key, `outbox-{row}`) it re-sends safely; on one that
+  cannot, the outcome is unknown, so the row goes `delivery_unknown` and its task
+  to the operator — **never an automatic retry**. No channel supports an
+  idempotency key today, so an interrupted real send always lands in
+  `delivery_unknown`; the key path is exercised by tests.
+- **Approval freezes the payload as a hash.** `approved_payload_hash` is set when
+  the row becomes sendable — at enqueue for a policy-approved kind (`approved_by
+  = policy`), at approval for a reply — and recomputed at dispatch. A text edited
+  after approval no longer matches, so the approval is void and the row goes to a
+  person. The staleness check (the conversation moved past what an answer
+  answers) still runs alongside it.
+- **Retries are bounded**, with backoff, both configured in `config.yaml`. An
+  ordinary send failure (the channel raised) returns the row to `queued` with
+  its count bumped; on exhaustion the row goes `failed` and its task to
+  `needs_human`. This is a clean failure, distinct from the crash mid-call above.
 - **A failed row is sent by hand.** The bot DMs it with its text; confirming
   moves the row to `sent_manually` and resolves the task. The distinction from
   `failed` is the audit trail: delivered by a human, not abandoned.

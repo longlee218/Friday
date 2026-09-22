@@ -252,24 +252,15 @@ async def _run(stack: AsyncExitStack) -> None:
         db=db,
     )
 
-    # Durable workflows run on DBOS (ticket 06), on their own SQLite system
-    # database beside the application one. Launch after the graphs are
-    # registered, so recovery of any workflow left running by a previous
-    # process can rebuild its Deps; shut it down on the way out. The adapter is
-    # the one module that names the vendor.
     from friday.workflow import adapter
 
-    adapter.launch("friday", str(Path(config.database_path).with_suffix(".system.db")))
-    stack.callback(adapter.shutdown)
-
-    responder = Responder.build(
-        config,
-        skills=skills,
-        db=db,
-        record=record_call,
-        spent=db.spent_today,
-    )
-    pool = Pool.build(config, db=db, responder=responder)
+    # The outbox and its senders are built *before* DBOS launches, for the same
+    # reason the graphs are registered before it (ticket 07): launch recovers
+    # workflows a previous process left running, and a delivery interrupted
+    # mid-send is one of them — recovery re-enters `deliver_once`, which must
+    # already be registered with live senders or the resumed step has nothing to
+    # call. So the button-decision callback, the bot, the senders and the outbox
+    # come first, and `register_outbox` runs ahead of `launch`.
     async def decided(*, outbound_id: int, approved: bool, by: str, by_id: int) -> None:
         """What a button press means.
 
@@ -317,7 +308,30 @@ async def _run(stack: AsyncExitStack) -> None:
         senders=senders,
         max_attempts=config.outbox.max_attempts,
         backoff_seconds=config.outbox.backoff_seconds,
+        # Each delivery runs inside a DBOS workflow (ticket 07), so a crash
+        # mid-send resumes exactly once — no double-post, no silent loss. The
+        # adapter is the one module that names the vendor; the step calls back
+        # into `deliver_once` for the delivery itself.
+        durable=adapter.deliver_outbound,
     )
+    adapter.register_outbox(outbox.deliver_once)
+
+    # Durable workflows run on DBOS (ticket 06), on their own SQLite system
+    # database beside the application one. Launch after the graphs and the
+    # outbox delivery are registered, so recovery of any workflow left running
+    # by a previous process can rebuild its Deps and resume its delivery; shut
+    # it down on the way out. The adapter is the one module that names the vendor.
+    adapter.launch("friday", str(Path(config.database_path).with_suffix(".system.db")))
+    stack.callback(adapter.shutdown)
+
+    responder = Responder.build(
+        config,
+        skills=skills,
+        db=db,
+        record=record_call,
+        spent=db.spent_today,
+    )
+    pool = Pool.build(config, db=db, responder=responder)
     liveness = Liveness(
         db=db,
         gateway=provider,

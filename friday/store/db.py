@@ -66,11 +66,14 @@ from friday.domain.models import (
     ModelCall,
     MonitorEvent,
     MonitorSnapshot,
+    POLICY,
     RunningTask,
     ToolCall,
     Outbound,
     Task,
     named_by,
+    payload_hash,
+    payload_hash_of,
     names_in,
     natural_key,
     writers_for,
@@ -109,7 +112,9 @@ _NEWEST_FIRST = (
 #: does, and renamed away from the enum's members so nothing here can quietly
 #: become a second source.
 OUTBOUND_QUEUED = OutboundState.QUEUED
+OUTBOUND_DISPATCHING = OutboundState.DISPATCHING
 OUTBOUND_SENT = OutboundState.SENT
+OUTBOUND_DELIVERY_UNKNOWN = OutboundState.DELIVERY_UNKNOWN
 OUTBOUND_FAILED = OutboundState.FAILED
 OUTBOUND_SENT_MANUALLY = OutboundState.SENT_MANUALLY
 
@@ -2145,6 +2150,11 @@ class Database:
         approves: int | None = None,
     ) -> Outbound:
         """`approves` is for an approval card: the row it asks about."""
+        # A kind that needs no operator approval is approved by policy, here and
+        # now: its payload is frozen at enqueue so the dispatch-time check has
+        # something to hold it against, the same hash a reply gets at approval.
+        # A reply is left unhashed until the operator releases it.
+        by_policy = str(kind) not in _NEEDS_APPROVAL
         row = schema.Outbound(
             task_id=task_id,
             conversation_id=str(conversation),
@@ -2155,6 +2165,16 @@ class Database:
             approves=approves,
             state=OUTBOUND_QUEUED,
             created_at=_now(),
+            approved_by=POLICY if by_policy else None,
+            approved_payload_hash=payload_hash(
+                kind=str(kind),
+                sender=sender,
+                conversation=conversation,
+                text=text,
+                reply_to=reply_to,
+            )
+            if by_policy
+            else None,
         )
         async with self._sessions.begin() as session:
             session.add(row)
@@ -2250,12 +2270,20 @@ class Database:
     async def record_outbound_attempt(
         self, outbound_id: int, error: str, *, retry_after: datetime | None = None
     ) -> None:
-        """A failure that will be retried. Stays queued; the count is the bound."""
+        """A failure that will be retried. Back to queued; the count is the bound.
+
+        Back to `queued`, not left `dispatching`: the send was attempted and
+        raised — a clean failure, not a crash mid-call — so it is safe to retry
+        without the delivery-unknown treatment, and the row must leave the
+        `dispatching` marker the outbox wrote before the call or the next pass
+        would read the clean failure as an interrupted send.
+        """
         async with self._sessions.begin() as session:
             await session.execute(
                 update(schema.Outbound)
                 .where(schema.Outbound.id == outbound_id)
                 .values(
+                    state=OUTBOUND_QUEUED,
                     attempts=schema.Outbound.attempts + 1,
                     last_error=scrub(error),
                     retry_after=retry_after,
@@ -2722,9 +2750,32 @@ class Database:
             return _task(row) if row else None
 
     async def approve_outbound(self, outbound_id: int, *, by: str) -> None:
-        """Record who approved this row and when. This is what the outbox
-        selects on, and it releases this row and no other."""
-        await self._set_outbound(outbound_id, approved_at=_now(), approved_by=by)
+        """Record who approved this row and when, and freeze what they approved.
+
+        This is what the outbox selects on, and it releases this row and no
+        other. The payload is hashed here, at the moment of approval, so the
+        dispatch can tell whether the message still says what the operator saw —
+        a text edited afterwards no longer matches and the approval is void.
+        """
+        row = await self.outbound_row(outbound_id)
+        frozen = payload_hash_of(row) if row is not None else None
+        await self._set_outbound(
+            outbound_id, approved_at=_now(), approved_by=by, approved_payload_hash=frozen
+        )
+
+    async def mark_outbound_dispatching(self, outbound_id: int) -> None:
+        """The channel call is about to be made. Written before the send, so a
+        crash in between leaves this marker: a row still `dispatching` at
+        startup was interrupted, and the outbox reads it as delivery-unknown."""
+        await self._set_outbound(outbound_id, state=OUTBOUND_DISPATCHING)
+
+    async def mark_outbound_delivery_unknown(self, outbound_id: int, reason: str) -> None:
+        """Interrupted mid-send on a channel that cannot dedupe: kept apart from
+        `failed` because it may already have gone out, so it waits for the
+        operator rather than being retried."""
+        await self._set_outbound(
+            outbound_id, state=OUTBOUND_DELIVERY_UNKNOWN, last_error=scrub(reason)
+        )
 
     async def outbound_row(self, outbound_id: int) -> Outbound | None:
         """One row by id, or None if there is no such row."""
@@ -3665,6 +3716,7 @@ def _outbound(row: schema.Outbound) -> Outbound:
         attempts=row.attempts,
         last_error=row.last_error,
         approves=row.approves,
+        approved_payload_hash=row.approved_payload_hash,
     )
 
 

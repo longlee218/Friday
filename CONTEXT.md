@@ -164,9 +164,11 @@ is the premise each board tracks against.
    decision is checked against `operator_id` in `record_decision`
    (`friday/outbox/__init__.py`), not trusted from whatever button was pressed.
    Still to do: a single-instance lock on `run_agent.py` (ticket 04). **The
-   outbox double-post fix** (`friday/outbox/__init__.py` `_deliver`) is **not**
-   here — the delivery loop is a durable-workflow candidate, so it folds into
-   the DBOS phase (§15 step 3, ADR 0001).
+   outbox double-post fix** folded into the DBOS phase as planned (§15 step 3,
+   ADR 0001) and **landed as ticket 07**: each delivery is a DBOS workflow,
+   `dispatching` is written before the channel call, an interrupted send on a
+   channel that cannot dedupe becomes `delivery_unknown` for the operator, and
+   `approved_payload_hash` voids an approval whose message changed.
 2. **DESIGN-v2** (`docs/DESIGN-v2.md`, **accepted target 2026-09-22, ADR
    0001**): a kernel owns the invariants, everything else registers as an
    in-repo plugin. **Re-sequenced §15**: library-independent defects (step 1)
@@ -435,23 +437,41 @@ agent speaking as the operator about a cause.
 
 ## Outbound state
 
-`queued`, `sent`, `failed`, `sent_manually` (a person sent it — not
-abandoned), `cancelled` (withdrawn because the operator answered first). One
-definition, in `friday/domain/states.py`.
+`queued`, `dispatching` (the channel call is in flight — written before the
+send), `sent`, `delivery_unknown` (interrupted mid-send on a channel that
+cannot dedupe: may have gone out, so it waits for the operator, never
+auto-retried), `failed`, `sent_manually` (a person sent it — not abandoned),
+`cancelled` (withdrawn because the operator answered first). One definition,
+in `friday/domain/states.py`.
 
 ## Outbox
 
 The only module that delivers: dispatches each row to the adapter its
 `sender` names, retries within a bound, gives up to a person, and checks at
-the last moment that an answer has not gone stale.
+the last moment that an answer has not gone stale. **Each delivery is a DBOS
+workflow** (ticket 07), so a crash mid-send resumes exactly once —
+`Outbox.deliver_once` is the durable unit, run through
+`adapter.deliver_outbound`.
 
 ## Approval
 
-A fact about **one outbox row**: who approved that reply and when. A row whose
-kind needs approval is sendable only while it carries one; the approval card
-names the row it approves (`approves`), so answering it releases that reply
-and nothing queued after it. Reading logs and code needs no approval — the
-risk is in speaking, and Friday takes no other action.
+A fact about **one outbox row**: who approved that reply and when, and the
+message that was approved, frozen as `approved_payload_hash`. A row whose kind
+needs approval is sendable only while it carries one; the approval card names
+the row it approves (`approves`), so answering it releases that reply and
+nothing queued after it. A kind that needs no approval is **policy-approved**
+at enqueue (`approved_by = policy`), hashed there too. The hash is recomputed
+at dispatch: a text edited after approval no longer matches, so the approval is
+void. Reading logs and code needs no approval — the risk is in speaking, and
+Friday takes no other action.
+
+## Idempotency key
+
+What a channel dedupes a repeated send on (`outbox-{row}`, stable across
+retries). A sender declares support with `supports_idempotency = True`; the
+default is `False` — the safe assumption for a channel not proven to dedupe,
+which is why an interrupted send on one lands in `delivery_unknown` rather than
+being re-tried.
 
 ## Hand-over
 

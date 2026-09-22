@@ -15,8 +15,12 @@ import tempfile
 import pytest
 
 from friday.domain.actions import Ask
+from friday.domain.conversation import ConversationId
+from friday.outbox import Outbox
 from friday.sdk.workflow import DAG, DAGState, Deps, Edge, Node, NodeRun, envelope
 from friday.workflow import adapter
+
+WATCHED = ConversationId("fake", "watched")
 
 # Side-effect ledgers, module-level so they survive a destroy()+launch() (a
 # simulated restart) within one test process and prove memoization.
@@ -282,6 +286,87 @@ async def test_a_crash_resumes_from_the_last_incomplete_step(dbos_sqlite):
 
     assert open(marker).read().count("a") == 1  # memoized: ask not re-run on resume
     assert state["ask"]["answer"] == "resumed" and state["after"]["done"] is True
+
+
+async def test_a_send_interrupted_mid_call_is_delivery_unknown_after_restart(dbos_sqlite):
+    """Ticket 07, criterion 6: kill between the channel call and the write ->
+    the row is `delivery_unknown` after restart, and nothing is sent twice.
+
+    A child process delivers one row through the durable step: it marks the row
+    `dispatching`, calls the channel (appending once to a marker), then
+    `os._exit`s before recording the send — a true crash mid-delivery. This
+    process then relaunches DBOS on the SAME system database and reopens the SAME
+    application database; DBOS recovery re-enters the PENDING delivery workflow,
+    `deliver_once` reads the `dispatching` marker, and — the channel cannot
+    dedupe — routes the row to `delivery_unknown` without a second send."""
+    import os
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    from dbos import DBOS
+
+    from friday.store.db import Database
+    from friday.workflow import adapter
+
+    tmp = tempfile.mkdtemp()
+    app_db = f"{tmp}/app.db"
+    marker = f"{tmp}/marker"
+    root = Path(__file__).resolve().parent.parent
+
+    # Seed one sendable row (a policy-approved ask, frozen at enqueue), then let
+    # go of both databases so the child has exclusive access.
+    db = await Database.connect(app_db, create=True)
+    opened = await db.create_task(
+        conversation=WATCHED, type="api_issue", state="pending",
+        confidence=0.9, params={"summary": "s"},
+    )
+    row = await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind="ask_for_details",
+        sender="discord_user", text="which environment?",
+    )
+    await db.close()
+    DBOS.destroy(destroy_registry=False)  # the child needs the system db to itself
+
+    child = subprocess.run(
+        [sys.executable, str(root / "tests/outbox_crash_child.py"),
+         dbos_sqlite, app_db, marker, str(row.id)],
+        capture_output=True, text=True, timeout=60, cwd=str(root),
+        env={**os.environ, "PYDANTIC_AI_NO_BANNER": "1", "PYTHONPATH": str(root)},
+    )
+    assert child.returncode == 1, f"child did not crash as expected: {child.stderr[-800:]}"
+    assert open(marker).read().count("a") == 1  # the channel was called once
+
+    # "Restart": same system db, same application db, a fresh sender.
+    _launch(dbos_sqlite)
+    db = await Database.connect(app_db, create=False)
+    box = Outbox(db=db, senders={"discord_user": _RecordingSender()})
+    adapter.register_outbox(box.deliver_once)
+
+    # Recovery re-enters the PENDING workflow; get_result blocks until it ends.
+    handle = await DBOS.retrieve_workflow_async(f"outbox-{row.id}-0")
+    outcome = await handle.get_result()
+
+    assert outcome == "delivery_unknown"
+    assert open(marker).read().count("a") == 1, "the send was not repeated on resume"
+    assert (await db.outbound_row(row.id)).state == "delivery_unknown"
+    assert (await db.tasks())[0].state == "needs_human"
+    await db.close()
+
+
+class _RecordingSender:
+    """A non-idempotent channel that would record a send if asked — so the test
+    can prove recovery does NOT ask it to."""
+
+    supports_idempotency = False
+
+    def __init__(self) -> None:
+        self.sent: list[int] = []
+
+    async def send(self, row) -> str:
+        self.sent.append(row.id)
+        return f"sent-{row.id}"
 
 
 def test_the_adapter_is_the_only_module_that_imports_dbos():
