@@ -56,8 +56,19 @@ and its labels are the operator's to confirm before it moves into `evals/`.
   in it (the search is now pushed into the back end as a `needle`); `WARN`
   counted as an error, which disarmed the one automatic widening for ever on
   any chatty service; and "a sample of the window" did not say which part.
-  Cases 1–5 still have not been run — they are dev cases and dev retention
-  cannot reach them, so the operator's pick is still what 00 waits on.
+  **00's four questions are answered**, on a captured production case
+  (`data/cases/prod-onboarding-400.json`, replayed with
+  `uv run replay_case.py --case … --diagnose`): the dossier held the
+  decisive line, `Diagnose` pointed at refs that resolve and got the cause
+  right, 8 lines of 403 in 8.5 s, and no seam broke. A captured case carries
+  the back end's own answers, so it replays offline and for ever without
+  reaching a cluster — which is what makes a case collectable at all when
+  dev keeps only since the last pod restart. **Cases live in `data/cases/`
+  and are not in the repository**: production log lines carry `userId`, `ip`
+  and `deviceId`, so a case travels only if somebody deliberately sends it.
+  Cases 1–5 are still unrun and cannot be: they are dev cases already past
+  that horizon. What 00 waits on now is a *set* — one case is not a score
+  (ticket 14).
   The two defects the live task 6 exposed are **done**: 18 (the extractor
   now names the artifact holding the request and code copies it, so nothing
   retypes a verbatim span) and 17 (the reporter's own Bearer token is

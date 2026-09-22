@@ -411,3 +411,100 @@ after the review, while fixing it: the new `truncated` test called `_within`
 directly and so made the inference it was meant to be testing.
 
 Eleven mutations, eleven red. Suite `1449 passed, 1 skipped`.
+
+---
+
+## The four questions, answered (2026-09-21)
+
+Answered on `prod-onboarding-400`, a **captured case**: the parameters and
+the two answers Loki gave, in one file under `data/cases/`. Captured because
+the five runs this ticket asks for were never going to happen otherwise —
+dev keeps only what a pod has logged since its last restart, and production
+needs a Keycloak session Friday does not have yet. A case captured once is
+replayable for ever, offline, by anyone; it is also the only way to ask
+whether a *change* to the distillation rule makes a past case better or
+worse, which needs the same lines twice.
+
+    uv run replay_case.py --case data/cases/prod-onboarding-400.json --diagnose
+
+Not a list of lines but the back end's own answers, so the real `LokiSource`
+runs against it — the parsing, the stamps, the stream merge and `truncated`
+are all the real ones and only the socket is missing. The case file carries
+`decisive` and `cause` as the operator would label them, so question 1 stops
+being a question put to a person on every run.
+
+**1. Did the dossier hold the decisive line? Yes.** `categoryId should not
+be empty, categoryId must be a UUID`, in an 8-line dossier of 403 lines
+offered.
+
+**2. Did `Diagnose` cite a ref that exists, and was the cause right? Yes to
+both.** It pointed at the two lines that are this request — the
+`ExceptionFilter` line and the `LoggerMiddleware` line — and the answer was
+not voided, so every pointer resolved. Its cause:
+
+> Client gửi POST /v1/onboarding/completed với body có `categoryId` rỗng.
+> ValidationPipe của NestJS ở `exceptionFactory` từ chối request vì
+> `categoryId` không được rỗng và phải là UUID. Đây là lỗi từ phía request,
+> không phải bug của service.
+
+`certain`, `conclusive`, and correct. It also **named something nobody asked
+it about**: the repo maps `ERR19` to `INTERNAL_SERVER_ERROR`
+(`src/core/constants/error-code.ts:19`) while this 400 carries it, so the
+code is a catch-all and the name in the table misleads. The repo's own test
+reports say the same ("400 ERR19 (generic)"). That is a finding for the
+service's team, produced by the graph rather than by a person.
+
+**3. Sizes.** 8 lines kept of 403 offered; five nodes; 8.5 s wall, of which
+8.47 s is the one model call. Everything else is under 20 ms.
+
+**4. Which seam broke? None.** `read_failing_code` came back `empty` and
+that is correct: every frame in this stack is in `node_modules` (NestJS's
+`ValidationPipe`), so `NOT_OURS` filters all of them. The diagnosis had to
+be drawn from `error.message` in the log, and was. A graph that treated an
+empty code node as a failure would hand back the shape production produces
+most.
+
+### What this run changed
+
+**The path is a fallback, not an addition.** D2 says "a curl, **or** an
+endpoint plus one identifier" — *or*. Matching on both made the dossier
+**18 lines instead of 8**, and all ten extra lines were *other people's
+successful calls to the same endpoint* with two lines of context each. The
+request's own lines were the same two either way. Still a fallback rather
+than a deletion: a correlationId the log does not carry would otherwise take
+the path down with it, so the test is whether it *matched*, not whether it
+was supplied.
+
+### Two divergences from the spec now closed
+
+- **`≤ 12 lines` of dossier is reached** — 8 on the real case, by the
+  histogram (tickets 02/03) and the path-as-fallback rule above.
+- **The Loki branch has been called against the real server**, twice: the
+  measurement that found the tail bug, and this run.
+
+### Still owed
+
+- **Cases 1–5 remain unrun.** They are dev cases and dev retention cannot
+  reach them. A captured case is how they stop being lost in future; it
+  cannot recover one already gone.
+- **One case is not a score.** Ticket 14 wants a diagnosis scored against
+  cases the operator labelled, and n=1 is not that. The mechanism now
+  exists — capture, label `decisive` and `cause`, replay — so the set can
+  grow one production case at a time.
+- **`alternatives_rejected`** is still not in the answer shape (ticket 05),
+  and `ReadFailingCode` still reads ±15 lines without the enclosing function
+  or a caller hop (ticket 04).
+
+### A seam did break, on the fourth run
+
+Not a code fault: `diagnose` could not reach the model provider and gave up
+after three attempts with `Connection error`. Worth recording because it is
+the first real answer to question 4 that is not "none", and because of what
+the graph did with it — `find_request_log` still produced its 8 lines,
+`diagnose` returned an `error` envelope naming the reason, `report` still
+wrote the file and handed over with that reason in it. Nothing pretended to
+have concluded anything. The next run, minutes later, succeeded.
+
+Three successful model runs on this case, three times the same cause, all
+`certain` and `conclusive` — so the answer is stable rather than a lucky
+sample. Still one case, which is still not a score.

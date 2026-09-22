@@ -922,6 +922,135 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
 # --- replay_case.py, the tool that answers questions 3 and 4 -----------------
 
 
+def test_a_captured_case_runs_through_the_real_source():
+    """The point of capturing an answer rather than a list of lines: the
+    parsing, the stamps, the stream merge and the `truncated` flag are the
+    real ones, and only the socket is missing. A capture that stored lines
+    would test the fake's own parsing and pass while `_streams` was broken.
+    """
+    import asyncio
+
+    from friday.sources import Placement
+    from friday.sources.logs import LokiSource
+    from replay_case import CannedReads
+
+    answer = {
+        "streams": [{"labels": {}, "lines": ["2026-09-21T10:35:01Z ERROR boom"]}],
+        "truncated": True,
+    }
+    source = LokiSource(server=CannedReads({"window": answer, "narrowed": answer}))
+
+    read = asyncio.run(
+        source.lines(
+            Placement(env="production", service="s", cluster="c",
+                      namespace="n", app="a"),
+            since=REPORTED_AT, until=REPORTED_AT, limit=400,
+        )
+    )
+
+    assert read.lines == ("ERROR boom",)
+    assert read.truncated and read.oldest is not None
+
+
+def test_a_case_key_nobody_reads_is_an_error_rather_than_a_silence():
+    """**A typo here is invisible and undoes the run.** Renaming
+    `correlation_id` to `correlationId` in the file made the dossier 18
+    lines instead of 8 — the request matched by its endpoint path instead,
+    pulling in every other caller — and the tool reported a clean run. A
+    hand-written file is the only input this has."""
+    from replay_case import case_params
+
+    with pytest.raises(ValueError, match="correlationId"):
+        case_params({
+            "id": "x", "channel_id": "c", "reported_at": "2026-09-21T00:00:00",
+            "reads": {}, "correlationId": "abc-123",
+        })
+
+
+def test_a_case_missing_what_it_needs_says_which():
+    from replay_case import case_params
+
+    with pytest.raises(ValueError, match="reads"):
+        case_params({
+            "id": "x", "channel_id": "c", "reported_at": "2026-09-21T00:00:00",
+        })
+
+
+def test_the_parameters_are_read_off_the_dataclass_not_the_class_body():
+    """`__annotations__` is only what the class itself declares, so it would
+    start dropping inherited parameters silently the day one of these grows
+    a base class."""
+    import dataclasses
+
+    from friday.domain.models import PARAMS
+    from replay_case import case_params
+
+    kept = case_params({
+        "id": "x", "channel_id": "c", "reported_at": "2026-09-21T00:00:00",
+        "reads": {}, "summary": "s", "curl": "c", "correlation_id": "i",
+        "environment": "dev",
+    })
+
+    assert set(kept) == {f.name for f in dataclasses.fields(PARAMS["api_issue"])}
+
+
+def test_a_dev_case_is_captured_from_kubectl_and_replays_through_it():
+    """Dev retention is the *reason* captured cases exist — a pod keeps only
+    what it logged since its last restart. A capture mechanism that served
+    production alone would cover the one environment that did not need it.
+    """
+    import asyncio
+
+    from friday.sources import Placement
+    from replay_case import canned_source
+
+    name, source = canned_source({
+        "source": "kubectl",
+        "reads": {
+            "window": "2026-09-21T10:35:01Z INFO quiet\n",
+            "narrowed": "2026-09-21T10:35:01Z ERROR boom\n",
+        },
+    })
+
+    read = asyncio.run(
+        source.lines(
+            Placement(env="dev", service="s", namespace="n",
+                      pod_pattern="backend"),
+            since=datetime(2026, 9, 21, 10, tzinfo=timezone.utc),
+            until=datetime(2026, 9, 21, 11, tzinfo=timezone.utc),
+            limit=400, needle="abc",
+        )
+    )
+
+    assert name == "kubectl"
+    assert read.lines == ("ERROR boom",)
+
+
+def test_a_case_captured_from_somewhere_else_is_refused():
+    from replay_case import canned_source
+
+    with pytest.raises(ValueError, match="loki or kubectl"):
+        canned_source({"source": "splunk", "reads": {}})
+
+
+def test_a_captured_case_answers_the_two_reads_separately():
+    """A capture holds what the back end returned for *each* read. Serving
+    the window's answer to the narrowed read would hide exactly the fault
+    this whole change was made for."""
+    import asyncio
+
+    from replay_case import CannedReads
+
+    canned = CannedReads({"window": {"streams": []}, "narrowed": {"truncated": True}})
+
+    window = asyncio.run(canned.call("loki_query_range", {"query": '{app="a"}'}))
+    ours = asyncio.run(
+        canned.call("loki_query_range", {"query": '{app="a"} |= "abc"'})
+    )
+
+    assert "streams" in window and "truncated" in ours
+
+
 def test_a_node_that_ended_the_run_does_not_read_as_one_that_passed_it_on():
     """`node_runs` records any `Action` as `ok`, because an `Action` carries
     no envelope. So a `resolve` that handed over — ending the whole run —
@@ -1100,6 +1229,107 @@ async def test_a_line_both_reads_returned_is_not_counted_or_quoted_twice(db):
 
     assert result["kept"] == 1
     assert dict(result["histogram"])["ERR19"] == 1
+
+
+async def test_the_path_is_a_fallback_and_not_an_addition(db):
+    """D2: "a curl, **or** an endpoint plus one identifier" — *or*.
+
+    Measured on the production case, 2026-09-21: matching the path as well
+    as the correlationId made the dossier 18 lines instead of 8, and all ten
+    extra lines were *other people's successful calls to the same endpoint*
+    with two lines of context each. The request's own lines were the same
+    two either way.
+    """
+    await write_rows(db)
+    others = [
+        f'{{"correlationId":"someone-{i}","path":"/v1/pod/orders/init",'
+        f'"statusCode":200}}'
+        for i in range(6)
+    ]
+    source = FakeSource(answers=[[
+        *others,
+        '{"level":"ERROR","correlationId":"abc-123",'
+        '"path":"/v1/pod/orders/init","statusCode":500}',
+    ]])
+    state = prepared(correlation_id="abc-123").with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert "abc-123" in result["dossier"]
+    assert "someone-0" not in result["dossier"]
+
+
+async def test_a_correlation_id_the_log_never_carries_falls_back_to_the_path(db):
+    """The reporter read it off a response body, or a gateway rewrote it.
+    Dropping the path because an id was *supplied* — rather than because it
+    matched — would leave a dossier of nothing."""
+    await write_rows(db)
+    # Deliberately **not** a loud line: a line carrying ERROR is kept by
+    # `_LOUD` whether or not the path is a needle, so a fixture like that
+    # passes this test with the fallback deleted. It did, once.
+    source = FakeSource(answers=[[
+        '{"level":"INFO","path":"/v1/pod/orders/init","statusCode":500}'
+    ]])
+    state = prepared(correlation_id="never-logged").with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert "/v1/pod/orders/init" in result["dossier"]
+
+
+async def test_a_correlation_id_that_matched_nothing_is_said_out_loud(db):
+    """The most actionable thing a dossier can carry: the id is wrong, or
+    this is not the service that logged it, or the window is. Detecting it
+    and then discarding the detection — which the first version did — turns
+    a finding into a search that quietly widened itself."""
+    await write_rows(db)
+    source = FakeSource(answers=[[
+        '{"level":"ERROR","path":"/v1/pod/orders/init","statusCode":500}'
+    ]])
+    state = prepared(correlation_id="never-logged").with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert any(
+        "carries the correlationId 'never-logged'" in line
+        for line in result["not_checked"]
+    )
+
+
+async def test_the_widened_window_narrows_the_same_way_the_first_one_did(db):
+    """Its own test because it is its own call site: replacing the rule with
+    the old one *in the widened branch alone* left the whole suite green."""
+    await write_rows(db)
+    quiet = [f'{{"level":"INFO","n":{i}}}' for i in range(3)]
+    loud = [
+        *[f'{{"correlationId":"someone-{i}","path":"/v1/pod/orders/init"}}'
+          for i in range(6)],
+        '{"level":"ERROR","correlationId":"abc-123","path":"/v1/pod/orders/init"}',
+    ]
+    source = FakeSource(answers=[quiet, loud])
+    state = prepared(correlation_id="abc-123").with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert source.windows == ["0.58h", "6.08h"], "it widened"
+    assert "abc-123" in result["dossier"]
+    assert "someone-0" not in result["dossier"]
 
 
 async def test_the_narrowed_read_asks_for_the_correlation_id_over_the_path(db):

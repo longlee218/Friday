@@ -142,6 +142,47 @@ def _covered(read: Lines) -> str:
     return f"{_when(read.oldest)}–{_when(read.newest)}"
 
 
+def _matching(
+    needles: tuple[str, ...], correlation_id: str | None, lines: list[str]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """What to match on besides the correlationId, and what to say about it.
+
+    The endpoint path, but only when the correlationId did not find the
+    request.
+
+    D2 says "a curl, **or** an endpoint plus one identifier the log line
+    carries" — *or*. The path is the fallback for a report that has no
+    correlationId, and passing both costs exactly what the spec's line cap
+    is there to prevent: measured on the production case, 2026-09-21, the
+    dossier is **18 lines with the path and 8 without**, and all ten extra
+    lines are *other people's successful calls to the same endpoint*, two
+    lines of context each. The request's own lines are the same two either
+    way.
+
+    Still a fallback rather than a deletion: a correlationId that the log
+    does not carry — the reporter read it off a response body, a gateway
+    rewrote it — would otherwise take the path down with it and leave a
+    dossier of nothing. So the test is whether it actually matched, not
+    whether it was supplied.
+
+    **And it says so when it falls back.** "The correlationId you gave
+    appears in no line here" is close to the most actionable thing a dossier
+    can carry: it means the id is wrong, or the service is not the one that
+    logged it, or the window is. Detecting that and then discarding the
+    detection — which the first version of this did — turns a finding into a
+    dossier that quietly widened its own search.
+    """
+    if not correlation_id:
+        return needles, ()
+    if any(correlation_id in line for line in lines):
+        return (), ()
+    return needles, (
+        f"no line in what was read carries the correlationId "
+        f"{correlation_id!r}, so the request was matched by its endpoint "
+        f"path instead — which matches every caller of it, not only this one",
+    )
+
+
 def _capped(
     wanted: str, window: Lines, ours: Lines, *, needle: str, asked: timedelta
 ) -> tuple[str, ...]:
@@ -248,10 +289,11 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
                 "error", f"{wanted} could not be read: {type(exc).__name__}: {exc}"
             )
 
+        merged = _merged(window, ours)
+        matching, unmatched = _matching(needles, correlation_id, merged)
         dossier = distil(
-            _merged(window, ours), correlation_id=correlation_id,
-            matching=needles, max_lines=FIRST_LINES,
-            other_error_cap=OTHER_ERRORS,
+            merged, correlation_id=correlation_id, matching=matching,
+            max_lines=FIRST_LINES, other_error_cap=OTHER_ERRORS,
         )
         widened = ()
         if dossier.worth_widening:
@@ -266,10 +308,11 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
                     f"{wanted} could not be read on the wider window: "
                     f"{type(exc).__name__}: {exc}",
                 )
+            merged = _merged(window, ours)
+            matching, unmatched = _matching(needles, correlation_id, merged)
             dossier = distil(
-                _merged(window, ours), correlation_id=correlation_id,
-                matching=needles, max_lines=WIDER_LINES,
-                other_error_cap=OTHER_ERRORS,
+                merged, correlation_id=correlation_id, matching=matching,
+                max_lines=WIDER_LINES, other_error_cap=OTHER_ERRORS,
             )
             widened = (
                 f"the {_said(FIRST_WINDOW)} before {_when(reported_at)} "
@@ -302,7 +345,7 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
             )
 
         capped = _capped(wanted, window, ours, needle=needle, asked=until - since)
-        not_checked = (*widened, *capped, *dossier.not_checked)
+        not_checked = (*widened, *unmatched, *capped, *dossier.not_checked)
         if not dossier.lines:
             return envelope(
                 "empty",
