@@ -120,10 +120,23 @@ def _is_blank(value: Any) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class Matches:
-    """The field must match a regular expression. None and blank strings pass."""
+    """The field must match a regular expression. None and blank strings pass.
+
+    `ask` is optional and only needed when the field it guards carries no
+    `ask` of its own — a field that is filled but never asked for directly.
+    `correlation_id` is the one such field (board
+    `read-it-the-way-the-operator-does`, ticket 01): it is read out of the
+    response the reporter pasted, so nobody is ever asked for it, and yet
+    this rule can still report it as malformed. Without a phrase here
+    `asked_as` raises and the run hands over instead of asking for the one
+    thing that would settle it — the response, again. Same argument as
+    `OneOf`'s: the phrase lives beside the thing that reports.
+    """
 
     pattern: str
     name: str = "matches"
+    #: See above. Empty means "the field has its own `ask`".
+    ask: str = ""
 
     def check(self, value: Any) -> str | None:
         if _is_blank(value):
@@ -170,13 +183,21 @@ class NonEmpty:
 
 @dataclass(frozen=True, slots=True)
 class OneOf:
-    """At least one of the named fields must have a non-blank value.
+    """At least one of the named alternatives must be satisfied.
+
+    An alternative is a field name, or a **tuple of field names that must all
+    be present together**. `("curl", ("endpoint", "identifier"))` reads "the
+    curl, or the endpoint *and* one identifier" — which is D2's findability
+    rule, and the reason a group exists at all (board
+    `read-it-the-way-the-operator-does`, ticket 01). A flat `OneOf` could only
+    say "any one of these", and under that rule an endpoint on its own
+    satisfies the gate and then matches every other caller of it.
 
     Cross-field rule: stores no `value` of its own, so it sits in `_RULES`
     under a sentinel field name. The check sees the whole params object.
-    Construction fails if the named fields list is empty — that would
-    always report, which is not what a constructor that accepts no
-    arguments is for.
+    Construction fails if the named alternatives list is empty, or if any
+    group in it is — either would always report, which is not what a
+    constructor that accepts no arguments is for.
 
     **It carries its own `ask`, and that reverses what this class used to
     say.** This is the one place that argument is written out; everywhere else
@@ -202,7 +223,9 @@ class OneOf:
     to field metadata.
     """
 
-    fields: tuple[str, ...]
+    #: Each entry is one alternative: a field name, or a tuple of field names
+    #: that only satisfies the rule together.
+    fields: tuple[str | tuple[str, ...], ...]
     #: How to ask about the thing this rule reports. Never sent verbatim —
     #: the responder writes the question a reporter reads from it.
     ask: str
@@ -210,6 +233,11 @@ class OneOf:
     def __post_init__(self) -> None:
         if not self.fields:
             raise ValueError("OneOf needs at least one field to look at")
+        if any(not alternative for alternative in self.fields):
+            raise ValueError(
+                "OneOf was given an empty alternative, which nothing can "
+                "satisfy — name the fields it stands for"
+            )
         if not self.ask.strip():
             raise ValueError(
                 "OneOf needs an `ask`: it reports under a sentinel, so there "
@@ -225,6 +253,8 @@ class OneOf:
         asking for it. How to ask is `self.ask` — see the class docstring for
         why it moved here from a dict in the node that renders the question.
         """
-        if any(not _is_blank(getattr(params, f, None)) for f in self.fields):
-            return None
+        for alternative in self.fields:
+            needed = (alternative,) if isinstance(alternative, str) else alternative
+            if all(not _is_blank(getattr(params, f, None)) for f in needed):
+                return None
         return ""

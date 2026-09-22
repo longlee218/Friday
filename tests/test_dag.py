@@ -711,8 +711,13 @@ async def test_the_three_message_table_holds_end_to_end(db):
 
     "API lỗi" asks and the graph never starts. "cảm ơn anh" changes nothing,
     so it asks again and the graph still never starts — there is nothing new
-    to trace on. The correlationId finally makes the report traceable, and
-    the graph runs for the first time.
+    to trace on. The curl finally makes the report findable, and the graph
+    runs for the first time.
+
+    A curl and not a correlationId: since ticket 01 an id on its own is not
+    findability — it says nothing about where the request went — so a
+    follow-up carrying only one leaves the report exactly as unusable as it
+    was, which is the case the second pass above already covers.
     """
     from friday.tasks.pool import Pool
     from tests.test_pool import make_task
@@ -731,10 +736,10 @@ async def test_the_three_message_table_holds_end_to_end(db):
     asked = [r for r in await db.outbound() if r.kind == "ask_for_details"]
     assert len(asked) == 2, "the follow-up should still be answered, just not investigated"
 
-    # "cid là abc..." — now it is traceable.
+    # "curl đây anh" — now it is findable.
     await db.set_task_params(
         task.id,
-        {**task.params, "correlation_id": "abcdef01-2345-6789-abcd-ef0123456789"},
+        {**task.params, "curl": "curl https://api.aperogroup.ai/v1/pay"},
     )
     await db.move_task(task.id, "pending")
     await Pool(db=db, auto_ask=True).run_once()
@@ -1134,7 +1139,7 @@ async def test_a_node_0_hand_over_still_reaches_the_operator(db, monkeypatch):
     from tests.conftest import make_event
     from tests.test_pool import make_task
 
-    traced = "abcdef01-2345-6789-abcd-ef0123456789"
+    traced = "curl https://api.aperogroup.ai/v1/pay"
 
     async def fills_something_in(
         task_type, text, *, known=None, channel_id=None, task_id=None, node=None
@@ -1145,7 +1150,7 @@ async def test_a_node_0_hand_over_still_reaches_the_operator(db, monkeypatch):
             ApiIssueParams(
                 summary="checkout 500",
                 environment="production",
-                correlation_id=traced,
+                curl=traced,
             ),
             None,
         )
@@ -1155,7 +1160,7 @@ async def test_a_node_0_hand_over_still_reaches_the_operator(db, monkeypatch):
     EDGE_ROUTER.pop("api_issue", None)
     register_dag("api_issue", build_simple_dag("api_issue", ApiIssueParams))
     try:
-        task = await make_task(db, correlation_id=traced)
+        task = await make_task(db, curl=traced)
         await db.record_message(make_event(message_id="m1", text="API lỗi"))
         await db.mark_triaged(
             make_event(message_id="m1"), task.id, decision={"type": "api_issue"}

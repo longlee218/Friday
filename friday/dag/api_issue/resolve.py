@@ -126,16 +126,18 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
 
         if domain is None:
             # D2: "Without a curl there is no domain". A report is findable
-            # on a correlationId alone — `_traceable` lets one through — but
+            # without one — `_traceable` lets an endpoint plus an identifier
+            # through, and ticket 01 made that the point of the type — but
             # findable is not the same as routable, and the routing table is
-            # keyed on the domain. Ticket 01 is where a task learns to name
-            # its service another way; until then this is a hand-over that
-            # says which of the two is missing, rather than the `external`
-            # one, which would blame a domain nobody wrote.
+            # keyed on the domain. Naming a service another way is still not
+            # a thing a task can do, so this is a hand-over that says which
+            # of the two is missing, rather than the `external` one, which
+            # would blame a domain nobody wrote.
             return HandOver(
                 "nothing here carries the URL that was called, so I cannot "
-                "tell which service or environment this is about. The "
-                "correlationId alone does not say."
+                "tell which service or environment this is about. An "
+                "endpoint name or a correlationId does not say which host "
+                "it was called on."
             )
 
         known = await deps.db.structured_memories(

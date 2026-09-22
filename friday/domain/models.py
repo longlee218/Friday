@@ -182,18 +182,75 @@ class ApiIssueParams:
     environment: str | None = field(
         default=None,
         metadata={
-            "doc": "Which environment they named: production, staging or dev. "
-            "'prod' is production, 'stg' is staging. null if none is named.",
+            # `staging` was in this enum and in this sentence until board
+            # `read-it-the-way-the-operator-does`, ticket 01: no project this
+            # room serves has a staging environment, so the only thing the
+            # word could do was let a reporter's guess validate cleanly and
+            # send `Resolve` looking for logs of somewhere that does not
+            # exist. `external` is deliberately absent too — it is what the
+            # `environment` rows *conclude* about a domain (see
+            # `friday/dag/api_issue/resolve.py`), never something a reporter
+            # names about themselves.
+            "doc": "Which environment they named: production or dev. 'prod' "
+            "is production. null if none is named.",
             "ask": "which environment you're on",
         },
     )
+    response: str | None = field(
+        default=None,
+        metadata={
+            # **Where a correlationId actually comes from** (ticket 01). The
+            # operator never receives one from a reporter; they receive the
+            # response the reporter pasted and read it out of that. Asking a
+            # reporter for "the correlationId" asks them to do a lookup they
+            # do not know how to do, and the three `ask_for_details` messages
+            # this system has ever sent all had to teach it inline — which is
+            # the responder adding content nobody approved
+            # (`tests/test_responder_check.py`).
+            #
+            # An artifact id, like `curl` and for ticket 18's reason: a
+            # response body is long, and a model copying it out by hand gets
+            # a character wrong.
+            "doc": "The id of the artifact holding the response they pasted "
+            "— the `ab12cd34` in `[artifact ab12cd34: …]`, on its own, "
+            "nothing else. Do not copy the response itself: it is put back "
+            "for you. If they typed it inline with no artifact around it, "
+            "give it as they wrote it. null if they pasted no response.",
+            "ask": "the response you got back",
+        },
+    )
+    endpoint: str | None = field(
+        default=None,
+        metadata={
+            "doc": "The endpoint they called, as they named it — a path like "
+            "`/v1/onboarding/completed`, or the name they used for it "
+            "('login API'). null if they named none.",
+            "ask": "which endpoint you called",
+        },
+    )
+    identifier: str | None = field(
+        default=None,
+        metadata={
+            "doc": "One id the failing request carried, copied exactly, "
+            "whatever kind they gave: deviceId, userId, email, orderId. It "
+            "is matched against log lines by machine, so copy it as written "
+            "and do not reformat it. null if they gave none.",
+            "ask": "the deviceId, userId, email or order id you used",
+        },
+    )
+    #: **Read out of `response`, never asked for** — which is why it carries a
+    #: `doc` and no `ask`, and so is not in `askable_fields`. The value is
+    #: short enough for a model to copy correctly, which is why it is lifted
+    #: into a field of its own rather than left inside the span: the log
+    #: sources search for one plain substring, and a whole response body is
+    #: not one.
     correlation_id: str | None = field(
         default=None,
         metadata={
             "doc": "The correlation id, trace id, request id or x-request-id "
-            "in what they wrote, copied exactly — it is matched by machine. "
-            "Usually shaped like a uuid. null if absent.",
-            "ask": "the correlationId",
+            "in what they wrote — usually inside the response they pasted — "
+            "copied exactly: it is matched by machine. Usually shaped like a "
+            "uuid. null if absent.",
         },
     )
     curl: str | None = field(
@@ -216,28 +273,43 @@ class ApiIssueParams:
     )
 
     #: Validate catches what the LLM extractor got wrong. `environment` has to
-    #: be one of the three environments we actually serve; `correlation_id`
+    #: be one of the two environments we actually serve; `correlation_id`
     #: has to look like a uuid for Loki's query_range filter to find it.
     #:
     #: `_traceable` is this type's override of the general required-ness rule,
-    #: which reads its answer off the annotations: all three of `environment`,
-    #: `correlation_id` and `curl` are `str | None`, so none of them is
-    #: individually required — and yet a report with none of them cannot be
-    #: investigated at all. An id *or* a curl makes a request findable; that is
-    #: not something a type can say, which is what `OneOf` is for.
+    #: which reads its answer off the annotations: every field below is
+    #: `str | None`, so none of them is individually required — and yet a
+    #: report that names no request at all cannot be investigated. That is not
+    #: something a type can say, which is what `OneOf` is for.
     #:
     #: Without it nothing in the gate knew, so a report with nothing to trace
     #: on validated cleanly and the graph ran its whole path to discover it
     #: could do nothing.
+    #:
+    #: **The alternatives are the curl, or the endpoint plus one id** (D2,
+    #: and ticket 01's correction of what this rule used to say). It used to
+    #: read `correlation_id` *or* `curl`, which asked a reporter for the one
+    #: thing they never have, and refused as unusable a report that already
+    #: said everything needed — "login API, deviceId X, 500" names a request
+    #: the log can be searched for. The endpoint alone is not enough: measured
+    #: on the production case, 2026-09-21, matching on the path alone returns
+    #: every *other* caller's successful request to it — 18 dossier lines
+    #: where the id gives 8 — so the id is what narrows it to this reporter.
     _RULES = {
-        "environment": InSet(frozenset({"production", "staging", "dev"})),
+        "environment": InSet(frozenset({"production", "dev"})),
         "correlation_id": Matches(
             r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",
             name="uuid",
+            # The phrase is on the rule because the field has none: a
+            # malformed correlationId is answered by the response it should
+            # have been read out of, not by asking the reporter to go and
+            # find an id.
+            ask="the response you got back",
         ),
         "_traceable": OneOf(
-            fields=("correlation_id", "curl"),
-            ask="the correlationId, or the curl you used",
+            fields=("curl", ("endpoint", "identifier")),
+            ask="the curl you used, or which endpoint you called plus one id "
+            "it carried",
         ),
     }
 
@@ -352,12 +424,22 @@ def askable_fields(params_cls: type) -> tuple[str, ...]:
     Whatever askable means, the tool and the guard now mean the same thing.
 
     `dataclasses.fields()` is the filter that drops the pseudo-fields, and
-    `MODEL_AUTHORED` drops what the model writes rather than reads.
+    **an `ask` is what makes a field askable**. That used to be `MODEL_AUTHORED`
+    — the one field nobody would be asked for was `summary`, which the model
+    writes — and it stopped being the whole story in ticket 01, which added a
+    field the reporter has and is still never asked for: `correlation_id` is
+    read out of the response they pasted, and asking them for it directly is
+    the mistake the reshape exists to undo. The two filters agree on every
+    field that has an `ask`, so this is the same set it always was plus that
+    one exclusion; the phrase beside the field is now the single thing that
+    decides, rather than a second list to keep in step with it.
     """
     from dataclasses import fields as _dataclass_fields
 
     return tuple(
-        f.name for f in _dataclass_fields(params_cls) if f.name not in MODEL_AUTHORED
+        f.name
+        for f in _dataclass_fields(params_cls)
+        if f.name not in MODEL_AUTHORED and (f.metadata or {}).get("ask")
     )
 
 

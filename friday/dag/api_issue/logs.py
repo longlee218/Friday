@@ -172,15 +172,41 @@ def _matching(
     detection — which the first version of this did — turns a finding into a
     dossier that quietly widened its own search.
     """
-    if not correlation_id:
-        return needles, ()
-    if any(correlation_id in line for line in lines):
-        return (), ()
-    return needles, (
-        f"no line in what was read carries the correlationId "
-        f"{correlation_id!r}, so the request was matched by its endpoint "
-        f"path instead — which matches every caller of it, not only this one",
+    # **One needle, the narrowest that actually matched.** `distil` ORs what
+    # it is given, so handing it the endpoint *as well as* the identifier is
+    # handing it the endpoint: measured on this shape, a window of eight
+    # other callers plus this reporter distils to 9 lines with both and 3
+    # with the identifier alone. The identifier names this reporter; the
+    # endpoint names everyone who ever called it.
+    def carried(needle: str | None) -> bool:
+        return bool(needle) and any(needle in line for line in lines)
+
+    # **Said whatever else matched.** Computed before the choice rather than
+    # inside it: an endpoint that happens to match is not a reason to stop
+    # reporting that the id did not, and folding the two together dropped
+    # this sentence the first time it was written.
+    unmatched = (
+        (
+            f"no line in what was read carries the correlationId "
+            f"{correlation_id!r}, so the request was matched by "
+            + (f"{needles[0]!r}" if needles else "nothing narrower")
+            + " instead — which can match callers other than this one",
+        )
+        if correlation_id and not carried(correlation_id)
+        else ()
     )
+
+    # Ordered narrowest first, and the first that appears in what was read
+    # wins. `correlation_id` needs no entry in `matching` because `distil`
+    # takes it as its own argument.
+    for candidate in (correlation_id, *needles):
+        if carried(candidate):
+            return ((), unmatched) if candidate == correlation_id else (
+                (candidate,), unmatched
+            )
+    # Nothing named this request at all. The widest is all there is, and the
+    # dossier says "nothing named this request" for itself.
+    return needles[-1:], unmatched
 
 
 def _capped(
@@ -245,17 +271,35 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
                 "were not read at all",
             )
 
-        needles = tuple(
-            n for n in (path_of(getattr(params, "curl", None)),) if n
+        # D2's two ways of naming a request, in the order the type now offers
+        # them (board `read-it-the-way-the-operator-does`, ticket 01): the
+        # path off the curl, or — for the reporter who wrote "login API,
+        # deviceId X, 500" and pasted nothing — the endpoint they named, plus
+        # the one id they gave.
+        endpoint = path_of(getattr(params, "curl", None)) or getattr(
+            params, "endpoint", None
         )
+        identifier = getattr(params, "identifier", None)
+        # **Narrowest first**, which is what `_matching` walks: the
+        # identifier names this reporter, the endpoint names everyone who
+        # ever called it.
+        needles = tuple(n for n in (identifier, endpoint) if n)
         correlation_id = getattr(params, "correlation_id", None)
         reported_at = _reported_at(deps.task)
 
         # **The one string the source can search for.** The correlationId
-        # when the reporter gave one, else the endpoint path off their curl.
-        # Both are plain substrings of the log line, which is what both back
-        # ends can narrow on without being told the log's format.
-        needle = correlation_id or (needles[0] if needles else "")
+        # when the response the reporter pasted carried one; then the
+        # identifier; then the endpoint. All three are plain substrings of
+        # the log line, which is what both back ends can narrow on without
+        # being told the log's format.
+        #
+        # The identifier before the endpoint, because the endpoint matches
+        # every caller of it and the identifier matches this reporter:
+        # measured on the production case, 2026-09-21, narrowing on the path
+        # returned 18 lines where ten were other people's successful calls.
+        # A read narrowed to the wrong thing is worse than the wide one,
+        # because `limit` is a tail and the ten crowd out this request.
+        needle = correlation_id or identifier or endpoint or ""
         until = reported_at + MARGIN
 
         async def read(since: datetime, limit: int) -> tuple[Lines, Lines]:

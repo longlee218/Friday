@@ -175,10 +175,11 @@ def test_a_template_with_nothing_untranslatable_binds_only_the_other_rules():
     """The honest limit, written down so nobody reads the docs as a stronger
     promise than the code makes.
 
-    Five of the eight questions this system asks name nothing that has to
+    Eight of the eleven questions this system asks name nothing that has to
     survive translation — "what access you need", "which document you mean".
     For those there is no way to tell a faithful Vietnamese rewording from a
-    different question, so this rule says nothing and the other five carry it.
+    different question, so this rule says nothing and the other three carry
+    it.
 
     The split is asserted below rather than only stated here.
     """
@@ -203,7 +204,14 @@ def test_which_questions_this_rule_binds_is_derived_not_counted():
     same pattern the rule matches on is what stops the prose drifting from the
     code a second time.
 
-    The eight questions themselves are pinned in
+    Ticket 01 reshaped `ApiIssueParams` and moved both numbers: eleven
+    subjects now, and `correlation_id` left the bound set because nobody is
+    asked for one any more — it is read out of the response the reporter
+    pasted, and "the response you got back" names no untranslatable word.
+    `identifier` joined it, through `deviceId` and the same camelCase branch
+    of `_KEPT` that used to catch `correlationId`.
+
+    The eleven questions themselves are pinned in
     `tests/test_validation.py::test_the_questions_this_system_can_ask_are_written_down`;
     this asserts only which of them this rule binds.
     """
@@ -213,11 +221,11 @@ def test_which_questions_this_rule_binds_is_derived_not_counted():
     asks = _asks()
     binds = sorted(subject for (_, subject), phrase in asks.items() if _KEPT.search(phrase))
 
-    assert binds == ["_traceable", "correlation_id", "curl"], (
+    assert binds == ["_traceable", "curl", "identifier"], (
         "which questions must survive translation has changed — the docstring "
-        "above and CLAUDE.md both state this split"
+        "above states this split"
     )
-    assert len(asks) == 8, "the number of questions changed; CLAUDE.md states it"
+    assert len(asks) == 11, "the number of questions changed; the docstring above states it"
 
 
 #: The three `ask_for_details` rows in `data/friday.db` — every message this

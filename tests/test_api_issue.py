@@ -344,6 +344,32 @@ async def test_the_dossier_keeps_the_lines_that_name_the_request(db):
     assert result["total"] == 3
 
 
+async def test_the_identifier_narrows_the_read_when_there_is_no_correlation_id(db):
+    """D2's second way of naming a request, now that the type carries it
+    (board `read-it-the-way-the-operator-does`, ticket 01).
+
+    The identifier and not the endpoint path, which is the whole point of
+    asking for one: the path matches every caller of it, and `limit` is a
+    tail — measured on the production case of 2026-09-21, narrowing on the
+    path returned 18 lines of which ten were other people's successful
+    requests. The path stays in what `distil` matches on; it is only the
+    *narrowed read* this chooses.
+    """
+    await write_rows(db)
+    source = FakeSource(answers=[[
+        "GET /v1/health 200",
+        "ERROR POST /v1/pod/orders/init 500 ERR19 device-42",
+    ]])
+    state = prepared(correlation_id=None, identifier="device-42")
+
+    await find_request_log_node().run(
+        state.with_result("resolve", await resolve_node().run(state, deps_for(db))),
+        deps_for(db, extra={"log_sources": {"kubectl": source}}),
+    )
+
+    assert [needle for _, _, needle in source.asked if needle] == ["device-42"]
+
+
 async def test_a_quiet_window_is_widened_once_and_only_once(db):
     """Spec: one automatic widening of the window, recorded in `not_checked`."""
     await write_rows(db)
@@ -1185,7 +1211,8 @@ def test_the_parameters_are_read_off_the_dataclass_not_the_class_body():
     kept = case_params({
         "id": "x", "channel_id": "c", "reported_at": "2026-09-21T00:00:00",
         "reads": {}, "summary": "s", "curl": "c", "correlation_id": "i",
-        "environment": "dev",
+        "environment": "dev", "response": "r", "endpoint": "/v1/x",
+        "identifier": "device-1",
     })
 
     assert set(kept) == {f.name for f in dataclasses.fields(PARAMS["api_issue"])}
@@ -2433,3 +2460,50 @@ def load_config_for_test():
     from friday.config import load_config
 
     return load_config()
+
+
+async def test_the_endpoint_is_not_matched_beside_a_narrower_id(db):
+    """`distil` ORs what it is given, so handing it the endpoint *as well as*
+    the identifier is handing it the endpoint. Measured on this shape: eight
+    other callers of the same path plus this reporter distils to 9 lines with
+    both and 3 with the identifier alone.
+
+    The node got the ordering right for the *source* narrowing and not for
+    the distillation — one lesson applied in one of the two places it
+    governs."""
+    await write_rows(db)
+    source = FakeSource(answers=[[
+        *[f'{{"correlationId":"someone-{i}","path":"/v1/pod/orders/init",'
+          f'"statusCode":200}}' for i in range(8)],
+        '{"level":"ERROR","deviceId":"DEV-42","path":"/v1/pod/orders/init"}',
+    ]])
+    state = prepared(
+        curl=None, endpoint="/v1/pod/orders/init", identifier="DEV-42",
+    ).with_result("resolve", await resolve_node().run(prepared(), deps_for(db)))
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert "DEV-42" in result["dossier"]
+    assert "someone-0" not in result["dossier"]
+
+
+async def test_a_dead_correlation_id_still_says_so_when_the_endpoint_matched(db):
+    """The endpoint happening to match is not a reason to stop reporting that
+    the id did not — folding the note into the choice dropped this sentence
+    the first time it was written."""
+    await write_rows(db)
+    source = FakeSource(answers=[[
+        '{"level":"ERROR","path":"/v1/pod/orders/init","statusCode":500}'
+    ]])
+    state = prepared(correlation_id="never-logged").with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert "/v1/pod/orders/init" in result["dossier"], "the fallback still ran"
+    assert any("never-logged" in line for line in result["not_checked"])

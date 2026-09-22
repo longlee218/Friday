@@ -61,7 +61,7 @@ async def test_a_task_is_acted_on_only_once(db):
 
 async def test_a_report_that_can_be_traced_waits_for_a_human(db):
     """Tracing is not built. Handing over is honest; replying would not be."""
-    await make_task(db, correlation_id="7f3a91c2-dead-beef-cafe-1234567890ab")
+    await make_task(db, curl="curl https://api.aperogroup.ai/v1/pay")
 
     await Pool(db=db, auto_ask=True).run_once()
 
@@ -120,7 +120,7 @@ async def test_the_responder_is_told_what_to_say(db):
 
     await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
-    assert "correlationId" in responder.asked[0]
+    assert "curl" in responder.asked[0]
 
 
 async def test_the_template_still_goes_out_when_the_responder_cannot(db):
@@ -159,19 +159,19 @@ async def test_asking_for_details_is_the_agents_own_decision(db):
     await make_task(db)
 
     acted = await Pool(
-        db=db, auto_ask=True, responder=StubResponder("cho anh xin correlationId")
+        db=db, auto_ask=True, responder=StubResponder("cho anh xin cái curl")
     ).run_once()
 
     (queued,) = await db.outbound()
     assert queued.kind == "ask_for_details"
-    assert queued.text == "cho anh xin correlationId"
+    assert queued.text == "cho anh xin cái curl"
     assert await db.sendable_outbound() == [queued]
     assert acted[0].state == ASKED
 
 
 async def test_a_task_it_cannot_handle_is_brought_to_the_operator(db):
     """Otherwise it sits in a column nobody is watching."""
-    task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")  # traceable, unactionable
+    task = await make_task(db, curl="curl https://api.aperogroup.ai/v1/pay")  # findable, unactionable
     runner = Pool(db=db, auto_ask=True)
 
     await runner.run_once()
@@ -180,12 +180,12 @@ async def test_a_task_it_cannot_handle_is_brought_to_the_operator(db):
     (card,) = await db.outbound()
     assert card.kind == "help_wanted"
     assert card.sender == "discord_bot"
-    assert "abcdef01-2345-6789-abcd-ef0123456789" in card.text
+    assert "curl https://api.aperogroup.ai/v1/pay" in card.text
 
 
 async def test_the_operator_is_told_once(db):
     """A card per poll is a notification that trains you to ignore it."""
-    await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    await make_task(db, curl="curl https://api.aperogroup.ai/v1/pay")
     runner = Pool(db=db, auto_ask=True)
 
     await runner.run_once()
@@ -1191,7 +1191,7 @@ async def test_a_draft_that_would_promise_something_never_reaches_the_reporter(d
     (queued,) = await db.outbound()
     assert "để anh trace" not in queued.text
     assert queued.text == responder.asked[0], "the template, unchanged"
-    assert "correlationId" in queued.text
+    assert "curl" in queued.text
 
 
 async def test_a_draft_that_only_reworded_the_question_does_reach_them(db):

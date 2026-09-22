@@ -61,20 +61,50 @@ async def test_a_report_with_nothing_to_trace_on_asks_for_details():
     action = await gate()
 
     assert isinstance(action, Ask)
-    assert "correlationId" in action.text or "curl" in action.text.lower()
+    assert "curl" in action.text.lower() or "endpoint" in action.text.lower()
 
 
-async def test_a_correlation_id_is_enough_to_reach_the_graph():
-    assert await gate(correlation_id=CID) is None
+async def test_a_correlation_id_alone_does_not_reach_the_graph():
+    """Ticket 01 reversed this test, which read "a correlation id is enough".
+    It is not: the operator never receives one from a reporter, and an id on
+    its own says nothing about which host the request went to — `Resolve`
+    hands over on exactly that. Keeping it as findability meant the type
+    asked a reporter for the one thing they do not have."""
+    assert isinstance(await gate(correlation_id=CID), Ask)
 
 
 async def test_a_curl_is_enough_to_reach_the_graph():
     assert await gate(curl="curl https://x") is None
 
 
+async def test_an_endpoint_with_an_identifier_is_enough_to_reach_the_graph():
+    """The report the old rule turned away: "login API, deviceId X, 500" names
+    a request the log can be searched for, and asking that reporter for a
+    correlationId asks them to do a lookup they do not know how to do."""
+    assert await gate(endpoint="/v1/login", identifier="device-42") is None
+
+
+async def test_an_endpoint_without_an_identifier_is_not_enough():
+    """The path alone matches every caller of it — measured on the production
+    case of 2026-09-21, ten of the eighteen lines it returned were other
+    people's successful requests."""
+    assert isinstance(await gate(endpoint="/v1/login"), Ask)
+
+
 async def test_an_environment_alone_is_not_enough_to_trace():
     """You cannot find a request from the environment name."""
     assert isinstance(await gate(environment="production"), Ask)
+
+
+async def test_staging_is_not_an_environment_this_room_serves():
+    """`staging` was in the enum until ticket 01 and no project has one. The
+    only thing the word could do was let a reporter's guess validate cleanly
+    and send `Resolve` looking for the logs of somewhere that does not
+    exist."""
+    action = await gate(environment="staging", curl="curl https://x")
+
+    assert isinstance(action, Ask)
+    assert "dev, production" in action.text
 
 
 # ---- the other task types --------------------------------------------------
@@ -129,11 +159,14 @@ async def test_the_summary_is_never_asked_for():
 
 
 async def test_api_issue_keeps_its_own_rule():
-    """A correlationId makes a request findable; its type cannot say that."""
+    """An endpoint plus one id makes a request findable; its type cannot say
+    that — every field of it is `str | None`, so the annotations call them all
+    optional and the report unusable either way."""
     traceable = ApiIssueParams(
         summary="s",
         environment=None,
-        correlation_id="abcdef01-2345-6789-abcd-ef0123456789",
+        endpoint="/v1/login",
+        identifier="device-42",
         curl=None,
     )
 
@@ -192,13 +225,13 @@ async def test_code_floor_wins_over_a_clarify_that_names_a_different_field(monke
 
 
 async def test_a_clarify_for_an_already_filled_field_is_not_honoured(monkeypatch):
-    """The model asked about `correlation_id`, but it is already there — from
-    the reporter, or from this same extraction run. Asking again for
-    something already answered is not a question this exists to ask."""
+    """The model asked about `curl`, but it is already there — from the
+    reporter, or from this same extraction run. Asking again for something
+    already answered is not a question this exists to ask."""
     from friday.extraction import Clarify
 
-    complete = params(correlation_id=CID)
-    clarify = Clarify(fields=("correlation_id",), because="not sure")
+    complete = params(curl="curl https://x/y")
+    clarify = Clarify(fields=("curl",), because="not sure")
 
     _, action = await _prepare_with_clarify(complete, clarify, monkeypatch=monkeypatch)
 
@@ -228,10 +261,7 @@ async def test_plan_by_required_parameters_hands_over_once_everything_is_present
     nothing outstanding: no question left to ask, and hand-over is what
     "a human takes it from here" looks like."""
     action = await _decide(
-        "api_issue",
-        ApiIssueParams(
-            summary="s", correlation_id="abcdef01-2345-6789-abcd-ef0123456789"
-        ),
+        "api_issue", ApiIssueParams(summary="s", curl="curl https://x/y")
     )
 
     assert isinstance(action, HandOver)
@@ -480,14 +510,16 @@ async def test_a_question_the_extractor_raised_survives_the_skipped_call(db):
     from friday.extraction import Clarify
     from tests.test_extraction import _install
 
-    # A correlationId that validates, so `_problems` is empty and the
-    # extractor's own question is the only thing that can produce an `Ask`.
+    # A curl, so `_problems` is empty and the extractor's own question is
+    # the only thing that can produce an `Ask`. The correlationId beside it
+    # validates too, so neither rule has anything to say.
     # Without it the `_traceable` rule fires first and both passes return the
     # same code-written question — which is how the first version of this test
     # passed with the replay deleted.
     extractor = _CountingExtractor(
         ApiIssueParams(
             summary="service down",
+            curl="curl https://api.aperogroup.ai/v1/pay",
             correlation_id="3f7a1e22-8b44-4c31-9d0e-77a2c6b51e90",
         ),
         clarify=Clarify(("environment",), "the URL says test, which is not an env"),
@@ -653,8 +685,14 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
     for.
 
     The recorded failure this replaces: `environment` came back null because
-    the extractor could not tell whether `test.apero` was staging or dev, so
-    it asked, and nobody answered.
+    the extractor could not tell which environment `test.apero` was, so it
+    asked, and nobody answered.
+
+    The room's fact used to say `staging`, which was a value only the room
+    could put in the prompt and so a clean marker. Ticket 01 removed `staging`
+    from the enum — no project this room serves has one — so the fact now says
+    `dev` and the marker is the Vietnamese phrase around it, which nothing
+    else in the prompt writes.
     """
     from friday.dag.prepare import prepare_node
     from friday.domain.models import FridayState, MemoryKind, MemoryOrigin
@@ -662,7 +700,8 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
 
     await db.memory_add(
         FridayState(channel_id="watched", agent="operator"),
-        "test.apero: staging", kind=MemoryKind.FACT, origin=MemoryOrigin.ADMIN,
+        "test.apero chạy trên dev", kind=MemoryKind.FACT,
+        origin=MemoryOrigin.ADMIN,
     )
 
     seen: list[str] = []
@@ -678,16 +717,19 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
             # Asserted on the *value* and on the section, never on
             # `test.apero`: the reporter's own message says `test.apero`, so
             # the first version of this test passed with the room never
-            # actually reaching the prompt. Only the room can put `staging`
-            # here.
+            # actually reaching the prompt. Only the room can put "chạy trên
+            # dev" here — the bare word `dev` would not do, since the
+            # `environment` field's own schema line names it.
             assert "[channel" in said, (
                 f"no room section — rows were {context.domain_memories!r}"
             )
-            assert "staging" in said, "the room's value never reached the prompt"
+            assert "chạy trên dev" in said, (
+                "the room's value never reached the prompt"
+            )
             return (
                 ApiIssueParams(
                     summary="service down",
-                    environment="staging",
+                    environment="dev",
                     curl="curl https://test.apero/health",
                 ),
                 None,
@@ -701,7 +743,7 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
 
     assert seen, "the extractor was never reached"
     assert not isinstance(outcome, Ask), f"still asking: {outcome!r}"
-    assert (await db.task(task.id)).params["environment"] == "staging"
+    assert (await db.task(task.id)).params["environment"] == "dev"
 
 
 async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp_path):
@@ -746,7 +788,8 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     # form — a row, live on the next read, with no reload to forget.
     await db.memory_add(
         FridayState(channel_id="watched", agent="operator"),
-        "test.apero: staging", kind=MemoryKind.FACT, origin=MemoryOrigin.ADMIN,
+        "test.apero chạy trên dev", kind=MemoryKind.FACT,
+        origin=MemoryOrigin.ADMIN,
     )
 
     await node.run(DAGState.empty(), DAGDeps(task=await db.task(task.id), db=db))

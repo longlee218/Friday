@@ -20,7 +20,7 @@ import pytest
 
 from conftest import ScriptedHarness
 from friday.agent.harness import Harness, Refused
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from friday.extraction import (
@@ -125,7 +125,12 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
 
     @dataclass
     class ParamsWithRules:
-        environment: Optional[str] = None
+        #: `ask` and not only a name: a field with no phrase beside it is not
+        #: askable (`askable_fields`), and a stub with nothing askable builds
+        #: an empty enum for `ask_about`, which pydantic refuses.
+        environment: Optional[str] = field(
+            default=None, metadata={"ask": "which environment you're on"}
+        )
 
     class StubResult:
         final_output = '{"environment": "production"}'
@@ -253,8 +258,8 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
             model=ScriptedModel([[function_call("answer", {
                 "summary": "api trả 500",
                 "environment": "production",
-                "ask_about": ["correlation_id"],
-                "because": "no id or curl anywhere in the report",
+                "ask_about": ["curl"],
+                "because": "no request anywhere in the report",
             }, call_id="1")]]),
         ),
         name="api_issue_ext",
@@ -269,7 +274,7 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
             "the fields it did read came back in the same answer"
         )
         assert clarify == Clarify(
-            fields=("correlation_id",), because="no id or curl anywhere in the report"
+            fields=("curl",), because="no request anywhere in the report"
         )
     finally:
         registered().pop("clarify_test_31", None)
@@ -311,18 +316,29 @@ async def test_asking_about_nothing_is_not_a_request_with_no_fields_in_it():
 
 def test_an_extractor_cannot_ask_about_a_field_that_does_not_exist():
     """The closed set is the enforcement, and it survived the move off the
-    tool: `ask_about` is generated from the type's own dataclass fields,
-    `summary` (model-authored) excluded, so the schema itself is what stops
-    the model asking about something that is not there or that it writes
-    itself."""
+    tool: `ask_about` is generated from the type's askable fields, so the
+    schema itself is what stops the model asking about something that is not
+    there, something it writes itself, or something nobody is ever asked for.
+
+    **Written out rather than derived**, because the derivation is what is
+    under test. The sets moved in ticket 01: `summary` is excluded because
+    the model writes it, and `correlation_id` because a reporter never has
+    one to give — it is read out of the response they pasted, and the three
+    messages this system has ever sent asking for one had to teach the
+    reporter where to look.
+    """
     from friday.agent.harness import _answer_params
     from friday.domain.models import AccessRequestParams, ApiIssueParams, DocQuestionParams
     from friday.extraction.answer import answer_shape
 
-    for params_cls in (ApiIssueParams, AccessRequestParams, DocQuestionParams):
+    for params_cls, askable in (
+        (ApiIssueParams, {"environment", "response", "endpoint", "identifier", "curl"}),
+        (AccessRequestParams, {"project", "permission"}),
+        (DocQuestionParams, {"question", "doc_ref"}),
+    ):
         schema = _answer_params(answer_shape(params_cls))
         enum = set(schema["properties"]["ask_about"]["items"]["enum"])
-        assert enum == set(params_cls.__dataclass_fields__) - {"summary"}
+        assert enum == askable, params_cls.__name__
 
 
 async def test_a_field_the_type_does_not_have_is_refused_rather_than_asked_about():
@@ -393,7 +409,11 @@ def test_the_string_null_is_treated_as_absent():
     from friday.extraction import _hygiene
     from friday.domain.models import ApiIssueParams
 
-    cleaned = _hygiene(ApiIssueParams("s", "null", "N/A", "   "))
+    cleaned = _hygiene(
+        ApiIssueParams(
+            summary="s", environment="null", correlation_id="N/A", curl="   "
+        )
+    )
 
     assert (cleaned.environment, cleaned.correlation_id, cleaned.curl) == (
         None, None, None

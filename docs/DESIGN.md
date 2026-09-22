@@ -607,12 +607,22 @@ it is testable with no database — the caller applies the outcome.
 **Parameters matter more than the type.** The most common real action is not
 diagnosis, it is noticing a report is incomplete and asking for what is missing:
 
-> *"Which environment are you using? Could you give me the CURL or the
-> correlationId?"*
+> *"Which environment are you using? Could you give me the CURL, or the
+> endpoint plus one id you called it with?"*
 
 That is mechanical, high-frequency, and cannot be embarrassingly wrong. An
-`api_issue` with no `correlation_id` and no `curl` takes that path; one with
-them goes to tracing. Same type, different action, decided by parameters.
+`api_issue` with no `curl` and no `endpoint`+`identifier` pair takes that
+path; one with either goes to tracing. Same type, different action, decided
+by parameters.
+
+**Not the correlationId** (board `read-it-the-way-the-operator-does`, ticket
+01). The rule read "a correlationId or a curl" until 2026-09-22, and both
+halves of that were wrong: the operator never receives an id from a
+reporter — they read it out of the *response* the reporter pastes, which is
+why `response` is a field and `correlation_id` is filled from it and never
+asked for — and a reporter who wrote "login API, deviceId X, 500" has
+already named a request the log can be searched for. The endpoint alone does
+not count: it matches every caller of it.
 
 **Never-drop is enforced through the SDK's `error_handlers`**, which recover
 from `max_turns`, `model_refusal` and `invalid_final_output` by returning a
@@ -677,7 +687,7 @@ One workflow per type, **deterministic Python** — branching, not reasoning:
 
 ```
 api_issue:
-    missing correlation_id and curl  → ask for them
+    no curl and no endpoint+id       → ask for them
     a domain that is not ours        → hand over, having read nothing
     no route row for the domain      → hand over, naming the missing row
     otherwise                        → read the log, read the code,

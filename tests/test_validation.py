@@ -194,22 +194,47 @@ def test_a_params_with_no_rules_passes_validation_and_returns_no_problems():
 
 
 def test_an_api_issue_with_nothing_to_trace_on_is_not_usable():
-    """The rule that is not expressible as a type: `environment`,
-    `correlation_id` and `curl` are each optional, and a report with none of
-    them cannot be investigated at all. Without this the graph ran its whole
-    path to discover it could do nothing."""
+    """The rule that is not expressible as a type: every field of this type is
+    optional, and a report that names no request at all cannot be investigated.
+    Without this the graph ran its whole path to discover it could do
+    nothing."""
     problems = _problems(ApiIssueParams(summary="API lỗi nè"))
 
     params = ApiIssueParams(summary="API lỗi nè")
     assert [p.field for p in problems] == ["_traceable"]
-    assert "correlationId" in _question(params, problems)
     assert "curl" in _question(params, problems)
+    assert "endpoint" in _question(params, problems)
 
 
-def test_either_a_correlation_id_or_a_curl_is_enough():
-    cid = "abcdef01-2345-6789-abcd-ef0123456789"
-    assert _problems(ApiIssueParams(summary="s", correlation_id=cid)) == []
+def test_a_curl_or_an_endpoint_with_an_id_makes_a_request_findable():
+    """Ticket 01 replaced "a correlationId or a curl" with this, and the
+    replacement is the ticket: a correlationId is not something a reporter
+    has, and "login API, deviceId X, 500" is a report that can be
+    investigated. The endpoint on its own is not: it matches every caller of
+    it, which on the production case of 2026-09-21 was ten other people's
+    successful requests."""
     assert _problems(ApiIssueParams(summary="s", curl="curl -X GET /pay")) == []
+    assert _problems(
+        ApiIssueParams(summary="s", endpoint="/v1/login", identifier="dev-42")
+    ) == []
+    assert [
+        p.field for p in _problems(ApiIssueParams(summary="s", endpoint="/v1/login"))
+    ] == ["_traceable"]
+    assert [
+        p.field for p in _problems(ApiIssueParams(summary="s", identifier="dev-42"))
+    ] == ["_traceable"]
+
+
+def test_a_correlation_id_alone_is_not_findability():
+    """The half of the old rule that was wrong, pinned so it cannot come
+    back. A correlationId reaches the graph only alongside something that
+    says *where* the request went — it is read out of a pasted response, and
+    a response says nothing about which host was called."""
+    cid = "abcdef01-2345-6789-abcd-ef0123456789"
+
+    assert [
+        p.field for p in _problems(ApiIssueParams(summary="s", correlation_id=cid))
+    ] == ["_traceable"]
 
 
 # --- the question ------------------------------------------------------
@@ -218,9 +243,9 @@ def test_either_a_correlation_id_or_a_curl_is_enough():
 def test_question_uses_natural_language_for_known_fields():
     q = _question(
         ApiIssueParams(summary="s"),
-        [Problem(field="correlation_id"), Problem(field="environment")],
+        [Problem(field="endpoint"), Problem(field="environment")],
     )
-    assert "correlationId" in q
+    assert "endpoint" in q
     assert "environment" in q
     assert q.startswith("Could you")
 
@@ -373,11 +398,35 @@ def test_the_questions_this_system_can_ask_are_written_down():
     """
     assert _asks() == {
         ("ApiIssueParams", "environment"): "which environment you're on",
-        ("ApiIssueParams", "correlation_id"): "the correlationId",
+        # Not askable — `correlation_id` carries no `ask` of its own. The
+        # phrase is on its `Matches` rule, for the one case that can still
+        # report it: a value that came back malformed, answered by asking for
+        # the response it should have been read out of.
+        ("ApiIssueParams", "correlation_id"): "the response you got back",
+        ("ApiIssueParams", "response"): "the response you got back",
+        ("ApiIssueParams", "endpoint"): "which endpoint you called",
+        ("ApiIssueParams", "identifier"):
+            "the deviceId, userId, email or order id you used",
         ("ApiIssueParams", "curl"): "the curl you used",
-        ("ApiIssueParams", "_traceable"): "the correlationId, or the curl you used",
+        ("ApiIssueParams", "_traceable"):
+            "the curl you used, or which endpoint you called plus one id it "
+            "carried",
         ("AccessRequestParams", "project"): "which project you need access to",
         ("AccessRequestParams", "permission"): "what access you need",
         ("DocQuestionParams", "question"): "what you would like to know",
         ("DocQuestionParams", "doc_ref"): "which document you mean",
     }
+
+
+def test_one_of_refuses_an_empty_alternative():
+    """An empty group satisfies nothing, so a rule containing one always
+    reports — which is exactly what the constructor's other guard exists to
+    prevent, and it was added without a test beside it."""
+    import pytest
+
+    from friday.domain.validation import OneOf
+
+    with pytest.raises(ValueError, match="empty alternative"):
+        OneOf(fields=("curl", ()), ask="the curl you used")
+    with pytest.raises(ValueError, match="empty alternative"):
+        OneOf(fields=("curl", ""), ask="the curl you used")
