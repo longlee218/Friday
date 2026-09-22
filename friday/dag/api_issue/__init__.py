@@ -42,6 +42,14 @@ TASK_TYPE = "api_issue"
 #: What a node that reads the world is given before it is called stuck. Not
 #: a model call, so these are network round trips, not thinking: ticket 16
 #: measured dev at ~1.5 s a round trip and this node makes two.
+#: The three nodes that only read a row or write one. **Bounded because
+#: nothing is**, not because they are slow: `resolve`, `acknowledge` and
+#: `report` all reach the database, and a node with no ceiling waits on a
+#: hung connection for as long as the process lives — holding a pool slot
+#: that ticket 13 went to some trouble to bound. Generous enough that a busy
+#: SQLite write never trips it, small enough to be a bound.
+ROW_TIMEOUT_SECONDS = 20.0
+
 LOG_TIMEOUT_SECONDS = 90.0
 CODE_TIMEOUT_SECONDS = 30.0
 
@@ -92,26 +100,34 @@ def build_api_issue_dag(
                 on_ready=None,
                 budget_tokens=budget_tokens,
                 agent=None if extractor is None else "extractor",
+                # **A ceiling either way.** With no extractor configured
+                # this node makes no model call and is fast by construction
+                # — but fast by construction is not bounded, and a graph
+                # whose sum has a hole in it has no sum. The agent's clock
+                # when there is one, the row clock when there is not.
                 timeout_seconds=(
-                    None
+                    ROW_TIMEOUT_SECONDS
                     if extractor is None
                     else extractor.timeout_seconds + NODE_CLOCK_MARGIN_SECONDS
                 ),
             ),
-            resolve_node(),
-            acknowledge_node(),
+            resolve_node(timeout_seconds=ROW_TIMEOUT_SECONDS),
+            acknowledge_node(timeout_seconds=ROW_TIMEOUT_SECONDS),
             find_request_log_node(timeout_seconds=LOG_TIMEOUT_SECONDS),
             read_failing_code_node(timeout_seconds=CODE_TIMEOUT_SECONDS),
             diagnose_node(
                 harness=diagnose_harness,
                 agent=None if diagnose is None else "diagnose",
                 timeout_seconds=(
-                    None
+                    ROW_TIMEOUT_SECONDS
                     if diagnose is None
                     else diagnose.timeout_seconds + NODE_CLOCK_MARGIN_SECONDS
                 ),
             ),
-            report_node(reports_dir=reports_dir or _default_reports_dir()),
+            report_node(
+                reports_dir=reports_dir or _default_reports_dir(),
+                timeout_seconds=ROW_TIMEOUT_SECONDS,
+            ),
         ),
         edges=(
             # Node 0 runs outside the walk (`Pool._run_dag`), and an `Ask` or

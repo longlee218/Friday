@@ -153,7 +153,9 @@ def brief(diagnosis: Any) -> str:
     return said
 
 
-def report_node(*, reports_dir: Path) -> Node:
+def report_node(
+    *, reports_dir: Path, timeout_seconds: float | None = None
+) -> Node:
     """Build node 5: the report file, and the two rows that follow it.
 
     Hands over only when nothing was concluded. With a cause it returns a
@@ -234,4 +236,4 @@ def report_node(*, reports_dir: Path) -> Node:
 
         return Reply(brief(diagnosis))
 
-    return Node("report", _report)
+    return Node("report", _report, timeout_seconds=timeout_seconds)

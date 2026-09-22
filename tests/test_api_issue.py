@@ -2314,3 +2314,122 @@ async def test_a_business_error_with_no_stack_is_still_worth_diagnosing(db):
 
     assert status_of(result) == "empty", "conclusive with no ref is still refused"
     assert "pointed at nothing" in result["reason"]
+
+
+# --- the clock (ticket 06) ---------------------------------------------------
+
+
+def test_every_node_in_the_graph_has_a_ceiling():
+    """**A node without one is not bounded by a big number, it is
+    unbounded.** Three of these had none: `resolve`, `acknowledge` and
+    `report` each reach the database, and a hung connection would hold a
+    pool slot for the life of the process — the thing ticket 13 went to some
+    trouble to prevent."""
+    dag = build_api_issue_dag()
+
+    assert [n.name for n in dag.nodes if n.timeout_seconds is None] == []
+
+
+def test_a_graph_that_can_outlast_its_budget_is_refused_at_boot():
+    """A clock that does not add up is a configuration mistake, and the
+    place to find one is the start — not a cancelled run on a task nobody is
+    watching."""
+    import pytest as _pytest
+
+    from friday.config import ConfigError
+    from friday.dag.router import check_graph_clocks
+
+    dag = build_api_issue_dag()
+    total = sum(n.timeout_seconds or 0.0 for n in dag.nodes)
+
+    check_graph_clocks([dag], {dag.name: total})
+    with _pytest.raises(ConfigError, match="over the"):
+        check_graph_clocks([dag], {dag.name: total - 1})
+
+
+def test_a_node_with_no_clock_is_refused_however_large_the_budget():
+    """The sum of a list with a hole in it is not a bound."""
+    import pytest as _pytest
+
+    from friday.config import ConfigError
+    from friday.dag.engine import DAG, Node
+
+    async def _nothing(state, deps):
+        return None
+
+    loose = DAG(
+        name="api_issue",
+        nodes=(Node("a", _nothing, timeout_seconds=1.0), Node("b", _nothing)),
+        edges=(),
+    )
+
+    with _pytest.raises(ConfigError, match="no timeout"):
+        check_graph_clocks_for(loose)
+
+
+def check_graph_clocks_for(dag):
+    from friday.dag.router import check_graph_clocks
+
+    return check_graph_clocks([dag], {dag.name: 10_000.0})
+
+
+def test_a_graph_with_no_budget_is_not_checked():
+    """The honest default for a one-node graph: its single node's clock is
+    the bound, and inventing a budget for it would be inventing a number."""
+    from friday.dag.engine import DAG, Node
+
+    async def _nothing(state, deps):
+        return None
+
+    from friday.dag.router import check_graph_clocks
+
+    check_graph_clocks(
+        [DAG(name="doc_question", nodes=(Node("a", _nothing),), edges=())], {}
+    )
+
+
+def test_the_budget_is_read_as_a_number_and_must_be_positive(tmp_path):
+    """Every other setting in this block is a name or a path and is read as
+    text; `str()` on this one would compare a string to a sum."""
+    import pytest as _pytest
+
+    from friday.config import ConfigError, load_config
+
+    path = tmp_path / "config.yaml"
+    path.write_text('api_issue:\n  timeout_seconds: 300\n')
+    assert load_config(path).api_issue.timeout_seconds == 300.0
+
+    path.write_text('api_issue:\n  timeout_seconds: "soon"\n')
+    with _pytest.raises(ConfigError, match="must be a number"):
+        load_config(path)
+
+    path.write_text('api_issue:\n  timeout_seconds: 0\n')
+    with _pytest.raises(ConfigError, match="must be positive"):
+        load_config(path)
+
+
+def test_the_boot_actually_checks_the_graph_clocks(monkeypatch):
+    """`check_graphs` is what the composition root calls before it opens
+    anything. A check that exists and is never reached is a check nobody
+    has — and removing the call from it left the whole suite green."""
+    import pytest as _pytest
+
+    from friday.config import ConfigError
+    from friday.dag import router
+
+    def over_budget(*_a, **_k):
+        raise ConfigError("clocks do not add up")
+
+    monkeypatch.setattr(router, "check_graph_clocks", over_budget)
+
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    with _pytest.raises(ConfigError, match="do not add up"):
+        router.check_graphs(load_config_for_test())
+
+
+def load_config_for_test():
+    from friday.config import load_config
+
+    return load_config()

@@ -251,6 +251,29 @@ class ApiIssueConfig:
     #: Where a run's report is written. Beside the database, for the same
     #: reason: state this process produced, not source.
     reports_dir: str = "./data/reports"
+    #: **The longest one task may hold a pool slot**, checked at boot against
+    #: the sum of the graph's node ceilings.
+    #:
+    #: Ticket 13 bounded the pool by working its batch side by side, and said
+    #: `api_issue` was "bounded at five minutes". That was true of a one-node
+    #: graph. Measured 2026-09-22, the seven-node graph's ceilings sum to
+    #: 340s and three of its nodes had no ceiling at all — so the sentence
+    #: ticket 13 relied on had quietly stopped being true, and nothing said
+    #: so. With `workflows.concurrency` at 2, two slow tasks are two slots,
+    #: and for that long nothing else is triaged, drafted or answered.
+    #:
+    #: A budget rather than a runtime kill: cancelling a graph half way
+    #: leaves a task that has read a log, queued an acknowledgement and
+    #: written nothing. Refusing at boot is the same choice
+    #: `check_node_clocks` already makes — a clock that does not add up is a
+    #: configuration mistake, and the place to find it is the start.
+    #:
+    #: 420s because the graph's ceilings sum to 400 and a budget with no
+    #: headroom is one that refuses the next node anybody adds. **The lever,
+    #: if seven minutes is too long: `agents.diagnose.timeout_seconds` is
+    #: 150 of it** — the node gets that plus a margin, and it is the single
+    #: biggest term by a distance.
+    timeout_seconds: float = 420.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -538,9 +561,23 @@ def _api_issue(raw: dict) -> ApiIssueConfig:
     # `"None"` — a truthy hostname that turns every dev task into a failed
     # `ssh None`. An empty setting means "not configured", which is what a
     # blank line in a config file plainly means.
-    return ApiIssueConfig(
-        **{k: "" if v is None else str(v) for k, v in raw.items()}
-    )
+    # Every other setting here is a name or a path and is read as text;
+    # `timeout_seconds` is the one number, and `str()` on it would make the
+    # boot check compare a string to a sum.
+    clock = raw.pop("timeout_seconds", None)
+    settings: dict = {k: "" if v is None else str(v) for k, v in raw.items()}
+    if clock is not None:
+        try:
+            settings["timeout_seconds"] = float(clock)
+        except (TypeError, ValueError):
+            raise ConfigError(
+                f"api_issue: timeout_seconds must be a number, not {clock!r}"
+            ) from None
+        if settings["timeout_seconds"] <= 0:
+            raise ConfigError(
+                f"api_issue: timeout_seconds must be positive, not {clock!r}"
+            )
+    return ApiIssueConfig(**settings)
 
 
 def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:

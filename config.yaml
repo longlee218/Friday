@@ -208,6 +208,20 @@ api_issue:
   loki_tool: "loki_query_range"
   # Where each run's report is written. Nothing in it is sent to anybody.
   reports_dir: "./data/reports"
+  # The longest one task may hold a pool slot. Checked at boot against the
+  # sum of the graph's node clocks, which is 400s today — a graph whose nodes
+  # can outlast this refuses to start rather than discovering it on a task
+  # nobody is watching.
+  #
+  # Ticket 13 bounded the pool by working its batch side by side and rested
+  # on `api_issue` being "bounded at five minutes". That was a one-node
+  # graph. It is seven nodes now, and three of them had no clock at all —
+  # which is not "bounded by a big number", it is unbounded.
+  #
+  # `workflows.concurrency` is 2, so two slow tasks are both slots: lowering
+  # this is how you buy back triage latency, and
+  # `agents.diagnose.timeout_seconds` (150) is the biggest single term in it.
+  timeout_seconds: 420
 
 # ── Workflows ──────────────────────────────────────────────────────────────
 # How often to say the process is alive and what it is holding.

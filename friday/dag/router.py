@@ -107,6 +107,64 @@ def check_node_clocks(dags: Any, agents: dict[str, Any]) -> None:
                 )
 
 
+def _budgets(config: Any) -> dict[str, float]:
+    """How long one task of each type may hold a pool slot.
+
+    One entry today. A graph with no budget is not checked, which is the
+    honest default for the one-node graphs: their single node's clock *is*
+    the bound.
+    """
+    # Imported here rather than at the top, the way the rest of this module
+    # reaches the graph packages: they import back from it.
+    from friday.dag.api_issue import TASK_TYPE as API_ISSUE
+
+    api_issue = getattr(config, "api_issue", None)
+    clock = getattr(api_issue, "timeout_seconds", None)
+    return {} if clock is None else {API_ISSUE: float(clock)}
+
+
+def check_graph_clocks(dags: Any, budgets: dict[str, float]) -> None:
+    """Refuse a graph whose nodes can outlast the budget for one task.
+
+    **What this is really guarding is the pool, not the graph.** Ticket 13
+    stopped one long task from holding the batch by working it side by side,
+    and rested on `api_issue` being "bounded at five minutes". That was true
+    of the one-node graph it was written against. Measured 2026-09-22, the
+    seven-node graph summed to 340s and three of its nodes had no ceiling at
+    all — so the sentence had stopped being true and nothing anywhere said
+    so. With `workflows.concurrency` at 2, two of those are both slots.
+
+    Two rules, and the first is the one that matters: **every node has a
+    ceiling.** A node without one is not bounded by a large number, it is
+    unbounded, and a sum that skips it is a sum that means nothing.
+
+    At boot, like `check_node_clocks` and for the same reason: a clock that
+    does not add up is a configuration mistake, and cancelling a run half
+    way leaves a task that has read a log, told the reporter it was working
+    and written nothing.
+    """
+    for dag in dags:
+        budget = budgets.get(dag.name)
+        if budget is None:
+            continue
+        loose = [n.name for n in dag.nodes if n.timeout_seconds is None]
+        if loose:
+            raise ConfigError(
+                f"graph {dag.name!r}: node(s) {loose} have no timeout, so the "
+                f"graph has no bound however long {dag.name}.timeout_seconds "
+                f"is — one hung read holds a pool slot for the life of the "
+                f"process"
+            )
+        total = sum(n.timeout_seconds or 0.0 for n in dag.nodes)
+        if total > budget:
+            raise ConfigError(
+                f"graph {dag.name!r}: its nodes can take {total}s together, "
+                f"over the {budget}s budget in {dag.name}.timeout_seconds. "
+                f"Raise the budget, or lower a node's clock — "
+                + ", ".join(f"{n.name} {n.timeout_seconds}s" for n in dag.nodes)
+            )
+
+
 # --- the one-node graph, for a type with no investigation --------------------
 
 
@@ -196,6 +254,7 @@ def check_graphs(config: Any) -> None:
     builds anything a graph is later handed. `register_dags` checks again
     what it actually registers."""
     check_node_clocks(_graphs(config).values(), config.agents)
+    check_graph_clocks(_graphs(config).values(), _budgets(config))
 
 
 def register_dags(
@@ -254,6 +313,7 @@ def register_dags(
         register_dag(task_type, dag)
 
     check_node_clocks(EDGE_ROUTER.values(), config.agents)
+    check_graph_clocks(EDGE_ROUTER.values(), _budgets(config))
 
     # Node 0 reaches its extractor through `friday.extraction`'s registry,
     # not through here, and `Diagnose` is handed its harness when the graph is

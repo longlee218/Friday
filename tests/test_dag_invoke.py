@@ -616,16 +616,24 @@ def test_node_0_runs_the_extractor_on_a_clock_that_outlasts_the_extractors(
         assert node.timeout_seconds == extractor_timeout + router.NODE_CLOCK_MARGIN_SECONDS
 
 
-def test_node_0_with_no_extractor_configured_calls_no_model_and_has_no_clock():
+def test_node_0_with_no_extractor_configured_calls_no_model_but_is_still_bounded():
     """No `extractor` block is a warned-about install where node 0 is code
-    alone — nothing to bound on the model's behalf, and naming an agent that
-    is not configured would refuse the boot."""
+    alone — nothing to bound *on the model's behalf*, and naming an agent
+    that is not configured would refuse the boot.
+
+    It still gets a clock, and the reason is a different one (2026-09-22):
+    the bound is owed to the pool, not to the model. A node that is fast by
+    construction is not a node that is bounded, and `check_graph_clocks`
+    sums every node — a sum with a hole in it is not a sum.
+    """
     from friday.dag import router
+    from friday.dag.api_issue import ROW_TIMEOUT_SECONDS
 
     router.register_dags(_extractor_config(None))
 
     node = router.dag_for("api_issue").node("prepare")
-    assert node.agent is None and node.timeout_seconds is None
+    assert node.agent is None
+    assert node.timeout_seconds == ROW_TIMEOUT_SECONDS
 
 
 def test_the_clocks_are_checked_from_the_configuration_alone(monkeypatch):
