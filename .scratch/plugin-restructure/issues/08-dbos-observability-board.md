@@ -4,6 +4,8 @@
 
 **Blocked by:** 06.
 
+**Source:** `spec.md` — § Observability (reuse before rewrite).
+
 **Status:** ready-for-agent
 
 - [ ] A FastAPI endpoint returns workflow status from `DBOSClient.list_workflows(...)` + per-workflow progress events

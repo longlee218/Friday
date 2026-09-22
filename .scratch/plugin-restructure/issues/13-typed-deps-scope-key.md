@@ -4,6 +4,8 @@
 
 **Blocked by:** 11.
 
+**Source:** `spec.md` — Migration order, step 6 (typed per-run Deps from the scope key).
+
 **Status:** ready-for-agent
 
 - [ ] A task type's `deps` factory builds `Deps` at run start from the serializable scope key

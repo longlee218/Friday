@@ -4,6 +4,8 @@
 
 **Blocked by:** 01.
 
+**Source:** `spec.md` — Migration order, step 1 (library-independent defects); § Implementation Decisions → "Defects".
+
 **Status:** done
 
 - [x] `BOARD_TOKEN` removed from code and config (no route ever checked it; it only lifted the loopback refusal)

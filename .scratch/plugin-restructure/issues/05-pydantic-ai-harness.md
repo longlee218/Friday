@@ -4,6 +4,8 @@
 
 **Blocked by:** 01. (Recommended before 06 to avoid re-touching the node/harness seam; not a hard blocker.)
 
+**Source:** `spec.md` — Migration order, step 2 (Pydantic AI + ModelProvider seam); § Implementation Decisions → "Runtime libraries" (DESIGN-v2 §6.7). See `docs/research/pydantic-ai-migration.md`.
+
 **Status:** ready-for-agent
 
 - [ ] `harness.py` runs the agent loop on Pydantic AI and is the only module importing the agent/vendor SDK

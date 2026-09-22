@@ -4,6 +4,8 @@
 
 **Blocked by:** 10.
 
+**Source:** `spec.md` — Migration order, step 4 (task types register themselves).
+
 **Status:** ready-for-agent
 
 - [ ] `PARAMS`, `EXTRACTS`, `_graphs` replaced by a `TaskTypeSpec` registry filled by `register()`

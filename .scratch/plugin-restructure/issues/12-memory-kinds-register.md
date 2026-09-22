@@ -4,6 +4,8 @@
 
 **Blocked by:** 10.
 
+**Source:** `spec.md` — Migration order, step 5 (memory kinds register, trimmed spec); § Implementation Decisions → "Registration and scope".
+
 **Status:** ready-for-agent
 
 - [ ] `_READERS`/`_WRITERS` and the `*Data` shapes come from a `MemoryKindSpec` registry

@@ -4,6 +4,8 @@
 
 **Blocked by:** 07, 14.
 
+**Source:** `spec.md` — Migration order, step 9 (store split, workflow state excluded).
+
 **Status:** ready-for-agent
 
 - [ ] `db.py` is split into repository modules behind the same `Database` facade

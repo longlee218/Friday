@@ -4,6 +4,8 @@
 
 **Blocked by:** 11, 12, 13.
 
+**Source:** `spec.md` — Migration order, step 7 (`sdk/` + `plugins/devops/`).
+
 **Status:** ready-for-agent
 
 - [ ] The ports `devops` needs are extracted into `friday/sdk` (`LogSource`, `CodeSource`, `TaskTypeSpec`, `MemoryKindSpec`, `Deps`, workflow port)

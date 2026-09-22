@@ -4,6 +4,8 @@
 
 **Blocked by:** 06.
 
+**Source:** `spec.md` — Migration order, step 3 (folds the outbox delivery loop into the DBOS phase).
+
 **Status:** ready-for-agent
 
 - [ ] Delivery is a DBOS step carrying an idempotency key (passed down when the channel supports one)

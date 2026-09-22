@@ -4,6 +4,8 @@
 
 **Blocked by:** 01.
 
+**Source:** `spec.md` — Migration order, step 1 (library-independent defects); § Local operation (§12.1).
+
 **Status:** done
 
 - [x] `run_agent.py` takes an exclusive lock (a lock file beside the database) at startup

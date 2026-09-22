@@ -4,6 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
+**Source:** `spec.md` — Migration order, step 0 (clean tree).
+
 **Status:** done
 
 - [x] Uncommitted `api_issue` work is landed or stashed

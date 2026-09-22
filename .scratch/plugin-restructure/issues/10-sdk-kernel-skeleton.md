@@ -4,6 +4,8 @@
 
 **Blocked by:** 06.
 
+**Source:** `spec.md` — Migration order, step 7 (`sdk`/`kernel`/`plugins` split); § Implementation Decisions → "Shape and trust".
+
 **Status:** ready-for-agent
 
 - [ ] `friday/sdk` holds `Plugin`, `PluginAPI`, `TaskTypeSpec`, `MemoryKindSpec` (beside the workflow port from 06): Protocols and dataclasses only, no I/O, no third-party imports

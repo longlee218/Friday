@@ -4,6 +4,8 @@
 
 **Blocked by:** 14.
 
+**Source:** `spec.md` — Migration order, step 8 (second persona `plugins/docs/`).
+
 **Status:** ready-for-agent
 
 - [ ] `plugins/docs` registers `doc_question` (one-node graph) through `register()`

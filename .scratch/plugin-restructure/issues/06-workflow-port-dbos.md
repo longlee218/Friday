@@ -4,6 +4,8 @@
 
 **Blocked by:** 01. (Recommended after 05.)
 
+**Source:** `spec.md` — Migration order, step 3 (DBOS workflow port + adapter); § Implementation Decisions → "Runtime libraries" (DESIGN-v2 §7).
+
 **Status:** ready-for-agent
 
 - [ ] `sdk/workflow.py` is a thin Friday port (`Node`/`Step`/`Edge`, envelope, `Ask`/`Reply`/`HandOver`)

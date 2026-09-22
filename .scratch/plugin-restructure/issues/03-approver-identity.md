@@ -4,6 +4,8 @@
 
 **Blocked by:** 01.
 
+**Source:** `spec.md` — Migration order, step 1 (library-independent defects); § Implementation Decisions → "Defects".
+
 **Status:** done
 
 - [x] The decider of an approval is checked against `operator_id` before the row becomes sendable

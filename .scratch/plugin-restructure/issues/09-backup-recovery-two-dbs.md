@@ -4,6 +4,8 @@
 
 **Blocked by:** 06, 07.
 
+**Source:** `spec.md` — § Local operation (§12.1).
+
 **Status:** ready-for-agent
 
 - [ ] WAL is on for both the application and the DBOS system database
