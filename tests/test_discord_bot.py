@@ -97,9 +97,11 @@ async def test_approving_reports_the_row_and_who_decided():
         on_decision=lambda **kw: decisions.append(kw),
     )
 
-    await bot.handle("friday:approve:row:12", by="longle_")
+    await bot.handle("friday:approve:row:12", by="longle_", by_id=OPERATOR)
 
-    assert decisions == [{"outbound_id": 12, "approved": True, "by": "longle_"}]
+    assert decisions == [
+        {"outbound_id": 12, "approved": True, "by": "longle_", "by_id": OPERATOR}
+    ]
 
 
 async def test_rejecting_reports_it_too():
@@ -109,9 +111,11 @@ async def test_rejecting_reports_it_too():
         on_decision=lambda **kw: decisions.append(kw),
     )
 
-    await bot.handle("friday:reject:row:12", by="longle_")
+    await bot.handle("friday:reject:row:12", by="longle_", by_id=OPERATOR)
 
-    assert decisions == [{"outbound_id": 12, "approved": False, "by": "longle_"}]
+    assert decisions == [
+        {"outbound_id": 12, "approved": False, "by": "longle_", "by_id": OPERATOR}
+    ]
 
 
 async def test_a_card_from_before_the_move_is_not_read_as_a_row():
@@ -124,7 +128,7 @@ async def test_a_card_from_before_the_move_is_not_read_as_a_row():
         on_decision=lambda **kw: decisions.append(kw),
     )
 
-    await bot.handle("friday:approve:42", by="longle_")
+    await bot.handle("friday:approve:42", by="longle_", by_id=OPERATOR)
 
     assert decisions == []
 
@@ -136,7 +140,7 @@ async def test_a_button_that_is_not_ours_is_ignored():
         on_decision=lambda **kw: decisions.append(kw),
     )
 
-    await bot.handle("something:else:1", by="longle_")
+    await bot.handle("something:else:1", by="longle_", by_id=OPERATOR)
 
     assert decisions == []
 
@@ -196,13 +200,26 @@ async def test_telling_the_operator_about_a_row_that_belongs_to_no_task(caplog):
     assert str(Kind.ALERT) in line
 
 
+class _User:
+    """A Discord user as `_answered` reads it: prints as a name, carries an id."""
+
+    def __init__(self, name: str, id: int) -> None:
+        self._name = name
+        self.id = id
+
+    def __str__(self) -> str:
+        return self._name
+
+
 class Pressed:
     """What discord.py hands a button callback, reduced to what `_answered`
     reads and writes."""
 
     def __init__(self, custom_id: str, content: str = "**Reply to 999?**"):
         self.data = {"custom_id": custom_id}
-        self.user = "longle_"
+        # A Discord user prints as its name and carries the authenticated id
+        # the kernel checks against operator_id.
+        self.user = _User("longle_", OPERATOR)
         self.message = SimpleNamespace(content=content)
         self.edits: list[dict] = []
 
@@ -230,6 +247,20 @@ async def test_a_recorded_decision_says_who_answered():
 
     (edit,) = pressed.edits
     assert "answered by longle_" in edit["content"]
+
+
+async def test_a_press_carries_the_authenticated_pressers_id():
+    """The decision must carry who the channel authenticated, not the button's
+    payload, so the kernel can check it against operator_id."""
+    decisions: list = []
+    bot = DiscordBot(
+        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        on_decision=lambda **kw: decisions.append(kw),
+    )
+
+    await press(bot, "friday:approve:row:12")
+
+    assert decisions[0]["by_id"] == OPERATOR and decisions[0]["by"] == "longle_"
 
 
 async def test_a_card_from_before_the_move_says_nothing_was_recorded(caplog):

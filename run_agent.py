@@ -21,14 +21,13 @@ from friday.ops.api import bind, build_api, check_exposure
 from friday.ops.liveness import Heartbeat, Liveness
 from friday.agent.mcp import build as build_mcp
 from friday.ops.redact import Redacting, install_excepthook
-from friday.outbox import Outbox
+from friday.outbox import Outbox, record_decision
 from friday.providers import CredentialRejected
 from friday.providers.discord.user import DiscordUserProvider
 from friday.providers.discord.bot import DiscordBot
 from friday.responder import Responder
 from friday.agent.skills import SkillLibrary
 from friday.domain.models import ModelCall
-from friday.domain.states import TaskState
 from friday.triage.runner import TriageRunner
 from friday.tasks.pool import Pool
 
@@ -248,25 +247,23 @@ async def _run(stack: AsyncExitStack) -> None:
         spent=db.spent_today,
     )
     pool = Pool.build(config, db=db, responder=responder)
-    async def decided(*, outbound_id: int, approved: bool, by: str) -> None:
+    async def decided(*, outbound_id: int, approved: bool, by: str, by_id: int) -> None:
         """What a button press means.
 
-        Approving records who and when on the reply row the card named, which
-        is the only thing standing between that reply and the channel — the
-        outbox selects on it, so nothing has to remember the reply was
-        waiting. The row, not the task: a reply the task queues later waits
-        for its own card.
+        The identity check lives in `record_decision`, not here: only the
+        operator may release a reply that goes out in their name, so the
+        decider's authenticated id is checked against `operator_id` before the
+        row can become sendable — never trusted from whatever button was
+        pressed.
         """
-        if approved:
-            await db.approve_outbound(outbound_id, by=by)
-            log.info("reply %d approved by %s", outbound_id, by)
-            return
-        row = await db.outbound_row(outbound_id)
-        if row is None or row.task_id is None:
-            log.warning("reply %d rejected by %s, but it has no task", outbound_id, by)
-            return
-        await db.move_task(row.task_id, TaskState.NEEDS_HUMAN)
-        log.info("task %d rejected by %s (reply %d)", row.task_id, by, outbound_id)
+        await record_decision(
+            db,
+            outbound_id=outbound_id,
+            approved=approved,
+            by=by,
+            by_id=by_id,
+            operator_id=config.operator_id,
+        )
 
     bot_token = os.environ.get("DISCORD_BOT_TOKEN")
     bot = (

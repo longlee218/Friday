@@ -11,7 +11,7 @@ import pytest
 
 from conftest import make_event
 from friday.domain.conversation import ConversationId
-from friday.outbox import Kind, Outbox
+from friday.outbox import Kind, Outbox, record_decision
 
 WATCHED = ConversationId("fake", "watched")
 
@@ -97,6 +97,70 @@ async def test_asking_for_missing_details_never_waits_for_approval(db):
     assert Kind.ASK_FOR_DETAILS.needs_approval is False
     assert Kind.APPROVAL_CARD.needs_approval is False
     assert Kind.REPLY.needs_approval is True
+
+
+# ── Ticket 03: only the operator may release a reply ──────────────────────────
+OPERATOR = 482447107983147039
+STRANGER = 999
+
+
+async def _pending_reply(db):
+    opened = await task(db)
+    return await db.queue_outbound(
+        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
+        sender="discord_user", text="here is your answer",
+    )
+
+
+async def test_the_operator_approving_makes_the_reply_sendable(db):
+    row = await _pending_reply(db)
+
+    applied = await record_decision(
+        db, outbound_id=row.id, approved=True,
+        by="operator", by_id=OPERATOR, operator_id=OPERATOR,
+    )
+
+    assert applied is True
+    assert [r.id for r in await db.sendable_outbound()] == [row.id]
+
+
+async def test_a_non_operator_decider_cannot_approve(db):
+    """The reply speaks in the operator's name, so only they may release it —
+    checked here against operator_id, not trusted from whoever pressed the
+    button."""
+    row = await _pending_reply(db)
+
+    applied = await record_decision(
+        db, outbound_id=row.id, approved=True,
+        by="a stranger", by_id=STRANGER, operator_id=OPERATOR,
+    )
+
+    assert applied is False
+    assert await db.sendable_outbound() == [], "the reply must not become sendable"
+
+
+async def test_the_operator_rejecting_sends_the_task_to_a_human(db):
+    row = await _pending_reply(db)
+
+    applied = await record_decision(
+        db, outbound_id=row.id, approved=False,
+        by="operator", by_id=OPERATOR, operator_id=OPERATOR,
+    )
+
+    assert applied is True
+    assert (await db.tasks())[0].state == "needs_human"
+
+
+async def test_a_non_operator_decider_cannot_reject_either(db):
+    row = await _pending_reply(db)
+
+    applied = await record_decision(
+        db, outbound_id=row.id, approved=False,
+        by="a stranger", by_id=STRANGER, operator_id=OPERATOR,
+    )
+
+    assert applied is False
+    assert (await db.tasks())[0].state != "needs_human"
 
 
 async def test_a_row_is_never_sent_twice(db):

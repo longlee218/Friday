@@ -88,7 +88,7 @@ class DiscordBot:
         )
         return str(message.id)
 
-    async def handle(self, custom_id: str, *, by: str) -> bool:
+    async def handle(self, custom_id: str, *, by: str, by_id: int) -> bool:
         """Report a decision about one outbox row, and say whether it was
         reported. Applying it is the caller's business.
 
@@ -110,8 +110,17 @@ class DiscordBot:
         if decision not in ("approve", "reject") or self._on_decision is None:
             log.warning("ignored a press on %r by %s: nothing takes it", custom_id, by)
             return False
+        # The operator-identity check lives downstream (`record_decision`). A
+        # decision it refuses is silent to the presser here — the card still
+        # reads "answered". That is safe because these buttons live in the
+        # operator's own DM, so no one else can press them; surfacing a refusal
+        # on the card, and auditing it, is ticket 17 (the approval card tells
+        # the whole truth).
         result = self._on_decision(
-            outbound_id=int(outbound_id), approved=decision == "approve", by=by
+            outbound_id=int(outbound_id),
+            approved=decision == "approve",
+            by=by,
+            by_id=by_id,
         )
         if hasattr(result, "__await__"):
             await result
@@ -164,7 +173,11 @@ class _Buttons(discord.ui.View):
 
     async def _answered(self, interaction) -> None:
         recorded = await self._handle(
-            interaction.data["custom_id"], by=str(interaction.user)
+            interaction.data["custom_id"],
+            by=str(interaction.user),
+            # The channel-authenticated presser, not the button's payload:
+            # the kernel checks this against operator_id.
+            by_id=interaction.user.id,
         )
         note = (
             f"_answered by {interaction.user}_"

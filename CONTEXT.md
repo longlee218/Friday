@@ -157,14 +157,15 @@ is the premise each board tracks against.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
 
-1. **Library-independent defects, first** (DESIGN-v2 §15 step 1). `BOARD_TOKEN`
-   only lifts the loopback refusal and no request is checked against it
-   (`friday/ops/api.py` `check_exposure`); the board writes `admin` memory
-   with no Host, Origin or CSRF check; the approver's identity is never
-   checked (`run_agent.py` `decided`); no single-instance lock on
-   `run_agent.py`. **The outbox double-post fix** (`friday/outbox/__init__.py`
-   `_deliver`) is **not** here — the delivery loop is a durable-workflow
-   candidate, so it folds into the DBOS phase (§15 step 3, ADR 0001).
+1. **Library-independent defects, first** (DESIGN-v2 §15 step 1). Landed:
+   board protection (ticket 02) — `BOARD_TOKEN` removed and every write checks
+   Host/Origin/CSRF (`friday/ops/api.py`); approver identity (ticket 03) — a
+   decision is checked against `operator_id` in `record_decision`
+   (`friday/outbox/__init__.py`), not trusted from whatever button was pressed.
+   Still to do: a single-instance lock on `run_agent.py` (ticket 04). **The
+   outbox double-post fix** (`friday/outbox/__init__.py` `_deliver`) is **not**
+   here — the delivery loop is a durable-workflow candidate, so it folds into
+   the DBOS phase (§15 step 3, ADR 0001).
 2. **DESIGN-v2** (`docs/DESIGN-v2.md`, **accepted target 2026-09-22, ADR
    0001**): a kernel owns the invariants, everything else registers as an
    in-repo plugin. **Re-sequenced §15**: library-independent defects (step 1)

@@ -18,9 +18,51 @@ from friday.domain.states import OutboundState, TaskState
 
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN
 
-__all__ = ["FAILED", "Kind", "Outbox", "QUEUED"]
+__all__ = ["FAILED", "Kind", "Outbox", "QUEUED", "record_decision"]
 
 log = logging.getLogger(__name__)
+
+
+async def record_decision(
+    db,
+    *,
+    outbound_id: int,
+    approved: bool,
+    by: str,
+    by_id: int,
+    operator_id: int,
+) -> bool:
+    """Apply an approval decision to one outbox row, and say whether it stuck.
+
+    A reply goes out *as the operator*, so only the operator may release one.
+    That is checked here, against `operator_id`, and not trusted from whatever
+    button was pressed: the decision carries the id of whoever the channel
+    authenticated (`by_id`), and a decision by anyone else is refused before the
+    row can become sendable — a `False` return, nothing approved, no task moved.
+
+    Approving records who and when on the reply row, which is the only thing
+    standing between it and the channel — the outbox selects on it. Rejecting
+    sends the reply's task back to a human. The row, not the task: a reply the
+    task queues later waits for its own card.
+    """
+    if by_id != operator_id:
+        log.warning(
+            "refused a decision on reply %d by %s (id %s): only the operator "
+            "(id %s) may release a reply that speaks in their name",
+            outbound_id, by, by_id, operator_id,
+        )
+        return False
+    if approved:
+        await db.approve_outbound(outbound_id, by=by)
+        log.info("reply %d approved by %s", outbound_id, by)
+        return True
+    row = await db.outbound_row(outbound_id)
+    if row is None or row.task_id is None:
+        log.warning("reply %d rejected by %s, but it has no task", outbound_id, by)
+        return True
+    await db.move_task(row.task_id, NEEDS_HUMAN)
+    log.info("task %d rejected by %s (reply %d)", row.task_id, by, outbound_id)
+    return True
 
 #: The two a *reader* asks about — the board, the API and the liveness line all
 #: want "what is waiting" and "what gave up". Named here for them; defined in

@@ -4,9 +4,9 @@
 
 **Blocked by:** 01.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The decider of an approval is checked against `operator_id` before the row becomes sendable
-- [ ] A decision by any other principal is refused
-- [ ] Test: a non-operator decider is rejected (guard deleted once and watched go red)
-- [ ] `uv run pytest -q` passes
+- [x] The decider of an approval is checked against `operator_id` before the row becomes sendable
+- [x] A decision by any other principal is refused
+- [x] Test: a non-operator decider is rejected (guard deleted once and watched go red)
+- [x] `uv run pytest -q` passes
