@@ -4,14 +4,24 @@
 tools over them, the `collect` tool, and the Collector sub-agent that answers
 it with an `Evidence`.
 
-**Blocked by:** 09 (knowledge rows build the enums), 11 (timeouts that nest),
-05 (`Diagnose` and the evidence set). The eval baseline — collects = 0 —
-comes from 14 before this is switched on (D16).
+**Blocked by:** 05's remainder and 14's baseline (2026-09-22). 09 and 11
+are done.
 
 **Decisions:** spec, "Architecture v3.2". Replaces this ticket's earlier
 form, `Investigate`, which is withdrawn.
 
-**Status:** ready-for-agent
+**Status:** barely started, and less of it exists than "the Source layer
+landed" suggests (2026-09-22). `friday/sources/` holds **one** protocol,
+`LogSource`, not six — the rest are concrete classes (`LokiSource`,
+`SshKubectlSource`, `DbSource`) and helper functions in `code.py`. There
+are no wrapped-primitive tools, no `collect` tool and no Collector
+sub-agent; nothing yet lets a model decide what to look for.
+
+What did land is the half this ticket argued for first: reading is confined
+to one package, narrowed by `Reads` to tools declared in code, and holding
+no judgement of its own — which is what makes the same primitives servable
+to a Collector later ("the difference is **who decides what to look for**,
+never what is called").
 
 ## What
 

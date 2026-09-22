@@ -8,7 +8,26 @@ from `DeploySource`, which this ticket owns, not from the log check.)
 
 **Decisions:** D6, D7.
 
-**Status:** ready-for-agent
+**Status:** part done (2026-09-22). Built: stack frame to file with the
+clone root enforced, `±15` lines around it, source-map decoding so a
+`dist/*.js:60` frame reads as `src/*.ts:109`, and error-code meanings read
+out of the repo's own table. Exercised on a real production case, where the
+right answer was to read **nothing**: every frame was in `node_modules`, so
+the node returned `empty` and the diagnosis came from the log.
+
+**What is left, and which half is blocked:**
+
+- *Not blocked* — checking out the running version. The operator's rule is
+  that the image tag is the release tag, so the clone must be detached at
+  that tag before it is read. The report already admits it did not: "read
+  at the clone's current HEAD … not at the version actually running — they
+  may differ". Verified by hand on 2026-09-21 that prod ran `0.4.4` and
+  that the files in question were identical to `develop` — which is the
+  check this node should be making for itself.
+- *Blocked by the Keycloak sign-in* — asking `release_status` what tag is
+  running. Doing it by hand needs a token Friday does not have.
+- *Not blocked* — CodeGraph for the enclosing function and one hop of
+  callers. Nothing in `friday/` mentions CodeGraph today.
 
 ## What
 

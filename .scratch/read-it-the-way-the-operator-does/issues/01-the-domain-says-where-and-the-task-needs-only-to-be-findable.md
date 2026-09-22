@@ -4,7 +4,8 @@
 uses, an environment rule in code, and the channel routing table node 0
 looks a domain up in.
 
-**Blocked by:** 09 for the routing half; the `ApiIssueParams` half is free.
+**Blocked by:** nothing (2026-09-22). 09 is done, and the routing half
+shipped with it — see the amendment at the bottom.
 
 **Revised 2026-09-17:** the routing table is not in a channel context file.
 `Resolve` reads `route → service → project` rows (spec, "Memory: one store,
@@ -13,7 +14,21 @@ twelve kinds"), and an unknown domain is investigated, not refused
 
 **Decisions:** D1, D2, D3.
 
-**Status:** ready-for-agent
+**Status:** half done (2026-09-22). The environment rule and the whole
+routing half shipped inside ticket 00's slice — `environment_of` in
+`friday/dag/api_issue/resolve.py` reads `environment` rows by longest
+suffix, and the hardcoded `_OURS`/`_DEV_LABEL` pair is gone **from that
+module** (`_OURS` survives elsewhere as unrelated names in
+`friday/inbox/` and `friday/agent/`; `NOT_OURS` in `friday/sources/code.py`
+is a different thing again), and `route → service → project`
+rows resolve a domain to a cluster, namespace and app. Verified against the
+live database and against production Loki, twice.
+
+**What is left is only the `ApiIssueParams` reshape.** The class is still
+`summary, environment, correlation_id, curl` — the shape this ticket was
+written to replace. `response`, `endpoint` and `identifier` do not exist,
+and `correlation_id` is still asked for directly rather than read out of a
+pasted response. Nothing blocks it.
 
 ## Why
 

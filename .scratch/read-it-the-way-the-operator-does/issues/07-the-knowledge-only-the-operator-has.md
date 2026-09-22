@@ -12,7 +12,15 @@ spec's "Memory: one store, twelve kinds".
 
 **Decisions:** D3, D9.
 
-**Status:** ready-for-human
+**Status:** structured half done (2026-09-22), by the operator on
+2026-09-21. The live database holds two `environment` rows, two `route`
+rows, one `service` and one `project` — enough that a production domain now
+resolves to a cluster, namespace and app without asking anyone, which a
+real run proved. Four `fact` rows exist beside them.
+
+**What is left:** the reasoning half D9 describes — the service-interaction
+context, as prose. Still `ready-for-human`: nobody but the operator can
+write it.
 
 ## Drafted for confirmation
 

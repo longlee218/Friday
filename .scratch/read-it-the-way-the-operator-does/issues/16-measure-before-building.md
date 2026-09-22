@@ -9,8 +9,23 @@ operator for the first three.
 **Decisions:** the operator's 2026-09-18 call; the spec's "Diagnose's
 context" carries the numbers this ticket must confirm or replace.
 
-**Status:** done 2026-09-18, except measurement 2 (reporter delay), which
-ticket 00's five cases will supply
+**Status:** done 2026-09-18, except measurement 2 (reporter delay), whose
+stated supplier has fallen through (2026-09-22). This said ticket 00's five
+cases would supply it; those cases cannot be run at all, because dev
+retention does not reach back to them. Two probes an hour apart on
+2026-09-21 saw different oldest lines, and case 1's request was 27 hours
+older than the oldest line its pod still held — which is itself the
+measurement's most useful number so far, and an argument that the reporter
+delay matters more on dev than the window size does. A real figure now has
+to come from captured production cases as they accumulate.
+
+**Two of the numbers above rest on a live session and on nothing in this
+repository** — the two probes an hour apart, and case 1's request being 27
+hours older than its pod's oldest line. They were read off a cluster that
+has since moved on, and no transcript of them was kept. Treated as
+indicative, not as measurements, until a captured case carries the same
+shape; the same goes for the 2026-09-21 reading that production ran image
+tag `0.4.4`, which needs the devops MCP to check again.
 
 ## Measurements
 

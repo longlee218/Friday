@@ -3,11 +3,28 @@
 **What to build:** A `friday/tools/` read tool wrapping `kubectl get pods`
 and `kubectl logs`, and the dev branch of the log node.
 
-**Blocked by:** 01.
+**Blocked by:** nothing (2026-09-22).
 
 **Decisions:** D4, D5, D14.
 
-**Status:** ready-for-agent
+**Status:** done in a different shape (2026-09-22). `friday/tools/` exists
+and is where an *agent's* tools live, but `kubectl` is not among them and
+should not be: reading is `friday/sources/logs.py`'s `SshKubectlSource`,
+under the Source layer the operator asked for on
+2026-09-21 ("node chuyên về kết nối SSH, node chuyên về Kubectl"), and the
+dev branch of the log node picks it whenever the environment is not
+production.
+
+Two faults found by running it rather than by reading it: `--tail` counts
+from the newest line and there is no `--until`, so a sixteen-hour-old
+window came back as today's newest 400 lines (fixed with `--timestamps` and
+client-side clipping); and `--tail` is applied before anything downstream
+sees a line, so narrowing now asks for the whole window and lets `grep`
+cut it on the far side, under `bash -o pipefail` so a failed `kubectl` is
+not swallowed by the pipe.
+
+**What is left:** nothing of this ticket's own. Dev cases remain
+uninvestigable for a different reason — retention, ticket 00.
 
 **Revised 2026-09-18:** not a local kubeconfig — `ssh dev` then `kubectl` on
 the host (spec, "Dev is behind SSH"). The Source composes the whole command

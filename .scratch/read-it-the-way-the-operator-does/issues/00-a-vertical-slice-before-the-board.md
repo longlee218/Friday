@@ -13,9 +13,33 @@ slice's numbers.
 "nine tickets' worth of green suite did not catch three bugs" (`CLAUDE.md`),
 and this design has changed four times in two days without running once.
 
-**Status:** the code is built (2026-09-20, see the last section); the five
-runs are not. `ready-for-human`: cases 2–5, case 1's cause, and the `route`
-and `service` rows the slice reads
+**Status:** its four questions are answered (2026-09-22) — on a captured
+production case, not on cases 1–5. The rows it needed are typed in. See
+"The four questions, answered" near the end, and the production run before
+it that found three defects in the log node.
+
+**Cases 1–5 will not be run, and that is now a finding rather than a
+backlog item.** They are dev cases, and a dev pod keeps only what it has
+logged since its last restart; case 1's request was 27 hours older than the
+oldest line still held. Captured cases stop the next one being lost; they
+cannot recover these. What this ticket still waits on is a *set* large
+enough to score against (ticket 14), which is one labelled production case
+at a time.
+
+
+**How to check any of this rather than believe it.** The run writes its
+report into a throwaway directory, so `data/reports/` is empty and nothing
+in the tree records that a run happened. What *is* on disk is the case
+itself, and it is enough to reproduce every claim here:
+
+    uv run replay_case.py --case data/cases/prod-onboarding-400.json --diagnose
+
+`data/cases/prod-onboarding-400.json` also corroborates the log
+measurements directly, without running anything: its `reads.window` is 400
+lines with `truncated: true` spanning 10:38:20–10:39:44Z — 84 seconds of
+the 35 minutes asked for — and its `reads.narrowed` is 2 lines with
+`truncated: false`. The file is under `data/`, which is gitignored on
+purpose: those lines carry `userId`, `ip` and `deviceId`.
 
 ## What is in, and what is deliberately out
 

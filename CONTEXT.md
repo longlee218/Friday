@@ -78,11 +78,37 @@ and its labels are the operator's to confirm before it moves into `evals/`.
   was never lost, it is `artifacts.af85b208fd70e`. One open question, the
   operator's: may Friday replay a request when no log line can be found?
 
-  Waiting on the operator: 07 (confirm the drafted knowledge rows in
-  `research/03-seed-rows.md`, write the runbooks); the two `route` rows and
-  one `service` row the slice reads — `memories` is empty, so every real run
-  hands over on a missing row until they exist; cases 2–5, and case 1's
-  cause. The order is in its `execution-plan.md`.
+  **The board was re-read against the code on 2026-09-22** and every
+  ticket's status line now says what is actually built, because the
+  `Blocked by:` lines were written before 00's slice existed and had
+  stopped being true. Where each one stands:
+
+  | | |
+  | --- | --- |
+  | done | 03, 09, 10, 11, 12, 13, 17, 18, 19 |
+  | part done | 00 (questions answered, no labelled set), 01 (only the `ApiIssueParams` reshape left), 02 (only the not-found ask/resume, plus the deferred sign-in), 04, 05, 06 (the whole outbound half), 07, 08, 16 |
+  | not started | 14 (no longer blocked by code — blocked by labelled cases), 15 (one protocol of six; no `collect`, no Collector) |
+
+  Two things are built and connected to nothing, which is worth saying out
+  loud because both look done from a distance: `friday/sources/db.py` has
+  no caller in any node, and the Keycloak sign-in is written, tested and
+  uncommitted at the operator's word.
+
+  **Nothing in this repository records that a run happened**, because
+  `replay_case.py` writes its report to a throwaway directory and
+  `data/reports/` stays empty. Every claim about a run is reproducible
+  instead, from the one artefact that is kept:
+  `uv run replay_case.py --case data/cases/prod-onboarding-400.json
+  --diagnose`. Cases live under `data/`, which is gitignored, because their
+  lines carry `userId`, `ip` and `deviceId`.
+
+  Waiting on the operator: 07's prose half (the structured rows are in, and
+  a production domain now resolves without asking anyone); labelled cases
+  for 14, one captured production case at a time; the Keycloak sign-in; and
+  the open question — may Friday replay a request when no log line can be
+  found? Cases 2–5 and case 1's cause are **withdrawn as asks**: dev
+  retention cannot reach them. The order is in its `execution-plan.md`,
+  which the re-read has not yet been folded into.
 
 # Vocabulary
 
