@@ -667,6 +667,23 @@ the collect ceiling to 0 is the eval's baseline.
 
 ## Architecture v3.3: Gather stops fetching (operator, 2026-09-22)
 
+> **Paused 2026-09-22, the operator's call: the feature had grown too large
+> and was going too far, and the work moves to restructuring.** What is built
+> is built and switched off — `api_issue.diagnose_reads` is `false`, so the
+> fixed pipeline is what runs and nothing below is live.
+>
+> **What would have to be true to resume:** a set of labelled cases worth
+> comparing against. One case is a regression check; the whole argument for
+> v3.3 is that it diagnoses *better*, and with n=1 that sentence cannot be
+> checked either way.
+>
+> **What would mean deleting it instead:** the switch still `false` with no
+> intention to measure. A capability kept for a caller that does not arrive
+> is the thing this board keeps removing, and `friday/tools/investigate.py`
+> plus the `_reading` path in `diagnose.py` are exactly that shape if the
+> measurement never happens. Whoever reads this next: decide, do not
+> inherit it.
+
 Supersedes v3.2's division of labour. The operator's call, and the argument
 is the one this board has been making about the database all week, applied
 to everything else:

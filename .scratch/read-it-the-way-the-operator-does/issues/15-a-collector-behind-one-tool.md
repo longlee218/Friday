@@ -14,32 +14,27 @@ supersedes v3.2's division of labour. This ticket's earlier forms —
 `Investigate`, then a `Collector` sub-agent behind one `collect` tool — are
 both withdrawn.
 
-**Status:** built and **switched off** (2026-09-22).
-`api_issue.diagnose_reads` is `false` by default.
+**Status:** built, switched off, and **paused** (2026-09-22, the operator:
+the feature had grown too large and the work moves to restructuring).
 
-Built: `friday/tools/investigate.py` — `read_log`, `read_code`,
-`what_code_means` — with `Evidence` carrying a **grounding index that
-accumulates across calls** and a ceiling of twelve reads. `Diagnose` builds
-a harness per run with this run's tools, and both ways of answering pass
-through one shared `_judged()`: two copies of the gates is one that stops
-being updated, and this second path exists precisely to be compared against
-the first.
+`api_issue.diagnose_reads` is `false`, so none of this runs. Built:
+`friday/tools/investigate.py` — `read_log`, `read_code`, `what_code_means` —
+with `Evidence` carrying a grounding index that accumulates across calls and
+a ceiling of twelve reads; and `Diagnose` building a harness per run with
+this run's tools, both ways of answering passing through one shared
+`_judged()`.
 
-One gate the pipeline never needed: an answer written **without a single
-tool call** is refused. The old node could check there was a dossier; here
-nothing is fetched unless the model fetches it.
+**This is a capability with no live caller, which is the shape this board
+deletes.** It is kept rather than reverted for one reason: the measurements
+that justify it are written into it, and re-deriving them costs more than
+the code does. That reason expires. Whoever picks this up:
 
-**What is left:**
-
-- **Turn the switch on and compare.** That is what it is for. With one
-  labelled case the comparison decides nothing yet, which is the honest
-  state rather than a reason to skip it.
-- **The db tools** (`list_tables`, `describe`, `query`). `friday/sources/db.py`
-  exists and has no caller; what it needs first is a `MemoryKind.DATABASE`
-  so a room can say which `db_id`s it may read — `DbSource.allowed` is empty
-  today and reads nothing.
-- Removing `find_request_log` and `read_failing_code`, which is step 5 and
-  waits on a measurement, not on work.
+- **Resume** if there is a set of labelled cases worth comparing against
+  (ticket 14). The claim v3.3 makes is "diagnoses better", and with one case
+  that sentence cannot be checked either way.
+- **Delete** `friday/tools/investigate.py`, the `_reading` path in
+  `diagnose.py`, `build_reads_input`, the `READS` instructions and the
+  `diagnose_reads` switch, if nobody intends to measure. Do not inherit it.
 ## Why the Collector sub-agent is gone
 
 v3.2 put a sub-agent between `Diagnose` and the sources so that raw volume

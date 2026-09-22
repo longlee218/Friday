@@ -6,23 +6,19 @@ runner printing cause accuracy, `conclusive` agreement and groundedness.
 
 **Blocked by:** cases the operator has labelled (2026-09-22) — no longer
 05 and 06. **Decisions:** finding L; research 01.
-**Status:** built (2026-09-22), and it has one case in it.
+**Status:** built (2026-09-22), with one case in it, and **its consumer is
+paused**.
 
 `evals/api_issue.py` scores a run against what the operator said was true;
 `uv run python -m evals.run_api_issue_eval` replays every captured case with
-the model on. Cause accuracy is substring matching against `cause_mentions`,
-not a judge model — the spec's own rule, and its weakness is written in the
-docstring rather than hidden.
+the model on. It still earns its place with the fixed pipeline: it is the
+only thing that notices a change to the distillation making causes worse,
+and three such changes landed on 2026-09-21 with nobody able to tell.
 
-Three things it refuses to flatter: an **unlabelled** case scores zero rather
-than full marks, a **voided** answer is a third outcome and not
-`conclusive: false`, and under ten cases it prints that it is a regression
-check and **not a score**.
-
-**What is left is the set, and it accumulates.** One case: cause 1/1,
-conclusive 1/1, refs 2. Friday proposes both labels when it captures a case
-and the operator confirms or corrects — the `verdicts.py` shape. Ten to
-twenty make a number worth comparing, and they arrive as incidents do.
+**The set accumulates as incidents do.** Friday proposes both labels when it
+captures a case; the operator confirms or corrects. One case today: cause
+1/1, conclusive 1/1, refs 2. Ten to twenty make a number worth comparing —
+and that number is what ticket 15 waits on.
 ## Notes
 Evidence is frozen so a run calls the model only. The mark that labels a row
 is the mark that verifies that task's `finding` (finding D). Baseline first
