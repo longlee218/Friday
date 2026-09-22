@@ -22,6 +22,7 @@ from friday.ops.liveness import Heartbeat, Liveness
 from friday.agent.mcp import build as build_mcp
 from friday.ops.redact import Redacting, install_excepthook
 from friday.outbox import Outbox, record_decision
+from friday.ops.single_instance import single_instance_lock
 from friday.providers import CredentialRejected
 from friday.providers.discord.user import DiscordUserProvider
 from friday.providers.discord.bot import DiscordBot
@@ -101,6 +102,11 @@ async def _run(stack: AsyncExitStack) -> None:
             "DISCORD_USER_TOKEN is not set. Put it in .env (see .env.example) "
             "or export it before running."
         )
+    # One agent at a time (ticket 04; see `single_instance` for why). The OS
+    # releases the lock when this process exits, so `stack` closing it is for a
+    # clean shutdown, not crash recovery — there is no stale lock file to sweep.
+    lock = single_instance_lock(config.database_path)
+    stack.callback(lock.close)
     db = await Database.connect(config.database_path)
 
     async def record_call(entry) -> None:

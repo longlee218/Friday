@@ -4,10 +4,10 @@
 
 **Blocked by:** 01.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `run_agent.py` takes an exclusive lock (a lock file beside the database) at startup
-- [ ] A second `run_agent` refuses to start with a clear message
-- [ ] SQLite `busy_timeout` set explicitly
-- [ ] Test: a second `run_agent` refuses to start (guard deleted once and watched go red)
-- [ ] `uv run pytest -q` passes
+- [x] `run_agent.py` takes an exclusive lock (a lock file beside the database) at startup
+- [x] A second `run_agent` refuses to start with a clear message
+- [x] SQLite `busy_timeout` set explicitly
+- [x] Test: a second `run_agent` refuses to start (guard deleted once and watched go red)
+- [x] `uv run pytest -q` passes

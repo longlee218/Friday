@@ -124,6 +124,18 @@ _NEEDS_APPROVAL = ("reply",)
 _ASK = "ask_for_details"
 
 
+#: How long a write waits for a competing lock before giving up (ticket 04).
+#: A read from the board holds the database only for the length of the read;
+#: without this a write that lands during one raises `database is locked` at
+#: once, and with it the write simply waits the read out. Three seconds is far
+#: longer than any read here takes and short enough not to hang the agent.
+#:
+#: Set explicitly rather than left to the driver: aiosqlite happens to default
+#: to 5000ms today, but a value a safety property depends on is one this
+#: process names, not one it inherits and hopes stays put.
+BUSY_TIMEOUT_MS = 3000
+
+
 def _engine(path: str):
     """One engine per process. In-memory needs `StaticPool`: without it every
     checkout opens a *different* empty database."""
@@ -133,8 +145,9 @@ def _engine(path: str):
     engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
 
     @event.listens_for(engine.sync_engine, "connect")
-    def _wal(connection, _record):
+    def _pragmas(connection, _record):
         connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
 
     return engine
 
