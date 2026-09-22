@@ -6,10 +6,10 @@
 
 **Source:** `spec.md` — Migration order, step 2 (Pydantic AI + ModelProvider seam); § Implementation Decisions → "Runtime libraries" (DESIGN-v2 §6.7). See `docs/research/pydantic-ai-migration.md`.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] `harness.py` runs the agent loop on Pydantic AI and is the only module importing the agent/vendor SDK
-- [ ] A `ModelProvider`/harness seam is drawn; moving between compatible vendors is `base_url`/`api_key`/`model`
+- [x] A `ModelProvider`/harness seam is drawn; moving between compatible vendors is `base_url`/`api_key`/`model`
 - [x] The vendored `ScriptedModel` test double is replaced by a Pydantic-AI equivalent under `sdk/testing/` (seam S2)
 - [x] Structured output + the one correction turn still work
 - [x] The kernel chain wraps budget, redaction and recording around every model call
@@ -71,16 +71,16 @@ What changed, against the research doc's feature map:
 - **Deleted** (absorbed from slice 3): `Harness.checkpoint`/`resume`/`RunState`
   and `needs_approval` — no prod caller; only `test_harness` exercised them.
 
-Two boxes left unticked:
+Two boxes were left for the operator; both are now closed (see below).
 
-- **ModelProvider seam (item 2).** Its *substance* holds — moving between
-  compatible OpenAI vendors is `base_url`/`api_key`/`model` (`_chat_model`),
-  and moving to Anthropic/Gemini is swapping `OpenAIChatModel` for the
-  framework's own model class, an adapter not a rewrite. A *bespoke*
-  `ModelProvider` port was deliberately not built, per the research doc
-  ("Pydantic AI makes DESIGN-v2 §6.7's ModelProvider port mostly
-  unnecessary"). Left for the operator to confirm the framework's provider
-  abstraction satisfies the intent.
+- **ModelProvider seam (item 2) — done 2026-09-22.** The operator's first
+  version runs on OpenAI, MiniMax and DeepSeek, all Chat Completions, so the
+  seam is `base_url`/`api_key`/`model` plus a `provider:` shorthand
+  (`config.PROVIDER_BASE_URLS`) that fills the known base_url — an explicit
+  `base_url` still wins. No `harness.py` change: a non-OpenAI-compatible vendor
+  would be a different model class in `_chat_model`, an adapter not a rewrite.
+  `tests/test_agent_config.py` pins the shorthand, the override and the two
+  refusals.
 - **Triage eval (item 7).** CLAUDE.md rule 4 applies (the harness is upstream
   of the classifier), but the eval scores the *live* classifier — a billed
   provider call the operator triggers: `uv run python -m evals.run_triage_eval`

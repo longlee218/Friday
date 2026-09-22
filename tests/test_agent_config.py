@@ -86,6 +86,53 @@ def test_an_agent_missing_its_model_is_rejected_by_name(tmp_path):
         load_config(write(tmp_path, text))
 
 
+def test_a_provider_shorthand_fills_the_base_url(tmp_path):
+    """The first version runs on OpenAI, MiniMax or DeepSeek — all Chat
+    Completions — so a `provider:` names one instead of pasting its URL, and
+    nothing in the harness changes."""
+    text = (
+        'agents:\n'
+        '  triage:    { provider: minimax,  api_key: k, model: MiniMax-M3 }\n'
+        '  responder: { provider: deepseek, api_key: k, model: deepseek-chat }\n'
+        '  extractor: { provider: openai,   api_key: k, model: gpt-4o }\n'
+    )
+
+    agents = load_config(write(tmp_path, text)).agents
+
+    assert agents["triage"].base_url == "https://api.minimax.io/v1"
+    assert agents["responder"].base_url == "https://api.deepseek.com"
+    assert agents["extractor"].base_url == "https://api.openai.com/v1"
+
+
+def test_an_explicit_base_url_wins_over_the_shorthand(tmp_path):
+    """For a custom endpoint or a provider not listed: `base_url` is still the
+    real field, and pinning one overrides the shorthand."""
+    text = (
+        'agents:\n'
+        '  triage: { provider: openai, base_url: "https://gateway.internal/v1", '
+        'api_key: k, model: m }\n'
+    )
+
+    assert (
+        load_config(write(tmp_path, text)).agents["triage"].base_url
+        == "https://gateway.internal/v1"
+    )
+
+
+def test_an_unknown_provider_is_refused_by_name(tmp_path):
+    text = 'agents:\n  triage: { provider: llama, api_key: k, model: m }\n'
+
+    with pytest.raises(ConfigError, match="llama"):
+        load_config(write(tmp_path, text))
+
+
+def test_neither_base_url_nor_provider_names_the_shorthand_in_the_error(tmp_path):
+    text = 'agents:\n  triage: { api_key: k, model: m }\n'
+
+    with pytest.raises(ConfigError, match="provider"):
+        load_config(write(tmp_path, text))
+
+
 def test_max_tokens_reaches_the_model_settings_without_a_knob_for_it():
     """`max_tokens` needs no code here, and the point is to say so once.
 

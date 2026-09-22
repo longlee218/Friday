@@ -608,6 +608,15 @@ client = AsyncOpenAI(base_url=..., api_key=..., max_retries=0)
 OpenAIChatModel(model, provider=OpenAIProvider(openai_client=client))
 ```
 
+**Switching vendor is three config values** — `base_url`, `api_key`, `model` —
+because the first version's providers (OpenAI, MiniMax, DeepSeek) all speak Chat
+Completions. A `provider: openai | minimax | deepseek` shorthand fills the known
+`base_url` (`config.PROVIDER_BASE_URLS`), so a block names the provider instead
+of pasting a URL; an explicit `base_url` still wins, for a custom endpoint or a
+vendor not listed. Nothing in `harness.py` changes: the seam is the harness
+itself, and a non-OpenAI-compatible vendor would be a different Pydantic AI
+model class in `_chat_model`, an adapter rather than a rewrite.
+
 **No telemetry is emitted** unless an agent is instrumented, and Friday never
 instruments one — the openai-agents predecessor exported traces to OpenAI using
 the same key as model requests, which with a third-party provider leaked both

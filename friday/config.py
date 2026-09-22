@@ -107,6 +107,18 @@ _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 _REQUIRED_AGENT_FIELDS = ("api_key", "base_url", "model")
 
+#: Shorthand for the `base_url` of the OpenAI-compatible providers Friday's
+#: first version runs on. A `provider:` in an agent block fills the `base_url`
+#: from this, so config names the provider instead of pasting a URL — nothing
+#: in `harness.py` changes, because all three speak Chat Completions and the
+#: only thing that varies is where the request goes. An explicit `base_url`
+#: still wins, for a provider not listed here or a custom endpoint.
+PROVIDER_BASE_URLS = {
+    "openai": "https://api.openai.com/v1",
+    "minimax": "https://api.minimax.io/v1",
+    "deepseek": "https://api.deepseek.com",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class AgentConfig:
@@ -483,10 +495,24 @@ def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
     agents = {}
     for name, spec in raw.items():
         spec = dict(spec or {})
+        # `provider: minimax` is shorthand for its `base_url`. An explicit
+        # `base_url` wins — for a custom endpoint, or a provider not listed.
+        provider = spec.pop("provider", None)
+        if provider is not None and not spec.get("base_url"):
+            if provider not in PROVIDER_BASE_URLS:
+                raise ConfigError(
+                    f"Agent {name!r}: provider {provider!r} is not one of "
+                    f"{', '.join(sorted(PROVIDER_BASE_URLS))} — set `base_url` "
+                    f"directly for anything else"
+                )
+            spec["base_url"] = PROVIDER_BASE_URLS[provider]
         missing = [f for f in _REQUIRED_AGENT_FIELDS if not spec.get(f)]
         if missing:
+            hint = (
+                " (or a `provider:` shorthand)" if "base_url" in missing else ""
+            )
             raise ConfigError(
-                f"Agent {name!r} is missing: {', '.join(missing)}"
+                f"Agent {name!r} is missing: {', '.join(missing)}{hint}"
             )
         agents[name] = AgentConfig(
             name=name,
