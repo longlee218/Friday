@@ -32,7 +32,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from friday.dag.engine import DAGDeps, DAGState, Node, envelope
+from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
 from friday.domain.actions import HandOver
 from friday.domain.models import MemoryKind
 from friday.sources import Placement

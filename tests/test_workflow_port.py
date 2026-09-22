@@ -126,6 +126,47 @@ async def test_a_node_error_becomes_an_error_envelope_scrubbed(dbos_sqlite):
     assert RECORDED[0].node == "boom" and RECORDED[0].dag_name == "err"
 
 
+async def test_a_node_retries_the_exceptions_it_named_then_succeeds(dbos_sqlite):
+    """The kernel chain's retry, ported into the adapter's `_invoke`: an
+    exception in `retry_on` is tried again up to `max_attempts`, and every
+    attempt is a `node_runs` row."""
+    tries = {"n": 0}
+
+    async def flaky(state, deps):
+        tries["n"] += 1
+        if tries["n"] < 2:
+            raise ValueError("transient")
+        return envelope("ok", tries=tries["n"])
+
+    dag = DAG(name="retry", nodes=(Node(
+        name="flaky", run=flaky, retry_on=(ValueError,), max_attempts=2,
+        retry_backoff_seconds=0.0,
+    ),))
+    adapter.register_graph(dag, _no_deps, _record_all)
+
+    state = await adapter.run("retry", {})
+
+    assert state["flaky"]["tries"] == 2
+    assert [r.status for r in RECORDED] == ["error", "ok"]  # one row per attempt
+
+
+async def test_a_node_that_outruns_its_clock_is_timed_out(dbos_sqlite):
+    """The kernel clock wraps the node alone: a node that does not finish in
+    `timeout_seconds` comes back `{status: timed_out}`, and the run goes on."""
+    import asyncio as _asyncio
+
+    async def slow(state, deps):
+        await _asyncio.sleep(5)
+        return envelope("ok")
+
+    dag = DAG(name="slow", nodes=(Node(name="slow", run=slow, timeout_seconds=0.05),))
+    adapter.register_graph(dag, _no_deps)
+
+    state = await adapter.run("slow", {})
+
+    assert state["slow"]["status"] == "timed_out"
+
+
 async def test_deps_are_rebuilt_inside_the_run_from_the_scope_key(dbos_sqlite):
     seen = {}
 

@@ -20,7 +20,7 @@ from typing import Any
 
 from friday.dag.api_issue.distil import distil, frames as frames_of
 from friday.dag.api_issue.resolve import path_of, resolved
-from friday.dag.engine import DAGDeps, DAGState, Node, envelope
+from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
 from friday.domain.actions import Ask
 from friday.sources import Lines
 
@@ -283,7 +283,13 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
 
     async def _find(state: DAGState, deps: DAGDeps) -> Any:
         placement, _ = resolved(state["resolve"])
-        params = state["prepare"]
+        # On the first run, the params `prepare` extracted. On a re-run after an
+        # `Ask`, the params the pool re-extracted from the reporter's answer and
+        # delivered here (model B: the answer re-runs this node with what it now
+        # knows, in place of v1's re-run from node 0). The happy path — a
+        # dossier found without asking — never touches `deps.answers`, so the
+        # replay eval is unchanged.
+        params = deps.answers[-1] if deps.answers else state["prepare"]
         sources: dict[str, Any] = deps.extra.get("log_sources", {})
         wanted = "loki" if placement.env == "production" else "kubectl"
         source = sources.get(wanted)

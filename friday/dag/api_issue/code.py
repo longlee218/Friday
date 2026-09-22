@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from friday.dag.engine import DAGDeps, DAGState, Node, envelope
+from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
 from friday.sources.code import (
     NOT_OURS,
     at_ref,

@@ -1072,7 +1072,7 @@ def test_log_sources_are_only_built_for_what_is_configured():
     assert set(prod) == {"loki"}
 
 
-async def test_a_complete_report_is_investigated_rather_than_handed_back(db):
+async def test_a_complete_report_is_investigated_rather_than_handed_back(db, workflows):
     """The behaviour task 6 met, and the reason this board exists.
 
     Node 0 finds nothing to ask about — a curl satisfies `_traceable` — and
@@ -1088,7 +1088,8 @@ async def test_a_complete_report_is_investigated_rather_than_handed_back(db):
 
     await Pool(db=db, auto_ask=True).run_once()
 
-    _, question = await db.dag_pause((await db.tasks())[0].id)
+    pauses = await db.pauses_for([(await db.tasks())[0].id])
+    (question,) = pauses.values()
     assert "no investigation past this point" not in question
     assert "route row" in question
 
@@ -1096,7 +1097,7 @@ async def test_a_complete_report_is_investigated_rather_than_handed_back(db):
 async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
     """Every node of the slice, in one pass, with the rows and a source in
     place — the shape ticket 00's five cases are run through."""
-    from friday.dag.engine import DAGRunner
+    from replay_case import _run_on_adapter
     from tests.test_pool import make_task
 
     (tmp_path / "orders.ts").write_text("\n".join(f"line {i}" for i in range(40)))
@@ -1121,23 +1122,17 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
         "ERROR ERR19 POST /v1/pod/orders/init 500",
         "at handler (/app/orders.ts:12:3)",
     ]])
-    state = DAGState.empty().with_result(
-        "prepare", ApiIssueParams(**task.params)
-    )
-    runner = DAGRunner(
+    # Node 0 runs outside the walk (the pool does exactly this); the workflow
+    # runs from `resolve` with `prepare` pre-seeded.
+    final, runs, _ = await _run_on_adapter(
         dag,
-        deps=DAGDeps(
-            task=task, db=db, extra={"log_sources": {"kubectl": source}}
-        ),
-        state=state,
+        deps=DAGDeps(task=task, db=db, extra={"log_sources": {"kubectl": source}}),
+        seed={"prepare": ApiIssueParams(**task.params)},
+        system_db=tmp_path / "sys.db",
+        wfid="test-whole-line",
     )
 
-    final = await runner.run()
-
-    # No `prepare`: node 0 runs outside the walk and its result is handed to
-    # the runner already recorded, so the trail starts where the walk does.
-    # `Pool._run_dag` does exactly this on a fresh pass.
-    assert runner.trail == [
+    assert [r.node for r in runs] == [
         "resolve", "acknowledge", "find_request_log", "read_failing_code",
         "diagnose", "report",
     ]
@@ -1294,7 +1289,7 @@ def test_a_node_that_ended_the_run_does_not_read_as_one_that_passed_it_on():
     from replay_case import answers
 
     run = NodeRun(
-        dag_name="api_issue", dag_version="v", node="resolve", attempt=1,
+        dag_name="api_issue", node="resolve", attempt=1,
         status="ok", reason="", duration_ms=6,
     )
     final = DAGState.empty().with_result("resolve", HandOver("no service row"))
@@ -1313,7 +1308,7 @@ def test_a_node_that_failed_is_named_as_a_seam_that_broke():
 
     def run(node, status, reason=""):
         return NodeRun(
-            dag_name="api_issue", dag_version="v", node=node, attempt=1,
+            dag_name="api_issue", node=node, attempt=1,
             status=status, reason=reason, duration_ms=1,
         )
 

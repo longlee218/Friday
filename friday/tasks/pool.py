@@ -17,14 +17,15 @@ package with.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from dataclasses import asdict
 from typing import Any
 
-from friday.dag.engine import DAGDeps, DAGRunner, DAGState, NodeRun, status_of
 from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS, dag_for
+from friday.ops.redact import scrub
+from friday.sdk.workflow import DAGState, Deps as DAGDeps, NodeRun, envelope, status_of
 from friday.store.db import Database
+from friday.workflow import adapter
 from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.states import TaskState
 from friday.domain.models import PARAMS, FridayState, Task
@@ -145,6 +146,9 @@ class Pool:
         """
         for task in await self._db.tasks_the_operator_handled():
             withdrawn = await self._db.cancel_outbound_for(task.id)
+            # A workflow suspended waiting on the reporter must not sit there:
+            # the operator has taken the task off the board.
+            await adapter.cancel(_wfid(task.id))
             await self._db.move_task(task.id, HANDLED)
             log.info(
                 "task %d: the operator answered it — closing%s",
@@ -172,9 +176,7 @@ class Pool:
         tasks = await self._db.tasks_in_state(NEEDS_HUMAN, self._batch_size)
         if not tasks:
             return
-        pauses = await self._db.dag_pauses(
-            {task.id: _fingerprint(task.params) for task in tasks}
-        )
+        pauses = await self._db.pauses_for([task.id for task in tasks])
         said = await self._db.announced(
             Kind.HELP_WANTED, state=NEEDS_HUMAN, limit=self._batch_size
         )
@@ -259,10 +261,10 @@ class Pool:
                 task.id,
                 asked,
             )
-            return await self._move(task, NEEDS_HUMAN)
+            return await self._escalate(task, ask.text)
         if not self._auto_ask:
             log.info("task %d: would ask, but auto_ask is off", task.id)
-            return await self._move(task, NEEDS_HUMAN)
+            return await self._escalate(task, ask.text)
 
         text = await self._in_the_operators_voice(task, ask.text)
         await self._db.queue_outbound(
@@ -277,10 +279,19 @@ class Pool:
         return await self._move(task, ASKED)
 
     async def _hand_over(self, task: Task, hand_over: HandOver) -> Task:
-        """Nothing here can take it further. No row is queued at this point:
-        `_raise_hands` tells the operator later in the same pass, and it
-        carries this reason rather than the task's bare type."""
+        """Nothing here can take it further. The specific reason is stored so
+        `_raise_hands` can carry it later in the same pass rather than the
+        task's bare type; no row is queued at this point."""
         log.info("task %d: %s", task.id, hand_over.reason)
+        await self._db.set_pause(task.id, hand_over.reason)
+        return await self._move(task, NEEDS_HUMAN)
+
+    async def _escalate(self, task: Task, reason: str) -> Task:
+        """Asking is exhausted or switched off, so a person takes it. The
+        workflow was suspended waiting on the reporter — cancel it, store the
+        reason for `_raise_hands`, and move the task to a human."""
+        await adapter.cancel(_wfid(task.id))
+        await self._db.set_pause(task.id, reason)
         return await self._move(task, NEEDS_HUMAN)
 
     async def _propose(self, task: Task, text: str) -> Task:
@@ -411,165 +422,98 @@ class Pool:
         return await self._run_dag(dag, task)
 
     async def _run_dag(self, dag, task: Task) -> Action:
-        """Run the graph registered for this task type.
+        """Work this task's graph on DBOS (ticket 06).
 
-        Node 0 — `dag.entry`, `prepare` for every graph today — is run once,
-        upfront, outside the checkpoint entirely: there is no fingerprint to
-        load state *by* until node 0 has produced one, and it must run on
-        every pass regardless of what is stored, because there may be a new
-        message since the last one. If it says the report cannot be worked
-        with, the graph never starts.
+        Node 0 — `dag.entry`, `prepare` for every graph — is run here, once,
+        every pass, outside the durable workflow: there is a new reporter
+        message since the last pass, and node 0 is the extractor that reads it.
+        If it decides the answer — an `Ask`/`Reply`/`HandOver`, which a one-node
+        graph always does — that is the outcome and no workflow runs.
 
-        Past that, the runner records each remaining node before starting the
-        next, so a crash mid-graph resumes here rather than starting over. A
-        node that cannot decide returns an `Ask` or `HandOver` like any node
-        deciding the graph's answer; when that is how the run ends, which
-        node said so and what it said are saved alongside the checkpoint, so
-        `_raise_hands` can put the specific question in front of the operator
-        rather than the task's bare type and parameters.
+        Past that (`api_issue`'s investigation) the graph runs as a durable
+        DBOS workflow, `prepare` pre-seeded so the walk starts at `resolve`.
+        The workflow persists across passes: a node that must ask the reporter
+        suspends it, and a later pass — after the reporter's answer re-planned
+        the task — resumes it in place with the re-extracted parameters, rather
+        than re-running the whole graph.
         """
-        # Through the runner's invoke like every other node, so node 0 has a
-        # clock, a retry and a `node_runs` row too; an exception comes back
-        # as `{status: error}` rather than raised, and is still work.
-        prepared = await DAGRunner(
-            dag, deps=self._deps_for(task), on_node_run=self._recorder(task)
-        ).run_entry()
+        deps = self._deps_for(task)
+        prepared = await self._run_entry(dag, deps, task)
         if status_of(prepared) in _FAILED:
             log.warning(
                 "task %d: %s's %s failed — %s",
                 task.id, dag.name, dag.entry, prepared["reason"],
             )
             return HandOver(f"{dag.name} failed: {prepared['reason']}")
-
         if isinstance(prepared, (Ask, Reply, HandOver)):
-            if isinstance(prepared, HandOver):
-                # Node 0 deciding the answer is not special — a one-node
-                # graph's only node is node 0 — so it gets the same
-                # pause-recording treatment as any later node's `HandOver` does.
-                #
-                # Fingerprinted against the parameters as they stand *now*,
-                # not the `task` handed to this pass: node 0 writes what it
-                # filled in back before it returns, so that snapshot is one
-                # write out of date the moment it hands over. `_raise_hands`
-                # keys `dag_pauses` on the current parameters, and a pause
-                # stored under any other fingerprint is filtered straight
-                # back out — the row was written and never read, so a
-                # one-node graph's only reason never reached anyone
-                # (ticket 11).
-                await self._record_pause(
-                    task.id,
-                    dag,
-                    results={},
-                    # Node 0 is the whole path a one-node graph walks, and it
-                    # runs outside the runner — so there is no trail to carry
-                    # here, only the one node that produced this.
-                    trail=[dag.entry],
-                    fingerprint=_fingerprint(await self._params_now(task)),
-                    node=dag.entry,
-                    hand_over=prepared,
-                )
             return prepared
+        return await self._run_workflow(dag, task, prepared)
 
-        fingerprint = _fingerprint(_prepare_material(prepared))
-        stored = await self._db.load_dag_progress(
-            task.id,
-            dag_name=dag.name,
-            params_fingerprint=fingerprint,
-            dag_version=dag.version,
-        )
-        results, walked = stored if stored is not None else ({}, [])
-        state = DAGState.from_dict(results).with_result(dag.entry, prepared)
-
-        outcome, final, trail = await self._walk(
-            dag, task=task, state=state, fingerprint=fingerprint, walked=walked
-        )
-        if final is None:
-            return outcome  # the run itself failed; there is no state to record
-
-        if isinstance(outcome, HandOver):
-            # The run ended here rather than deciding something to send — an
-            # `Ask`/`Reply` is still headed for the reporter or the outbox, so
-            # only a `HandOver` is "stuck" in the sense the operator needs the
-            # specific reason for. One more save alongside the ordinary
-            # checkpoint the last node already wrote, so `_raise_hands` reads
-            # this run's actual reason rather than the task's bare type.
-            await self._record_pause(
-                task.id,
-                dag,
-                results=_checkpointable(final, dag),
-                trail=trail,
-                fingerprint=fingerprint,
-                node=_deciding_node(final, trail) or dag.name,
-                hand_over=outcome,
+    async def _run_entry(self, dag, deps: DAGDeps, task: Task) -> Any:
+        """Run node 0 outside the workflow, recording the attempt like any node
+        and turning an exception into work rather than a crash."""
+        node = dag.node(dag.entry)
+        try:
+            result = await node.run(DAGState.empty(), deps)
+        except Exception as exc:  # noqa: BLE001 - a node 0 failure becomes work
+            result = envelope("error", scrub(f"{type(exc).__name__}: {exc}"))
+        await self._recorder(task)(
+            NodeRun(
+                dag_name=dag.name, node=node.name, attempt=1,
+                status=status_of(result) or "ok",
+                reason=result.get("reason", "") if status_of(result) else "",
+                duration_ms=0,
             )
-        return outcome
+        )
+        return result
+
+    async def _run_workflow(self, dag, task: Task, prepared: Any) -> Action:
+        """Start or resume this task's durable workflow, then poll it to its
+        next boundary — the action it decided, or the question it waits on."""
+        wfid = _wfid(task.id)
+        st = await adapter.status(wfid)
+        if st is None:
+            await adapter.start(
+                dag.name, self._scope(task, seed={dag.entry: prepared}), workflow_id=wfid
+            )
+        else:
+            waiting = await adapter.pending(wfid)
+            if waiting is not None:
+                # A reporter reply re-planned the task; hand the freshly
+                # extracted parameters to the node that was waiting, and it
+                # searches again with what it now knows.
+                await adapter.answer(wfid, waiting["node"], prepared)
+        return await self._poll(dag, wfid)
+
+    async def _poll(self, dag, wfid: str) -> Action:
+        """Drive the workflow to a boundary: the outcome it reached, or the
+        `Ask` it suspended on. The graph runs fast between suspensions, so this
+        never blocks on a human — it returns the moment the run waits."""
+        while True:
+            st = await adapter.status(wfid)
+            if st == "SUCCESS":
+                return self._outcome(dag, await adapter.result(wfid))
+            if st in ("ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"):
+                return HandOver(f"{dag.name} did not finish ({st})")
+            waiting = await adapter.pending(wfid)
+            if waiting is not None:
+                return Ask(waiting["text"])
+            await asyncio.sleep(0.02)
+
+    def _scope(self, task: Task, *, seed: dict) -> dict:
+        """A workflow's serializable input: the task to rebuild `Deps` from, and
+        node 0's result to pre-seed so the walk starts past it."""
+        return {"task_id": task.id, "task_type": task.type, "_seed": seed}
 
     def _deps_for(self, task: Task) -> DAGDeps:
-        """What every node in this task's graph is handed.
-
-        The three things a node may reach for — the task, the store, and
-        whichever agents and tool servers `register_dags` built — assembled
-        in one place rather than at each of the three call sites that used to
-        spell it out identically.
-        """
+        """What node 0 is handed. The workflow's own nodes get theirs rebuilt
+        inside the run by the adapter's deps factory; this is node 0's alone."""
         return DAGDeps(
             task=task,
             db=self._db,
             servers=dict(DAG_SERVERS),
             extra=dict(DAG_DEPS_EXTRA.get(task.type, {})),
         )
-
-    async def _walk(
-        self,
-        dag,
-        *,
-        task: Task,
-        state: DAGState,
-        fingerprint: str,
-        walked: list[str] | None = None,
-        from_node: str | None = None,
-    ) -> tuple[Action, DAGState | None, list[str]]:
-        """Run the graph from `state`, recording each node before the next.
-
-        Returns what the graph decided, the state it ended in, and the path it
-        took — the last two are `None` and empty when the run itself failed,
-        which is the one case with no state worth recording.
-
-        Both callers had this identically: the same checkpoint closure, the
-        same runner, the same "a graph failure becomes work" except clause.
-        `from_node` only changes what the log line says.
-        """
-
-        async def checkpoint(current: DAGState, path: list[str]) -> None:
-            await self._db.save_dag_state(
-                task.id,
-                dag_name=dag.name,
-                results=_checkpointable(current, dag),
-                trail=path,
-                params_fingerprint=fingerprint,
-                dag_version=dag.version,
-            )
-
-        runner = DAGRunner(
-            dag,
-            deps=self._deps_for(task),
-            state=state,
-            trail=walked,
-            on_checkpoint=checkpoint,
-            on_node_run=self._recorder(task),
-        )
-        try:
-            final = await runner.run()
-        except Exception as exc:  # noqa: BLE001 - a graph failure becomes work
-            log.warning(
-                "task %d: %s failed%s — %s",
-                task.id,
-                dag.name,
-                f" resuming from {from_node}" if from_node else "",
-                exc,
-            )
-            return HandOver(f"{dag.name} failed: {exc}"), None, []
-        return self._outcome(dag, final, runner.trail), final, runner.trail
 
     def _recorder(self, task: Task):
         """Where a graph's attempts are written: `node_runs`, under this task."""
@@ -579,64 +523,16 @@ class Pool:
 
         return record
 
-    async def _params_now(self, task: Task) -> dict:
-        """The task's parameters as the database holds them, not as this pass
-        was handed them.
-
-        Node 0 writes back what it filled in (`prepare_node`'s
-        `set_task_params`) and then returns, so `task.params` is stale from
-        that moment on. Every reader of a pause keys on what is stored, so
-        the writer has to as well. Falls back to the snapshot if the row has
-        gone: a fingerprint that matches nothing is what was already wrong.
-        """
-        current = await self._db.task(task.id)
-        return dict(current.params) if current is not None else dict(task.params)
-
-    async def _record_pause(
-        self,
-        task_id: int,
-        dag,
-        *,
-        results: dict,
-        #: The path that produced those results. Passed for the same reason
-        #: `results` is: this is a second write to the row the checkpoint just
-        #: wrote, and the upsert overwrites every column it is given — so a
-        #: column left out is a column blanked. It was, and the trail this
-        #: ticket added went with it on every hand-over.
-        trail: list[str],
-        fingerprint: str,
-        node: str,
-        hand_over: HandOver,
-    ) -> None:
-        """A run ended on a `HandOver`: save which node said so and what it said,
-        alongside the state so far, so `_raise_hands` can read this run's
-        actual reason rather than the task's bare type and parameters.
-
-        There was an `interruption` alongside this — a paused tool call
-        waiting on the operator's yes or no. It went with the five-node
-        `api_issue` graph: `apply_fix` was the only tool that ever produced
-        one, and nothing produces one now.
-        """
-        await self._db.save_dag_state(
-            task_id,
-            dag_name=dag.name,
-            results=results,
-            trail=trail,
-            params_fingerprint=fingerprint,
-            dag_version=dag.version,
-            paused_at_node=node,
-            paused_question=hand_over.reason,
-        )
-
     @staticmethod
-    def _outcome(dag, final: DAGState, trail: list[str]) -> Action:
-        """What the graph decided, as an action.
+    def _outcome(dag, results: dict) -> Action:
+        """What the graph decided, off the results the workflow returned.
 
-        A graph that walked its whole path without producing an `Action` has
-        not said what to send, and handing over is the honest answer. Inventing a
-        reply out of a value the graph never meant as one is not.
+        A graph that finished without producing an `Action` has not said what
+        to send, and handing over is the honest answer. The results mapping is
+        in walk order, so the deciding node is the last `Action` in it.
         """
-        node = _deciding_node(final, trail)
+        final = DAGState(results=results)
+        node = _deciding_node(final, list(results.keys()))
         if node is not None:
             result = final[node]
             if status_of(result) in _FAILED:
@@ -664,22 +560,10 @@ def _as_params(task: Task):
         return None
 
 
-def _prepare_material(prepared) -> dict:
-    """Node 0's output, shaped for `_fingerprint`.
-
-    A dataclass — every real `prepare`, `ApiIssueParams` included — becomes
-    its fields. Anything already a mapping is used as-is, for a synthetic
-    graph's node 0 that returns a plain dict. Anything else is wrapped, so a
-    value that is not naturally a mapping gets a stable digest instead of
-    crashing the graph before its first real node runs.
-    """
-    from dataclasses import is_dataclass
-
-    if is_dataclass(prepared):
-        return asdict(prepared)
-    if isinstance(prepared, dict):
-        return prepared
-    return {"value": prepared}
+def _wfid(task_id: int) -> str:
+    """One durable workflow per task, keyed by its id, so a pass finds the run
+    an earlier pass started (suspended on the reporter, or still going)."""
+    return f"task-{task_id}"
 
 
 #: The envelope statuses the runner writes when a node did not finish: its
@@ -706,58 +590,9 @@ def _deciding_node(final: DAGState, trail: list[str]) -> str | None:
     return None
 
 
-def _checkpointable(state: DAGState, dag) -> dict:
-    """What actually gets persisted: everything but node 0.
-
-    Node 0 re-reads what the reporter has said on every pass; storing its
-    result would let a restart skip a message that arrived after the last
-    checkpoint. `_run_dag` never asks `DAGRunner` to run node 0 through the
-    normal loop in the first place — this only has to keep it out of what
-    gets written, in the two places a run's state is saved.
-    """
-    return {
-        k: v
-        for k, v in state.to_dict().items()
-        if k != dag.entry and status_of(v) not in _FAILED
-    }
-
-
-def _fingerprint(params: dict) -> str:
-    """A stable digest of the parameters a graph ran against.
-
-    Empty values are dropped, because `""` and `None` and absent are the same
-    absence for a `str | None` field, and discarding a graph's work over that
-    distinction would cost tool calls for nothing.
-
-    That is true of every parameter type there is today, and stops being true
-    the first time one is a bool or a number: `False`, `0` and `[]` would then
-    read as "not supplied", and answering a question with `False` would not
-    invalidate the state computed without it. Revisit this line when a
-    `Params` field is not `str | None`.
-
-    What is left is serialised as JSON with sorted keys rather than joined
-    into a string. Joining `f"{key}={value}"` made `{"a": "b=c"}` and
-    `{"a=b": "c"}` the same fingerprint, and `1` the same as `"1"` — both
-    unreachable today, because every parameter is a `str | None` field named
-    by the dataclass. But this function is handed a plain dict — `asdict()`
-    of a graph's node 0 output, or the raw JSON-decoded storage — not the
-    dataclass itself, so the type discipline it was relying on is not
-    enforced at its own edge. JSON does not need it to be.
-    """
-    from hashlib import blake2b
-
-    material = json.dumps(
-        {key: value for key, value in params.items() if value},
-        sort_keys=True,
-        allow_nan=False,
-        default=repr,
-    )
-    return blake2b(material.encode(), digest_size=16).hexdigest()
-
-
 def _stuck(
     task: Task,
-    pause: tuple[str, str] | None = None,
+    reason: str | None = None,
     last_said: str | None = None,
 ) -> str:
     """What it is, what it knows, and what the reporter last said — enough to
@@ -770,8 +605,8 @@ def _stuck(
     """
     known = ", ".join(f"{k}: {v}" for k, v in sorted(task.params.items()) if v)
     line = f"{task.type} #{task.id} — {known or 'nothing extracted'}"
-    if pause is not None and pause[1]:
-        line += f"\n{pause[0]}: {pause[1]}"
+    if reason:
+        line += f"\n{reason}"
     if last_said:
         quoted = last_said.strip().replace("\n", "\n> ")
         line += f"\nthey last said:\n> {quoted}"

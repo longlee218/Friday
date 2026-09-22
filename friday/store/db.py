@@ -934,7 +934,6 @@ class Database:
             return [
                 {
                     "dag_name": r.dag_name,
-                    "dag_version": r.dag_version,
                     "node": r.node,
                     "attempt": r.attempt,
                     "status": r.status,
@@ -2691,28 +2690,6 @@ class Database:
             )
             return open_here == 1 and any(r is None for (r,) in said)
 
-    async def clear_dag_interruption(self, task_id: int) -> bool:
-        """Withdraw a tool call waiting on the operator. Returns whether there
-        was one.
-
-        Only the `interruption` column: `paused_at_node` and
-        `paused_question` are the record of what the run stopped on, and that
-        stays true after the decision is moot. What must go is the *state a
-        resume would run from*, because the tool executes the moment anyone
-        approves it — so a patch left here outlives the work it belonged to
-        (ticket 12).
-        """
-        async with self._sessions.begin() as session:
-            result = await session.execute(
-                update(schema.DagState)
-                .where(
-                    schema.DagState.task_id == task_id,
-                    schema.DagState.interruption.is_not(None),
-                )
-                .values(interruption=None, updated_at=_now())
-            )
-            return bool(result.rowcount)
-
     async def cancel_outbound_for(self, task_id: int) -> int:
         """Withdraw everything queued about a task. Returns how many."""
         async with self._sessions.begin() as session:
@@ -2920,44 +2897,58 @@ class Database:
                 said.setdefault(task_id, set()).add(text)
             return said
 
-    async def dag_pauses(self, fingerprints: dict[int, str]) -> dict:
-        """The node and question each of these tasks is paused on, if any.
+    async def set_pause(self, task_id: int, question: str) -> None:
+        """Record the specific reason a task handed a person the work, so
+        `_raise_hands` carries it rather than the task's bare type (ticket 06 —
+        the workflow itself suspends now, so this is the pool's note beside it,
+        not a checkpoint). Scrubbed: a reason can be a node's exception text."""
+        statement = insert(schema.DagState).values(
+            task_id=task_id,
+            dag_name="",
+            results={},
+            paused_at_node="",
+            paused_question=scrub(question),
+            updated_at=_now(),
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[schema.DagState.task_id],
+                    set_={
+                        "paused_question": statement.excluded.paused_question,
+                        "paused_at_node": statement.excluded.paused_at_node,
+                        "updated_at": statement.excluded.updated_at,
+                    },
+                )
+            )
 
-        Keyed by task id to the fingerprint of that task's *current*
-        parameters, and a pause computed against different ones is not
-        returned. A pause is only cleared by a checkpoint, and a checkpoint
-        only happens after a node completes — so a run that discards its state
-        and then fails before finishing a node leaves the old question sitting
-        there. Reporting it would ask the reporter the very thing they just
-        answered, with their answer visible in the same message.
+    async def clear_pause(self, task_id: int) -> None:
+        """Forget a task's stored reason once it is being worked again."""
+        async with self._sessions.begin() as session:
+            await session.execute(
+                update(schema.DagState)
+                .where(schema.DagState.task_id == task_id)
+                .values(paused_question=None, paused_at_node=None)
+            )
 
-        `load_dag_state` has enforced this since the fingerprint landed. This
-        is its sibling reading the same row, and one reader enforcing an
-        invariant while the other ignores it is how the row starts lying.
+    async def pauses_for(self, task_ids: list[int]) -> dict[int, str]:
+        """The reason each of these tasks was handed over, if one was stored.
 
-        In bulk, because the caller has a batch and asking per task is how a
-        poll that usually finds nothing costs twenty-one queries every two
-        seconds.
+        In bulk, because `_raise_hands` has a batch and asking per task is how a
+        poll that usually finds nothing costs a query each every two seconds.
         """
-        if not fingerprints:
+        if not task_ids:
             return {}
         async with self._sessions() as session:
             rows = await session.execute(
                 select(
-                    schema.DagState.task_id,
-                    schema.DagState.paused_at_node,
-                    schema.DagState.paused_question,
-                    schema.DagState.params_fingerprint,
+                    schema.DagState.task_id, schema.DagState.paused_question
                 ).where(
-                    schema.DagState.task_id.in_(list(fingerprints)),
-                    schema.DagState.paused_at_node.is_not(None),
+                    schema.DagState.task_id.in_(list(task_ids)),
+                    schema.DagState.paused_question.is_not(None),
                 )
             )
-            return {
-                task_id: (node, question or "")
-                for task_id, node, question, fingerprint in rows
-                if (fingerprint or "") == fingerprints[task_id]
-            }
+            return {task_id: question for task_id, question in rows}
 
     async def original_text_for(
         self, task_id: int, limit: int = 20, *, budget_tokens: int | None = None
@@ -3182,207 +3173,6 @@ class Database:
             return _balanced([(text, kind) for text, kind in rows], limit)
 
     # ---- workflow graph state -------------------------------------------
-
-    async def save_dag_state(
-        self,
-        task_id: int,
-        *,
-        dag_name: str,
-        results: dict,
-        #: The path that produced those results. Saved with them because they
-        #: are read together and are only meaningful together.
-        trail: list[str] | None = None,
-        #: Required, not defaulted. `_fingerprint` never returns "" — even for
-        #: no parameters at all — so an empty one is only what a caller who
-        #: forgot this argument writes, and writing it guarantees the next
-        #: load throws the state away.
-        params_fingerprint: str,
-        #: `DAG.version` of the graph writing this. Required for the reason
-        #: `params_fingerprint` is: a row saved without it matches no graph
-        #: that asks with one, so every resume would silently start over.
-        dag_version: str,
-        paused_at_node: str | None = None,
-        paused_question: str | None = None,
-        #: The SDK's own run state, set only while a `needs_approval` tool
-        #: call inside `paused_at_node` is waiting on the operator (ticket
-        #: 07). `None` clears it — every ordinary checkpoint passes nothing,
-        #: which is what makes approving (or a fresh pass discarding stale
-        #: state) the only two ways it survives past the write that set it.
-        interruption: dict | None = None,
-    ) -> None:
-        """Record what a task's workflow graph has produced so far.
-
-        Upserted on `task_id`: one row per task, rewritten after every node.
-        This is what makes a restart resume rather than start over, so it is
-        written before the next node begins rather than at the end of the run.
-        """
-        statement = insert(schema.DagState).values(
-            task_id=task_id,
-            dag_name=dag_name,
-            dag_version=dag_version,
-            params_fingerprint=params_fingerprint,
-            results=results,
-            trail=list(trail or []),
-            paused_at_node=paused_at_node,
-            # A hand-over's reason, which can be a node's exception text.
-            paused_question=(
-                None if paused_question is None else scrub(paused_question)
-            ),
-            interruption=interruption,
-            updated_at=_now(),
-        )
-        async with self._sessions.begin() as session:
-            await session.execute(
-                statement.on_conflict_do_update(
-                    index_elements=[schema.DagState.task_id],
-                    set_={
-                        "dag_name": statement.excluded.dag_name,
-                        "dag_version": statement.excluded.dag_version,
-                        "params_fingerprint": (
-                            statement.excluded.params_fingerprint
-                        ),
-                        "results": statement.excluded.results,
-                    "trail": statement.excluded.trail,
-                        "paused_at_node": statement.excluded.paused_at_node,
-                        "paused_question": statement.excluded.paused_question,
-                        "interruption": statement.excluded.interruption,
-                        "updated_at": statement.excluded.updated_at,
-                    },
-                )
-            )
-
-    async def load_dag_state(
-        self,
-        task_id: int,
-        *,
-        dag_name: str | None = None,
-        params_fingerprint: str | None = None,
-        dag_version: str | None = None,
-    ) -> dict | None:
-        """What the graph recorded, or None if it has not run.
-
-        `dag_name` is the graph asking. When it does not match the one that
-        wrote the row, nothing is returned and the graph starts over: node
-        names are only meaningful inside the graph that defined them, and
-        handing a renamed or rewritten graph its predecessor's results makes
-        it skip nodes on the strength of work that was never done. A restart
-        costs a few tool calls; a reply composed from another graph's
-        findings is wrong in a way nobody can see.
-
-        `params_fingerprint` is the same argument about the *inputs*. A node
-        concluded what it concluded from the parameters it was given, and the
-        whole point of asking the reporter for a correlationId is that the
-        answer changes. State written before they answered says "there was
-        nothing to look up", which is true of the old parameters and false of
-        the new ones — and believing it means the graph asks a question,
-        receives an answer, and then reads not one log line.
-
-        Returns the raw results mapping; rebuilding it into a `DAGState` is
-        the caller's business, so this module keeps knowing nothing about the
-        graph. `load_dag_progress` returns the path alongside it, for the
-        caller that resumes rather than only reads.
-        """
-        row = await self._dag_row(task_id, dag_name, params_fingerprint, dag_version)
-        return None if row is None else dict(row.results or {})
-
-    async def load_dag_progress(
-        self,
-        task_id: int,
-        *,
-        dag_name: str | None = None,
-        params_fingerprint: str | None = None,
-        dag_version: str | None = None,
-    ) -> tuple[dict, list[str]] | None:
-        """What the graph recorded, and the path that recorded it.
-
-        One read for both, because they are only meaningful together and a
-        resumed run needs both to answer "what did this graph decide?" — the
-        results say which nodes have run, the path says in what order, and
-        `Pool._outcome` reads the second backwards.
-        """
-        row = await self._dag_row(task_id, dag_name, params_fingerprint, dag_version)
-        if row is None:
-            return None
-        return dict(row.results or {}), list(row.trail or [])
-
-    async def _dag_row(
-        self,
-        task_id: int,
-        dag_name: str | None,
-        params_fingerprint: str | None,
-        dag_version: str | None = None,
-    ):
-        """The row, once it has passed both tests of whether it is still
-        anybody's to read. One place, so the two readers cannot disagree about
-        when state is stale."""
-        async with self._sessions() as session:
-            row = await session.get(schema.DagState, task_id)
-            if row is None:
-                return None
-            if dag_name is not None and row.dag_name != dag_name:
-                log.info(
-                    "task %d: discarding state from %r, this is %r",
-                    task_id,
-                    row.dag_name,
-                    dag_name,
-                )
-                return None
-            if dag_version is not None and row.dag_version != dag_version:
-                # Same name, different shape: a node was renamed, added or
-                # reordered. A result recorded under the old shape is not
-                # this graph's, however its key happens to read.
-                log.info(
-                    "task %d: discarding state from %s version %s, this is %s",
-                    task_id,
-                    row.dag_name,
-                    row.dag_version or "(none recorded)",
-                    dag_version,
-                )
-                return None
-            if (
-                params_fingerprint is not None
-                and (row.params_fingerprint or "") != params_fingerprint
-            ):
-                log.info(
-                    "task %d: parameters are %s, the graph concluded against "
-                    "%s — discarding what it concluded",
-                    task_id,
-                    params_fingerprint,
-                    row.params_fingerprint or "(none recorded)",
-                )
-                return None
-            return row
-
-    async def dag_pause(self, task_id: int) -> tuple[str, str] | None:
-        """The node that paused and the question it asked, if any."""
-        async with self._sessions() as session:
-            row = await session.get(schema.DagState, task_id)
-            if row is None or not row.paused_at_node:
-                return None
-            return row.paused_at_node, row.paused_question or ""
-
-    async def dag_interruption(self, task_id: int) -> dict | None:
-        """Everything `decide_pending_action` needs to resume or decline a
-        paused tool call — `None` unless one is actually waiting.
-
-        Read raw rather than through `load_dag_state`, which filters by a
-        fingerprint the caller does not have yet at this point: whether the
-        stored state is still good for the task's *current* parameters is
-        exactly what resuming has to check, not something to discard before
-        the check runs.
-        """
-        async with self._sessions() as session:
-            row = await session.get(schema.DagState, task_id)
-            if row is None or row.interruption is None:
-                return None
-            return {
-                "dag_name": row.dag_name,
-                "results": dict(row.results or {}),
-                "trail": list(row.trail or []),
-                "params_fingerprint": row.params_fingerprint or "",
-                "paused_at_node": row.paused_at_node,
-                "interruption": row.interruption,
-            }
 
     async def tasks_in_state(self, state: str, limit: int = 20) -> list[Task]:
         return await self._tasks(

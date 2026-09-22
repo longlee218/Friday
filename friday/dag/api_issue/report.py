@@ -21,7 +21,7 @@ from typing import Any
 
 from friday.dag.api_issue.diagnose import diagnosis_of
 from friday.dag.api_issue.resolve import resolved
-from friday.dag.engine import DAGDeps, DAGState, Node, status_of
+from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, status_of
 from friday.domain.actions import HandOver, Reply
 from friday.outbox import Kind
 from friday.ops.redact import scrub

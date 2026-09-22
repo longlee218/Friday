@@ -247,7 +247,21 @@ async def _run(stack: AsyncExitStack) -> None:
         # counted against the same daily budget as everybody else's.
         record=record_call,
         spent=db.spent_today,
+        # The store the DBOS adapter rebuilds each run's Deps from and writes
+        # node_runs through — which also registers the graphs on the adapter.
+        db=db,
     )
+
+    # Durable workflows run on DBOS (ticket 06), on their own SQLite system
+    # database beside the application one. Launch after the graphs are
+    # registered, so recovery of any workflow left running by a previous
+    # process can rebuild its Deps; destroy on the way out.
+    from dbos import DBOS, DBOSConfig
+
+    system_db = str(Path(config.database_path).with_suffix(".system.db"))
+    DBOS(config=DBOSConfig(name="friday", system_database_url=f"sqlite:///{system_db}"))
+    DBOS.launch()
+    stack.callback(lambda: DBOS.destroy(destroy_registry=False))
 
     responder = Responder.build(
         config,

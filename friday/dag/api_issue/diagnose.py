@@ -30,7 +30,7 @@ from typing import Any, Literal
 from friday.dag.api_issue.code import code_of, codes_of
 from friday.dag.api_issue.logs import dossier_of, histogram_of
 from friday.dag.api_issue.prompt import build_input, numbered
-from friday.dag.engine import DAGDeps, DAGState, Node, envelope
+from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
 
 __all__ = [
     "Diagnosis",

@@ -216,6 +216,41 @@ def workflow_graphs():
         DAG_SERVERS.clear()
 
 
+@pytest.fixture
+async def workflows(db):
+    """A real DBOS behind the pool, for the tests that run a task past node 0.
+
+    Most pool tests stop at node 0 (a missing-details `Ask`, a one-node
+    hand-over) and never touch a workflow, so DBOS is opt-in: this launches it
+    on a throwaway SQLite system database and registers the graphs on the
+    adapter with this test's store, the way the composition root does. A fresh
+    system database each test keeps one task's `task-<id>` workflow from
+    colliding with the next's.
+    """
+    import tempfile
+    from types import SimpleNamespace
+
+    from dbos import DBOS, DBOSConfig
+
+    from friday.dag.router import register_dags
+
+    DBOS.destroy(destroy_registry=False)
+    tmp = tempfile.mkdtemp()
+    DBOS(config=DBOSConfig(
+        name="friday-test", system_database_url=f"sqlite:///{tmp}/system.db"
+    ))
+    DBOS.launch()
+    register_dags(
+        SimpleNamespace(agents={}, context=SimpleNamespace(extraction_budget_tokens=None)),
+        servers={},
+        db=db,
+    )
+    try:
+        yield db
+    finally:
+        DBOS.destroy(destroy_registry=False)
+
+
 class ScriptedHarness(Harness):
     """A `Harness` whose model call is scripted and whose every other seam is
     the real one.

@@ -20,7 +20,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, fields, replace
 from typing import Any, get_args, get_type_hints
 
-from friday.dag.engine import DAGDeps, DAGState, Node
+from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node
 from friday.agent.harness import Refused
 from friday.domain.actions import Action, Ask, HandOver
 from friday.domain.models import MODEL_AUTHORED, ExtractionMark, Params

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from friday.config import ConfigError
-from friday.dag.engine import DAG
+from friday.sdk.workflow import DAG
 from friday.dag.prepare import plan_by_required_parameters, prepare_node
 from friday.domain.models import PARAMS, Params
 
@@ -284,6 +284,11 @@ def register_dags(
     #: does not set one up.
     record: Any = None,
     spent: Any = None,
+    #: The store the workflow adapter rebuilds each run's `Deps` from, and
+    #: writes `node_runs` through. `None` registers the graphs for the pool to
+    #: read (`dag_for`) but not on the DBOS adapter — every test that drives a
+    #: node directly with a stub rather than running the durable workflow.
+    db: Any = None,
 ) -> None:
     """Register every graph this build knows about.
 
@@ -371,6 +376,43 @@ def register_dags(
     # the node stops skipping and starts failing.
     DAG_SERVERS.clear()
     DAG_SERVERS.update(servers or {})
+
+    # Register the same graphs on the DBOS adapter (ticket 06), the way the
+    # pool runs them past node 0. The adapter rebuilds each run's `Deps` from a
+    # serializable scope key inside the workflow — a live source cannot cross a
+    # step boundary — so it reads the task back from the store and the sources
+    # from the globals just filled in above.
+    if db is not None:
+        _register_on_adapter(db)
+
+
+def _register_on_adapter(db: Any) -> None:
+    from dataclasses import asdict
+
+    from friday.sdk.workflow import Deps, NodeRun
+    from friday.workflow import adapter
+
+    async def deps_factory(scope_key: dict[str, Any]) -> Deps:
+        task_id = scope_key.get("task_id")
+        task = await db.task(task_id) if task_id is not None else None
+        return Deps(
+            task=task,
+            db=db,
+            servers=dict(DAG_SERVERS),
+            extra=dict(DAG_DEPS_EXTRA.get(scope_key.get("task_type", ""), {})),
+        )
+
+    def recorder_factory(scope_key: dict[str, Any]):
+        task_id = scope_key.get("task_id")
+
+        async def record(run: NodeRun) -> None:
+            await db.record_node_run(task_id=task_id, **asdict(run))
+
+        return record
+
+    adapter.clear_graphs()
+    for dag in EDGE_ROUTER.values():
+        adapter.register_graph(dag, deps_factory, recorder_factory=recorder_factory)
 
 
 #: Node name -> agent, per task type. Read by `Pool` when it builds

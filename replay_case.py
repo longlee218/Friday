@@ -50,12 +50,54 @@ from dotenv import load_dotenv
 
 from friday.config import load_config
 from friday.dag.api_issue import build_api_issue_dag, build_diagnose_harness, build_log_sources
-from friday.dag.engine import DAGDeps, DAGRunner, DAGState, NodeRun
 from friday.domain.actions import Ask, HandOver, Reply
 from friday.domain.conversation import ConversationId
 from friday.domain.models import PARAMS
+from friday.sdk.workflow import DAG, Deps as DAGDeps, NodeRun
 from friday.sources.logs import LokiSource, SshKubectlSource
 from friday.store.db import Database
+from friday.workflow import adapter
+
+
+async def _run_on_adapter(
+    dag: DAG,
+    *,
+    deps: DAGDeps,
+    seed: dict[str, Any],
+    system_db: Path,
+    wfid: str,
+) -> tuple[dict[str, Any], list[NodeRun], float]:
+    """Run one graph through the DBOS adapter on a throwaway SQLite system
+    database, the way the pool runs it in production — replacing the
+    hand-written runner this tool used before the DBOS port (ticket 06). The
+    canned `deps` are handed back by a one-shot factory; `seed` pre-loads
+    `prepare` so the walk starts at `resolve` (node 0 is not replayed).
+    """
+    from dbos import DBOS, DBOSConfig
+
+    runs: list[NodeRun] = []
+
+    async def factory(_scope: dict[str, Any]) -> DAGDeps:
+        return deps
+
+    def recorder(_scope: dict[str, Any]):
+        async def rec(run: NodeRun) -> None:
+            runs.append(run)
+        return rec
+
+    DBOS.destroy(destroy_registry=False)
+    adapter.clear_graphs()
+    adapter.register_graph(dag, factory, recorder_factory=recorder)
+    cfg: DBOSConfig = {"name": "friday-replay", "system_database_url": f"sqlite:///{system_db}"}
+    DBOS(config=cfg)
+    DBOS.launch()
+    try:
+        started = time.monotonic()
+        final = await adapter.run(dag.name, {"_seed": seed}, workflow_id=wfid)
+        return final, runs, time.monotonic() - started
+    finally:
+        DBOS.destroy(destroy_registry=False)
+        adapter.clear_graphs()
 
 
 def copy_aside(live: Path, into: Path) -> Path:
@@ -77,7 +119,7 @@ def copy_aside(live: Path, into: Path) -> Path:
     return copy
 
 
-def answers(runs: list[NodeRun], final: DAGState, *, wall_s: float) -> dict[str, Any]:
+def answers(runs: list[NodeRun], final: dict[str, Any], *, wall_s: float) -> dict[str, Any]:
     """Ticket 00's questions 3 and 4, off what the run recorded.
 
     Questions 1 and 2 are not here and cannot be: whether the dossier held
@@ -308,11 +350,6 @@ async def run_captured(case: dict, *, with_model: bool, into: Path):
             diagnose_harness=build_diagnose_harness(config) if with_model else None,
             reports_dir=reports,
         )
-        runs: list[NodeRun] = []
-
-        async def record(run: NodeRun) -> None:
-            runs.append(run)
-
         params = case_params(case)
         name, source = canned_source(case)
         deps = DAGDeps(
@@ -325,12 +362,14 @@ async def run_captured(case: dict, *, with_model: bool, into: Path):
             db=db,
             extra={"log_sources": {name: source}},
         )
-        state = DAGState.empty().with_result("prepare", PARAMS["api_issue"](**params))
-        runner = DAGRunner(dag, deps=deps, state=state, on_node_run=record)
-
-        started = time.monotonic()
-        final = await runner.run()
-        return final, runs, time.monotonic() - started, reports
+        final, runs, wall_s = await _run_on_adapter(
+            dag,
+            deps=deps,
+            seed={"prepare": PARAMS["api_issue"](**params)},
+            system_db=into / "replay-system.db",
+            wfid=f"replay-{case['id']}",
+        )
+        return final, runs, wall_s, reports
     finally:
         await db.close()
 
@@ -380,11 +419,6 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
             diagnose_harness=build_diagnose_harness(config) if with_model else None,
             reports_dir=reports,
         )
-        runs: list[NodeRun] = []
-
-        async def record(run: NodeRun) -> None:
-            runs.append(run)
-
         deps = DAGDeps(
             task=SimpleNamespace(
                 id=task.id,
@@ -395,14 +429,14 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
             db=db,
             extra={"log_sources": build_log_sources(config, {})},
         )
-        state = DAGState.empty().with_result(
-            "prepare", PARAMS[task.type](**task.params)
+        final, runs, wall_s = await _run_on_adapter(
+            dag,
+            deps=deps,
+            seed={"prepare": PARAMS[task.type](**task.params)},
+            system_db=into / "replay-system.db",
+            wfid=f"replay-task-{task_id}",
         )
-        runner = DAGRunner(dag, deps=deps, state=state, on_node_run=record)
-
-        started = time.monotonic()
-        final = await runner.run()
-        found = answers(runs, final, wall_s=time.monotonic() - started)
+        found = answers(runs, final, wall_s=wall_s)
         written = next(iter(sorted(reports.glob(f"{task_id}.md"))), None)
         print(render(task_id, found, written))
         return 0

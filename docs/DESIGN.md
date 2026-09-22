@@ -86,8 +86,10 @@ only and reached with `ssh -N -L 8086:127.0.0.1:8086 <host>`.
 | `friday/triage/` | Classification only, plus its sensitive-word prefilter and the untriaged-message loop. `context.py` gathers what a mention is shown; `prompt.py` renders it |
 | `friday/extraction/` | Everything a task knows, lifted out of the reporter's own words. One extractor per task type, each owning its prompt and `Params` schema; one `extractor` config block serves all of them. `context.py` is node 0's gather function: transcript, domain memories (this room and `'*'`), outstanding questions and `known`, one call, one frozen `FullContext` |
 | **`friday/sources/`** | Where facts come from, and the only place that reaches an outside read surface: `logs.py` (`LokiSource`, `SshKubectlSource`), `code.py` (a stack frame mapped into the operator's clone, and the window around it). Read-only by construction — no verb here writes — and holds no judgement: which window, which service, which frame all arrive as arguments. May not import `friday/agent/`, `friday/dag/` or `friday/tasks/`. `tests/test_sources_are_the_only_door.py` is the guard |
-| `friday/dag/` | `engine.py` — nodes, edges, checkpointed resume, and `DAGRunner._invoke`, the one way a node runs (timeout, retry, result envelope). `state.py` what a run accumulates. `prepare.py` builds the entry node every graph shares. `router.py` maps task type to graph and checks node clocks against agent timeouts. `api_issue/` is the one graph with an investigation past node 0 — resolve, find the log, read the code, diagnose, report — owning its nodes, its prompt and its one agent |
-| `friday/tasks/` | The pool: pulls pending tasks and hosts their graphs, up to `workflows.concurrency` at once, never taking one task twice while its graph runs. Decides nothing about what a graph decides |
+| `friday/sdk/workflow.py` | The workflow **port**: the graph vocabulary a node's author codes against — `DAG`, `Node`, `Edge`, `Deps`, `DAGState`, the `envelope`, `Ask`/`Reply`/`HandOver`. Contracts only, no `dbos`. There is no `DAG.version`: recovery is DBOS's (ticket 06) |
+| `friday/workflow/` | `adapter.py` — the **DBOS adapter** beneath the port, the one module that imports `dbos`. A graph is a `@DBOS.workflow` walk, each node a memoized `@DBOS.step`; DBOS owns run persistence, step memoization and resume. The kernel chain (clock, retry, redaction, the `node_runs` record) is ported into `_invoke`, not delegated. An ast guard keeps `dbos` here |
+| `friday/dag/` | `prepare.py` builds the entry node (node 0) every graph shares. `router.py` maps task type to graph, checks node clocks against agent timeouts, and registers the graphs on the adapter. `api_issue/` is the one graph with an investigation past node 0 — resolve, find the log, read the code, diagnose, report — owning its nodes, its prompt and its one agent. `engine.py`/`state.py` are thin re-export shims over the port (the hand-written `DAGRunner` was retired onto DBOS) |
+| `friday/tasks/` | The pool: runs node 0 itself each pass, then starts or resumes each task's durable DBOS workflow (`task-<id>`) and polls it to its next boundary — the outcome, or the `Ask` it suspended on. A workflow waiting on the reporter suspends and never blocks other tasks. Decides nothing about what a graph decides |
 | `friday/tools/` | Every tool an agent may call, one module per subject: skills (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), memory (`memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder). `tests/test_tools.py` asserts the full list and forbids declaring a tool anywhere else (one exemption, below) |
 | `friday/responder/` | Drafts a reply in the operator's voice |
 | `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
@@ -197,12 +199,23 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
 ### Workflow / DAG
 
 - **Workflows are deterministic Python; an agent is a node inside one.** A
-  model never chooses the next step. **Every node runs through
-  `DAGRunner._invoke`**: its own timeout (a `timed_out` envelope, not a
-  raise), retry over an explicit exception list with doubling backoff, any
-  other exception as a `{status: error}` envelope, one `node_runs` row per
-  attempt. Graphs checkpoint after every node and discard their state when
-  the task's parameters change **or the graph's `version` does**.
+  model never chooses the next step. Durability is **DBOS's** now (ticket 06):
+  a graph is a `@DBOS.workflow` walk, each node a memoized `@DBOS.step`, run on
+  DBOS's own SQLite system database beside the application one — so a crash
+  resumes from the last incomplete step, DBOS's per-step memoization in place
+  of the hand-written checkpoint and the derived `DAG.version` (both gone).
+  **Every node still runs through the adapter's `_invoke`**: its own timeout (a
+  `timed_out` envelope, not a raise), retry over an explicit exception list
+  with doubling backoff, any other exception as a `{status: error}` envelope,
+  one `node_runs` row per attempt — the kernel chain the kernel keeps for
+  itself rather than delegating.
+- **`Ask` suspends; `HandOver` is terminal.** A node that cannot finish without
+  the reporter returns `Ask` and the workflow suspends in place on `DBOS.recv`;
+  when the reporter answers, the pool re-extracts the parameters and the same
+  node **re-runs** with them (only that node, not the graph from the top). A
+  `HandOver` escalates to the operator out of band, so it flows on as a result
+  the pool reads. A workflow's input is a serializable scope key; the live
+  `Deps` (the store, the log sources) are rebuilt inside the run.
 - **A model node's clock outlasts its agent's** by
   `NODE_CLOCK_MARGIN_SECONDS`, or a node timeout would cancel the harness
   mid-run where its retry loop cannot see it. Node 0 is a model node (the
@@ -260,12 +273,13 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   (`friday/sources/`) is a capability: it reads one kind of thing and decides
   nothing. A **check** is a formula over sources — `FindRequestLog` is "the
   correlationId's lines, else path plus identifier, in a window measured back
-  from the reporter's message". A **node** is the frame a run is
-  checkpointed, timed and retried in. Reuse lives in the first layer, not the
-  third: whatever a node returns is written to `dag_state` on every run, so a
-  node is a boundary, not a unit of reuse. Reordering a graph is a change to
-  its `edges` in one function, and `DAG.version` is a digest of the shape, so
-  it discards the checkpoints that no longer apply by itself.
+  from the reporter's message". A **node** is the frame a run is timed and
+  retried in, and the unit DBOS memoizes. Reuse lives in the first layer, not
+  the third: a node is a boundary, not a unit of reuse. Reordering a graph is a
+  change to its `edges` in one function; a code change to a node makes DBOS's
+  application version move, and only same-version runs auto-resume — so an
+  in-flight run started under old code is not resumed onto new (ticket 06,
+  replacing the derived `DAG.version` digest).
 - **The code a diagnosis quotes is checked against the version that is
   running.** The operator's rule is that the image tag *is* the release tag,
   so `ReleaseSource.running_tag` asks the cluster which tag a service

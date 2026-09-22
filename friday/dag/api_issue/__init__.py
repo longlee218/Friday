@@ -28,7 +28,7 @@ from friday.dag.api_issue.diagnose import diagnose_node
 from friday.dag.api_issue.logs import find_request_log_node
 from friday.dag.api_issue.report import report_node
 from friday.dag.api_issue.resolve import resolve_node
-from friday.dag.engine import DAG, DAGState, Edge, status_of
+from friday.sdk.workflow import DAG, DAGState, Edge, status_of
 from friday.dag.prepare import prepare_node
 from friday.sources import Reads
 from friday.sources.logs import LokiSource, SshKubectlSource

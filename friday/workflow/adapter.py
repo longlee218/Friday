@@ -61,6 +61,10 @@ PauseSink = Callable[[ScopeKey, str, Action | None], Awaitable[None]]
 #: acyclic, and this says so out loud.
 MAX_STEPS = 50
 
+#: The DBOS event key a suspended workflow publishes its pending `Ask` under,
+#: so the pool can poll a run to its next boundary from outside.
+PENDING_EVENT = "pending"
+
 #: How long a suspended `Ask`/`HandOver` waits for its answer before the wait
 #: itself times out. DBOS records the wait as a durable sleep, so it must be a
 #: concrete number — `recv` with no timeout is not supported. A day is longer
@@ -224,9 +228,13 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
     graph = _GRAPHS[dag_name]
     wfid = DBOS.workflow_id
     assert wfid is not None  # always set inside a workflow
+    # A `_seed` in the scope key pre-loads node results, so the walk skips
+    # straight to the first unseeded node — how the replay eval starts at
+    # `resolve` with `prepare` already supplied, without running extraction.
+    seed = scope_key.get("_seed") or {}
     live = _LIVE[wfid] = _Live(
         deps=await graph.deps_factory(scope_key),
-        state=DAGState.empty(),
+        state=DAGState(results=dict(seed)),
         recorder=graph.recorder_factory(scope_key) if graph.recorder_factory else None,
         pause_sink=graph.pause_sink,
         scope=scope_key,
@@ -262,7 +270,13 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
                 # the node — so it flows on as a terminal result the pool reads
                 # off the state, exactly as v1's walk did.
                 await _record_pause(dag_name, current, result)
+                # Publish what the run is waiting on, so the pool can poll it to
+                # its next boundary without blocking (get_event from outside).
+                await DBOS.set_event_async(
+                    PENDING_EVENT, {"waiting": True, "node": current, "text": result.text}
+                )
                 answer = await DBOS.recv_async(current, timeout_seconds=WAIT_TIMEOUT_SECONDS)
+                await DBOS.set_event_async(PENDING_EVENT, {"waiting": False})
                 await _clear_pause(dag_name, current)
                 live.answers.setdefault(current, []).append(answer)
                 continue  # re-run `current`; do not advance, do not record the Ask
@@ -312,5 +326,42 @@ async def run(dag_name: str, scope_key: ScopeKey, *, workflow_id: str | None = N
 
 
 async def answer(workflow_id: str, node: str, value: Any) -> None:
-    """Deliver the answer a suspended `Ask`/`HandOver` is waiting on."""
+    """Deliver the answer a suspended `Ask` is waiting on."""
     await DBOS.send_async(workflow_id, value, topic=node)
+
+
+async def status(workflow_id: str) -> str | None:
+    """The DBOS status of a run — `SUCCESS`, `PENDING`, `ERROR`, `CANCELLED` —
+    or `None` if no such workflow exists (it has not been started)."""
+    try:
+        st = await DBOS.get_workflow_status_async(workflow_id)
+    except Exception:  # noqa: BLE001 - an unknown id is "not started", not an error
+        return None
+    return st.status if st is not None else None
+
+
+async def result(workflow_id: str) -> dict[str, Any]:
+    """The finished run's results mapping (node name -> result, objects intact)."""
+    handle: Any = await DBOS.retrieve_workflow_async(workflow_id)
+    return await handle.get_result()
+
+
+async def pending(workflow_id: str) -> dict[str, Any] | None:
+    """What a suspended run is waiting on — `{"node", "text"}` — or `None` if it
+    is not currently suspended on an `Ask`."""
+    try:
+        event = await DBOS.get_event_async(workflow_id, PENDING_EVENT, timeout_seconds=0)
+    except Exception:  # noqa: BLE001
+        return None
+    if event and event.get("waiting"):
+        return {"node": event["node"], "text": event["text"]}
+    return None
+
+
+async def cancel(workflow_id: str) -> None:
+    """Stop a run for good — the task was handled or escalated out of band, so
+    its suspended workflow must not sit waiting on an answer that will not come."""
+    try:
+        await DBOS.cancel_workflow_async(workflow_id)
+    except Exception:  # noqa: BLE001 - already gone is fine
+        pass

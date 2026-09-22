@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from friday.dag.engine import DAGDeps, DAGState, Node, envelope
+from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
 from friday.outbox import Kind
 
 __all__ = ["acknowledge_node"]
