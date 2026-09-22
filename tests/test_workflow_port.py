@@ -144,39 +144,52 @@ async def test_deps_are_rebuilt_inside_the_run_from_the_scope_key(dbos_sqlite):
     assert seen["task_id"] == "T-42"
 
 
-async def test_ask_suspends_the_workflow_and_resumes_on_the_answer(dbos_sqlite):
+async def test_ask_suspends_then_the_answer_reruns_the_asking_node(dbos_sqlite):
+    """Pure model B: `Ask` suspends; the answer re-runs the SAME node with the
+    answer in `deps.answers` (v1's "answer re-runs the asking node"), not a
+    result-replacement. Only that node re-runs — upstream stays memoized."""
+    paused: list = []
+
+    async def sink(scope, node, action):
+        paused.append((node, type(action).__name__ if action else None))
+
     async def asker(state, deps):
         RAN.append("ask")
+        if deps.answers:  # re-run after the answer arrived
+            return envelope("ok", got=deps.answers[-1])
         return Ask("what is the ticket number?")
 
     dag = DAG(
         name="asking",
         nodes=(
             Node(name="ask", run=asker),
-            _node("use", lambda s, d: envelope("ok", got=s["ask"])),
+            _node("use", lambda s, d: envelope("ok", got=s["ask"]["got"])),
         ),
         edges=(Edge("ask", "use"),),
     )
-    adapter.register_graph(dag, _no_deps)
+    adapter.register_graph(dag, _no_deps, pause_sink=sink)
 
     handle = await adapter.start("asking", {}, workflow_id="wf-ask")
-    # The run is now suspended on recv for node "ask"; deliver the answer.
-    await _until(lambda: RAN == ["ask"])
+    await _until(lambda: RAN == ["ask"])  # suspended on recv for node "ask"
     await adapter.answer("wf-ask", "ask", "TICKET-7")
 
     state = await handle.get_result()
 
-    assert state["ask"] == "TICKET-7"
+    assert RAN == ["ask", "ask", "use"]  # asked, re-ran with the answer, then on
+    assert state["ask"]["got"] == "TICKET-7"
     assert state["use"]["got"] == "TICKET-7"
+    assert paused == [("ask", "Ask"), ("ask", None)]  # told it paused, then resumed
 
 
-async def test_handover_also_suspends_and_resumes_on_the_answer(dbos_sqlite):
+async def test_handover_also_suspends_and_reruns_on_the_answer(dbos_sqlite):
     """`HandOver` suspends the same way `Ask` does (model B) — the two are the
-    port's pause actions and both wait on the operator's answer."""
+    port's pause actions and both wait, then re-run the node on the answer."""
     from friday.domain.actions import HandOver
 
     async def stuck(state, deps):
         RAN.append("stuck")
+        if deps.answers:
+            return envelope("ok", by=deps.answers[-1])
         return HandOver("needs a human")
 
     dag = DAG(name="ho", nodes=(Node(name="stuck", run=stuck),))
@@ -187,7 +200,7 @@ async def test_handover_also_suspends_and_resumes_on_the_answer(dbos_sqlite):
     await adapter.answer("wf-ho", "stuck", "handled")
 
     state = await handle.get_result()
-    assert state["stuck"] == "handled"
+    assert state["stuck"]["by"] == "handled"
 
 
 async def test_a_crash_resumes_from_the_last_incomplete_step(dbos_sqlite):
@@ -232,7 +245,7 @@ async def test_a_crash_resumes_from_the_last_incomplete_step(dbos_sqlite):
     state = await handle.get_result()
 
     assert open(marker).read().count("a") == 1  # memoized: ask not re-run on resume
-    assert state["ask"] == "resumed" and state["after"]["done"] is True
+    assert state["ask"]["answer"] == "resumed" and state["after"]["done"] is True
 
 
 def test_the_adapter_is_the_only_module_that_imports_dbos():

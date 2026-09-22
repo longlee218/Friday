@@ -25,7 +25,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from dbos import DBOS, SetWorkflowID
@@ -51,6 +51,12 @@ Recorder = Callable[[NodeRun], Awaitable[None]]
 #: Builds the per-run recorder from the scope key (recording is per task).
 RecorderFactory = Callable[[ScopeKey], Recorder]
 
+#: Told when a node suspends the workflow on an `Ask`/`HandOver`, and again with
+#: `None` when it resumes — so the pool can record what the run paused on (for
+#: the operator's help-wanted text and the board) and clear it on resume. Kept
+#: out of the adapter so `dbos` and the store stay separate: the pool injects it.
+PauseSink = Callable[[ScopeKey, str, Action | None], Awaitable[None]]
+
 #: A cycle in the edges would otherwise spin forever; the graph is meant to be
 #: acyclic, and this says so out loud.
 MAX_STEPS = 50
@@ -68,6 +74,7 @@ class _Graph:
     dag: DAG
     deps_factory: DepsFactory
     recorder_factory: RecorderFactory | None
+    pause_sink: PauseSink | None
 
 
 #: The router's registry, in DBOS terms: name -> how to run it. Populated at
@@ -86,6 +93,13 @@ class _Live:
     deps: Deps
     state: DAGState
     recorder: Recorder | None
+    pause_sink: PauseSink | None
+    #: The workflow's own input — what the pause sink is told, so the pool knows
+    #: which task suspended.
+    scope: ScopeKey
+    #: Answers a suspended node has been given, keyed by node name, oldest
+    #: first. Refilled onto `deps.answers` before each run of that node.
+    answers: dict[str, list[Any]] = field(default_factory=dict)
 
 
 #: Live workflow context, keyed by the DBOS workflow id. Rebuilt when the
@@ -97,11 +111,13 @@ def register_graph(
     dag: DAG,
     deps_factory: DepsFactory,
     recorder_factory: RecorderFactory | None = None,
+    pause_sink: PauseSink | None = None,
 ) -> None:
     """Make a graph runnable by name. The `deps_factory` rebuilds live handles
     from a scope key inside the run; `recorder_factory` builds the `node_runs`
-    sink per task."""
-    _GRAPHS[dag.name] = _Graph(dag, deps_factory, recorder_factory)
+    sink per task; `pause_sink` is told what a run suspends on (and that it
+    resumed), for the pool to act on."""
+    _GRAPHS[dag.name] = _Graph(dag, deps_factory, recorder_factory, pause_sink)
 
 
 def clear_graphs() -> None:
@@ -184,6 +200,8 @@ async def _run_node(dag_name: str, node_name: str) -> Any:
     assert wfid is not None  # always set inside a workflow
     graph = _GRAPHS[dag_name]
     live = _LIVE[wfid]
+    # A node that has asked and been answered re-runs with its answers in hand.
+    live.deps.answers[:] = live.answers.get(node_name, [])
     return await _invoke(
         dag_name, graph.dag.node(node_name), live.state, live.deps, live.recorder
     )
@@ -209,6 +227,8 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
         deps=await graph.deps_factory(scope_key),
         state=DAGState.empty(),
         recorder=graph.recorder_factory(scope_key) if graph.recorder_factory else None,
+        pause_sink=graph.pause_sink,
+        scope=scope_key,
     )
     try:
         current: str | None = graph.dag.entry
@@ -227,19 +247,47 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
             result = await _run_node(dag_name, current)
 
             if isinstance(result, (Ask, HandOver)):
-                # Model B: suspend in place until the pool sends the answer,
-                # keyed by this node so concurrent asks stay unambiguous. The
-                # received value becomes the node's recorded result; downstream
-                # reads it off the state. (The pool-facing mapping — reporter
-                # question, task state, re-run vs replace — is finalized in the
-                # cutover slice.)
-                result = await DBOS.recv_async(current, timeout_seconds=WAIT_TIMEOUT_SECONDS)
+                # Model B, pure suspend: a node that cannot finish without the
+                # reporter (`Ask`) or the operator (`HandOver`) suspends the
+                # workflow in place. The pool is told what it paused on, the
+                # wait is durable (survives a kill — proven by spike), and the
+                # answer re-runs the SAME node with the answer in `deps.answers`
+                # — the durable version of v1's "answer re-runs the asking
+                # node", but only that node re-runs, not the graph from the top.
+                await _record_pause(dag_name, current, result)
+                answer = await DBOS.recv_async(current, timeout_seconds=WAIT_TIMEOUT_SECONDS)
+                await _clear_pause(dag_name, current)
+                live.answers.setdefault(current, []).append(answer)
+                continue  # re-run `current`; do not advance, do not record the Ask
 
             live.state = live.state.with_result(current, result)
             current = graph.dag.next_after(current, live.state)
         return live.state.to_dict()
     finally:
         _LIVE.pop(wfid, None)
+
+
+@DBOS.step()
+async def _record_pause(dag_name: str, node: str, action: Action) -> None:
+    """Tell the pool what this run suspended on. A step so the notice is durable
+    and replays in order; the sink itself (the store write) is the pool's."""
+    graph = _GRAPHS[dag_name]
+    if graph.pause_sink is not None:
+        await graph.pause_sink(_scope_of(), node, action)
+
+
+@DBOS.step()
+async def _clear_pause(dag_name: str, node: str) -> None:
+    """The answer arrived; the run is no longer waiting on it."""
+    graph = _GRAPHS[dag_name]
+    if graph.pause_sink is not None:
+        await graph.pause_sink(_scope_of(), node, None)
+
+
+def _scope_of() -> ScopeKey:
+    wfid = DBOS.workflow_id
+    assert wfid is not None
+    return _LIVE[wfid].scope
 
 
 async def start(dag_name: str, scope_key: ScopeKey, *, workflow_id: str | None = None):

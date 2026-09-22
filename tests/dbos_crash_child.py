@@ -26,9 +26,11 @@ def build_and_register(marker: str) -> None:
     """Register the graph both processes share. `ask` appends to the marker file
     (the side effect that must not repeat on resume) then suspends on `Ask`."""
 
-    async def ask(state: object, deps: object):
+    async def ask(state: object, deps: Deps):
+        if deps.answers:  # re-run after the answer arrives
+            return envelope("ok", answer=deps.answers[-1])
         with open(marker, "a") as fh:
-            fh.write("a\n")
+            fh.write("a\n")  # the side effect that must NOT repeat on resume
         return Ask("waiting for a human")
 
     async def after(state: object, deps: object):

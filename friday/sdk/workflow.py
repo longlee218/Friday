@@ -77,6 +77,13 @@ class Deps:
     servers: dict[str, Any] = field(default_factory=dict)
     #: Anything a specific graph wants to pass down that is not worth a field.
     extra: dict[str, Any] = field(default_factory=dict)
+    #: The answers a suspended node has been given, oldest first. A node that
+    #: returns `Ask` suspends the workflow; when the reporter answers, the same
+    #: node **re-runs** with the answer appended here, and searches again with
+    #: what it now knows (the durable version of v1's "answer re-runs the asking
+    #: node"). Empty for a node that has not asked. The adapter refills this
+    #: with the current node's answers before each run.
+    answers: list[Any] = field(default_factory=list)
 
 
 #: A node is any async callable taking the state so far and its dependencies,
