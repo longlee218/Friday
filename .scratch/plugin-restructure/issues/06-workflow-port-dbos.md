@@ -43,16 +43,26 @@ which is in scope for the cutover slice.
   `Ask`/`Reply`/`HandOver` re-exported. No `dbos` import; **no `DAG.version`**
   (recovery is DBOS's). `friday/sdk/workflow_state.py` holds `DAGState`.
 - `friday/workflow/adapter.py` — the DBOS adapter, the **only** module importing
-  `dbos` (ast guard added, Rule-13 checked). Compiles a `DAG` onto a
+  `dbos` (grep-based import guard, Rule-13 checked). Compiles a `DAG` onto a
   `@DBOS.workflow` walk + per-node `@DBOS.step`; the kernel chain
   (clock/retry/redaction/`node_runs` record) is ported into `_invoke`, not
-  delegated to DBOS; `Deps` rebuilt inside the run from a serializable scope
-  key; `Ask`/`HandOver` suspend on `recv_async`.
-- `tests/test_workflow_port.py` — S3 on real DBOS (throwaway SQLite): linear,
-  conditional routing, error→scrubbed envelope + `node_runs`, deps-from-scope-
-  key, Ask-suspend-resume, and **box 8** (kill mid-workflow via in-process
-  `destroy()`+`launch()` on the same file → recovery resumes, first step
-  memoized, not re-run).
+  delegated to DBOS; live per-run context (`Deps`/state/recorder) in one `_Live`
+  struct keyed by workflow id; `Deps` rebuilt inside the run from a serializable
+  scope key; `Ask`/`HandOver` suspend on `recv_async`.
+- `tests/test_workflow_port.py` (+ `tests/dbos_crash_child.py`) — S3 on real
+  DBOS (throwaway SQLite): linear, conditional routing, error→scrubbed envelope
+  + `node_runs`, deps-from-scope-key, `Ask`- and `HandOver`-suspend-resume, and
+  **box 8** — a real kill: a child process runs the first step then `os._exit`s
+  while suspended on `recv`; this process launches DBOS on the same file, DBOS
+  recovery resumes the workflow, the first step is memoized (its marker written
+  once), and the run completes on the answer.
+
+Two-axis code review (standards + spec) run on the slice: no hard standards
+violation, no correctness defect. Fixes applied from it — the three parallel
+per-workflow caches folded into one `_Live` struct; `start()`'s branches
+collapsed with `nullcontext`; `DepsFactory`/`NodeFn` exported; box 8 made a
+faithful cross-process kill (the earlier in-process `destroy()`+relaunch could
+not truly kill a live workflow coroutine).
 
 **Not ticked — the cutover (slice 3b) remains:** wire `pool.py`/`run_agent.py`
 onto the adapter and Friday's own separate system-DB file; move the `api_issue`

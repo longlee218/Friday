@@ -24,6 +24,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -73,14 +74,23 @@ class _Graph:
 #: startup by `register_graph`; DBOS finds the `@DBOS.workflow` by decoration.
 _GRAPHS: dict[str, _Graph] = {}
 
-#: Live, per-running-workflow, keyed by the DBOS workflow id. Rebuilt on
-#: recovery when the workflow re-enters, torn down when it ends. These hold what
-#: cannot cross a step boundary — the live `Deps`, the accumulating state, the
-#: recorder — so the memoized `@DBOS.step` reads them from here rather than
-#: taking the whole growing state as a (re-serialized) argument every call.
-_DEPS: dict[str, Deps] = {}
-_STATE: dict[str, DAGState] = {}
-_REC: dict[str, Recorder | None] = {}
+
+@dataclass
+class _Live:
+    """What one running workflow needs that cannot cross a `@DBOS.step`
+    boundary: the live `Deps`, the accumulating state, the recorder. The
+    memoized step reads these rather than taking the whole growing state as a
+    (re-serialized) argument every call. `state` is reassigned as the walk
+    records nodes, so this is mutable by design."""
+
+    deps: Deps
+    state: DAGState
+    recorder: Recorder | None
+
+
+#: Live workflow context, keyed by the DBOS workflow id. Rebuilt when the
+#: workflow enters (including on recovery), torn down when it ends.
+_LIVE: dict[str, _Live] = {}
 
 
 def register_graph(
@@ -173,24 +183,33 @@ async def _run_node(dag_name: str, node_name: str) -> Any:
     wfid = DBOS.workflow_id
     assert wfid is not None  # always set inside a workflow
     graph = _GRAPHS[dag_name]
+    live = _LIVE[wfid]
     return await _invoke(
-        dag_name, graph.dag.node(node_name), _STATE[wfid], _DEPS[wfid], _REC[wfid]
+        dag_name, graph.dag.node(node_name), live.state, live.deps, live.recorder
     )
 
 
 @DBOS.workflow()
 async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
     """Walk the graph on DBOS. Rebuild `Deps` from the scope key, run each node
-    as a memoized step, suspend on `Ask`/`HandOver`, and return the final
-    state as a plain dict. Resume after a crash re-enters here: the memoized
-    steps replay without re-running, so the walk reaches the first incomplete
-    node and continues from there."""
+    as a memoized step, suspend on `Ask`/`HandOver`, and return the final state
+    as a plain dict. Resume after a crash re-enters here: the memoized steps
+    replay without re-running, so the walk reaches the first incomplete node and
+    continues from there.
+
+    The return is `DAGState.to_dict()`, a plain dict — past this boundary a
+    caller reads results by key without the `MissingNodeResult` guard that
+    `DAGState.__getitem__` gives a node mid-run. The guard's home is the node
+    signature, where the wiring mistakes it catches live.
+    """
     graph = _GRAPHS[dag_name]
     wfid = DBOS.workflow_id
     assert wfid is not None  # always set inside a workflow
-    _DEPS[wfid] = await graph.deps_factory(scope_key)
-    _REC[wfid] = graph.recorder_factory(scope_key) if graph.recorder_factory else None
-    _STATE[wfid] = DAGState.empty()
+    live = _LIVE[wfid] = _Live(
+        deps=await graph.deps_factory(scope_key),
+        state=DAGState.empty(),
+        recorder=graph.recorder_factory(scope_key) if graph.recorder_factory else None,
+    )
     try:
         current: str | None = graph.dag.entry
         steps = 0
@@ -201,9 +220,8 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
                     f"workflow {dag_name!r} exceeded {MAX_STEPS} steps at "
                     f"{current!r} — check the edges for a cycle"
                 )
-            state = _STATE[wfid]
-            if state.has(current):
-                current = graph.dag.next_after(current, state)
+            if live.state.has(current):
+                current = graph.dag.next_after(current, live.state)
                 continue
 
             result = await _run_node(dag_name, current)
@@ -215,25 +233,21 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
                 # reads it off the state. (The pool-facing mapping — reporter
                 # question, task state, re-run vs replace — is finalized in the
                 # cutover slice.)
-                answer = await DBOS.recv_async(current, timeout_seconds=WAIT_TIMEOUT_SECONDS)
-                result = answer
+                result = await DBOS.recv_async(current, timeout_seconds=WAIT_TIMEOUT_SECONDS)
 
-            _STATE[wfid] = state.with_result(current, result)
-            current = graph.dag.next_after(current, _STATE[wfid])
-        return _STATE[wfid].to_dict()
+            live.state = live.state.with_result(current, result)
+            current = graph.dag.next_after(current, live.state)
+        return live.state.to_dict()
     finally:
-        _DEPS.pop(wfid, None)
-        _STATE.pop(wfid, None)
-        _REC.pop(wfid, None)
+        _LIVE.pop(wfid, None)
 
 
 async def start(dag_name: str, scope_key: ScopeKey, *, workflow_id: str | None = None):
     """Start a graph as a durable workflow; returns a DBOS handle. The pool
     keys the handle so it can `answer` a suspended run."""
-    if workflow_id is not None:
-        with SetWorkflowID(workflow_id):
-            return await DBOS.start_workflow_async(_run_graph, dag_name, scope_key)
-    return await DBOS.start_workflow_async(_run_graph, dag_name, scope_key)
+    keyed = SetWorkflowID(workflow_id) if workflow_id is not None else nullcontext()
+    with keyed:
+        return await DBOS.start_workflow_async(_run_graph, dag_name, scope_key)
 
 
 async def run(dag_name: str, scope_key: ScopeKey, *, workflow_id: str | None = None) -> dict[str, Any]:

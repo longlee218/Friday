@@ -35,10 +35,12 @@ from friday.sdk.workflow_state import (
 __all__ = [
     "DAG",
     "Deps",
+    "DepsFactory",
     "DAGState",
     "Edge",
     "MissingNodeResult",
     "Node",
+    "NodeFn",
     "NodeRun",
     "STATUSES",
     "ScopeKey",

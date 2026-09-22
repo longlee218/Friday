@@ -170,42 +170,68 @@ async def test_ask_suspends_the_workflow_and_resumes_on_the_answer(dbos_sqlite):
     assert state["use"]["got"] == "TICKET-7"
 
 
-async def test_a_crash_resumes_from_the_last_incomplete_step(dbos_sqlite):
-    """Box 8: kill mid-workflow -> restart -> resume from the last incomplete
-    step. Simulated in-process: a workflow suspended on `Ask` is PENDING in the
-    system db; destroy()+launch() on the same SQLite file triggers DBOS
-    recovery, which re-enters the workflow — the completed first step is
-    memoized (its side effect does not repeat) and the run resumes still
-    waiting, then completes when the answer arrives."""
-    async def asker(state, deps):
-        RAN.append("ask")  # the side effect that must NOT repeat on resume
-        return Ask("waiting")
+async def test_handover_also_suspends_and_resumes_on_the_answer(dbos_sqlite):
+    """`HandOver` suspends the same way `Ask` does (model B) — the two are the
+    port's pause actions and both wait on the operator's answer."""
+    from friday.domain.actions import HandOver
 
-    dag = DAG(
-        name="crash",
-        nodes=(
-            Node(name="ask", run=asker),
-            _node("after", envelope("ok", done=True)),
-        ),
-        edges=(Edge("ask", "after"),),
-    )
+    async def stuck(state, deps):
+        RAN.append("stuck")
+        return HandOver("needs a human")
+
+    dag = DAG(name="ho", nodes=(Node(name="stuck", run=stuck),))
     adapter.register_graph(dag, _no_deps)
 
-    await adapter.start("crash", {}, workflow_id="wf-crash")
-    await _until(lambda: RAN == ["ask"])  # step ran, now suspended on recv
+    handle = await adapter.start("ho", {}, workflow_id="wf-ho")
+    await _until(lambda: RAN == ["stuck"])
+    await adapter.answer("wf-ho", "stuck", "handled")
 
-    # Restart: tear DBOS down and bring it back on the same SQLite file.
-    _launch(dbos_sqlite)
-    adapter.register_graph(dag, _no_deps)  # re-register in the fresh process state
+    state = await handle.get_result()
+    assert state["stuck"] == "handled"
+
+
+async def test_a_crash_resumes_from_the_last_incomplete_step(dbos_sqlite):
+    """Box 8: kill mid-workflow -> restart -> resume from the last incomplete
+    step, on real DBOS + SQLite.
+
+    A child process (`dbos_crash_child.py`) runs the `ask` step — appending once
+    to a marker file — then suspends on `recv` and `os._exit`s: a true kill
+    while waiting for the operator. This process then launches DBOS on the SAME
+    SQLite file, registers the same graph, and DBOS recovery re-enters the
+    PENDING workflow: `ask` is memoized (the marker stays at one `a`), the run
+    re-suspends on `recv`, and completes when the answer is sent."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
 
     from dbos import DBOS
 
-    await _until(lambda: RAN.count("ask") >= 1)  # recovery re-entered
+    from tests.dbos_crash_child import build_and_register
+
+    # This fixture already launched DBOS; the child needs exclusive access to
+    # the SQLite file, so tear ours down, run the child, then bring ours back.
+    root = Path(__file__).resolve().parent.parent
+    marker = dbos_sqlite + ".marker"
+    DBOS.destroy(destroy_registry=False)
+    child = subprocess.run(
+        [sys.executable, str(root / "tests/dbos_crash_child.py"), dbos_sqlite, marker, "wf-crash"],
+        capture_output=True, text=True, timeout=60, cwd=str(root),
+        env={**os.environ, "PYDANTIC_AI_NO_BANNER": "1", "PYTHONPATH": str(root)},
+    )
+    assert child.returncode == 1, f"child did not crash as expected: {child.stderr[-800:]}"
+    assert open(marker).read().count("a") == 1  # ask ran once before the kill
+
+    _launch(dbos_sqlite)  # "restart" — same SQLite file, fresh process state
+    build_and_register(marker)
+
+    # The answer is durable, so recovery picks it up whenever it re-enters;
+    # get_result blocks until the recovered workflow completes.
     await adapter.answer("wf-crash", "ask", "resumed")
     handle = await DBOS.retrieve_workflow_async("wf-crash")
     state = await handle.get_result()
 
-    assert RAN.count("ask") == 1  # memoized: the first step did not run twice
+    assert open(marker).read().count("a") == 1  # memoized: ask not re-run on resume
     assert state["ask"] == "resumed" and state["after"]["done"] is True
 
 
