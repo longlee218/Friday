@@ -3,39 +3,22 @@
 **What to build:** Friday's own client for `devops-generic`, allow-listed to
 read tools, and a graph node that finds the reporter's request in Loki.
 
-**Blocked by:** the Keycloak sign-in, and only for the half that needs a
-token (2026-09-22). 01's routing half is done.
+**Blocked by:** nothing (2026-09-22). The sign-in happened.
 
 **Decisions:** D4, D5.
 
-**Status:** mostly done (2026-09-22), and two of its bullets below are
-superseded — read this before them.
+**Status:** done (2026-09-22). Two of the bullets below are superseded and
+the Status that described them is now history: the allow-list is code rather
+than `allow:` in `config.yaml` (the operator's call), and the auth question
+it asked was answered — a browser once, then a refresh token, signed in on
+2026-09-22 and proved against the live server.
 
-- **The allow-list is not `allow:` in `config.yaml`.** The operator's call,
-  2026-09-21: which tools may be called is declared in code, on the class
-  that calls them (`LokiSource.TOOLS`), enforced twice, and an `allow:` key
-  in the file is refused at load — `friday/config.py:546`. The bullet below
-  asking for a test over the YAML list describes a design that was
-  reversed.
-- **The auth finding this ticket asked for is written**, and it is the
-  answer the ticket allowed for: it cannot be reused without a browser.
-  `friday/agent/auth.py` and `authorize.py` carry a one-off interactive
-  sign-in that keeps a refresh token at mode 0600 outside the database,
-  after which the process only ever refreshes. **Built and tested, not
-  committed** — the operator deferred it (2026-09-21).
-- **The search order shipped**, and in a stronger form than this bullet:
-  the correlationId is pushed into LogQL as `|= "<id>"` so the *read* is
-  narrowed rather than the result filtered. Measured: a 400-line read of a
-  35-minute window covered 84 seconds and did not contain the request; the
-  narrowed read returned it whole in two lines. The endpoint path is the
-  fallback when the id matches nothing, and the dossier says so when it
-  falls back.
-- **The histogram owed below is done**, and `≤ 12 lines` is reached — 8 on
-  the real production case.
-
-**What is left:** the not-found `ask(response, time)` and the resume on the
-follow-up. There is no `Ask` anywhere in the graph today; a window that
-holds nothing returns an `empty` envelope and the run continues.
+The last piece landed with it: a window that reached back, was searched and
+holds nothing now **asks** the reporter for the response and roughly when,
+and the graph resumes in this node when they answer. The retention case is
+deliberately not a question — the log no longer reaches back, so there is
+nothing to re-send into it — and neither is a reporter who already gave a
+response and an id the log simply does not carry.
 
 ## What
 

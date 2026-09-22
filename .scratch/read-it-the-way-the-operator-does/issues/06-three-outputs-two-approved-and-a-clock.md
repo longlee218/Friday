@@ -3,46 +3,19 @@
 **What to build:** The graph's edges end to end, its outbound rows, the
 report file, and the timeouts.
 
-**Blocked by:** 05's remainder for the `[db]` step only (2026-09-22).
-01, 02, 03 and 04 no longer gate this.
+**Blocked by:** 05's `[db]` step, which is all that is left of this
+(2026-09-22).
 
 **Decisions:** D10, D11, D13.
 
-**Status:** part done (2026-09-22). The graph runs end to end —
-`prepare → resolve → find_request_log → read_failing_code → diagnose →
-report` — with `resolve` ending the run on an external domain, and `report`
-writing `data/reports/<task_id>.md` (D10) and handing over. Run against a
-real production case; no seam broke. A run where the model provider was
-unreachable degraded correctly: an `error` envelope naming the reason, the
-report still written, nothing pretending to have concluded.
+**Status:** done except the `[db]` step, which is ticket 05's (2026-09-22).
+Three outputs: the acknowledgement, sent unapproved on the operator's call;
+the finding, direct-messaged to them with the cause and the report's path;
+and the reporter's copy, which waits for approval as a `Reply`. The clock is
+`api_issue.timeout_seconds`, checked at boot against the sum of the graph's
+node ceilings — every node has one now, which three did not.
 
-**What is left, all of it the outbound half:**
-
-- The "đang xử lý" acknowledgement, queued awaiting approval. Nothing is
-  queued today; `report` hands over and that is the end.
-- The operator's DM with the summary and the path, and the reporter's brief
-  queued awaiting approval. Neither exists — no outbox row is written by
-  this graph at all, which `friday/dag/api_issue/report.py`'s own docstring
-  already says is owed to this ticket.
-- The `[db]` step (ticket 05).
-- `dag.api_issue.timeout_seconds` and per-node ceilings in `config.yaml`.
-  Nodes take a `timeout_seconds` argument, and the file sets none; the only
-  `timeout_seconds` in `config.yaml` are the agents'.
-
-
-**How to check any of this rather than believe it.** The run writes its
-report into a throwaway directory, so `data/reports/` is empty and nothing
-in the tree records that a run happened. What *is* on disk is the case
-itself, and it is enough to reproduce every claim here:
-
-    uv run replay_case.py --case data/cases/prod-onboarding-400.json --diagnose
-
-`data/cases/prod-onboarding-400.json` also corroborates the log
-measurements directly, without running anything: its `reads.window` is 400
-lines with `truncated: true` spanning 10:38:20–10:39:44Z — 84 seconds of
-the 35 minutes asked for — and its `reads.narrowed` is 2 lines with
-`truncated: false`. The file is under `data/`, which is gitignored on
-purpose: those lines carry `userId`, `ip` and `deviceId`.
+Its own title is out of date: **one** output is approved, not two.
 
 ## What
 

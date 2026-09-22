@@ -3,52 +3,23 @@
 **What to build:** The diagnosis agent and node, its answer shape, its
 memory tools, and the guarded step to the database.
 
-**Blocked by:** nothing that is still true (2026-09-22): 02 and 03 are
-done, and 04's remainder enriches this rather than gating it. (Was also 07: knowledge rows enrich a
+**Blocked by:** for the `[db]` step, the operator's decision about its
+shape. Nothing else (2026-09-22). (Was also 07: knowledge rows enrich a
 diagnosis, they do not gate building one — `Diagnose` with an empty
 knowledge table must work, and is the baseline.)
 
 **Decisions:** D8, D9, D12.
 
-**Status:** part done (2026-09-22). The agent and node exist and have been
-run against a real production case three times, each time reaching the same
-correct cause, `certain` and `conclusive`, with every ref resolving. The
-answer shape is `Diagnosis(cause, confidence, conclusive, refs,
-next_checks)`, and refs are **line pointers rather than quotes** — the
-measurement in the spec, not a preference.
+**Status:** part done (2026-09-22). `alternatives_rejected` is in the answer
+shape and enforced: `conclusive: true` with nothing ruled out is refused, and
+so is an entry with an empty hypothesis, an empty reason, or a `ref` naming a
+line the model was not shown. That is the spec's first tier of
+self-questioning — the shape forcing the question — and the only one that
+costs no second model call.
 
-**What is left:**
-
-- `alternatives_rejected` is in `spec.md` and in no line of code.
-- **The guarded step to the database is wired to nothing.**
-  `friday/sources/db.py` exists, is SELECT-only, one statement, capped at
-  50 rows and redacts PII columns by name — and `DbSource` has no caller in
-  any node. It is a capability built and connected to nothing, which is the
-  shape this board has called out before.
-- The agent is given no memory tools; `harness` carries the model and
-  nothing else.
-
-**Revised 2026-09-17 (spec, v3.2):** `Diagnose` only reasons. Its tools are
-`collect`, `memory_search`, `memory_add(finding)`, the skill tools and its
-answer tool; it holds no fetching tool. There is no `db` or `conclude` node —
-`InspectDatabase` is a check in `Gather`, by rule. The answer tool refuses a
-`ref` no `Evidence` holds, and a supervisor in code scores the `Diagnosis`
-and routes it (spec, same section).
-
-
-**How to check any of this rather than believe it.** The run writes its
-report into a throwaway directory, so `data/reports/` is empty and nothing
-in the tree records that a run happened. What *is* on disk is the case
-itself, and it is enough to reproduce every claim here:
-
-    uv run replay_case.py --case data/cases/prod-onboarding-400.json --diagnose
-
-`data/cases/prod-onboarding-400.json` also corroborates the log
-measurements directly, without running anything: its `reads.window` is 400
-lines with `truncated: true` spanning 10:38:20–10:39:44Z — 84 seconds of
-the 35 minutes asked for — and its `reads.narrowed` is 2 lines with
-`truncated: false`. The file is under `data/`, which is gitignored on
-purpose: those lines carry `userId`, `ip` and `deviceId`.
+**What is left:** memory tools for the diagnosis agent, which is handed a
+model and nothing else; and the `[db]` step, which stays deliberately unwired
+— `friday/sources/db.py` has no caller until the operator decides its shape.
 
 ## What
 
