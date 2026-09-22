@@ -614,7 +614,7 @@ async def test_a_mention_is_never_lost_to_a_spent_budget(db, provider, inbox):
     """
     from dataclasses import replace as _replace
 
-    from agents.models.interface import Model
+    from friday.sdk.testing import Model
 
     from friday.config import AgentConfig
     from friday.triage import Triage
@@ -661,7 +661,7 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(db, provider, inbo
     """
     from dataclasses import replace as _replace
 
-    from agents.models.interface import Model
+    from friday.sdk.testing import Model
 
     from friday.config import AgentConfig
     from friday.triage import Triage

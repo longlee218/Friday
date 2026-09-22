@@ -179,7 +179,7 @@ def test_every_tool_survives_the_chat_completions_converter():
     not fail loudly: the agent holding it would simply never answer again, and
     the system would report that as work for a person, once a minute, forever.
     """
-    from agents.models.chatcmpl_converter import Converter
+    from friday.sdk.testing import Converter
 
     for name, built in _tool_objects().items():
         Converter.tool_to_openai(built)  # raises UserError if it cannot be used
@@ -352,7 +352,7 @@ async def test_a_tool_that_raises_tells_the_model_nothing_it_should_not_see():
     The exception is not lost — it is logged, scrubbed. Only the model is told
     less than it asked for.
     """
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.agent.harness import tool
 
@@ -401,7 +401,7 @@ async def test_a_model_that_calls_a_tool_wrongly_is_told_how_to_fix_it():
     that. What this fixes is every agent that is *not* stop-on-first-tool: the
     responder, the extractors, and any graph node with tools.
     """
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.agent.harness import tool
 
@@ -436,7 +436,7 @@ async def test_memory_tools_say_so_when_they_were_wired_without_a_scope(caplog):
     mistake."""
     import logging
 
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.domain.models import FridayState
     from friday.tools.memory import memory_tools
@@ -496,7 +496,7 @@ async def test_memory_add_tells_the_model_the_channel_is_full_rather_than_losing
     in the store because only the store can actually stop a write (see
     `Database.MEMORY_PER_CHANNEL`). Nothing here evicts anything to make room
     — the model is told to correct or remove something on purpose instead."""
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.domain.models import FridayState
     from friday.tools.memory import memory_tools
@@ -522,7 +522,7 @@ async def test_memory_add_writes_under_the_voice_kind():
     only agent wired to these tools, and everything it writes is voice
     material (D14) — the split between the two memory stores is by who
     writes, not by kind."""
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.domain.models import MemoryKind, FridayState
     from friday.tools.memory import memory_tools
@@ -550,7 +550,7 @@ async def test_memory_propose_tells_the_model_it_is_waiting_for_a_mark():
     says nothing is decided yet — a model reading "proposed" and stopping
     there would treat a candidate as remembered, which it is not until
     marked."""
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.domain.models import CandidateStatus, MemoryCandidate, FridayState
     from friday.tools.memory import memory_tools
@@ -581,7 +581,7 @@ async def test_memory_propose_reports_an_immediate_resolution():
     """`propose_memory` resolves on the spot when the message it is scoped to
     already carries a verdict — the tool has to say what actually happened,
     not the generic "waiting" answer."""
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.domain.models import CandidateStatus, MemoryCandidate, FridayState
     from friday.tools.memory import memory_tools
@@ -609,7 +609,7 @@ async def test_memory_propose_reports_an_immediate_resolution():
 
 
 async def test_memory_propose_writes_under_the_voice_kind():
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.domain.models import MemoryKind, FridayState
     from friday.tools.memory import memory_tools
@@ -641,7 +641,7 @@ async def test_memory_propose_writes_under_the_voice_kind():
 
 
 async def test_memory_search_reads_only_the_voice_kind():
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.domain.models import MemoryKind, FridayState
     from friday.tools.memory import memory_tools
@@ -704,7 +704,7 @@ async def test_a_hostile_memory_cannot_close_a_section_in_the_responders_prompt(
 
     search, _, _, _, _ = memory_tools(Store())
 
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     said = await search.on_invoke_tool(
         ToolContext(context=FridayState(channel_id="c1", task_id=None, agent="responder"),

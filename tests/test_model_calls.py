@@ -6,10 +6,10 @@ fact. A log line answers it while the process is alive and never again.
 
 from __future__ import annotations
 
-from agents.models.interface import Model
+from friday.sdk.testing import Model
 from dataclasses import asdict
 
-from agents.testing import ScriptedModel, function_call
+from friday.sdk.testing import ScriptedModel, function_call
 
 from conftest import captured, make_event
 from friday.config import AgentConfig

@@ -22,7 +22,7 @@ from typing import Literal
 
 import pytest
 
-from agents.testing import ScriptedModel, assistant_message, function_call
+from friday.sdk.testing import ScriptedModel, assistant_message, function_call
 
 from friday.agent.harness import Harness
 from friday.agent.structured import describe, find_json, fits

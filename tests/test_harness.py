@@ -12,9 +12,9 @@ varies.
 from __future__ import annotations
 
 import pytest
-from agents import Agent
-from agents.models.interface import Model
-from agents.testing import ScriptedModel, assistant_message
+from friday.sdk.testing import Agent
+from friday.sdk.testing import Model
+from friday.sdk.testing import ScriptedModel, assistant_message
 
 from friday.config import AgentConfig
 from friday.agent.harness import Harness, ToolContext, tool
@@ -117,7 +117,7 @@ async def test_configuration_reaches_the_agent():
 async def test_tracing_is_off():
     """It exports to OpenAI using the same key as model requests, which with a
     third-party provider leaks both the traffic and the credential."""
-    from agents.tracing import get_trace_provider
+    from friday.sdk.testing import get_trace_provider
 
     Harness(config=CONFIG, instructions="i")
 
@@ -141,13 +141,16 @@ async def test_an_agent_can_be_given_servers_it_did_not_have_to_know_about():
 
 
 async def test_this_is_the_only_module_that_imports_the_sdk():
-    """Ticket 23's guarantee. Replacing the SDK is a rewrite of this file, and
-    that is only true while nothing else reaches past it — declaring a tool
-    pulls the library in, so a second importer would spread the dependency to
-    every agent written after it."""
+    """Ticket 23's guarantee, widened for the S2 seam (ticket 05). Replacing
+    the SDK is a rewrite of the harness, and that is only true while nothing in
+    *production* code reaches past it — declaring a tool pulls the library in,
+    so a second importer would spread the dependency to every agent written
+    after it. `friday/sdk/testing/` is the one exception: it is the test-double
+    seam, whose whole job is to be the single place a *test* names the vendor,
+    so the fourteen test files that scripted a model no longer do."""
     import subprocess
 
-    allowed = {"friday/agent/harness.py"}
+    allowed = {"friday/agent/harness.py", "friday/sdk/testing/__init__.py"}
     hits = subprocess.run(
         ["grep", "-rlE", r"^\s*(from agents|import agents)\b", "friday/"],
         capture_output=True, text=True,
@@ -159,7 +162,7 @@ async def test_this_is_the_only_module_that_imports_the_sdk():
 async def test_run_accepts_a_rendered_section():
     """Ticket 27 widens the seam: a bundle's rendered string is the prompt,
     and nothing else about the call changes."""
-    from agents.testing import ScriptedModel, assistant_message
+    from friday.sdk.testing import ScriptedModel, assistant_message
     from friday.agent.instruction_prompt import task
 
     h = harness([assistant_message("done")])
@@ -169,7 +172,7 @@ async def test_run_accepts_a_rendered_section():
 
 async def test_run_still_accepts_a_plain_string():
     """The scripted-test seam: a plain string keeps working unchanged."""
-    from agents.testing import ScriptedModel, assistant_message
+    from friday.sdk.testing import ScriptedModel, assistant_message
 
     h = harness([assistant_message("done")])
     result = await h.run("plain prompt")
@@ -182,7 +185,7 @@ async def test_run_still_accepts_a_plain_string():
 async def test_a_tool_marked_needs_approval_interrupts_rather_than_running():
     """The whole reason this exists: the run stops at the call, the tool's
     own body never executes, and `result.interruptions` says why."""
-    from agents.testing import function_call
+    from friday.sdk.testing import function_call
     from friday.agent.harness import tool
 
     ran: list[str] = []
@@ -210,7 +213,7 @@ async def test_checkpoint_and_resume_round_trip_through_json_and_a_fresh_agent()
     against a *freshly constructed* Harness, not the one that paused."""
     import json
 
-    from agents.testing import ScriptedModel, assistant_message, function_call
+    from friday.sdk.testing import ScriptedModel, assistant_message, function_call
     from friday.agent.harness import tool
 
     ran: list[str] = []
@@ -243,7 +246,7 @@ async def test_checkpoint_and_resume_round_trip_through_json_and_a_fresh_agent()
 async def test_a_second_needs_approval_call_is_still_an_interruption_on_resume():
     """Resuming does not assume the model behaves — if it asks for approval
     again, that has to come back as another interruption, not a crash."""
-    from agents.testing import function_call
+    from friday.sdk.testing import function_call
     from friday.agent.harness import tool
 
     @tool(needs_approval=True)
@@ -283,7 +286,7 @@ async def test_a_run_paused_on_two_approvals_becomes_work_rather_than_an_excepti
     a person. It is not an exception nobody catches, leaving the task wedged
     with its approval row intact and no way to clear it.
     """
-    from agents.testing import function_call
+    from friday.sdk.testing import function_call
     from friday.agent.harness import tool
 
     ran: list[str] = []
@@ -617,8 +620,8 @@ async def test_the_ceiling_is_reached_at_it_and_not_past_it():
 
 def _flaky(*failures):
     """A model that raises the given things, in order, then answers."""
-    from agents.items import ModelResponse
-    from agents.usage import Usage
+    from friday.sdk.testing import ModelResponse
+    from friday.sdk.testing import Usage
     from openai.types.responses import ResponseOutputMessage, ResponseOutputText
 
     queue = list(failures)
@@ -838,7 +841,7 @@ async def test_what_an_agent_reached_for_is_written_down_too():
         """
         return "found it"
 
-    from agents.testing import function_call
+    from friday.sdk.testing import function_call
 
     run = harness(
         [function_call("look_up", {"name": "deploy"}, call_id="1")],
@@ -867,7 +870,7 @@ async def test_a_tool_that_failed_is_recorded_as_having_failed():
     the `agent` and `tool_call_id` the SDK has been passing every tool all
     along.
     """
-    from agents.testing import function_call
+    from friday.sdk.testing import function_call
 
     from friday.agent.harness import tool
 
@@ -1050,7 +1053,7 @@ def test_an_agent_can_declare_both_a_shape_and_its_own_tool_choice():
     """
     from dataclasses import dataclass
 
-    from agents.testing import ScriptedModel
+    from friday.sdk.testing import ScriptedModel
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
@@ -1086,7 +1089,7 @@ async def test_a_run_carrying_state_does_not_have_to_name_its_own_message():
     which step of a graph asked, which the graph knows and the journey does
     not.
     """
-    from agents.testing import ScriptedModel, assistant_message
+    from friday.sdk.testing import ScriptedModel, assistant_message
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
@@ -1118,7 +1121,7 @@ async def test_a_caller_that_knows_better_than_its_state_still_wins():
     """A run about a different message than the one the state carries — which
     is what `about_message` exists for on the other side of the same
     question."""
-    from agents.testing import ScriptedModel, assistant_message
+    from friday.sdk.testing import ScriptedModel, assistant_message
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
@@ -1159,7 +1162,7 @@ def test_an_agent_with_a_shape_may_not_have_its_mechanism_overridden():
     """
     from dataclasses import dataclass
 
-    from agents.testing import ScriptedModel
+    from friday.sdk.testing import ScriptedModel
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
@@ -1197,8 +1200,8 @@ class _Slow(Model):
     async def get_response(self, system_instructions, input, *a, **kw):
         import asyncio
 
-        from agents.items import ModelResponse
-        from agents.usage import Usage
+        from friday.sdk.testing import ModelResponse
+        from friday.sdk.testing import Usage
         from openai.types.responses import ResponseOutputMessage, ResponseOutputText
 
         await asyncio.sleep(0.02)

@@ -14,8 +14,8 @@ the tool schema is the only thing stopping a model from being asked to do both.
 from __future__ import annotations
 
 import pytest
-from agents.models.interface import Model
-from agents.testing import ScriptedModel, assistant_message, function_call
+from friday.sdk.testing import Model
+from friday.sdk.testing import ScriptedModel, assistant_message, function_call
 
 from conftest import make_event, summary_row
 from friday.config import AgentConfig
@@ -251,7 +251,7 @@ async def test_a_malformed_classify_call_is_corrected_by_the_model():
     that actually means answered: the tool returning an *instance* of that
     shape, rather than returning anything at all.
     """
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     triage = Triage(
         config=CONFIG,
@@ -280,7 +280,7 @@ async def test_a_model_that_cannot_fix_its_own_call_becomes_a_persons_problem():
     other triage failure lands. Never dropped, which is the rule this system
     is built on.
     """
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     bad = [function_call("answer", {"type": "api_issue",
                                       "confidence": "high"}, call_id="1")]
@@ -731,7 +731,7 @@ async def test_a_classification_is_the_return_value_of_the_call_that_asked():
     said, validated, and reading the code is enough to see where the answer
     comes from — which it was not while a tool wrote into a per-run object the
     caller read back afterwards."""
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     triage = triage_with(
         [function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")]
@@ -744,7 +744,7 @@ async def test_skip_is_a_member_of_the_same_set_and_is_validated_the_same_way():
     """D6 reverses the `classify`/`skip` split. The two were validated
     differently because they were two tools; "there is no work here" is now
     checked exactly as strictly as "there is"."""
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     triage = triage_with(
         [function_call("answer", {"type": "skip", "confidence": 0.95}, call_id="1")]
@@ -764,7 +764,7 @@ async def test_a_type_outside_the_closed_set_never_becomes_a_classification():
     configured provider returned `hardware_issue`. What stops it is the
     validation in this process.
     """
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     triage = triage_with(
         [function_call("answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="1")],
@@ -782,7 +782,7 @@ async def test_a_type_outside_the_closed_set_never_becomes_a_classification():
 async def test_an_invented_type_earns_the_same_one_correction_as_anything_else():
     """It is a bad tool call like any other, so it comes back as the tool's own
     output naming the field, and the model gets the turn `max_turns` allows."""
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     triage = triage_with(
         [function_call("answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="1")],
@@ -897,7 +897,7 @@ async def test_an_answer_that_names_no_type_is_never_silently_a_skip():
     unreadable answer becoming a successful one because every field had a
     default.
     """
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     nothing = {}
     triage = triage_with(
@@ -923,7 +923,7 @@ async def test_the_tools_own_former_parameter_name_is_not_a_skip_either():
     older than this board), so the only thing standing between a stale field
     name and a lost mention is `type` having no default.
     """
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     stale = {"task_type": "api_issue", "confidence": 0.9}
     triage = triage_with(
@@ -956,7 +956,7 @@ async def test_a_malformed_confidence_is_not_reported_as_an_invented_type():
     invented decision — was counted as an invented type and printed under that
     sentence.
     """
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     wrong_shape = {"type": "api_issue", "confidence": "very high"}
     triage = triage_with(
@@ -1007,7 +1007,7 @@ async def test_a_model_that_named_nothing_did_not_name_an_invented_type():
     Found by review, twice: the flag first fired on any validation failure,
     then on any failure of the `type` field, and only this version distinguishes
     a value the model *sent* from one it left out."""
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     triage = triage_with(
         [function_call("answer", {}, call_id="1")],
@@ -1025,7 +1025,7 @@ async def test_a_real_type_under_the_deleted_tools_old_key_is_not_invented_eithe
     habit named `api_issue` — a real member of the set — under a key this shape
     cannot see. It still reaches a person, and the mention is still not
     dropped, but calling it an invented type would be false."""
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     stale = {"task_type": "api_issue", "confidence": 0.9}
     triage = triage_with(
@@ -1042,7 +1042,7 @@ async def test_a_real_type_under_the_deleted_tools_old_key_is_not_invented_eithe
 async def test_a_type_the_model_actually_invented_is_still_counted():
     """The other side of the line, so the narrowing above cannot have quietly
     turned the number off."""
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     invented = {"type": "hardware_issue", "confidence": 0.9}
     triage = triage_with(

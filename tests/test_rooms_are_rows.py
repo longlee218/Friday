@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from agents.testing import ScriptedModel, assistant_message
+from friday.sdk.testing import ScriptedModel, assistant_message
 
 from friday.config import AgentConfig
 from friday.domain.models import (
@@ -216,7 +216,7 @@ async def test_a_room_with_no_rows_leaves_the_extractors_prompt_as_it_was(db):
 
 
 async def test_the_responder_is_shown_the_summary_and_not_the_facts(db):
-    from agents.models.interface import Model
+    from friday.sdk.testing import Model
     from friday.responder import Responder
 
     prompts: list[str] = []

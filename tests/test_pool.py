@@ -371,7 +371,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
     Responder's, not the template `_question_from_clarify` builds for it to
     write from.
     """
-    from agents.testing import ScriptedModel, assistant_message, function_call
+    from friday.sdk.testing import ScriptedModel, assistant_message, function_call
     from sqlalchemy import update as sa_update
 
     from friday.agent.harness import Harness
@@ -829,7 +829,7 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
 
 
 async def test_the_stranger_line_reaches_the_prompt_and_only_then(tmp_path):
-    from agents.models.interface import Model
+    from friday.sdk.testing import Model
 
     from friday.config import AgentConfig
     from friday.responder import Responder
@@ -968,7 +968,7 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
     """
     from datetime import datetime, timezone
 
-    from agents.testing import ScriptedModel, assistant_message
+    from friday.sdk.testing import ScriptedModel, assistant_message
     from sqlalchemy import update as sa_update
 
     from friday.agent.harness import Harness
@@ -1045,7 +1045,7 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
 def _responder(sink):
     """A real `Responder` over a scripted model, so the whole path from
     `Pool` to `Harness` is exercised rather than stubbed at the first joint."""
-    from agents.testing import ScriptedModel, assistant_message
+    from friday.sdk.testing import ScriptedModel, assistant_message
 
     from friday.config import AgentConfig
     from friday.responder import Responder

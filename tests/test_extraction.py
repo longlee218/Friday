@@ -240,7 +240,7 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
     capture the caller read back afterwards — so neither half was the return
     value of anything.
     """
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     from friday.config import AgentConfig
     from friday.domain.models import ApiIssueParams
@@ -284,7 +284,7 @@ async def test_asking_about_nothing_is_not_a_request_with_no_fields_in_it():
     """An empty `ask_about` is the model saying there is nothing worth asking,
     which the graph must not turn into a question. `because` on its own is not
     a request either — the fields are what a question gets built from."""
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     from friday.config import AgentConfig
     from friday.domain.models import ApiIssueParams
@@ -739,7 +739,7 @@ async def test_a_skill_fetch_and_a_correction_both_fit_in_one_extraction():
     Three model calls: reach for a skill, answer wrongly, answer again. All
     three land inside one run.
     """
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     from friday.agent.skills import SkillLibrary
     from friday.config import AgentConfig

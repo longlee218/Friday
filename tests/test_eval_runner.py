@@ -9,7 +9,7 @@ What is under test here is the wiring: that a real `Triage`, given a real
 
 from __future__ import annotations
 
-from agents.testing import ScriptedModel, function_call
+from friday.sdk.testing import ScriptedModel, function_call
 
 from evals.dataset import Example
 from evals.run_triage_eval import _to_prediction, report, run
@@ -123,7 +123,7 @@ async def test_a_multi_message_row_reaches_triage_as_a_real_turn(tmp_path):
     a joined string — otherwise nothing here ever exercises the ownership
     mark or a real multi-line render, which is exactly the gap ticket 09's
     own criterion named."""
-    from agents.models.interface import Model
+    from friday.sdk.testing import Model
 
     from evals.dataset import write_jsonl
     from friday.triage import Triage
@@ -179,7 +179,7 @@ async def test_an_invented_type_is_reported_as_its_own_number(tmp_path):
     the validation that actually refuses the type rather than a flag a test set
     by hand.
     """
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     from evals.dataset import Example, write_jsonl
     from evals.run_triage_eval import report, run
@@ -210,7 +210,7 @@ async def test_an_invented_type_is_reported_as_its_own_number(tmp_path):
 async def test_a_clean_run_still_reports_the_number_as_zero(tmp_path):
     """A line that appears only when it is non-zero is a line whose absence
     means both "none" and "not measured"."""
-    from agents.testing import ScriptedModel, function_call
+    from friday.sdk.testing import ScriptedModel, function_call
 
     from evals.dataset import Example, write_jsonl
     from evals.run_triage_eval import report, run

@@ -124,7 +124,7 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
     """The tool catches `InstructionShaped` itself rather than letting it
     reach `harness._tool_failed`'s generic swallow — a model told "that tool
     is unavailable" learns nothing about why, and would only try again."""
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.tools.memory import memory_tools
 
@@ -150,7 +150,7 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
 
 
 async def test_the_update_tool_also_tells_the_model_why():
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     from friday.tools.memory import memory_tools
 

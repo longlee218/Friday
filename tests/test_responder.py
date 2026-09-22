@@ -8,8 +8,8 @@ sentence every time, and that stops being true the moment a model writes it.
 
 from __future__ import annotations
 
-from agents.models.interface import Model
-from agents.testing import ScriptedModel, assistant_message
+from friday.sdk.testing import Model
+from friday.sdk.testing import ScriptedModel, assistant_message
 
 from conftest import make_event
 from friday.config import AgentConfig
@@ -159,7 +159,7 @@ async def test_a_responder_given_a_store_can_reach_its_own_memory():
     the kind of thing worth writing down. Driven end to end: a scripted model
     that calls `memory_search`, and the tool actually reaching the store
     scoped to the channel this draft is about."""
-    from agents.testing import function_call
+    from friday.sdk.testing import function_call
 
     from friday.domain.models import FridayState
 
@@ -346,7 +346,7 @@ async def test_a_memory_is_attributed_to_the_responder_whoever_handed_the_state_
     could be attributed to whoever ran before: the state travels a whole
     message's journey, and triage is at the front of it.
     """
-    from agents.testing import function_call
+    from friday.sdk.testing import function_call
 
     from friday.domain.models import FridayState
 

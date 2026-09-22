@@ -55,7 +55,7 @@ def call(tool, **kw):
     around the function and what a test bypassing it would not exercise."""
     import json
 
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     arguments = json.dumps(kw)
     return asyncio.run(
@@ -548,7 +548,7 @@ def _tool_named(harness, name):
     """The tool the harness was built with, callable as the model calls it."""
     import json
 
-    from agents.tool_context import ToolContext
+    from friday.sdk.testing import ToolContext
 
     tool = next(t for t in harness._tools if t.name == name)
 

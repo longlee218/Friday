@@ -10,8 +10,8 @@ and `tests/test_memory_kinds.py`). What is left here is the summariser.
 from __future__ import annotations
 
 import pytest
-from agents.models.interface import Model
-from agents.testing import ScriptedModel, assistant_message
+from friday.sdk.testing import Model
+from friday.sdk.testing import ScriptedModel, assistant_message
 
 from friday.memory.channel_context import ContextRebuilder
 from friday.config import AgentConfig
@@ -365,9 +365,9 @@ def _scripted(seen: list):
     internals the first version of this reached into and broke — the summary
     then failed on every pass, and the test read that as the behaviour it was
     checking for."""
-    from agents.items import ModelResponse
-    from agents.models.interface import Model
-    from agents.usage import Usage
+    from friday.sdk.testing import ModelResponse
+    from friday.sdk.testing import Model
+    from friday.sdk.testing import Usage
     from openai.types.responses import ResponseOutputMessage, ResponseOutputText
 
     class Answers(Model):
@@ -677,7 +677,7 @@ async def test_the_summary_arrives_as_a_tool_call(db, tmp_path):
     Nothing here parses anything: the fields go out as the tool's arguments
     and come back as a `RoomSummary`.
     """
-    from agents.testing import function_call
+    from friday.sdk.testing import function_call
 
     rebuilder = ContextRebuilder(
         db=db, channels=["100"],
@@ -703,7 +703,7 @@ async def test_a_summary_that_is_not_a_summary_is_never_stored_as_one(db, tmp_pa
     the shape is refused after its correction turn, the previous summary
     stands, and the next beat tries again — where this used to store whatever
     came back and render it into every later prompt for that room."""
-    from agents.testing import function_call
+    from friday.sdk.testing import function_call
 
     rebuilder = ContextRebuilder(
         db=db, channels=["100"],
