@@ -878,3 +878,101 @@ its correlationId, it succeeded 20/20. So every model-written `Evidence`
 carries pointers only, and code fills `quote` from the tool output it holds.
 A pointer that does not resolve is refused like any wrong ref. This replaces
 "code checks the quote occurs in a tool output" in v3.2.
+
+## Revision v4: a map, not evidence (proposed 2026-09-22)
+
+**Status: proposed, not agreed as built.** Scheduled in the roadmap
+(`CONTEXT.md` § Project state) **after the DESIGN-v2 restructure and before
+the move to Pydantic AI**, so it is built on the harness and engine as they
+are then. Whether it replaces v3.2's gathered evidence is the eval's to
+decide (ticket 14), not this section's.
+
+**Why.** The operator's point: a `Gather` written in code is never enough —
+it holds a formula per kind of case, and the long tail has no formula. What
+code does well is the part that needs no judgment *and* is not evidence:
+where things are. So `Gather` stops collecting evidence and builds a **map**;
+the agent decides what evidence to fetch, inside the map. v3.1's rule "known
+in advance to be needed → `Gather`" is replaced by "known without reading the
+case → the map".
+
+    Prepare → Resolve+Map → Notify ─┬─▶ Investigate ⇄ tools → Supervisor ─┬─ conclusive ──▶ Explain → Report
+     model      code          code  │    agent                code       ├─ needs reporter ─────────▶ Report (asks)
+                  │                 │                                     └─ inconclusive ───────────▶ Report (hand-over)
+                  └─ not ours / row missing ─────────────────────────────────────────────────────────▶ Report (hand-over)
+
+**Prepare and Map are split by source, not by subject.** Prepare (model)
+reads only the reporter's words and returns what the reporter *claims*:
+domain, path, method, identifiers, the time they give, hints of service and
+environment. Map (code, no model, reads no logs) reads only Friday's
+knowledge — memory rows and light k8s reads — plus Prepare's output, and
+returns facts. Where they overlap, **the domain beats the words**:
+`ApiIssueParams.environment` becomes a hint used only without a domain, and a
+disagreement goes to `unresolved[]`, visible to the agent and the report,
+never silently settled. The same for a service the reporter names.
+
+**The map** — every field a knowledge row or a cheap read, none of it a log
+line: environment; service and placement (cluster/namespace/app; dev: ssh
+host and pod pattern); repo path, the running ref, the stack (which picks the
+reading-guide skills); the dependency graph (to_service, via, join key,
+`db_checks`); running version and last rollout; the **anchor** (correlationId
+or path + identifier, and the window, D5); findings for the error code;
+skills whose `when` matches; `unresolved[]`.
+
+**Notify** stays after Map, for `acknowledge.py`'s reason: an external
+domain or a missing row ends the run there, and nobody should have been told
+work was starting. It is sent without approval (operator, 2026-09-22) and may
+run alongside Investigate, since Map costs milliseconds.
+
+**Investigate** is one agent holding the tools; v3.2's `Diagnose`/Collector
+split is not built unless measured context growth calls for it. Every
+"where" parameter is a closed enum built from the map — `search_logs(service
+∈ map, search, window)`, `read_source`/`codegraph_explore` at `map.ref`,
+`db_lookup(check ∈ map.deps.db_checks, key)`, `deploy_history(service)`,
+`read_config(service)`, `memory_search`, the skill tools. **The v3.2
+distillation rules move into the tools**: output capped, error-code
+histogram, "8 of N", pointers not quotes (ticket 16: pointing 20/20,
+quoting 32/40); `FindRequestLog` becomes the inside of `search_logs`.
+
+**The loop is stopped by layers, whichever comes first**, because ticket 16
+measured both failure shapes (repeated `search_logs` 4/10; tools called and
+no answer 1/20):
+
+| Layer | Stops |
+| --- | --- |
+| turn ceiling (start 6, to be measured) | an endless loop |
+| last turn: every tool but `answer` withdrawn, answering forced | ending without an answer |
+| per-tool ceiling (e.g. `search_logs` ≤ 3) | repeating one tool |
+| de-duplication in the wrapper ("already fetched, ref X") | asking the same question twice |
+| bounded tool output | one output flooding the context |
+| per-run token ceiling, checked before every model request | one expensive run |
+| `daily_token_budget` | total spend |
+| the step's clock | a slow back end |
+
+Every tool call writes its output to the run's **evidence ledger** as it
+returns, so hitting any layer loses nothing: the forced last turn answers
+with `conclusive = false` and "stopped: budget" in `not_checked`, and if even
+that fails, Report hands over with the ledger (D13).
+
+**The supervisor is code** and runs on every `Diagnosis`, against the
+ledger. Hard gates, which ask for one correction turn with specific
+objections: every ref resolves (built today: `unresolved_refs`); `cause`
+cites one; **coverage** — with an anchor, the anchor's own lines are in the
+ledger; with a stack, the code at the first application frame was read; with
+a dependency the error points at, that service was searched; when
+conclusive, at least one `alternatives_rejected` with a ref. Then the rung
+check, which downgrades rather than retries (`validated` needs found log or
+database evidence; no anchor lines → at most `speculation`). Then routing
+(the diagram). Still failing after the correction: `conclusive = false`, the
+objections go into the report. No LLM judge online (D18).
+
+**Eval.** Captured cases today hold the back end's answers to fixed queries;
+an agent that invents a query would find nothing to replay. **Capture
+changes first**: the raw log window of every service in the map, and replay
+tools filter it locally, so any query can be answered offline. Then ticket 14
+compares the v3.2 slice with v4 on the operator's labelled cases.
+
+**Order.** Capture change → Map (Resolve extended; `environment` → hint) →
+Investigate with the tools and the layers → supervisor coverage gates →
+eval against the slice. Mechanisms for "withdraw tools on the last turn" and
+"check tokens before every request" are the current harness's until the move
+to Pydantic AI, where they become `prepare_tools` and a capability.

@@ -13,14 +13,16 @@ knowledge table must work, and is the baseline.)
 **Status:** part done (2026-09-22). `alternatives_rejected` is in the answer
 shape and enforced: `conclusive: true` with nothing ruled out is refused, and
 so is an entry with an empty hypothesis, an empty reason, or a `ref` naming a
-line the model was not shown. That is the spec's first tier of
-self-questioning — the shape forcing the question — and the only one that
-costs no second model call.
+line the model was not shown.
 
-**What is left:** memory tools for the diagnosis agent, which is handed a
-model and nothing else; and the `[db]` step, which stays deliberately unwired
-— `friday/sources/db.py` has no caller until the operator decides its shape.
+**What is left, and the second is no longer this ticket's alone:**
 
+- Memory tools for the diagnosis agent.
+- The `[db]` step. Under v3.3 it stops being a node with a trigger rule and
+  becomes three tools — ticket 15 — and what blocks it is a
+  `MemoryKind.DATABASE` for a room to declare its `db_id`s, not a decision.
+  **The operator already made the decision**: the model picks the table, and
+  `execute_query` is a read. Saying this was blocked on them was wrong.
 ## What
 
 **Revised 2026-09-18 (spec, "Diagnose's context"):**

@@ -14,8 +14,32 @@ supersedes v3.2's division of labour. This ticket's earlier forms —
 `Investigate`, then a `Collector` sub-agent behind one `collect` tool — are
 both withdrawn.
 
-**Status:** re-scoped 2026-09-22, not started.
+**Status:** built and **switched off** (2026-09-22).
+`api_issue.diagnose_reads` is `false` by default.
 
+Built: `friday/tools/investigate.py` — `read_log`, `read_code`,
+`what_code_means` — with `Evidence` carrying a **grounding index that
+accumulates across calls** and a ceiling of twelve reads. `Diagnose` builds
+a harness per run with this run's tools, and both ways of answering pass
+through one shared `_judged()`: two copies of the gates is one that stops
+being updated, and this second path exists precisely to be compared against
+the first.
+
+One gate the pipeline never needed: an answer written **without a single
+tool call** is refused. The old node could check there was a dossier; here
+nothing is fetched unless the model fetches it.
+
+**What is left:**
+
+- **Turn the switch on and compare.** That is what it is for. With one
+  labelled case the comparison decides nothing yet, which is the honest
+  state rather than a reason to skip it.
+- **The db tools** (`list_tables`, `describe`, `query`). `friday/sources/db.py`
+  exists and has no caller; what it needs first is a `MemoryKind.DATABASE`
+  so a room can say which `db_id`s it may read — `DbSource.allowed` is empty
+  today and reads nothing.
+- Removing `find_request_log` and `read_failing_code`, which is step 5 and
+  waits on a measurement, not on work.
 ## Why the Collector sub-agent is gone
 
 v3.2 put a sub-agent between `Diagnose` and the sources so that raw volume
