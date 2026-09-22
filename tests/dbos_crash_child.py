@@ -51,12 +51,7 @@ def _main() -> None:
     import asyncio
 
     sysdb, marker, wfid = sys.argv[1], sys.argv[2], sys.argv[3]
-    from dbos import DBOS, DBOSConfig
-
-    DBOS.destroy(destroy_registry=False)
-    cfg: DBOSConfig = {"name": "friday-wf-test", "system_database_url": f"sqlite:///{sysdb}"}
-    DBOS(config=cfg)
-    DBOS.launch()
+    adapter.launch("friday-wf-test", sysdb)
     build_and_register(marker)
 
     async def go() -> None:

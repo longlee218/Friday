@@ -230,16 +230,11 @@ async def workflows(db):
     import tempfile
     from types import SimpleNamespace
 
-    from dbos import DBOS, DBOSConfig
-
     from friday.dag.router import register_dags
+    from friday.workflow import adapter
 
-    DBOS.destroy(destroy_registry=False)
     tmp = tempfile.mkdtemp()
-    DBOS(config=DBOSConfig(
-        name="friday-test", system_database_url=f"sqlite:///{tmp}/system.db"
-    ))
-    DBOS.launch()
+    adapter.launch("friday-test", f"{tmp}/system.db")
     register_dags(
         SimpleNamespace(agents={}, context=SimpleNamespace(extraction_budget_tokens=None)),
         servers={},
@@ -248,7 +243,7 @@ async def workflows(db):
     try:
         yield db
     finally:
-        DBOS.destroy(destroy_registry=False)
+        adapter.shutdown()
 
 
 class ScriptedHarness(Harness):

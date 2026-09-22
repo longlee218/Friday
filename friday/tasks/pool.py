@@ -22,8 +22,7 @@ from dataclasses import asdict
 from typing import Any
 
 from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS, dag_for
-from friday.ops.redact import scrub
-from friday.sdk.workflow import DAGState, Deps as DAGDeps, NodeRun, envelope, status_of
+from friday.sdk.workflow import DAGState, Deps as DAGDeps, NodeRun, status_of
 from friday.store.db import Database
 from friday.workflow import adapter
 from friday.domain.actions import Action, Ask, HandOver, Reply
@@ -219,10 +218,7 @@ class Pool:
         return await self._route(task, await self._plan(task))
 
     async def _route(self, task: Task, action: Action) -> Task:
-        """Given a decision, do what it says. Shared by the ordinary pass and
-        by `decide_pending_action` — an approval resuming a graph reaches the
-        same three outcomes a fresh pass does, and should be routed the same
-        way once it has one.
+        """Given a decision, do what it says.
 
         One branch per kind, and none of them falls through to another. Each
         answers the same four questions — where the text came from, whether
@@ -450,22 +446,13 @@ class Pool:
         return await self._run_workflow(dag, task, prepared)
 
     async def _run_entry(self, dag, deps: DAGDeps, task: Task) -> Any:
-        """Run node 0 outside the workflow, recording the attempt like any node
-        and turning an exception into work rather than a crash."""
-        node = dag.node(dag.entry)
-        try:
-            result = await node.run(DAGState.empty(), deps)
-        except Exception as exc:  # noqa: BLE001 - a node 0 failure becomes work
-            result = envelope("error", scrub(f"{type(exc).__name__}: {exc}"))
-        await self._recorder(task)(
-            NodeRun(
-                dag_name=dag.name, node=node.name, attempt=1,
-                status=status_of(result) or "ok",
-                reason=result.get("reason", "") if status_of(result) else "",
-                duration_ms=0,
-            )
+        """Run node 0 outside the workflow, through the adapter's shared invoke —
+        the same clock, retry, redaction and `node_runs` record every node in
+        the workflow gets. An exception comes back as `{status: error}`, not a
+        crash."""
+        return await adapter.run_node(
+            dag.name, dag.node(dag.entry), DAGState.empty(), deps, self._recorder(task)
         )
-        return result
 
     async def _run_workflow(self, dag, task: Task, prepared: Any) -> Action:
         """Start or resume this task's durable workflow, then poll it to its
@@ -491,10 +478,10 @@ class Pool:
         never blocks on a human — it returns the moment the run waits."""
         while True:
             st = await adapter.status(wfid)
-            if st == "SUCCESS":
+            if st == "done":
                 return self._outcome(dag, await adapter.result(wfid))
-            if st in ("ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"):
-                return HandOver(f"{dag.name} did not finish ({st})")
+            if st == "failed":
+                return HandOver(f"{dag.name} did not finish")
             waiting = await adapter.pending(wfid)
             if waiting is not None:
                 return Ask(waiting["text"])

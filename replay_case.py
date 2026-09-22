@@ -73,8 +73,6 @@ async def _run_on_adapter(
     canned `deps` are handed back by a one-shot factory; `seed` pre-loads
     `prepare` so the walk starts at `resolve` (node 0 is not replayed).
     """
-    from dbos import DBOS, DBOSConfig
-
     runs: list[NodeRun] = []
 
     async def factory(_scope: dict[str, Any]) -> DAGDeps:
@@ -85,18 +83,15 @@ async def _run_on_adapter(
             runs.append(run)
         return rec
 
-    DBOS.destroy(destroy_registry=False)
+    adapter.launch("friday-replay", str(system_db))
     adapter.clear_graphs()
     adapter.register_graph(dag, factory, recorder_factory=recorder)
-    cfg: DBOSConfig = {"name": "friday-replay", "system_database_url": f"sqlite:///{system_db}"}
-    DBOS(config=cfg)
-    DBOS.launch()
     try:
         started = time.monotonic()
         final = await adapter.run(dag.name, {"_seed": seed}, workflow_id=wfid)
         return final, runs, time.monotonic() - started
     finally:
-        DBOS.destroy(destroy_registry=False)
+        adapter.shutdown()
         adapter.clear_graphs()
 
 

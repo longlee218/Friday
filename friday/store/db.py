@@ -2922,15 +2922,6 @@ class Database:
                 )
             )
 
-    async def clear_pause(self, task_id: int) -> None:
-        """Forget a task's stored reason once it is being worked again."""
-        async with self._sessions.begin() as session:
-            await session.execute(
-                update(schema.DagState)
-                .where(schema.DagState.task_id == task_id)
-                .values(paused_question=None, paused_at_node=None)
-            )
-
     async def pauses_for(self, task_ids: list[int]) -> dict[int, str]:
         """The reason each of these tasks was handed over, if one was stored.
 
@@ -3396,8 +3387,8 @@ class Database:
         )
 
     async def task(self, task_id: int) -> Task | None:
-        """One task, freshest read — `decide_pending_action` needs current
-        params, not the ones a stored graph state was checkpointed against."""
+        """One task, freshest read — the pool's deps factory rebuilds a run's
+        `Deps` from the current row, not a snapshot handed to an earlier pass."""
         async with self._sessions() as session:
             row = await session.get(schema.Task, task_id)
             return _task(row) if row is not None else None

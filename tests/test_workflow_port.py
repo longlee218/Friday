@@ -189,11 +189,6 @@ async def test_ask_suspends_then_the_answer_reruns_the_asking_node(dbos_sqlite):
     """Pure model B: `Ask` suspends; the answer re-runs the SAME node with the
     answer in `deps.answers` (v1's "answer re-runs the asking node"), not a
     result-replacement. Only that node re-runs — upstream stays memoized."""
-    paused: list = []
-
-    async def sink(scope, node, action):
-        paused.append((node, type(action).__name__ if action else None))
-
     async def asker(state, deps):
         RAN.append("ask")
         if deps.answers:  # re-run after the answer arrived
@@ -208,10 +203,12 @@ async def test_ask_suspends_then_the_answer_reruns_the_asking_node(dbos_sqlite):
         ),
         edges=(Edge("ask", "use"),),
     )
-    adapter.register_graph(dag, _no_deps, pause_sink=sink)
+    adapter.register_graph(dag, _no_deps)
 
     handle = await adapter.start("asking", {}, workflow_id="wf-ask")
     await _until(lambda: RAN == ["ask"])  # suspended on recv for node "ask"
+    # The pool learns what it paused on by polling the run to its boundary.
+    assert (await adapter.pending("wf-ask"))["text"] == "what is the ticket number?"
     await adapter.answer("wf-ask", "ask", "TICKET-7")
 
     state = await handle.get_result()
@@ -219,7 +216,6 @@ async def test_ask_suspends_then_the_answer_reruns_the_asking_node(dbos_sqlite):
     assert RAN == ["ask", "ask", "use"]  # asked, re-ran with the answer, then on
     assert state["ask"]["got"] == "TICKET-7"
     assert state["use"]["got"] == "TICKET-7"
-    assert paused == [("ask", "Ask"), ("ask", None)]  # told it paused, then resumed
 
 
 async def test_handover_is_terminal_not_suspended(dbos_sqlite):

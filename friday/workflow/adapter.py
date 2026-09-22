@@ -30,7 +30,7 @@ from typing import Any
 
 from dbos import DBOS, SetWorkflowID
 
-from friday.domain.actions import Action, Ask
+from friday.domain.actions import Ask
 from friday.ops.redact import scrub
 from friday.sdk.workflow import (
     DAG,
@@ -50,12 +50,6 @@ log = logging.getLogger(__name__)
 Recorder = Callable[[NodeRun], Awaitable[None]]
 #: Builds the per-run recorder from the scope key (recording is per task).
 RecorderFactory = Callable[[ScopeKey], Recorder]
-
-#: Told when a node suspends the workflow on an `Ask`/`HandOver`, and again with
-#: `None` when it resumes — so the pool can record what the run paused on (for
-#: the operator's help-wanted text and the board) and clear it on resume. Kept
-#: out of the adapter so `dbos` and the store stay separate: the pool injects it.
-PauseSink = Callable[[ScopeKey, str, Action | None], Awaitable[None]]
 
 #: A cycle in the edges would otherwise spin forever; the graph is meant to be
 #: acyclic, and this says so out loud.
@@ -78,7 +72,6 @@ class _Graph:
     dag: DAG
     deps_factory: DepsFactory
     recorder_factory: RecorderFactory | None
-    pause_sink: PauseSink | None
 
 
 #: The router's registry, in DBOS terms: name -> how to run it. Populated at
@@ -97,10 +90,6 @@ class _Live:
     deps: Deps
     state: DAGState
     recorder: Recorder | None
-    pause_sink: PauseSink | None
-    #: The workflow's own input — what the pause sink is told, so the pool knows
-    #: which task suspended.
-    scope: ScopeKey
     #: Answers a suspended node has been given, keyed by node name, oldest
     #: first. Refilled onto `deps.answers` before each run of that node.
     answers: dict[str, list[Any]] = field(default_factory=dict)
@@ -115,13 +104,11 @@ def register_graph(
     dag: DAG,
     deps_factory: DepsFactory,
     recorder_factory: RecorderFactory | None = None,
-    pause_sink: PauseSink | None = None,
 ) -> None:
     """Make a graph runnable by name. The `deps_factory` rebuilds live handles
     from a scope key inside the run; `recorder_factory` builds the `node_runs`
-    sink per task; `pause_sink` is told what a run suspends on (and that it
-    resumed), for the pool to act on."""
-    _GRAPHS[dag.name] = _Graph(dag, deps_factory, recorder_factory, pause_sink)
+    sink per task."""
+    _GRAPHS[dag.name] = _Graph(dag, deps_factory, recorder_factory)
 
 
 def clear_graphs() -> None:
@@ -236,8 +223,6 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
         deps=await graph.deps_factory(scope_key),
         state=DAGState(results=dict(seed)),
         recorder=graph.recorder_factory(scope_key) if graph.recorder_factory else None,
-        pause_sink=graph.pause_sink,
-        scope=scope_key,
     )
     try:
         current: str | None = graph.dag.entry
@@ -269,7 +254,6 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
                 # to the operator out of band — there is no answer that re-runs
                 # the node — so it flows on as a terminal result the pool reads
                 # off the state, exactly as v1's walk did.
-                await _record_pause(dag_name, current, result)
                 # Publish what the run is waiting on, so the pool can poll it to
                 # its next boundary without blocking (get_event from outside).
                 await DBOS.set_event_async(
@@ -277,7 +261,6 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
                 )
                 answer = await DBOS.recv_async(current, timeout_seconds=WAIT_TIMEOUT_SECONDS)
                 await DBOS.set_event_async(PENDING_EVENT, {"waiting": False})
-                await _clear_pause(dag_name, current)
                 live.answers.setdefault(current, []).append(answer)
                 continue  # re-run `current`; do not advance, do not record the Ask
 
@@ -288,27 +271,34 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
         _LIVE.pop(wfid, None)
 
 
-@DBOS.step()
-async def _record_pause(dag_name: str, node: str, action: Action) -> None:
-    """Tell the pool what this run suspended on. A step so the notice is durable
-    and replays in order; the sink itself (the store write) is the pool's."""
-    graph = _GRAPHS[dag_name]
-    if graph.pause_sink is not None:
-        await graph.pause_sink(_scope_of(), node, action)
+async def run_node(
+    dag_name: str, node: Node, state: DAGState, deps: Deps, record: Recorder | None = None
+) -> Any:
+    """Run one node OUTSIDE a workflow, through the very same `_invoke` the
+    workflow uses — its clock, its retry, its redaction and its `node_runs`
+    record. The pool runs node 0 this way each pass, before the durable
+    workflow starts, so node 0 is timed and retried like every other node."""
+    return await _invoke(dag_name, node, state, deps, record)
 
 
-@DBOS.step()
-async def _clear_pause(dag_name: str, node: str) -> None:
-    """The answer arrived; the run is no longer waiting on it."""
-    graph = _GRAPHS[dag_name]
-    if graph.pause_sink is not None:
-        await graph.pause_sink(_scope_of(), node, None)
+def launch(name: str, system_db: str) -> None:
+    """Bring DBOS up on its own SQLite system database. The one place outside
+    this module that used to import `dbos` — the composition root, the replay
+    tool, the test harness — goes through here instead, so the vendor stays put.
+    Destroy-first clears any singleton a previous launch left (tests reuse the
+    process)."""
+    from dbos import DBOS, DBOSConfig
+
+    DBOS.destroy(destroy_registry=False)
+    DBOS(config=DBOSConfig(name=name, system_database_url=f"sqlite:///{system_db}"))
+    DBOS.launch()
 
 
-def _scope_of() -> ScopeKey:
-    wfid = DBOS.workflow_id
-    assert wfid is not None
-    return _LIVE[wfid].scope
+def shutdown() -> None:
+    """Tear DBOS down, keeping the decorated-workflow registry for a relaunch."""
+    from dbos import DBOS
+
+    DBOS.destroy(destroy_registry=False)
 
 
 async def start(dag_name: str, scope_key: ScopeKey, *, workflow_id: str | None = None):
@@ -331,13 +321,20 @@ async def answer(workflow_id: str, node: str, value: Any) -> None:
 
 
 async def status(workflow_id: str) -> str | None:
-    """The DBOS status of a run — `SUCCESS`, `PENDING`, `ERROR`, `CANCELLED` —
-    or `None` if no such workflow exists (it has not been started)."""
+    """A run's state in Friday's own words — `"running"`, `"done"` or
+    `"failed"` — or `None` if it was never started. DBOS's status vocabulary is
+    mapped here so it does not cross the seam into the pool."""
     try:
         st = await DBOS.get_workflow_status_async(workflow_id)
     except Exception:  # noqa: BLE001 - an unknown id is "not started", not an error
         return None
-    return st.status if st is not None else None
+    if st is None:
+        return None
+    if st.status == "SUCCESS":
+        return "done"
+    if st.status in ("ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"):
+        return "failed"
+    return "running"
 
 
 async def result(workflow_id: str) -> dict[str, Any]:

@@ -255,13 +255,12 @@ async def _run(stack: AsyncExitStack) -> None:
     # Durable workflows run on DBOS (ticket 06), on their own SQLite system
     # database beside the application one. Launch after the graphs are
     # registered, so recovery of any workflow left running by a previous
-    # process can rebuild its Deps; destroy on the way out.
-    from dbos import DBOS, DBOSConfig
+    # process can rebuild its Deps; shut it down on the way out. The adapter is
+    # the one module that names the vendor.
+    from friday.workflow import adapter
 
-    system_db = str(Path(config.database_path).with_suffix(".system.db"))
-    DBOS(config=DBOSConfig(name="friday", system_database_url=f"sqlite:///{system_db}"))
-    DBOS.launch()
-    stack.callback(lambda: DBOS.destroy(destroy_registry=False))
+    adapter.launch("friday", str(Path(config.database_path).with_suffix(".system.db")))
+    stack.callback(adapter.shutdown)
 
     responder = Responder.build(
         config,
