@@ -191,9 +191,22 @@ async def _run(stack: AsyncExitStack) -> None:
     # Before the agents, because one of them is handed this list.
     from friday.sources import DECLARED
 
-    servers = build_mcp(config.mcp_servers, allowed=DECLARED)
-    for server in servers:
-        await stack.enter_async_context(server)
+    servers = []
+    for server in build_mcp(config.mcp_servers, allowed=DECLARED):
+        try:
+            await stack.enter_async_context(server)
+        except Exception as refused:  # noqa: BLE001 - one server, not the boot
+            # **A tool server that will not connect does not stop the agent.**
+            # The commonest reason is that nobody has signed in to it yet
+            # (`authorize.py`), and a process that refuses to start until a
+            # person opens a browser is a process nobody can restart
+            # unattended. The graph says which source it wanted and skips.
+            log.warning(
+                "mcp %s is not available and is being skipped — %s: %s",
+                server.name, type(refused).__name__, refused,
+            )
+            continue
+        servers.append(server)
     if servers:
         log.info("mcp: %s", ", ".join(s.name for s in servers))
 

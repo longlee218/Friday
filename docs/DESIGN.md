@@ -253,15 +253,36 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   that cannot narrow ignore it. The node reads twice per window, narrowed
   and whole, because the error-code histogram counts the window.
 
-- **Friday presents its own identity to a tool server, and obtains it
-  itself.** Every MCP server here is behind Keycloak; `friday/agent/auth.py`
-  holds a `client_credentials` grant, fetched on demand and replaced before
-  it lapses, attached per request rather than baked into a header. The
-  identity is a **Keycloak client of Friday's own** — its own roles,
-  revocable on its own, logged as Friday and not as a person — which is what
-  makes this narrower than the operator pasting a token, not wider.
-  (Operator, 2026-09-21, amending "nothing here mints a credential": that
-  argument was about Friday borrowing the *operator's* identity.)
+- **Friday carries the operator's own session, obtained once by a person and
+  refreshed for ever after.** This replaced a `client_credentials` grant on
+  the operator's call (2026-09-21): that version argued for Friday holding an
+  identity of its own, which is the better answer *when a server will issue
+  one*. These will not — `devops-generic` and `db-generic` authorise a
+  person, and no service account is on offer.
+
+  So `uv run authorize.py <server>` runs the sign-in once, interactively, and
+  what is kept is a **refresh token** at mode 0600 under `data/credentials/`,
+  outside the database because the database is copied, rendered and rewritten
+  by migrations. `friday/agent/auth.py`'s `SsoTokens` is an httpx auth
+  handler rather than a header, so the token is decided per request and a
+  refresh needs no reconnection; the rotated refresh token is written back
+  every exchange, and a 401 is retried exactly once.
+
+  **Nothing about the server is configured** (measured 2026-09-22): each is
+  its own authorization server and advertises everything at
+  `/.well-known/oauth-authorization-server` — `authorization_code` +
+  `refresh_token`, PKCE `S256`, a registration endpoint, and a public client
+  with no secret. `authorize.py` discovers the endpoints, registers this
+  machine, and writes the token endpoint and client id beside the refresh
+  token, so `config.yaml` needs `url` and `auth: {}` and nothing that can go
+  stale. `auth: {}` and a missing `auth:` are deliberately different answers.
+
+  **What that costs, said out loud.** Friday reads as the operator, and the
+  server's log will say so. The guards that remain are the ones that were
+  always doing the work — what a reader declares it may call, what the server
+  filter allows, and what the database grants — and none of them ever
+  depended on which identity was presented. Proven against the live server
+  on 2026-09-22: it offers about sixty tools and Friday is handed one.
 - **Which tools a server may be asked for is declared in code**, on the
   class that calls them (`friday/sources/logs.py`'s `LokiSource.TOOLS`), and
   enforced twice: the server is built with a filter over those names, and

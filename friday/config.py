@@ -207,11 +207,24 @@ class MCPServerConfig:
     #: credential; a credential comes from `auth` instead, because a token
     #: written here is a token somebody has to rewrite when it lapses.
     headers: dict = field(default_factory=dict)
-    #: How to obtain a credential. `{"kind": "keycloak", "token_url",
-    #: "client_id", "client_secret", "scope"?}` — the client-credentials
-    #: grant, exchanged for a short token and exchanged again when it runs
-    #: out. Empty for a server that wants none.
-    auth: dict = field(default_factory=dict)
+    #: How to obtain a credential, or `None` for a server that wants none.
+    #:
+    #: **`{}` and `None` are different answers**, which is why this is not a
+    #: plain dict with a default: `auth: {}` says "this server needs signing
+    #: in to, and everything about how is discovered", and leaving the key
+    #: out says "it needs nothing". Both servers here are the first case, and
+    #: writing their endpoints down would be writing down what one HTTP GET
+    #: already says.
+    #:
+    #: Keys, all optional and all pinning something otherwise discovered:
+    #: `authorize_url`, `token_url`, `registration_url`, `client_id`,
+    #: `scope`, `client_secret`, `resource`.
+    #:
+    #: The operator signs in once with `authorize.py`, which discovers the
+    #: endpoints, registers this machine, and keeps a refresh token; this
+    #: process exchanges that for an access token and never asks anyone
+    #: anything.
+    auth: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -563,7 +576,7 @@ def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
                 url=spec.get("url", ""),
                 transport=transport,
                 headers=dict(spec.get("headers") or {}),
-                auth=dict(spec.get("auth") or {}),
+                auth=None if spec.get("auth") is None else dict(spec["auth"]),
             )
         )
     return tuple(servers)

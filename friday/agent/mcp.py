@@ -56,29 +56,29 @@ def _auth(config: MCPServerConfig) -> Any:
     which is the shape worth keeping: whoever adds it does not have to find
     every place a token is attached.
     """
-    if not config.auth:
+    if config.auth is None:
         return None
-    kind = config.auth.get("kind")
-    if kind != "keycloak":
+    kind = config.auth.get("kind", "oauth")
+    if kind not in ("oauth", "keycloak"):
         raise ConfigError(
             f"mcp server {config.name!r}: auth kind {kind!r} is not one of: "
-            "keycloak"
+            "oauth, keycloak"
         )
-    missing = [
-        key for key in ("token_url", "client_id", "client_secret")
-        if not config.auth.get(key)
-    ]
-    if missing:
-        raise ConfigError(
-            f"mcp server {config.name!r}: keycloak auth needs {missing}"
-        )
-    from friday.agent.auth import ClientCredentials
+    from pathlib import Path
 
-    return ClientCredentials(
-        token_url=config.auth["token_url"],
-        client_id=config.auth["client_id"],
-        client_secret=config.auth["client_secret"],
-        scope=str(config.auth.get("scope", "")),
+    from friday.agent.auth import SsoTokens, TokenStore
+
+    # **Nothing is required in the block.** The sign-in is `authorize.py`'s,
+    # once, with a person and a browser; it discovers the token endpoint,
+    # registers this machine, and writes both beside the refresh token. What
+    # is missing at boot is therefore the sign-in itself and never the
+    # configuration to go and do it — and a value set here still wins, for
+    # an install that has to pin one.
+    return SsoTokens(
+        store=TokenStore(Path("data/credentials") / f"{config.name}.json"),
+        token_url=str(config.auth.get("token_url", "")),
+        client_id=str(config.auth.get("client_id", "")),
+        client_secret=str(config.auth.get("client_secret", "")),
     )
 
 
