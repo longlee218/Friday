@@ -219,7 +219,12 @@ class CannedReads:
 #: itself. Named here so anything else is a mistake rather than a silence.
 CASE_KEYS = frozenset({
     "id", "channel_id", "reported_at", "reads", "source",
-    "decisive", "cause", "captured", "notes",
+    # What the operator said was true, used by `evals/run_api_issue_eval.py`
+    # and by nothing at run time. `cause_mentions` is the tokens any correct
+    # answer must contain; `conclusive` is whether the evidence really did
+    # settle it, which is a judgement about their system and not about the
+    # model.
+    "decisive", "cause", "cause_mentions", "conclusive", "captured", "notes",
 })
 
 
@@ -286,9 +291,13 @@ class CannedKubectl(SshKubectlSource):
         return str(self.reads["narrowed" if "grep -F" in remote else "window"])
 
 
-async def replay_captured(case_path: Path, *, with_model: bool, into: Path) -> int:
-    """One captured case, through the same graph the live one runs."""
-    case = json.loads(case_path.read_text())
+async def run_captured(case: dict, *, with_model: bool, into: Path):
+    """One captured case through the graph, returning what the run produced.
+
+    Split out of `replay_captured` so the eval runner and the command line
+    share one path. A second way to run a case is a second way for a score
+    to disagree with what the operator sees.
+    """
     config = load_config()
     into.mkdir(parents=True, exist_ok=True)
     db = await Database.connect(str(copy_aside(Path(config.database_path), into)))
@@ -316,33 +325,40 @@ async def replay_captured(case_path: Path, *, with_model: bool, into: Path) -> i
             db=db,
             extra={"log_sources": {name: source}},
         )
-        state = DAGState.empty().with_result(
-            "prepare", PARAMS["api_issue"](**params)
-        )
+        state = DAGState.empty().with_result("prepare", PARAMS["api_issue"](**params))
         runner = DAGRunner(dag, deps=deps, state=state, on_node_run=record)
 
         started = time.monotonic()
         final = await runner.run()
-        found = answers(runs, final, wall_s=time.monotonic() - started)
-        written = next(iter(sorted(reports.glob(f"{case['id']}.md"))), None)
-        # The half a captured case can score by itself: the operator wrote
-        # down the line they call decisive when they captured it, so
-        # question 1 stops being a question put to a person every run.
-        decisive = case.get("decisive")
-        held = None
-        if decisive:
-            dossier = final.get("find_request_log", {})
-            held = decisive in (
-                dossier.get("dossier", "") if isinstance(dossier, dict) else ""
-            )
-        print(render(case["id"], found, written, held=held))
-        if decisive and not held:
-            print(f"   missing: {decisive[:120]}")
-        if case.get("cause"):
-            print(f"\n2. you said the cause is: {case['cause']}")
-        return 0
+        return final, runs, time.monotonic() - started, reports
     finally:
         await db.close()
+
+
+async def replay_captured(case_path: Path, *, with_model: bool, into: Path) -> int:
+    """One captured case, through the same graph the live one runs."""
+    case = json.loads(case_path.read_text())
+    final, runs, wall_s, reports = await run_captured(
+        case, with_model=with_model, into=into
+    )
+    found = answers(runs, final, wall_s=wall_s)
+    written = next(iter(sorted(reports.glob(f"{case['id']}.md"))), None)
+    # The half a captured case can score by itself: the operator wrote down
+    # the line they call decisive when they captured it, so question 1 stops
+    # being a question put to a person every run.
+    decisive = case.get("decisive")
+    held = None
+    if decisive:
+        dossier = final.get("find_request_log", {})
+        held = decisive in (
+            dossier.get("dossier", "") if isinstance(dossier, dict) else ""
+        )
+    print(render(case["id"], found, written, held=held))
+    if decisive and not held:
+        print(f"   missing: {decisive[:120]}")
+    if case.get("cause"):
+        print(f"\n2. you said the cause is: {case['cause']}")
+    return 0
 
 
 async def replay(task_id: int, *, with_model: bool, into: Path) -> int:

@@ -122,3 +122,60 @@ numbers — accuracy, the confusion matrix, and the threshold table — are
 reported alongside the change. A probe written by hand once and thrown away
 is what this replaced (see ticket 06 on `.scratch/nothing-runs-unmeasured/`
 for why that was not repeatable).
+
+---
+
+## `api_issue` — is the diagnosis any good?
+
+    uv run python -m evals.run_api_issue_eval
+
+`triage.jsonl` answers "did it classify the mention right". This answers the
+other question, which nothing was asking: **did the investigation reach the
+right cause.**
+
+The suite cannot answer it. It checks that code does what it was told to;
+there is nothing in it that notices the model's causes getting worse. Three
+changes to the distillation landed on 2026-09-21 alone, each verified by one
+person reading one cause and nodding.
+
+Under architecture v3.3 that stops being tolerable. The model drives its own
+reads, so the same case may be investigated two ways — and "the suite is
+green" says nothing at all about which architecture diagnoses better.
+
+### The set is not in this repository
+
+A captured case holds the raw answers a log back end gave, and those lines
+carry `userId`, `ip` and `deviceId`. Cases live in `data/cases/`, which is
+gitignored. What is in the repository is `evals/api_issue.py` — *how* a case
+is scored, which is the part worth arguing with.
+
+### What a case is labelled with
+
+Written when it is captured and confirmed by the operator:
+
+| | |
+| --- | --- |
+| `decisive` | a substring of the log line they call decisive |
+| `cause` | the true cause, in their words |
+| `cause_mentions` | the tokens any correct answer must contain |
+| `conclusive` | whether the evidence really did settle it |
+
+**Friday proposes all four; the operator confirms or corrects.** The same
+shape as `friday/memory/verdicts.py`. What cannot be delegated is the
+judgement — the true cause of a production incident is a fact about their
+system.
+
+### What it measures, and where it is weak
+
+Cause accuracy is **substring matching, not a judge model**: the spec's rule
+is that an LLM critic is an eval variant until its scores agree with the
+operator's marks. So it cannot tell a right answer phrased unusually from a
+wrong one, and it cannot tell "categoryId is empty" from "categoryId is not
+empty". It is deterministic, it costs nothing, and it catches the failure
+that matters — the cause drifting off what the evidence was about.
+
+An unlabelled case scores zero rather than full marks. That is the one way a
+growing set could get quieter as it got weaker.
+
+**Under ten cases it prints that it is a regression check and not a score.**
+One case is where it stands today.
