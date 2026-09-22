@@ -1,27 +1,60 @@
-# 15: A Collector behind one tool
+# 15: Diagnose reads for itself, through tools that cut
 
-**What to build:** The Source layer's six protocols, the wrapped-primitive
-tools over them, the `collect` tool, and the Collector sub-agent that answers
-it with an `Evidence`.
+**What to build:** the existing sources wrapped as tools, an accumulating
+grounding index across tool calls, a ceiling on how many a run may make, and
+`Diagnose` driving them.
 
-**Blocked by:** 05's remainder and 14's baseline (2026-09-22). 09 and 11
-are done.
+**Blocked by:** ticket 14's labelled set — as a *precondition now*, not a
+nicety. This change makes an investigation non-deterministic, so without a
+score there is no way to say it diagnoses better than the fixed pipeline it
+replaces (spec, "Architecture v3.3").
 
-**Decisions:** spec, "Architecture v3.2". Replaces this ticket's earlier
-form, `Investigate`, which is withdrawn.
+**Decisions:** spec, "Architecture v3.3" (operator, 2026-09-22), which
+supersedes v3.2's division of labour. This ticket's earlier forms —
+`Investigate`, then a `Collector` sub-agent behind one `collect` tool — are
+both withdrawn.
 
-**Status:** barely started, and less of it exists than "the Source layer
-landed" suggests (2026-09-22). `friday/sources/` holds **one** protocol,
-`LogSource`, not six — the rest are concrete classes (`LokiSource`,
-`SshKubectlSource`, `DbSource`) and helper functions in `code.py`. There
-are no wrapped-primitive tools, no `collect` tool and no Collector
-sub-agent; nothing yet lets a model decide what to look for.
+**Status:** re-scoped 2026-09-22, not started.
 
-What did land is the half this ticket argued for first: reading is confined
-to one package, narrowed by `Reads` to tools declared in code, and holding
-no judgement of its own — which is what makes the same primitives servable
-to a Collector later ("the difference is **who decides what to look for**,
-never what is called").
+## Why the Collector sub-agent is gone
+
+v3.2 put a sub-agent between `Diagnose` and the sources so that raw volume
+never reached the reasoner. Measured on the captured production case, that
+volume is real: **one raw window read is 171 KB, about 43,654 tokens**, and
+the narrowed read is 1.5 KB.
+
+But the fix for that is the tool, not a second agent. `read_log` returns what
+`distil` left — 8 lines on that case — so by the time anything crosses into
+`Diagnose` the volume is already gone, and the sub-agent is a turn, a prompt
+and a failure mode buying nothing.
+
+## Why the Check layer is gone
+
+v3.2 kept fixed formulas in `Gather` for "what needs no judgment". The week
+measured what that judgment cost: the needle that matched every other caller
+of an endpoint (18 lines where the id gives 8), the window whose 400 lines
+covered 84 seconds of 35 minutes with the request outside them, the widening
+rule one `WARN` a minute disarmed for ever, and the table that cannot be
+enumerated in advance at all. Each was a judgement wearing a rule's clothes.
+
+## The tools
+
+| tool | what code still decides |
+| --- | --- |
+| `read_log(needle, minutes_back)` | narrow at the source, `distil`, the 12-line ceiling, the histogram, and **out of reach ≠ not found** |
+| `read_code(frame)` | clone containment, source maps, ±15 lines, **read at the running release tag** |
+| `what_code_means(code)` | the repo's own error-code table |
+| `list_tables` / `describe` / `query` | read-only, one statement, 50 rows after they arrive, PII by column name, only this room's `db_id`s |
+
+## What must survive, and it is not optional
+
+- **The grounding index accumulates across calls.** Every line any tool
+  returns gets an id; `refs` are checked against the accumulated map. The
+  measurement behind pointers rather than quotes is 32/40 against 20/20.
+- **`distil` stays a pure function over lines**, so a test can assert the
+  decisive line survived without a cluster.
+- **A tool-call ceiling**, because the 420s clock and the token budget stop
+  being formalities once a run can loop.
 
 ## What
 

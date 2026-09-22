@@ -141,3 +141,18 @@ which is the honest outcome.
 
 **Still this ticket's:** the same-user and same-path fallback, and the Loki
 call itself, which waits on the Keycloak client.
+
+## Re-scoped by architecture v3.3 (2026-09-22)
+
+The operator's call: `Gather` gathers **metadata**, and `Diagnose` reads for
+itself through tools. `FindRequestLog` becomes `read_log(needle, minutes_back)`: the
+narrowing, `distil`, the histogram and the retention answer all move inside
+the tool, and the model chooses the needle and the window instead of a rule
+guessing them. The measurements that forced this are in the spec — the
+endpoint needle, the 84-second window, and the widening a single `WARN` a
+minute disarmed.
+
+Nothing here is thrown away — the reading, the cutting and the guards are
+what the tool is made of. What changes is **who decides what to look for**,
+and nothing about what is called. See the spec's "Architecture v3.3" and
+ticket 15.

@@ -85,3 +85,14 @@ open question about replay.
 
 Shared with ticket 02 — it is a rule over lines, so it does not know which
 back end produced them. See that ticket for what was built and why.
+
+## Re-scoped by architecture v3.3 (2026-09-22)
+
+The operator's call: `Gather` gathers **metadata**, and `Diagnose` reads for
+itself through tools. The dev branch becomes the same `read_log` tool; which back end
+answers is still the placement's business, not the model's.
+
+Nothing here is thrown away — the reading, the cutting and the guards are
+what the tool is made of. What changes is **who decides what to look for**,
+and nothing about what is called. See the spec's "Architecture v3.3" and
+ticket 15.

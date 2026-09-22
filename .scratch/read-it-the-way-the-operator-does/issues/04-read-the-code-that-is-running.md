@@ -159,3 +159,15 @@ still a path.
 A frame-less run still carries the codes: a business error, a 4xx with a
 domain message, has no stack at all and what its code means is the whole of
 what there is to read.
+
+## Re-scoped by architecture v3.3 (2026-09-22)
+
+The operator's call: `Gather` gathers **metadata**, and `Diagnose` reads for
+itself through tools. `ReadFailingCode` becomes `read_code(frame)`, and the release-tag
+comparison goes inside it. CodeGraph, when it lands, is a second tool rather
+than more of a node.
+
+Nothing here is thrown away — the reading, the cutting and the guards are
+what the tool is made of. What changes is **who decides what to look for**,
+and nothing about what is called. See the spec's "Architecture v3.3" and
+ticket 15.

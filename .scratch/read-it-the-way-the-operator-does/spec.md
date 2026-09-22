@@ -665,6 +665,99 @@ the operator (marks → verified findings and eval labels). No critique loop.
 Collector (zero to N runs), `Explain`. An easy case is three calls; setting
 the collect ceiling to 0 is the eval's baseline.
 
+## Architecture v3.3: Gather stops fetching (operator, 2026-09-22)
+
+Supersedes v3.2's division of labour. The operator's call, and the argument
+is the one this board has been making about the database all week, applied
+to everything else:
+
+> "Gather context sẽ làm việc như là 1 node gom lại toàn bộ các metadata để
+> cho Diagnosed làm việc mà nó giỏi nhất … Còn phía Diagnosed agent sẽ dựa
+> vào các thông tin đó để đọc và sử dụng các tool để truy vấn."
+
+    Prepare → Resolve → Acknowledge → Diagnose(tools) → Report
+                 │                        │
+        metadata │                        │ read_log · read_code
+                 ▼                        ▼ what_code_means · query
+              (no reads)                Sources
+
+**`Gather` gathers metadata, not data.** Where the repository is, which file
+a frame names, what the service is called, which cluster and namespace it
+runs in, which environment, which release tag is running, which `db_id`s
+this room may read, which services it talks to. It opens nothing.
+
+**The Check layer is withdrawn.** v3.2 called it "a fixed formula over
+primitives, its query derived from data by rule, doing only what needs no
+judgment". The week measured what that judgment actually costs:
+
+| the formula decided | what it got wrong | found |
+| --- | --- | --- |
+| which needle to search on | the endpoint path matched every *other* caller — 18 dossier lines where the id gives 8 | 2026-09-21 |
+| how wide a window | 400 lines covered 84 seconds of the 35 minutes asked for, and the request was outside it | 2026-09-21 |
+| when to widen | one `WARN` a minute disarmed the rule permanently | 2026-09-21 |
+| which table answers a question | it cannot be enumerated in advance at all | 2026-09-21, the reversal |
+
+Every one of those is a judgement wearing a rule's clothes. A model that can
+search, look, and search again handles them the way a person does.
+
+### The boundary, and it is a measured one
+
+**A tool is not the back end.** Measured on the captured production case:
+
+| | |
+| --- | --- |
+| one raw `loki_query_range` window | 171 KB ≈ **43,654 tokens** |
+| the same read, narrowed at the source | 1.5 KB ≈ 388 tokens |
+| what `distil` cut it to | **8 lines** |
+
+So `Diagnose` is handed `read_log(needle, minutes_back)`, never
+`loki_query_range`. Inside the tool: the narrowed read, `distil`, the
+histogram, the numbering. **The model decides what to look for; code decides
+what comes back.** That is v3.2's own sentence, and it is the whole of what
+v3.3 keeps from it.
+
+**This is also why the Collector sub-agent goes.** v3.2 put a sub-agent
+between `Diagnose` and the sources so raw volume never reached the reasoner.
+Once the tool itself distils, the volume is already gone and the sub-agent is
+a turn, a prompt and a failure mode buying nothing.
+
+### What has to survive, each for a measured reason
+
+1. **The grounding gate.** `refs` are ids off lines *code* numbered — asked
+   to quote, the configured model succeeded 32/40; asked to point, 20/20.
+   With tools the index **accumulates across calls**: every line any tool
+   returns is given an id, and `refs` are checked against that. Without this
+   the gate quietly stops meaning anything.
+2. **`distil` stays a pure function over lines.** It is what lets a test
+   assert "the decisive line survived" with no cluster in the room.
+3. **A ceiling on tool calls.** `api_issue.timeout_seconds` is 420s against a
+   node sum of 400; with N calls the clock and the token budget become the
+   real bound rather than a formality.
+4. **Out of reach is not not-found.** The retention answer is a property of
+   the read, so it moves into the tool's answer, not out of existence.
+
+### What it costs, said before it is built
+
+- **One model call becomes several.** The captured case diagnoses today in
+  8.5 s and one call.
+- **It stops being deterministic.** The same case may investigate two ways.
+  Which makes **ticket 14 a precondition rather than a nicety**: without a
+  set of labelled cases, nothing can say whether this architecture diagnoses
+  better or worse than the one it replaces. This spec said 14 could wait. It
+  cannot any more.
+
+### Order, and why the last step is separate
+
+1. This section, and ticket 15 rewritten to match — read before any code.
+2. Wrap the existing sources as tools. The graph does not change; nothing
+   behaves differently yet.
+3. `Diagnose` uses the tools. `FindRequestLog` and `ReadFailingCode` stay,
+   as the fallback.
+4. Measure: same conclusion on the captured case, and what it cost.
+5. **Remove the two nodes only if step 4 says it is not worse.** There is one
+   labelled case today, and retiring two nodes that work on the strength of
+   n=1 is the mistake this board keeps writing down.
+
 ## Diagnose's context: a dossier, not the data (agreed 2026-09-18)
 
 Read against Anthropic's "Effective context engineering for AI agents"

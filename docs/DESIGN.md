@@ -230,6 +230,26 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   Only `Diagnose` calls a model. It is a slice (board
   `read-it-the-way-the-operator-does`, ticket 00) and is allowed to be thrown
   away once five real cases have been run through it.
+- **Gather gathers metadata; the model reads for itself** (operator,
+  2026-09-22, spec "Architecture v3.3" — **decided, not yet built**). The
+  fixed formulas that chose a needle, a window and when to widen were
+  judgement wearing a rule's clothes, and each was measured getting it
+  wrong within a week. So `Resolve` will produce only *where things are* —
+  repo, service, cluster, namespace, environment, running tag, readable
+  databases — and `Diagnose` will fetch through tools.
+
+  **A tool is not the back end, and the boundary is a measurement**: one raw
+  `loki_query_range` window is 171 KB ≈ 43,654 tokens, and what `distil`
+  leaves of it is 8 lines. `read_log` wraps the narrowing, the cut, the
+  histogram and the numbering; the model decides what to look for and code
+  decides what comes back. That also retires the Collector sub-agent — it
+  existed to keep raw volume out of the reasoner, and a tool that distils
+  has already done that.
+
+  Its price is stated where it is decided: several model calls instead of
+  one, and an investigation that is no longer deterministic — which makes a
+  labelled case set (ticket 14) a precondition rather than a nicety.
+
 - **Three layers, and the graph is the top one.** A **source**
   (`friday/sources/`) is a capability: it reads one kind of thing and decides
   nothing. A **check** is a formula over sources — `FindRequestLog` is "the

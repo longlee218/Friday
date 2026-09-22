@@ -173,3 +173,17 @@ composed statement must double-quote table and column names or fail with
 database alone came back with fifteen tables including `pg_stat_statements`
 and its forty columns. If a check ever needs the schema, it needs one
 table's worth of it, not the database's.
+
+## Re-scoped by architecture v3.3 (2026-09-22)
+
+The operator's call: `Gather` gathers **metadata**, and `Diagnose` reads for
+itself through tools. The `[db]` step stops being a node with a trigger rule and becomes
+three tools the model calls when it wants them — which is what the operator's
+reversal said in the first place. The answer shape, the refs gate and
+`alternatives_rejected` are unaffected, except that the ref index now
+accumulates across tool calls.
+
+Nothing here is thrown away — the reading, the cutting and the guards are
+what the tool is made of. What changes is **who decides what to look for**,
+and nothing about what is called. See the spec's "Architecture v3.3" and
+ticket 15.

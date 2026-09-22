@@ -36,3 +36,15 @@ Its own title is out of date: **one** output is approved, not two.
 - An end-to-end scripted run for each of: stack found, business error with
   escalation, not found then answered, external domain.
 - Checkpointed resume after the not-found ask.
+
+## Re-scoped by architecture v3.3 (2026-09-22)
+
+The operator's call: `Gather` gathers **metadata**, and `Diagnose` reads for
+itself through tools. The three outputs are unaffected. The node order loses
+`find_request_log` and `read_failing_code` once ticket 15's step 5 says it is
+safe to remove them.
+
+Nothing here is thrown away — the reading, the cutting and the guards are
+what the tool is made of. What changes is **who decides what to look for**,
+and nothing about what is called. See the spec's "Architecture v3.3" and
+ticket 15.
