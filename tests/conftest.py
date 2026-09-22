@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
+from fastapi.testclient import TestClient
 
 from friday.config import IngestConfig
 from friday.store.db import Database
@@ -153,6 +154,33 @@ def inbox(provider, db, config) -> Inbox:
 
 async def captured(inbox: Inbox) -> list[InboundEvent]:
     return [event async for event in inbox.stream()]
+
+
+class BoardClient(TestClient):
+    """A board client that behaves like the operator's own loopback page.
+
+    The board (ticket 02) refuses a write that does not come from a loopback
+    `Host` carrying the session's CSRF token. A browser reads that token from
+    the `friday_csrf` cookie a GET sets and echoes it in `X-CSRF-Token`; this
+    does the same on every write, so a write test asserts behaviour rather than
+    the guard's plumbing. It speaks from `127.0.0.1` because the guard trusts
+    only loopback. The cookie/header names come from the guard's own constants,
+    so a rename cannot leave this helper echoing the wrong one."""
+
+    def __init__(self, app, **kw):
+        kw.setdefault("base_url", "http://127.0.0.1")
+        super().__init__(app, **kw)
+
+    def request(self, method, url, *args, **kw):
+        from friday.ops.api import CSRF_COOKIE, CSRF_HEADER, _WRITE_METHODS
+
+        if method.upper() in _WRITE_METHODS:
+            if CSRF_COOKIE not in self.cookies:
+                super().request("GET", "/api/board")
+            headers = dict(kw.pop("headers", None) or {})
+            headers.setdefault(CSRF_HEADER, self.cookies.get(CSRF_COOKIE, ""))
+            kw["headers"] = headers
+        return super().request(method, url, *args, **kw)
 
 
 @pytest.fixture(autouse=True)

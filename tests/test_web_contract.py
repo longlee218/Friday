@@ -20,7 +20,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import captured, make_event
+from conftest import BoardClient, captured, make_event
 from friday.domain.conversation import ConversationId
 from friday.domain.states import TaskState
 from friday.ops.api import build_api, servable
@@ -41,7 +41,7 @@ def declared(interface: str) -> set[str]:
 
 @pytest.fixture
 def client(db):
-    return TestClient(
+    return BoardClient(
         build_api(
             db=db,
             provider_status=lambda: "connected",

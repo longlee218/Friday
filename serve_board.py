@@ -22,7 +22,6 @@ and hardening one of them is hardening none.
 from __future__ import annotations
 
 import asyncio
-import os
 
 import uvicorn
 from dotenv import load_dotenv
@@ -36,7 +35,7 @@ from friday.triage.runner import TriageRunner
 async def main() -> None:
     load_dotenv()
     config = load_config()
-    check_exposure(config.board_host, token=os.environ.get("BOARD_TOKEN"))
+    check_exposure(config.board_host)
     db = await Database.connect(config.database_path)
     status = lambda: "not connected (board only)"  # noqa: E731
     # Writable, like the agent's own board: this is the copy pointed at the

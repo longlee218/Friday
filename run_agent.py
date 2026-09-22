@@ -55,7 +55,7 @@ async def serve_board(db, provider, config, sock, threshold) -> None:
     status = lambda: (  # noqa: E731
         "connected" if provider.reconnected.is_set() else "connecting"
     )
-    check_exposure(config.board_host, token=os.environ.get("BOARD_TOKEN"))
+    check_exposure(config.board_host)
 
     app = build_api(
         db=db,

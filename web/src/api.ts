@@ -23,10 +23,23 @@ async function get<T>(path: string): Promise<T> {
   return (await answer.json()) as T;
 }
 
+// The board (ticket 02) refuses a write that does not carry the session's CSRF
+// token. A GET sets it in a `SameSite=Strict` cookie the browser sends back and
+// this page can read; echoing it here proves the write came from this tab and
+// not from a cross-site page, which can neither read the cookie nor set this
+// header.
+function csrfToken(): string {
+  const match = document.cookie.match(/(?:^|;\s*)friday_csrf=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
   const answer = await fetch(path, {
     method,
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    headers: {
+      "X-CSRF-Token": csrfToken(),
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!answer.ok) {

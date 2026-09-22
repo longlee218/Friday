@@ -12,8 +12,8 @@ public seams a writer reaches.
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
+from conftest import BoardClient
 from friday.domain.memory_guard import InstructionShaped
 from friday.domain.models import (
     DOMAIN_KINDS,
@@ -415,7 +415,7 @@ async def test_the_extractor_still_reads_what_it_read(db):
 
 @pytest.fixture
 def client(db):
-    return TestClient(build_api(db=db, provider_status=lambda: "connected"))
+    return BoardClient(build_api(db=db, provider_status=lambda: "connected"))
 
 
 def test_the_operator_writes_corrects_and_removes_a_row(client):

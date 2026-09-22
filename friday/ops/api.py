@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import socket
 import pathlib
 from collections.abc import Callable
@@ -40,11 +41,12 @@ from contextlib import contextmanager
 from dataclasses import MISSING, asdict, is_dataclass
 from dataclasses import fields as dataclass_fields
 from typing import Any, Literal, get_args, get_origin, get_type_hints
+from urllib.parse import urlparse
 
 from fastapi import Body, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from friday.domain.conversation import ConversationId
@@ -118,6 +120,45 @@ def build_api(
             allow_methods=allow_methods,
             allow_headers=["*"],
         )
+
+    # ── Board protection (ticket 02) ──────────────────────────────────────
+    # A read is open on loopback; a write must prove it came from the
+    # operator's own tab. The proof is checked here, in kernel code, and never
+    # trusted from the request: a loopback `Host` (so a page that rebound DNS
+    # to this port is refused), an `Origin` that is this board's own or a
+    # configured dev origin, and the session's CSRF token. The token is minted
+    # once per process and handed to the page in a `SameSite=Strict` cookie a
+    # GET sets; the page echoes it in `X-CSRF-Token`. A cross-site page can
+    # neither read that cookie nor set that header, so it cannot forge a write.
+    csrf_token = secrets.token_urlsafe(32)
+    allowed_origins = set(origins or ())
+
+    @api.middleware("http")
+    async def guard_writes(request: Request, call_next):
+        if request.method in _WRITE_METHODS:
+            host = urlparse(f"//{request.headers.get('host', '')}").hostname
+            if host not in _LOOPBACK:
+                return _refused(
+                    "this board accepts writes only from its own loopback "
+                    "address"
+                )
+            origin = request.headers.get("origin")
+            if origin is not None and not _origin_allowed(
+                origin, request.headers.get("host", ""), allowed_origins
+            ):
+                return _refused("that write came from a foreign origin")
+            sent = request.headers.get(CSRF_HEADER, "")
+            if not (sent and secrets.compare_digest(sent, csrf_token)):
+                return _refused("that write carried no valid session token")
+        response = await call_next(request)
+        # Hand the page the token to echo, once, on any read that has not
+        # already carried the cookie back.
+        if (
+            request.method not in _WRITE_METHODS
+            and CSRF_COOKIE not in request.cookies
+        ):
+            response.set_cookie(CSRF_COOKIE, csrf_token, samesite="strict", path="/")
+        return response
 
     @api.get("/api/board")
     async def board() -> dict:
@@ -920,38 +961,58 @@ _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 #: copied into a shell on a laptop.
 _CONTAINER_MARKER = pathlib.Path("/.dockerenv")
 
+#: The write guard's names. The token minted per process in `build_api` rides
+#: to the page in this cookie and comes back in this header.
+CSRF_COOKIE = "friday_csrf"
+CSRF_HEADER = "x-csrf-token"
+_WRITE_METHODS = frozenset({"POST", "PUT", "DELETE", "PATCH"})
 
-def check_exposure(host: str, *, token: str | None) -> None:
-    """Refuse to serve this to a network without a credential.
+
+def _refused(why: str) -> JSONResponse:
+    return JSONResponse({"detail": f"refused: {why}"}, status_code=403)
+
+
+def _origin_allowed(origin: str, host_header: str, allowed: set[str]) -> bool:
+    """True when the write's `Origin` is this board's own — the same `host:port`
+    the request's `Host` names, which is what a same-origin page from the built
+    bundle sends — or one the operator named in `board_origins` for the Vite
+    dev frontend, which is cross-origin by design."""
+    if urlparse(origin).netloc == host_header:
+        return True
+    return origin in allowed
+
+
+def check_exposure(host: str) -> None:
+    """Refuse to serve this anywhere but loopback.
 
     The board has no authentication, and the design said that was safe because
     it is read-only. That argument was always about *writes*. Reading it hands
     over every captured message and every model prompt, and what actually made
     that safe was that it only ever answered on loopback.
 
-    **There is a write now** (board D7): a channel's context `overrides`, which
-    reaches the instructions of every agent working in that room. So this is no
-    longer a judgement about disclosure — somebody who reaches this can change
-    what the agent believes about a room, and every reply after that carries
-    it — and the branch that used to let a container through is gone.
+    **There is a write now** (board D7, ticket 09): the operator's own memory
+    rows, which reach the instructions of every agent working in that room. So
+    this is no longer a judgement about disclosure — somebody who reaches this
+    can change what the agent believes about a room, and every reply after that
+    carries it.
 
-    That branch was not wrong when it was written. A container's loopback is
-    unreachable from outside it, so binding there means the port mapping never
-    arrives; `0.0.0.0` inside one means "this container", and who can reach
-    *that* is the publish rule one layer out — `ports: ["127.0.0.1:8086:8086"]`
-    in compose.yaml. But that reasoning trusts a compose file this process
-    cannot see, which is a fine thing to do about reads and not about writes.
+    There is no longer a credential that lifts this. `BOARD_TOKEN` gated
+    nothing on any route; it only switched off this refusal, and a switch that
+    exposes a writable board to the LAN is one nobody should be able to flip by
+    setting an environment variable. Friday runs on the operator's own machine;
+    the board is reached over an SSH tunnel or a loopback port mapping, never
+    bound wide.
     """
-    if host in _LOOPBACK or token:
+    if host in _LOOPBACK:
         return
     inside = " inside a container" if _CONTAINER_MARKER.exists() else ""
     raise SystemExit(
         f"refusing to serve the board on {host}{inside}: it is unauthenticated, "
-        "it shows every captured message and model prompt, and it now accepts "
-        "writes — a channel's context overrides, which reach the instructions "
+        "it shows every captured message and model prompt, and it accepts "
+        "writes — the operator's own memory rows, which reach the instructions "
         "of every agent in that room.\n"
-        "Set BOARD_TOKEN, or bind loopback and publish it with "
-        'ports: ["127.0.0.1:8086:8086"].'
+        "Bind loopback (board_host: 127.0.0.1) and reach it over an SSH tunnel "
+        'or a loopback port mapping (ports: ["127.0.0.1:8086:8086"]).'
     )
 
 

@@ -10,9 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from fastapi.testclient import TestClient
-
-from conftest import captured, make_event
+from conftest import BoardClient, captured, make_event
 from friday.ops.api import build_api
 from friday.domain.conversation import ConversationId
 from friday.outbox import Kind
@@ -23,7 +21,7 @@ WATCHED = ConversationId("fake", "watched")
 
 @pytest.fixture
 def client(db):
-    return TestClient(
+    return BoardClient(
         build_api(db=db, provider_status=lambda: "connected", origins=["http://x"])
     )
 
@@ -127,17 +125,18 @@ def test_a_typescript_client_can_be_generated_from_it(client):
     assert "/api/board" in schema["paths"]
 
 
-def test_binding_beyond_loopback_without_a_credential_is_refused():
-    """The board exposes every captured message and every model prompt. It has
-    no authentication because it only ever answered on loopback — so binding
-    wider has to bring one, or not happen."""
+def test_binding_beyond_loopback_is_refused():
+    """The board exposes every captured message and every model prompt, and it
+    writes the operator's own memory. It has no authentication because it only
+    ever answered on loopback — so binding wider does not happen. There is no
+    credential that lifts this any more (`BOARD_TOKEN` is gone, ticket 02)."""
     from friday.ops.api import check_exposure
 
-    check_exposure("127.0.0.1", token=None)
-    check_exposure("0.0.0.0", token="a-real-token")
+    check_exposure("127.0.0.1")
+    check_exposure("localhost")
 
     with pytest.raises(SystemExit) as refused:
-        check_exposure("0.0.0.0", token=None)
+        check_exposure("0.0.0.0")
     assert "loopback" in str(refused.value)
 
 
@@ -193,24 +192,25 @@ def test_a_container_may_no_longer_bind_its_own_network_uncredentialed(
     monkeypatch.setattr(api, "_CONTAINER_MARKER", marker)
 
     with pytest.raises(SystemExit):
-        api.check_exposure("0.0.0.0", token=None)
+        api.check_exposure("0.0.0.0")
 
 
-def test_a_container_with_a_credential_still_may(tmp_path, monkeypatch):
-    """A guard that leaves no correct path is a guard somebody deletes."""
+def test_loopback_is_the_supported_path():
+    """The correct path is loopback — inside a container too, reached from
+    outside over an SSH tunnel or a loopback port mapping. A guard that leaves
+    no correct path is a guard somebody deletes, and this is that path. (The
+    container marker only phrases the refusal; it does not gate loopback, so no
+    marker is set here.)"""
     from friday.ops import api
 
-    marker = tmp_path / ".dockerenv"
-    marker.write_text("")
-    monkeypatch.setattr(api, "_CONTAINER_MARKER", marker)
-
-    api.check_exposure("0.0.0.0", token="a-real-token")
+    api.check_exposure("127.0.0.1")
 
 
 def test_the_refusal_says_what_changed_and_what_to_do(tmp_path, monkeypatch):
     """Two failures this message exists to prevent: somebody reading it as the
     old read-only warning and ignoring it, and somebody finding no supported
-    way forward and deleting the check."""
+    way forward and deleting the check. It no longer offers `BOARD_TOKEN`,
+    which is gone."""
     from friday.ops import api
 
     marker = tmp_path / ".dockerenv"
@@ -218,13 +218,12 @@ def test_the_refusal_says_what_changed_and_what_to_do(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_CONTAINER_MARKER", marker)
 
     with pytest.raises(SystemExit) as refused:
-        api.check_exposure("0.0.0.0", token=None)
+        api.check_exposure("0.0.0.0")
 
     said = str(refused.value)
     assert "write" in said, "does not say the process now accepts writes"
-    assert "context" in said, "does not name what a write reaches"
-    assert "BOARD_TOKEN" in said, "names no supported way forward"
-    assert "loopback" in said
+    assert "loopback" in said, "names no supported way forward"
+    assert "BOARD_TOKEN" not in said, "still offers the credential that is gone"
 
 
 def test_a_host_still_may_not(tmp_path, monkeypatch):
@@ -233,7 +232,7 @@ def test_a_host_still_may_not(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_CONTAINER_MARKER", tmp_path / "absent")
 
     with pytest.raises(SystemExit, match="loopback"):
-        api.check_exposure("0.0.0.0", token=None)
+        api.check_exposure("0.0.0.0")
 
 
 async def test_a_tasks_own_calls_are_reachable(client, db):

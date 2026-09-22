@@ -228,12 +228,14 @@ api_issue:
 # Who is asked to approve a reply, by direct message from the bot.
 operator_id: 482447107983147039
 
-# The read-only debug view. It shows every captured message and every model
-# prompt and has no authentication, so it stays on loopback unless BOARD_TOKEN
-# is set.
+# The debug view. It shows every captured message and every model prompt, and
+# it writes the operator's own memory rows, so it stays on loopback — reach it
+# over an SSH tunnel or a loopback port mapping, never bound wide. A write must
+# carry the session's CSRF token from a loopback page; a read is open here.
 board_host: "127.0.0.1"
 board_port: 8086
-# Browser origins allowed to read the API — the frontend in development.
+# Browser origins allowed to write cross-origin — the Vite dev frontend. The
+# built bundle is served same-origin and needs no entry here.
 board_origins: []
 
 # Where the `project` form's repo picker may look (ticket 19). The board

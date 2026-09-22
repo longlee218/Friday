@@ -180,11 +180,11 @@ async def test_the_api_route_answers_422_with_the_reason(db):
     other producer, and told why rather than a bare validation error. It was
     the route that wrote a channel file's overrides; it is the memory form's
     now (ticket 10)."""
-    from fastapi.testclient import TestClient
+    from conftest import BoardClient
 
     from friday.ops.api import build_api
 
-    client = TestClient(
+    client = BoardClient(
         build_api(db=db, provider_status=lambda: "connected", origins=["http://x"])
     )
 
