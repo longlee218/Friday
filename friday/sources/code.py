@@ -99,10 +99,18 @@ def at_ref(repo_path: str, path: Path, ref: str) -> str | None:
         relative = path.resolve().relative_to(root)
     except ValueError:
         return None
-    done = subprocess.run(
-        ["git", "-C", str(root), "show", f"{ref}:{relative.as_posix()}"],
-        capture_output=True, text=True, timeout=20.0, check=False,
-    )
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), "show", f"{ref}:{relative.as_posix()}"],
+            capture_output=True, text=True, timeout=20.0, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        # The docstring above promises `None` for "git not on PATH", and it
+        # was not true: `FileNotFoundError` and `TimeoutExpired` both came
+        # out of here. A caller that read the promise and did not guard is a
+        # caller this function misled.
+        log.warning("git show %s: %s", ref, exc)
+        return None
     return done.stdout if done.returncode == 0 else None
 
 

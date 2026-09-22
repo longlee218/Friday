@@ -2918,3 +2918,25 @@ def test_the_model_is_told_both_to_fill_it_and_what_happens_if_it_does_not():
     # — both appear elsewhere in these instructions, so the looser assertion
     # stayed green with this warning deleted.
     assert "empty `alternatives_rejected` is refused" in said
+
+
+def test_git_failing_is_no_ref_rather_than_an_exception(tmp_path, monkeypatch):
+    """Its docstring promises `None` for "git not on PATH", and that was not
+    true: `FileNotFoundError` and `TimeoutExpired` both came out of here, and
+    a caller that read the promise and did not guard was a caller this
+    function misled — `read_code` was exactly that caller."""
+    import subprocess
+
+    from friday.sources import code as code_source
+
+    def explode(*_a, **_k):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(code_source.subprocess, "run", explode)
+    assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "1.0.0") is None
+
+    def hang(*_a, **_k):
+        raise subprocess.TimeoutExpired(cmd="git", timeout=20)
+
+    monkeypatch.setattr(code_source.subprocess, "run", hang)
+    assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "1.0.0") is None

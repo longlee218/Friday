@@ -14,6 +14,7 @@ its caller is invisible to the next person asking the same question.
 from __future__ import annotations
 
 import ast
+from datetime import datetime, timezone
 import importlib
 import inspect
 import pkgutil
@@ -45,6 +46,8 @@ def _factories() -> dict[str, object]:
     from friday.tools.describe_skill import describe_skill_tool
     from friday.tools.fetch_skill import fetch_skill_tool
     from friday.tools.memory import memory_tools
+    from friday.sources import Placement
+    from friday.tools.investigate import Evidence, investigate_tools
     from friday.tools.read_skill_file import read_skill_file_tool
     from friday.tools.search_skills import search_skills_tool
 
@@ -55,6 +58,16 @@ def _factories() -> dict[str, object]:
         describe_skill_tool(library),
         read_skill_file_tool(library),
         *memory_tools(object()),
+        # Built per run rather than once: every one of these needs the
+        # placement `Resolve` produced, so there is nothing to inject here
+        # but a stand-in for it.
+        *investigate_tools(
+            evidence=Evidence(),
+            placement=Placement(env="dev", service="s"),
+            project={},
+            log_sources={},
+            reported_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
+        ),
     ]
     return {tool.name: tool for tool in built}
 
@@ -95,6 +108,9 @@ def test_the_tools_this_system_has_are_all_in_one_place():
         "memory_propose",
         "memory_update",
         "memory_delete",
+        "read_log",
+        "read_code",
+        "what_code_means",
     }
 
 
