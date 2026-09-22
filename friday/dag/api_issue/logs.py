@@ -21,6 +21,7 @@ from typing import Any
 from friday.dag.api_issue.distil import distil, frames as frames_of
 from friday.dag.api_issue.resolve import path_of, resolved
 from friday.dag.engine import DAGDeps, DAGState, Node, envelope
+from friday.domain.actions import Ask
 from friday.sources import Lines
 
 __all__ = ["dossier_of", "find_request_log_node"]
@@ -209,6 +210,28 @@ def _matching(
     return needles[-1:], unmatched
 
 
+def _unanswered(params: Any, correlation_id: str | None, needle: str) -> str:
+    """What is worth asking the reporter, or `""` when nothing is.
+
+    `""` matters as much as the question: a reporter who already pasted a
+    response *and* gave a correlationId that the log simply does not carry
+    has told us everything they have, and asking again is how a system
+    teaches people to stop answering it. That case gets the envelope and
+    the honest "searched and not found" instead.
+    """
+    if not getattr(params, "response", None):
+        return (
+            "the response you got back — it carries the id this is searched "
+            "for — and roughly when it happened"
+        )
+    if not needle:
+        return (
+            "the endpoint you called and one id the request carried "
+            "(deviceId, userId, email or order id), and roughly when"
+        )
+    return ""
+
+
 def _capped(
     wanted: str, window: Lines, ours: Lines, *, needle: str, asked: timedelta
 ) -> tuple[str, ...]:
@@ -391,6 +414,28 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
         capped = _capped(wanted, window, ours, needle=needle, asked=until - since)
         not_checked = (*widened, *unmatched, *capped, *dossier.not_checked)
         if not dossier.lines:
+            # **The window was searched and this request is not in it.** Not
+            # the same as the retention case above, which returned before
+            # here: there, every line the window could have held was already
+            # gone, and asking a reporter to re-send something into a log
+            # that no longer reaches back is asking for nothing.
+            #
+            # Here the log *does* reach back, so the likeliest reasons are
+            # answerable by the reporter: the id was read off something else,
+            # the endpoint was named loosely, or it happened outside the
+            # window measured from their message. D2 asks for the response —
+            # which is where a correlationId actually comes from (ticket 01)
+            # — and for when it happened.
+            #
+            # An `Ask` rather than an envelope, so the pool queues the
+            # question, moves the task to waiting, and re-enters this node
+            # when the answer arrives: the node did not finish, so the
+            # checkpoint does not carry it and the resumed run searches
+            # again with what it now knows. The bound on asking the same
+            # task over and over is the pool's, not this node's.
+            missing = _unanswered(params, correlation_id, needle)
+            if missing:
+                return Ask(missing)
             return envelope(
                 "empty",
                 f"{wanted} returned {dossier.total} lines in the window and "

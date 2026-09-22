@@ -30,7 +30,7 @@ from friday.dag.api_issue.logs import find_request_log_node
 from friday.dag.api_issue.report import render, report_node
 from friday.dag.api_issue.resolve import resolve_node
 from friday.dag.engine import DAGDeps, DAGState, status_of
-from friday.domain.actions import HandOver, Reply
+from friday.domain.actions import Ask, HandOver, Reply
 from friday.domain.conversation import ConversationId
 from friday.domain.models import ApiIssueParams, FridayState, MemoryKind, MemoryOrigin
 
@@ -374,8 +374,12 @@ async def test_a_quiet_window_is_widened_once_and_only_once(db):
     """Spec: one automatic widening of the window, recorded in `not_checked`."""
     await write_rows(db)
     source = FakeSource(answers=[["GET /v1/health 200"], ["GET /v1/health 200"]])
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    # A reporter who has already given everything they have, so the empty
+    # window is reported rather than asked about — the widening is what this
+    # test is for.
+    said = prepared(response="artifact-1")
+    state = said.with_result(
+        "resolve", await resolve_node().run(said, deps_for(db))
     )
 
     result = await find_request_log_node().run(
@@ -2707,3 +2711,89 @@ async def test_dev_is_not_asked_which_tag_is_running(db, tmp_path):
     await _code_for(db, root, release, env="dev")
 
     assert release.asked == []
+
+
+# --- searched and not found, so the reporter is asked (ticket 02) ------------
+
+
+async def test_a_searched_window_that_holds_nothing_asks_the_reporter(db):
+    """The log reaches back and the request is not in it, so the likeliest
+    reasons are answerable: the id was read off something else, the endpoint
+    was named loosely, or it happened outside the window measured from their
+    message. D2 asks for the response — where a correlationId actually comes
+    from — and for when."""
+    await write_rows(db)
+    source = FakeSource(answers=[["GET /v1/health 200"], ["GET /v1/health 200"]])
+    state = prepared().with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert isinstance(result, Ask)
+    assert "response" in result.text
+
+
+async def test_a_reporter_who_gave_everything_is_not_asked_again(db):
+    """Asking someone who already answered is how a system teaches people to
+    stop answering it. They get the honest "searched and not found"."""
+    await write_rows(db)
+    source = FakeSource(answers=[["GET /v1/health 200"], ["GET /v1/health 200"]])
+    said = prepared(response="artifact-1", correlation_id="abc-123")
+    state = said.with_result("resolve", await resolve_node().run(said, deps_for(db)))
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert not isinstance(result, Ask)
+    assert status_of(result) == "empty"
+
+
+async def test_a_log_that_does_not_reach_back_is_not_a_question(db):
+    """**The one case that must not become a question.** Every line the
+    window could have held is gone; asking a reporter to re-send something
+    into a log that no longer reaches back is asking for nothing."""
+    await write_rows(db)
+    source = FakeSource(answers=[[]], oldest=REPORTED_AT + timedelta(hours=16))
+    state = prepared().with_result(
+        "resolve", await resolve_node().run(prepared(), deps_for(db))
+    )
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert not isinstance(result, Ask)
+    assert "does not reach back" in " ".join(result["not_checked"])
+
+
+def test_the_asking_node_does_not_end_the_graph_by_its_edges():
+    """An `Ask` ends the pass in the runner, not by an edge — the edge out of
+    this node is unconditional, so the resumed run walks on when the node
+    answers with a dossier instead."""
+    dag = build_api_issue_dag()
+    ok = DAGState.empty().with_result(
+        "find_request_log", {"status": "ok", "reason": ""}
+    )
+
+    assert dag.next_after("find_request_log", ok) == "read_failing_code"
+
+
+async def test_a_response_with_nothing_naming_the_request_asks_for_the_endpoint(db):
+    """The other half of D2. They pasted a response but named no request —
+    no curl, no endpoint, no id — so there is nothing to search the log
+    for, and that is the question."""
+    await write_rows(db)
+    source = FakeSource(answers=[["GET /v1/health 200"], ["GET /v1/health 200"]])
+    said = prepared(curl=None, response="artifact-1")
+    state = said.with_result("resolve", await resolve_node().run(prepared(), deps_for(db)))
+
+    result = await find_request_log_node().run(
+        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
+    )
+
+    assert isinstance(result, Ask)
+    assert "endpoint" in result.text and "deviceId" in result.text
