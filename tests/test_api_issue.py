@@ -705,6 +705,12 @@ async def test_a_conclusive_answer_that_points_at_nothing_is_not_reported(db):
         async def run_structured(self, prompt, **kw):
             return Diagnosis(
                 cause="nó hỏng", confidence="certain", conclusive=True, refs=[],
+                # Filled, so this reaches the refs gate rather than the
+                # alternatives one: the two refuse for different reasons and
+                # this test is about pointing at nothing.
+                alternatives_rejected=[
+                    {"hypothesis": "mạng chập", "why": "không có timeout nào"}
+                ],
             )
 
     state = (
@@ -2331,6 +2337,13 @@ async def test_a_business_error_with_no_stack_is_still_worth_diagnosing(db):
             return Diagnosis(
                 cause="ERR306: content pack required", confidence="likely",
                 conclusive=True, refs=[],
+                # Filled so this reaches the refs gate rather than the
+                # alternatives one — the two refuse for different reasons
+                # and this test is about the first.
+                alternatives_rejected=[{
+                    "hypothesis": "the pack exists and the user lacks it",
+                    "why": "the code means the pack itself is required",
+                }],
             )
 
     state = (
@@ -2797,3 +2810,111 @@ async def test_a_response_with_nothing_naming_the_request_asks_for_the_endpoint(
 
     assert isinstance(result, Ask)
     assert "endpoint" in result.text and "deviceId" in result.text
+
+
+# --- the shape forces the question (ticket 05) ------------------------------
+
+
+def _answering(**kw):
+    """A harness that answers with one fixed `Diagnosis`."""
+    class Said:
+        last_error = None
+
+        async def run_structured(self, prompt, **_):
+            return Diagnosis(**kw)
+
+    return Said()
+
+
+def _with_dossier():
+    return (
+        prepared()
+        .with_result(
+            "find_request_log",
+            {"status": "ok", "reason": "", "dossier": "ERROR boom"},
+        )
+        .with_result("read_failing_code", {"status": "empty", "reason": ""})
+    )
+
+
+async def test_conclusive_without_a_rejected_alternative_is_refused(db):
+    """Spec, tier 1 of self-questioning: the answer shape forces it. A cause
+    nothing was weighed against is the first thing the evidence suggested —
+    which is exactly the answer a reader cannot tell from a considered one."""
+    result = await diagnose_node(harness=_answering(
+        cause="x", confidence="certain", conclusive=True, refs=["L1"],
+    )).run(_with_dossier(), deps_for(db))
+
+    assert status_of(result) == "empty"
+    assert "ruled out" in result["reason"]
+
+
+async def test_an_alternative_with_no_reason_does_not_satisfy_the_gate(db):
+    """An empty hypothesis rules nothing out and a reason with no substance
+    is an assertion. Counting the field's existence would let the gate be
+    satisfied by the shape rather than by the thinking."""
+    result = await diagnose_node(harness=_answering(
+        cause="x", confidence="certain", conclusive=True, refs=["L1"],
+        alternatives_rejected=[{"hypothesis": "   ", "why": ""}, "not a dict"],
+    )).run(_with_dossier(), deps_for(db))
+
+    assert status_of(result) == "empty"
+    assert "ruled out" in result["reason"]
+
+
+async def test_a_weighed_conclusive_answer_is_reported(db):
+    result = await diagnose_node(harness=_answering(
+        cause="x", confidence="certain", conclusive=True, refs=["L1"],
+        alternatives_rejected=[
+            {"hypothesis": "downstream timeout", "why": "no timeout line",
+             "ref": "L1"}
+        ],
+    )).run(_with_dossier(), deps_for(db))
+
+    assert status_of(result) == "ok"
+    assert result["diagnosis"]["alternatives_rejected"][0]["ref"] == "L1"
+
+
+async def test_an_alternative_pointing_at_a_line_it_was_not_shown_voids_it(db):
+    """It is shown to the operator as evidence something was ruled out, so an
+    id naming no line is the same invention the main refs are checked for. A
+    gate that checked half the answer is a gate a model learns the shape of."""
+    result = await diagnose_node(harness=_answering(
+        cause="x", confidence="certain", conclusive=True, refs=["L1"],
+        alternatives_rejected=[
+            {"hypothesis": "y", "why": "z", "ref": "L99"}
+        ],
+    )).run(_with_dossier(), deps_for(db))
+
+    assert status_of(result) == "empty"
+    assert "L99" in result["reason"]
+
+
+async def test_a_tentative_answer_needs_no_alternative(db):
+    """`conclusive: false` costs nothing, and the gate is the claim of
+    certainty — not a tax on every answer."""
+    result = await diagnose_node(harness=_answering(
+        cause="có thể do cache", confidence="likely", conclusive=False,
+        refs=["L1"],
+    )).run(_with_dossier(), deps_for(db))
+
+    assert status_of(result) == "ok"
+
+
+def test_the_model_is_told_both_to_fill_it_and_what_happens_if_it_does_not():
+    """A rule enforced in code and absent from the prompt is a rule the model
+    discovers by having its whole answer thrown away.
+
+    Two separate things, asserted separately: the instruction to name an
+    alternative, and the warning that claiming `conclusive` without one is
+    refused. Asserting only the field name passed with the warning deleted,
+    because the instruction mentions it too."""
+    from friday.dag.api_issue.prompt import build_instructions
+
+    said = build_instructions()
+
+    assert "alternatives_rejected" in said, "it is asked for"
+    # The gate's own clause, not merely the words "conclusive" and "refused"
+    # — both appear elsewhere in these instructions, so the looser assertion
+    # stayed green with this warning deleted.
+    assert "empty `alternatives_rejected` is refused" in said

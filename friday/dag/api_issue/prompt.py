@@ -51,6 +51,10 @@ THINKING = [
     "Say what you could not check. The log window, the code version and "
     "everything outside them are already listed for you — add what you "
     "noticed on top of it.",
+    "Name what else it could have been, and what rules that out. Put it in "
+    "`alternatives_rejected` with the line id that shows it. The cause you "
+    "reached first and the cause that survived a rival read the same to "
+    "whoever gets the report; only one of them was weighed.",
     "Decide whether it is conclusive. Conclusive means the evidence shown "
     "would convince somebody who did not trust you.",
 ]
@@ -58,8 +62,12 @@ THINKING = [
 REMINDERS = [
     "A `ref` that names no line you were shown is refused, and the whole "
     "answer with it. Ids only — `L12`, not the line's text.",
-    "The code you were shown is the clone's current HEAD, not necessarily "
-    "the version that produced the log line.",
+    "Which version of the code you were shown is stated beside it — the "
+    "running tag, or the clone's HEAD when that could not be resolved. "
+    "Do not assume it is the one that produced the log line unless it says so.",
+    "`conclusive: true` with an empty `alternatives_rejected` is refused, "
+    "and the whole answer with it. Saying it is conclusive is saying you "
+    "considered the alternatives, so show one.",
     "`conclusive: false` costs nothing. A confident wrong cause is asserted "
     "in the operator's name to their own team.",
 ]
