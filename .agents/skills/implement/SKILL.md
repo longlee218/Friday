@@ -20,9 +20,8 @@ ticket you finished:
 - Tick every acceptance box it lists — `- [ ]` → `- [x]` in
   `.scratch/<feature-slug>/issues/<NN>-*.md` — but only for items you actually
   verified. Leave a box unticked (and say so) if its criterion is unmet.
-- If the ticket carries a `Status:` line and it is now blocking nothing you
-  still owe, leave it as the triage role it holds; do not invent a new status
-  string.
+- Set the ticket's `Status:` line to `done` (the completion state — see
+  `docs/agents/triage-labels.md`). Use no other completion string.
 - Do not touch `.scratch/progress.jsonl` here — the ticket file is where a
   ticket's status lives.
 

@@ -4,7 +4,7 @@
 
 **Blocked by:** 01.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] `BOARD_TOKEN` removed from code and config (no route ever checked it; it only lifted the loopback refusal)
 - [x] Every board write route checks the session CSRF token

@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Uncommitted `api_issue` work is landed or stashed
 - [x] The params-migration fix is committed
