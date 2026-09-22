@@ -1,720 +1,505 @@
 # CONTEXT
 
-Two things, kept apart: the project's current **state**, and the **domain
-vocabulary**. Use the vocabulary's words in code, tests, tickets and commit
-messages; where a word had two meanings, this file picks one.
+Three things, kept apart: **the rules** that must not be lost, **where the
+project stands** (strategy, boards, roadmap), and **the vocabulary**. Dated
+progress — tickets, measurements, evals, milestones, open asks — is not here:
+it is one JSON object per line in **`.scratch/progress.jsonl`** (§ Tracking).
+Architecture is `docs/DESIGN.md`; how to work is `CLAUDE.md`.
+
+Read § Rules first. They are at the top, and repeated in one line each at the
+bottom, because a rule found in the middle of a long file is a rule that gets
+missed.
+
+---
+
+# Rules that must not be lost
+
+Each is a standing decision by the operator or a measured fact; the pointer
+says where it is argued. Breaking one is a design change, not an
+implementation detail.
+
+**What Friday is allowed to do**
+
+1. **Friday never writes code and never executes it.** Every tool is a read;
+   the only outputs are a report and outbox rows a person approved.
+   (`docs/DESIGN.md` § Running it; spec D6.)
+2. **Nothing is sent by the caller that decided to send it.** An outbound
+   message is a row; one loop delivers it; `Channel.send`/`provider.send` has
+   one caller. **Approval belongs to the row**, not the task. Only `reply`
+   waits for approval; the acknowledgement, `ask_for_details`, the approval
+   card and operator-facing kinds do not. (§ Approval.)
+3. **A model never chooses the next step of a workflow.** The shape is code.
+   Inside one node an agent may choose which *read* to make next (v3.3,
+   `Diagnose` with tools) — never which node runs.
+4. **Never drop a mention.** Low confidence, refusals, errors, caps, the
+   prefilter — all route to a person. An old turn is recorded `outdated`,
+   not discarded. The prefilter **holds**, it does not skip.
+5. **The model decides what to look for; code decides where and what comes
+   back.** Every "where" a tool accepts is a closed enum built from knowledge
+   rows; tool output is narrowed and distilled in code (171 KB raw window →
+   8 lines, measured 2026-09-22).
+
+**How evidence and memory are treated**
+
+6. **Verbatim material is stored whole, as an `Artifact`, and pointed at —
+   never retyped.** Models *point* at lines by id and code fills the text
+   (pointing 20/20, quoting 32/40, measured 2026-09-18). A pointer that
+   resolves to nothing voids the answer (the grounding gate).
+7. **Every fact about where a request went is a row, not a rule in code** —
+   `environment`, `route`, `service`, `project`, `dependency`. A missing row
+   is a hand-over, not a guess.
+8. **Memory is one table, thirteen kinds, origin `model` | `admin`.** A model
+   may not alter an admin row; instruction-shaped text is refused at the one
+   write path; **silence is not approval** — candidates wait for the
+   operator's mark. (§ Memory.)
+9. **The reporter's credential never survives:** scrubbed where an artifact
+   is written and where the extractor reads; the Discord token never reaches
+   logs, tracebacks or the database.
+10. **Production data stays on this machine.** Captured cases live in
+    `data/cases/` (gitignored) because their lines carry `userId`, `ip`,
+    `deviceId`; a case travels only if somebody deliberately sends it.
+
+**How the code is built**
+
+11. **One seam per outside library.** Only `friday/agent/harness.py` imports
+    the agent SDK; a second module reaching for it is the thing to push back
+    on. The same rule will hold for every library adopted later.
+12. **Reuse before rewrite** (operator, 2026-09-22): a maintained library that
+    covers the need is adopted rather than rebuilt; Friday writes its
+    invariants, its domain and the glue. Its cost is written next to the
+    decision. (Roadmap item 5.)
+13. **A rule worth stating is worth a test**; a guard is deleted once and
+    watched go red. **Measure before building**: a number in `config.yaml` or
+    a spec needs a "measured on" date.
+14. **Triage classifies and nothing else**, into one closed set; extraction
+    lifts values, one extractor per type. Two producers on one field is a
+    coin toss with a rationale.
+15. **Only the responder carries the operator's voice.** Triage and the
+    extractors carry none.
+16. **ORM only** — SQLAlchemy 2.0 async and Alembic; never hand-written SQL
+    or `ALTER`. Migrations autogenerate against a throwaway database.
+17. **Design questions to the operator in Vietnamese; code and docs in
+    English.**
+
+---
 
 # Project state
 
-What is running and what is open, as of 2026-09-20. This part goes stale
-fastest — check each ticket's own `**Status:**` line before trusting it.
-Architecture is in `docs/DESIGN.md`; how to work is in `CLAUDE.md`.
+## Running
 
-**Running.** Friday ingests Discord mentions, classifies them, opens tasks,
-asks for missing details and sends approved replies as the watched account.
-It runs on the operator's own machine, on branch `main`, with a passing
-suite.
+Friday ingests Discord mentions, classifies them, opens tasks, asks for
+missing details, investigates `api_issue` (the six-node slice `Prepare →
+Resolve → FindRequestLog → ReadFailingCode → Diagnose → Report`, plus an
+unapproved acknowledgement), and sends approved replies as the watched
+account. It runs on the operator's own machine, on `main`, with a passing
+suite. Triage scored 100% on `evals/triage.jsonl` on 2026-09-20.
 
-**Triage, as of 2026-09-20.** Scored 100% on `evals/triage.jsonl` and on a
-second, deliberately balanced draft set, three runs each, after the label
-definitions were rewritten from the operator's own account of the work, the
-thinking flow gained the arrival prior (what reaches triage was addressed to
-us, so work is the normal case), the sensitive-word prefilter stopped
-treating `luồng` as `lương`, and ten worked examples went into
-`config.yaml`. It read 81.0% with 11.4 points of run-to-run spread before
-that. The balance set is a draft in
-`.scratch/read-it-the-way-the-operator-does/research/04-balance-set-draft.jsonl`
-and its labels are the operator's to confirm before it moves into `evals/`.
+## Technology
 
-**Boards** under `.scratch/<feature-slug>/issues/`:
+| Layer | What | Notes |
+| --- | --- | --- |
+| Language, packaging | Python 3.13, **uv** | `uv add` only; never hand-edit `pyproject.toml` |
+| Storage | **SQLite** (WAL), **SQLAlchemy 2.0 async**, **Alembic** | the only state store; one process |
+| Models | **openai-agents** 0.22 over **Chat Completions**; **MiniMax-M3** at `api.minimax.io` | provider is `base_url`/`api_key`/`model` |
+| Chat | **discord.py** (bot: buttons, DMs), **discord-self** (the operator's account: reads and replies) | the self-bot is an accepted risk |
+| Tool servers | **MCP** over streamable HTTP: `devops-generic` (Loki, k8s reads), `db-generic` | the operator's SSO session, refreshed by the process (`authorize.py` once) |
+| Dev logs | `kubectl` on the dev host via `ssh dev` | no kubeconfig on this machine |
+| Code reading | the operator's clones under `~/Documents/Apero/`, CodeGraph | read-only |
+| Board | **React + Vite** SPA served by FastAPI on `:8086`, SSE live feed | loopback only |
+| Tests, eval | **pytest** + pytest-asyncio; `evals/run_triage_eval.py` by hand | eval is not in the suite |
 
-- `discord-mention-triage/` (from `docs/SPEC.md`) — the original board. Done.
-- `a-monitor-on-the-whole-path/` — the operator UI rebuilt as a real-time
-  monitor: SSE live feed, drill-down to a Flow screen, motion, skeleton and
-  toast, axe-core and Lighthouse gates; a React + Vite SPA inside this
-  repository. Done.
-- `every-task-is-a-graph/` — one engine: `friday/tasks/` (the pool) and
-  `friday/dag/` (the graph). Every task type is a graph of one node. Done.
-- `every-answer-has-a-shape/` — structured answers and the agent memory
-  tools. Done except ticket 03, `ready-for-human`: the eval rows are the
-  operator's to label, since a classifier scored against labels a model
-  chose measures nothing.
-- `work-that-has-gone-cold/` — `max_message_age` and the cold-cursor sweep.
-  Done.
-- `read-it-the-way-the-operator-does/` — the `api_issue` graph, designed from
-  the operator's own routine. Done: 09 (twelve memory kinds), 10 (YAML
-  context files gone), 11 (one invoke in the runner), 12 (approval per
-  outbox row), 13 (bounded pool concurrency), 16 (measurements and the model
-  probe, except the reporter-delay measurement), and **00's code** — the
-  six-node slice `Prepare → Resolve → FindRequestLog → ReadFailingCode →
-  Diagnose → Report`, in `friday/dag/api_issue/`. `api_issue` is no longer a
-  one-node graph: a complete report is investigated rather than handed back.
-  **00 is not finished**, but the Loki branch has now been called against
-  the real server (2026-09-21) and the first production case is written up
-  in the ticket. It found three defects, all fixed: a back end's `limit` is
-  a *tail* and returned 84 seconds of a 35-minute window without the request
-  in it (the search is now pushed into the back end as a `needle`); `WARN`
-  counted as an error, which disarmed the one automatic widening for ever on
-  any chatty service; and "a sample of the window" did not say which part.
-  **00's four questions are answered**, on a captured production case
-  (`data/cases/prod-onboarding-400.json`, replayed with
-  `uv run replay_case.py --case … --diagnose`): the dossier held the
-  decisive line, `Diagnose` pointed at refs that resolve and got the cause
-  right, 8 lines of 403 in 8.5 s, and no seam broke. A captured case carries
-  the back end's own answers, so it replays offline and for ever without
-  reaching a cluster — which is what makes a case collectable at all when
-  dev keeps only since the last pod restart. **Cases live in `data/cases/`
-  and are not in the repository**: production log lines carry `userId`, `ip`
-  and `deviceId`, so a case travels only if somebody deliberately sends it.
-  Cases 1–5 are still unrun and cannot be: they are dev cases already past
-  that horizon. What 00 waits on now is a *set* — one case is not a score
-  (ticket 14).
-  The two defects the live task 6 exposed are **done**: 18 (the extractor
-  now names the artifact holding the request and code copies it, so nothing
-  retypes a verbatim span) and 17 (the reporter's own Bearer token is
-  scrubbed where the artifact is written and where the extractor reads,
-  with migration `b7c1a4e93f02` clearing the rows already written — it runs
-  on the next start). Case 1 is no longer blocked: the reporter's real curl
-  was never lost, it is `artifacts.af85b208fd70e`. One open question, the
-  operator's: may Friday replay a request when no log line can be found?
+## Boards — what each spec set out to do
 
-  **The board was re-read against the code on 2026-09-22** and every
-  ticket's status line now says what is actually built, because the
-  `Blocked by:` lines were written before 00's slice existed and had
-  stopped being true. Where each one stands:
+Status per ticket is in `.scratch/progress.jsonl` (`"kind": "ticket"`); this
+is the premise each board tracks against.
 
-  | | |
-  | --- | --- |
-  | done | 03, 09, 10, 11, 12, 13, 17, 18, 19 |
-  | part done | 00 (questions answered, no labelled set), 01 (only the `ApiIssueParams` reshape left), 02 (only the not-found ask/resume, plus the deferred sign-in), 04, 05, 06 (the whole outbound half), 07, 08, 16 |
-  | not started | 14 (no longer blocked by code — blocked by labelled cases), 15 (one protocol of six; no `collect`, no Collector) |
+- **`discord-mention-triage`** (spec `docs/SPEC.md`) — the base service:
+  capture mentions, triage, turn real ones into tasks, approve by button
+  before anything posts, show it on a board. Later reshaped into one harness,
+  outbound rows, DAG workflows, prompts per agent family. **Done**
+  (38 done, 4 withdrawn).
+- **`every-task-is-a-graph`** — one engine: every task type is a graph (a
+  trivial type is one node), node 0 `prepare` extracts and validates, the pool
+  owns the task lifecycle only. **Done.**
+- **`skill-tools`** — `search_skills`, `describe_skill`, `read_skill_file`
+  beside `fetch_skill`; `Skill` gains `mutability` and `allowed_tools`.
+  `issues/04-review-fixes.md` overrides five of the spec's decisions. **Done.**
+- **`nothing-runs-unmeasured`** — one middleware around every model call:
+  clock, budget before the call, retries, a recording sink; per-agent token
+  caps; a frozen triage eval run by hand. **Done.**
+- **`a-window-on-the-whole-path`** — the old board deleted, a React SPA on
+  the same API: flow, task and context screens. **Done.**
+- **`a-monitor-on-the-whole-path`** — the SPA became a real-time Monitor at
+  `/`: tokens not literals, SSE, axe and bundle-size gates. **Done.**
+- **`what-the-room-already-knows`** — context built twice (light for triage,
+  full at node 0), compaction by budget, verbatim material as artifacts,
+  domain memory with candidates and instruction guard; law: every store ships
+  with its producer and consumer. **Done.**
+- **`work-that-has-gone-cold`** — a message older than `max_message_age` is
+  recorded `outdated` at triage; a cold cursor looks back only that far.
+  **Done**, one open question on ticket 02.
+- **`every-answer-has-a-shape`** — every model answer is a typed dataclass
+  through a generated tool, checked in-process, one correction (MiniMax
+  ignores `response_format`); `FridayState` is the one run state; triage is
+  one closed set with `skip`. **In progress:** ticket 03 (the eval set and
+  its baseline) is the operator's to label.
+- **`read-it-the-way-the-operator-does`** — `api_issue` rebuilt from the
+  operator's own routine: environment from rows, production logs through the
+  devops MCP, dev logs over `ssh dev`, code at the running release, a
+  diagnosis that says what it did not check. Memory became one store. **In
+  progress.** **What stands now is v3.3 (operator, 2026-09-22): `Gather`
+  gathers metadata only; `Diagnose` reads for itself through tools that
+  distil; the Check layer and the Collector are withdrawn; ticket 14's
+  labelled eval is a precondition and the two old nodes go only if the
+  measurement says the new way is not worse.** Revision v4 in the same spec
+  is *proposed* additions to v3.3, not a competing design (see the open item
+  in the tracking file).
 
-  Two things are built and connected to nothing, which is worth saying out
-  loud because both look done from a distance: `friday/sources/db.py` has
-  no caller in any node, and the Keycloak sign-in is written, tested and
-  uncommitted at the operator's word.
+## Roadmap — decided in direction, not yet boards (2026-09-22)
 
-  **Nothing in this repository records that a run happened**, because
-  `replay_case.py` writes its report to a throwaway directory and
-  `data/reports/` stays empty. Every claim about a run is reproducible
-  instead, from the one artefact that is kept:
-  `uv run replay_case.py --case data/cases/prod-onboarding-400.json
-  --diagnose`. Cases live under `data/`, which is gitignored, because their
-  lines carry `userId`, `ip` and `deviceId`.
+1. **Library-independent defects, first** (DESIGN-v2 §15 step 1). `BOARD_TOKEN`
+   only lifts the loopback refusal and no request is checked against it
+   (`friday/ops/api.py` `check_exposure`); the board writes `admin` memory
+   with no Host, Origin or CSRF check; the approver's identity is never
+   checked (`run_agent.py` `decided`); no single-instance lock on
+   `run_agent.py`. **The outbox double-post fix** (`friday/outbox/__init__.py`
+   `_deliver`) is **not** here — the delivery loop is a durable-workflow
+   candidate, so it folds into the DBOS phase (§15 step 3, ADR 0001).
+2. **DESIGN-v2** (`docs/DESIGN-v2.md`, **accepted target 2026-09-22, ADR
+   0001**): a kernel owns the invariants, everything else registers as an
+   in-repo plugin. **Re-sequenced §15**: library-independent defects (step 1)
+   → the runtime libraries as the foundation, Pydantic AI (step 2) then DBOS
+   (step 3) → the registry / `sdk`–`kernel`–`plugins` split → adapters on
+   trigger. `docs/DESIGN.md` stays the as-built record; sections move across
+   as each step lands.
+3. **Triage at scale** — *one task type = one distinct graph* (two types
+   sharing a graph are one type with a parameter); *retrieve, then classify*
+   once the enabled set grows.
+4. **`api_issue`: finish v3.3 and fold in v4's proposals** — the Prepare/Map
+   split by source (the domain beats the reporter's words; `environment`
+   becomes a hint), a code supervisor for grounding and coverage, layered
+   ceilings on the tool loop with nothing lost when one is hit, and raw-window
+   capture so replay answers any query. Placed after DESIGN-v2 by the
+   operator; v3.3's own order starts earlier — see the open item.
+5. **Runtime libraries** (*reuse before rewrite*) — **the foundation, before
+   the plugin migration, not after it** (ADR 0001, reversing the earlier
+   order): **Pydantic AI** replaces openai-agents (spike 15/15 on MiniMax-M3
+   and the real MCP server, `docs/research/pydantic-ai-migration.md`) as §15
+   step 2, drawing the `ModelProvider`/harness seam; **DBOS** (in-process,
+   SQLite) replaces the hand-written DAG engine as §15 step 3 behind a thin
+   `sdk/workflow.py` port (plugins never import `dbos`) — **a DBOS spike on
+   MiniMax-M3 + SQLite is a precondition, not yet done**; **Jev** as a model
+   via `TypeSafeModel` + `FallbackModel`, shadow-run first
+   (`docs/research/jev-decision-models.md`). Not adopted: Harness `Skills`,
+   `DynamicWorkflow`. Temporal only on more than one machine. Open: may a
+   model *plan* a workflow that code validates?
 
-  Waiting on the operator: 07's prose half (the structured rows are in, and
-  a production domain now resolves without asking anyone); labelled cases
-  for 14, one captured production case at a time; the Keycloak sign-in; and
-  the open question — may Friday replay a request when no log line can be
-  found? Cases 2–5 and case 1's cause are **withdrawn as asks**: dev
-  retention cannot reach them. The order is in its `execution-plan.md`,
-  which the re-read has not yet been folded into.
+## Tracking
+
+`.scratch/progress.jsonl`, one object per line, one `kind` per row:
+
+| kind | keys | what |
+| --- | --- | --- |
+| `board` | `board, spec, status, dates, summary` | one per board |
+| `ticket` | `board, ticket, title, status, label, status_line, updated, path` | status is `done`, `part-done`, `not-started`, `blocked`, `withdrawn` or `proposed`, read from the ticket's own `**Status:**` line |
+| `measurement`, `eval`, `milestone` | `board, date, what, source` | dated facts; the number and the date it was measured |
+| `open` | `board, date, what, source` | waiting on the operator or unreconciled |
+| `note` | `board, date, what, source` | a known gap worth saying out loud |
+
+`uv run track_progress.py` rebuilds the `board` and `ticket` rows from
+`.scratch/` (hand-written rows are kept) and writes `data/progress.html`;
+`sync --dry-run` shows what would change. Append the other kinds by hand when
+a number is measured or something waits on the operator; the ticket file
+stays the source of truth and the row points at it. Read it with
+`jq`, e.g. `jq -c 'select(.kind=="open")' .scratch/progress.jsonl`.
+
+---
 
 # Vocabulary
 
+Use these words in code, tests, tickets and commit messages; where a word had
+two meanings, this picks one.
+
 ## Message
 
-An inbound message from a chat platform, normalised to one shape regardless of
-where it came from. **A message is not a task.** Most messages are context;
-some address the operator, and only a few become work.
+An inbound message from a chat platform, normalised to one shape whatever the
+platform. **A message is not a task**: most are context, some address the
+operator, few become work. One that addresses the operator carries a
+**mention type** — `direct`, `role` or `dm`; one without was seen but not
+addressed and is kept, because a conversation missing half of itself does not
+read. One table holds both.
 
-A message that addresses the operator carries a **mention type** — `direct`,
-`role` or `dm`. A message with no mention type was seen but not addressed to us;
-it is kept because a conversation missing half of itself does not read.
+## Turn
 
-One table holds both. The mention type is what separates the triage queue from
-the surrounding context, not a second table.
+A person's consecutive messages read as one unit — the unit triage
+classifies. Computed when read, never stored.
 
-## Transform
+## Transform and prefilter
 
-Turning a platform message into something worth reading: prose cleaned, code
-left exactly as it was, attachments named.
+**Transform** turns a platform message into something readable: prose
+cleaned, code left exactly as it was, attachments named. **Split before
+cleaning** — code comes out first, is never touched, and goes back where it
+was, because a `curl` or a stack trace is the part a value is lifted out of.
 
-**Split before cleaning** is the whole of it. Stripping an emoji or collapsing
-whitespace inside a `curl` or a stack trace corrupts the one part of the
-message that has to survive verbatim — and it is the part a value is lifted
-out of. So code comes out first, is never touched, and goes back where it was.
-
-Distinct from the **prefilter**, which is not cleaning. Some messages must not
-reach a third-party API at all — pay, a medical record, a password, someone
-asking for an API key. The harm is in the sending, so it is decided before the
-call by a word list the operator maintains, not by a judgement a persuasive
-message could argue with.
-
-It **holds**; it does not skip. Several of those words turn up in ordinary
-reports, so a rule that dropped them would be losing real mentions on the
-strength of one word. The guarantee is that the model does not see it, not that
-nobody does.
+The **prefilter** is not cleaning: a word list the operator maintains keeps
+some messages (pay, medical, passwords, key requests) from reaching a
+third-party model at all, decided before the call. It **holds**, it does not
+skip: the guarantee is that the model does not see it, not that nobody does.
 
 ## Conversation
 
-Where an exchange is happening: a channel, a thread, or a DM. Identity is
-`(provider, channel_id, thread_id)` — a thread and its parent channel are
-different conversations, because they carry different context.
-
-**Not "session".** That word is taken twice over — by the Agents SDK, whose
-`Session` is a transcript of an agent's own turns, and by Discord's gateway
-session. Say **conversation** for the place, and reserve **agent session** for
-the SDK's.
+Where an exchange happens: a channel, a thread or a DM, identified by
+`(provider, channel_id, thread_id)` — a thread and its parent are different
+conversations. **Not "session"**: that word belongs to the agent SDK's
+transcript and to Discord's gateway.
 
 ## Task
 
-A piece of work derived from a message: a type, a confidence, and the
-parameters extracted from the message. A conversation has at most one open task;
-later messages in it are follow-ups, not new tasks.
-
-**Parameters matter more than the type.** The most common real action is
-noticing an `api_issue` arrived without an environment or correlationId.
+A piece of work derived from a message: a type, a confidence, and parameters.
+A conversation has at most one open task; later messages are follow-ups.
+**Parameters matter more than the type** — the commonest real action is
+noticing an `api_issue` arrived without what makes it findable.
 
 ## Triage
 
-Deciding what a message is. **That, and nothing else.** Produces a **decision**
-— a type and a confidence — and writes nothing. Every message gets exactly one
-of two outcomes: `Decided` or `NeedsHuman`. There is no third case, and no
-silent discard.
-
-Not parameters, not a summary. Classifying and lifting values out of a message
-are different jobs with different failure modes: a wrong label sends a task
-down the wrong path where somebody notices, a wrong `correlation_id` sends
-someone looking through the wrong request where nobody does. Doing both here
-put two producers on one set of fields and needed a merge to reconcile them —
-and a merge between two models that disagree is a coin toss with a rationale.
-
-The tool schema is what holds the line, because a tool parameter is an
-instruction: a schema with `correlation_id` in it *is* triage extracting,
-whatever the prompt says.
-
-The type is a member of one **closed decision set** — every task type, plus
-`skip` for a message that needs no action — checked in this process before
-anything acts on it. Two tools carried this, one naming work and one naming
-the absence of it, until board `every-answer-has-a-shape` found that the split
-meant two validations of one question: an invented type could open a task the
-pool then discovered had no graph, and "there is no work here" was checked less
-strictly than "there is".
-
-So a `NeedsHuman` now says *which* failure it was. A model that named something
-outside the set is not a provider that never answered: one says a prompt or a
-model is wrong, the other says the network was, and the classifier's own
-evaluation reports them as two numbers.
+Deciding what a message is — **that, and nothing else**. Produces a decision
+(a type from one **closed set** — every task type plus `skip` — and a
+confidence) and writes nothing. Every message ends `Decided` or `NeedsHuman`;
+there is no silent discard. A `NeedsHuman` says which failure it was — a
+label outside the set is a prompt or model fault, no answer is a network
+fault — and the eval reports them apart. Triage extracts no parameters: a
+tool schema with `correlation_id` in it *is* extraction, whatever the prompt
+says.
 
 ## Extraction
 
-Lifting the values a task needs out of what the reporter wrote. One extractor
-per task type, each owning its prompt, its schema and its model — it knows what
-that workflow needs.
-
-It reads **every** message linked to the task, oldest first, not the opening
-one. The answer to a question we asked comes back as an ordinary follow-up, and
-nothing else in the system reads it for content.
-
-It runs inside `prepare`, node 0 of every graph (ticket 03), because
-validation has nothing to check until the fields are filled and runs
-immediately after regardless. The first answer for a field stands: a later
-run may fill what is still blank and may not revise what it already said,
-because a model asked the same question twice does not give the same answer,
-and a reworded value is indistinguishable from a changed one.
-
-An extraction is **one validated object**: that type's own parameters plus
-**`ask_about`** and **`because`** — which of its own fields the extractor wants
-the reporter asked about, and why. It just read the whole thread and may catch
-something no structural rule does. The field names are closed to that type's
-own dataclass fields, and it names fields rather than words, so it cannot be
-argued into phrasing that bypasses the Responder's voice. (Two tools carried
-this before board `every-answer-has-a-shape`: `ask_clarification`, which
-nothing ever called, and `ask_for_fields`, whose enum is what `ask_about`
-inherited.) Code stays the floor: a value the type's own rules reject is
-challenged with the code template regardless of what was
-asked instead, and a field the model names that turns out already filled is
-not asked about again.
+Lifting the values a task needs out of what the reporter wrote: one extractor
+per task type, owning its prompt, schema and model. It reads **every**
+message linked to the task, oldest first, inside node 0 (`prepare`). **The
+first answer for a field stands**: a later run may fill a blank, not revise a
+value. The result is one validated object — the type's parameters plus
+`ask_about` (which of its own fields to ask the reporter about) and
+`because`. Code stays the floor: a value the type's rules reject is
+challenged regardless.
 
 ## Extraction mark
 
-What node 0's last **Extraction** for a task was made from, and what it came
-to. One row per task, rewritten whenever the reporter says something new.
-
-Node 0 re-executes on every pass, and that is deliberate — it is excluded from
-the checkpoint because a reporter who sends the curl three seconds later has to
-be read. What it must not do is call a model when nothing arrived. One task in
-the recorded data has two extractor calls of 1,790 input tokens whose prompts
-share a sha256, seven and a half hours apart: it sat pending across a restart,
-and every pass paid again.
-
-The fingerprint is over **the reporter's text and the field schema, and nothing
-else**, because that is the whole of what the extractor is shown. The task's
-parameters never reach its prompt, so a parameter that moved is not a reason to
-pay for the same answer again. The schema is in there rather than assumed
-fixed: adding a field, or rewording what one means, changes the prompt, and a
-task already marked would otherwise never be read again under the new one.
-
-A mark stands in for the call, so it records the outcome and not merely the
-input: the extracted values, so the same fill happens, and the question the
-extractor asked, so the same question is asked. Without the question a skip
-would turn an `Ask` into "everything needed is here" on the next pass — the
-fields an extractor asks about are usually the optional ones no structural rule
-challenges.
-
-Distinct from the **Graph**'s own checkpoint, which is also one row per task. A
-checkpoint holds what nodes *returned* and is discarded when the task's
-parameters change; a mark holds what node 0 was *given*, and outlives a
-parameter change on purpose.
+What node 0's last extraction was made from and what it came to — one row
+per task, rewritten when the reporter says something new. Fingerprinted over
+**the reporter's text and the field schema only**, so no model is called when
+nothing arrived. Records the outcome (values and the question asked), so a
+skipped call behaves like the call. Distinct from a graph's checkpoint: a
+checkpoint holds what nodes *returned* and is discarded when parameters
+change; a mark holds what node 0 was *given* and outlives that.
 
 ## Pool
 
-The loop. Pulls pending tasks and hosts their graphs — nothing about *what*
-to do with a task is this module's decision, only *when* and *whether what
-came back may be sent*. Four things, every pass: stand down for a task the
-operator answered themselves, announce to the operator whatever nobody can
-act on, host the graph for whatever tasks are pending, and turn what came
-back into rows — a reply queued for approval, a question sent outright, a
-task moved to `needs_human`.
+The loop that hosts tasks' graphs — deciding only *when*, and *whether what
+came back may be sent*, never *what* to do. Every pass: stand down for a task
+the operator answered, announce to the operator what nobody can act on, host
+graphs for pending tasks (bounded concurrency), and turn what came back into
+rows. Lives in `friday/tasks/`, apart from the engine.
 
-Lives in its own `friday/tasks/` package, not inside the graph engine:
-hosting a graph is one of the four things it does, not what it is. It shares
-no vocabulary of its own — `Ask`, `Reply` and `HandOver` come from the
-domain, same as the graph engine reads them, which is what lets the two stop
-importing each other. Was a differently-named loop package once, before
-every task type ran through the same graph engine and there was no second
-thing left in it to share a package with.
+## Action
 
-## Deciding an action
-
-What to do about a task. Returns an **action** — `Ask`, `Reply` or `HandOver` —
-never a side effect.
-
-Every task takes the same first two steps, whatever its type: **fill in** what
-the original message carries that triage did not extract, then **check** the
-result against the type's rules. Both happen before a route is chosen, because
-they are about the parameters and not about what to do with them. What was
-filled in is written back to the task, so the route reads what was checked.
-
-After that, every task type gets its action from a **graph** (ticket 04) — the
-**edge router** looks one up for every type `PARAMS` knows about, never
-answering "no graph". A type with no investigation of its own gets one node:
-validate the parameters, ask for whatever is missing, hand over otherwise.
-Most types need nothing more than that; `api_issue` is the one with more.
-
-There is no second way. A registry of per-type planner functions lived here
-until ticket 33 emptied it, a deterministic path outside any graph lived here
-until ticket 04 removed the branch that read it, and a dispatcher with nothing
-to dispatch to is not extensibility — it is a second way to do what the graphs
-already do.
-
-`Ask` is the agent's own decision. `Reply` waits for approval — asking for a
-correlationId costs a question if it is wrong, and asserting a cause costs the
-operator's credibility with their own team.
-
-**Nothing produces a `Reply` today.** The tool that built one belonged to the
-five-node `api_issue` graph, and that graph is gone — so the system can ask a
-reporter or hand over to the operator, and cannot answer. The vocabulary and
-the outbox path for a reply are intact and unused, waiting for a graph that
-concludes something.
-
-**All three are read by the reporter except one, and it is not the one that
-waits.** `Ask` and `Reply` both go to the person who reported the problem;
-`Reply` waits precisely *because* it answers them in the operator's name.
-`HandOver` is the one addressed to the operator, and it never reaches the
-reporter at all. The operator's other two messages are not actions: the
-approval card queued beside a `Reply`, and the help-wanted sent about a task
-sitting in `needs_human`.
-
-One rule holds for every type: **a task missing something it cannot work
-without has to say so.** Required-ness is read off the parameter type —
-`project: str` is required, `doc_ref: str | None` says outright that we can
-manage without it — so it is never declared twice and cannot drift from the
-schema the model is asked to fill.
-
-`api_issue` overrides that rule with `OneOf`, because its own is not
-expressible as a type: a correlationId *or* a curl makes a request findable,
-and both are optional individually. A type with an override keeps it;
-everything else gets the general rule for free.
-
-The override is what decides whether the investigation past node 0 is worth
-starting. Without it in `_RULES` — where it was documented but absent — a
-report with nothing to trace on validated cleanly, and the graph ran its whole
-path to find out it could do nothing. **A precondition belongs in the gate,
-not in the last node's else branch.**
+What a graph returns about a task — `Ask`, `Reply` or `HandOver` — never a
+side effect. Every task first **fills in** what the message carries and
+**checks** it against the type's rules; then its graph decides. `Ask` goes to
+the reporter as a question; `Reply` answers the reporter in the operator's
+name and **waits for approval**; `HandOver` goes to the operator only and
+never reaches the reporter. A task missing something it cannot work without
+has to say so: required-ness is read off the parameter type, except where a
+type overrides it (`api_issue`: a correlationId *or* a curl makes a request
+findable). **A precondition belongs in the gate, not in the last node's else
+branch.** `api_issue`'s `Report` produces a `Reply` (a brief) today.
 
 ## Graph
 
-How a workflow that is more than one decision gets made. A **node** is
+How a workflow of more than one decision is made. A **node** is
 `async (state, deps) -> result`; an **edge** may carry a predicate, and the
-first whose predicate holds is the one taken. Deterministic Python: the shape
-is code, not something a model chooses at run time.
+first that holds is taken. Deterministic Python.
 
-Two things follow from that shape and neither is incidental.
+- **Node 0, `prepare`**, extracts and validates and runs fresh on every pass;
+  it is never checkpointed. Its output is what state is discarded against.
+- A graph **checkpoints after every other node**, keyed on its **version** — a
+  digest of node names and edges — so a changed shape never inherits old
+  results.
+- **One invoke** (`DAGRunner._invoke`): the node's timeout, retries over an
+  explicit exception list with doubling backoff, any other exception turned
+  into a result. A result is an `Action` (ends the run) or an **envelope** —
+  `status` (`ok`, `empty`, `skipped`, `timed_out`, `error`) and `reason`. A
+  node that cannot do its job **skips out loud**. Each attempt is a **node
+  run** row.
+- A node that calls a model names its `agent`; its clock must outlast the
+  agent's by a margin, checked at load — two equal clocks race.
+- An agent is a node inside a graph, never the thing driving it; which agent
+  and server a node gets is composition, handed in through `deps`.
 
-A graph **checkpoints after every node but its entry** — `prepare`, node 0
-(ticket 03), which extracts and validates and runs fresh on every pass because
-there may be a new message since the last one, and is never itself part of
-the checkpoint. Its *output* is what state is discarded against: results are
-only meaningful for the inputs that produced them, so a restart resumes past
-node 0 exactly when nothing it found has changed, and re-investigates when it
-has — otherwise asking the reporter a question and receiving an answer would
-change nothing.
+## Source, check, node
 
-The checkpoint is keyed on the graph's **version** as well as its name — a
-digest of its node names and edges (`DAG.version`), so a renamed, added or
-reordered node never inherits a result recorded under the old shape.
-
-Every node runs through **one invoke** (`DAGRunner._invoke`, board
-`read-it-the-way-the-operator-does` ticket 11): the node's own
-`timeout_seconds`, its retry over an explicit `retry_on` list with doubling
-backoff, and any other exception turned into the node's result rather than
-raised. A result that is not an `Action` may be an **envelope** — a JSON dict
-with `status` (`ok`, `empty`, `skipped`, `timed_out`, `error`) and `reason`;
-the runner writes the last two itself, the run goes on along the edges, and a
-graph that ends on one hands over naming it. Neither is checkpointed as done.
-Each attempt is a **node run**, one `node_runs` row per attempt, node 0
-included. A node that calls a model names its `agent`, and registration
-refuses its timeout unless it outlasts that agent's by a margin — two equal
-clocks race, and the outer one's cancellation is invisible to the harness.
-
-A node that cannot decide returns an `Ask` or `HandOver` and the run ends there,
-the same as any node deciding the graph's answer — an absent edge past it, not
-a special case. `PauseForHuman`, raised rather than returned, used to be a
-second way to do this; it dissolved (ticket 04) once new reporter text
-re-running from node 1 reached everywhere "resume from the paused node" did.
-
-The composing node's agent reported its conclusion by calling a tool —
-`answer(text)` or `hand_over(reason)` (ticket 06) — rather than by writing
-prose a node function then parses. Both went with the five-node `api_issue`
-graph; the argument is why an agent with a declared shape answers through a
-generated tool (see **Harness**), which is a different `answer` from that one
-and worth not confusing with it; `hand_over` alone is any node's, `fix_bug`
-included, to call when it cannot conclude. `CANNOT FIX`, `NOT FOUND`, a stray
-Markdown fence: a sentinel is a private protocol between a prompt and the
-function reading it, and a model that wanders off it fails silently, its
-prose read as the answer it never meant to give — `fix_bug`'s own code never
-checked for `CANNOT FIX` at all, so a refusal in prose was proposed as the
-diff. A graph that reaches its end without a node having answered hands over
-by code — "it did not say" is not a question to ask a model.
-
-An agent is a node inside a graph, never the thing driving it. Which agent a
-node gets, and which tool server, is composition — handed down through `deps`,
-so the shape of a graph can be tested without a model or a server. A node whose
-agent or server is absent skips and returns nothing; the graph still reaches
-its last node, which is the only one that decides what to send.
-
-**The last node is the exception**: when *it* has no agent, the graph hands
-over rather than answering (ticket 10). Everything it holds by then —
-the analysis's cause, a proposed diff — is Node-family text, and only
-Responder-family agents produce what a reporter reads. It replied once,
-carrying both verbatim, which put an unreviewed patch in front of the person
-who filed the report; the operator is who that material was always for.
+Three layers. A **source** (`friday/sources/`) reads one kind of thing and
+decides nothing — the only package that reaches an outside read surface. A
+**check** is a formula over sources (being withdrawn by v3.3 in favour of
+distilling tools). A **node** is the frame a run is checkpointed, timed and
+retried in. Reuse lives in the first layer, not the third.
 
 ## Tool server
 
-Tools that live outside this process, reached over MCP. A server is
-**configuration** — adding one is a block in `config.yaml`, not a module — for
-the same reason `base_url` and `model` are.
-
-Which tools an agent may see is declared beside the server, not left to the
-agent's instructions: a prompt is a request and a filter is not. A log server
-offers whatever it offers, and nothing about answering "why did this request
-fail" should be able to delete a log stream.
-
-## Voice
-
-How an agent is told to write, as distinct from what it is told to do. It is
-part of that agent's own prompt, in that agent's own module — there is no
-separate file and no label deciding who gets which section.
-
-Two agents carry the operator's voice, because a person reads what they write
-under that name: the **responder**, and the graph node that composes a reply.
-Every other graph node is told the opposite — it is a step, it writes to the
-next step, it invents nothing. Triage and the extractors are told nothing
-about voice at all: one picks a tool, the other copies values, and a word
-spent on voice there is paid for on the highest-volume calls in the system to
-change nothing.
-
-The two who share the voice hold two copies of it, deliberately. They are
-different agents with different jobs, and the day one needs a sentence the
-other does not is the day sharing it would have been the bug.
-
-There was a `PERSONA.md` holding this for everyone, split by heading, with a
-`Family` label deciding which agent read which section. It went with ticket
-16 — knowing what an agent had actually been told required opening a second
-file, and the invariant the label was there to protect turned out not to be
-protected by it: the test written in terms of the label passed throughout the
-bug it existed to catch. What a reporter reads is pinned on the one place a
-`Reply` is built instead.
-
-Distinct from **tone**: the voice is written by hand and describes the shape,
-the tone examples are real messages the operator sent and are the evidence.
-Where they disagree the examples win, and the voice says so itself.
+Tools outside this process, over MCP. A server is **configuration** (a block
+in `config.yaml`); which of its tools may be called is **declared in code**
+on the class that calls them and enforced twice — a filter at build time and
+a check on every call. Config may not widen it.
 
 ## Harness
 
-The one place an agent is *run*. Takes a declared agent and an input, returns an
-outcome. Owns everything every agent needs and none of them should restate: the
-client and its `base_url` / `api_key` / `model`, model settings, the logging
-hooks, turn and token caps, guardrails, handoffs, and the rule that any failure
-becomes work for a human rather than silence.
+The one place an agent is *run*: client and `base_url`/`api_key`/`model`,
+model settings, recording hooks, turn and token caps, the clock, retries, and
+the rule that any failure becomes work for a person rather than silence. An
+**agent declaration** is only what differs: instructions, tools, output
+shape. Structured answers come back through a generated **answer tool**,
+checked in-process, with one correction turn.
 
-An **agent declaration** is then only what makes that agent different:
-instructions, tools, output shape. Triage was the first; the responder, the extractors and every
-reasoning node in a graph followed.
+## Voice
 
-`friday/agent/harness.py` is the only module that may import the agent SDK. The SDK
-is here for speed, not for keeps, and that is only true while replacing it
-means rewriting one file.
+How an agent is told to write, as distinct from what to do — part of that
+agent's own prompt module. Only the **responder** carries the operator's
+voice; triage and the extractors carry none, because a word spent there is
+paid on the highest-volume calls for nothing. Where the written voice and the
+operator's real messages disagree, the messages win.
 
 ## Flow
 
-Everything that followed from one message: the turn it belonged to, what triage
-concluded and how confident it was, the task if one opened, every model call and
-tool call in order, and the outbound rows at the end. A read-side assembly, not
-a thing that is stored — `Database.flow_for` builds it at one instant and
-`MessageFlow` is its shape.
-
-**Its spine is a message, not a task or a graph**, and both exclusions are
-deliberate. A task-spined flow loses triage, because when the classifier runs
-there is no task and its call correlates by message alone; it also loses every
-`skip`, which is the outcome an operator most often wants to interrogate. A
-graph-spined flow would draw one box: every task type gets the same one-node
-graph, so the multi-step thing here is the path through the process, not the
-`Workflow`.
-
-Not to be confused with `Workflow`/`Graph`, which is what a task's own DAG does
-once it is running. A Flow contains one of those as a step.
+Everything that followed from one message — the turn, triage's decision, the
+task, every model and tool call, the outbound rows. A read-side assembly
+(`Database.flow_for` → `MessageFlow`), never stored. **Its spine is a
+message**, because a task-spined flow loses triage and every `skip`. Not a
+`Graph`: a flow contains one as a step.
 
 ## Channel summary
 
-What a room's transcript has been reduced to: four fields — `topic`, `facts`,
-`decisions`, `constraints` — written by the summariser and read by every later
-agent that reads the room's context, not a paragraph of prose. Structured
-because free prose loses too much: "the reporter had a problem and we
-discussed it" is not context a later run can act on.
-
-Written when the room has said anything since its last summary, with no other
-gate: the fraction-of-a-context-window threshold this used to wait for made
-the summariser an emergency valve rather than a context-building step, and
-every room's derived context stayed `{}` because of it, alongside the
-mechanism being unconfigured. One message is enough to be worth a call now.
-
-**Capped, and a cap refuses rather than trims** — the same rule as
-`daily_token_budget`. A summary cut mid-field says something false about the
-room; the summary already stored is merely older, and stands when a fresh one
-is refused. Measured on the stored, structured form, not the transcript that
-produced it.
-
-**A row, one active per room** — a `summary` **Memory** (board
-`read-it-the-way-the-operator-does`, ticket 10). It was the `derived` section
-of a per-channel YAML file, replaced wholesale on each rebuild; a rebuild now
-supersedes the previous row, so what a room used to be summarised as is kept.
-Read by triage and the responder, and by no other agent.
-
-Bookkeeping — the first and last message it covers, and the shape it was
-written to — is on the same row, in `data` beside the four fields, and is
-never rendered: the renderer reads the four fields by name and nothing else,
-because a message id is not context. (In the file it was a separate `state`
-section, for the same reason.) Distinct from an **Extraction mark**'s checkpoint in the same way that
-one is: this is what a room *is*, not what a task's own extraction was made
-from, and it outlives a task closing.
-
-A model that answers in prose rather than the four fields asked for still said
-something true about the room; that answer is kept as `topic` rather than
-discarded, because the alternative to an imperfect fact is no fact at all.
+A room's transcript reduced to four fields — `topic`, `facts`, `decisions`,
+`constraints` — stored as the room's one active `summary` memory row,
+superseded on rebuild. Rebuilt whenever the room has said anything since the
+last one. **Capped, and a cap refuses rather than trims**: the stored summary
+stands when a fresh one is refused. Bookkeeping sits in `data` and is never
+rendered. Read by triage and the responder only.
 
 ## Friday state
 
-What one message's journey knows about itself, carried the whole way down. The
-room and the agent now running, and — as the journey supplies them — the
-provider, thread, message, author, reply and task. It is what the SDK's per-run
-`context` carries, and the only thing it carries: that slot used to mean "who
-is this run about" for one agent and "where the answer will appear" for
-another, which is two mechanisms sharing one parameter.
-
-Its fields are read-only, and every change goes through a named method that
-returns a *new* state — `as_agent`, `for_task`, `about_message`. Not a style
-choice: one value reaches a tool, the store and the recording sink inside a
-single run, and a field anything could assign makes "what can change this, and
-where" unanswerable, which is the question it exists to keep answerable. There
-is deliberately no general setter.
-
-Only the room and the agent are required. Those two are the boundary and the
-provenance — a memory written without a room has nowhere safe to live, one
-written without an author loses who wrote it and while doing what. The rest are
-absent until the journey supplies them, the way a task id already meant "this
-run belongs to no task".
-
-Three readers so far: the memory tools take it as their scope, the recording
-sink reads the message and the task off it, and the responder stamps its own
-name on it before writing anything down.
-
-What made the slot mean two things was that a tool could write its result into
-an object the caller read back afterwards. An answer is the return value of the
-call that asked for it now, so there is nothing else for the slot to carry.
+What one message's journey knows about itself — the room, the agent, and as
+supplied the provider, thread, message, author, reply and task. The SDK's
+per-run `context` carries it and nothing else. **Read-only**: every change is
+a named method returning a new state (`as_agent`, `for_task`,
+`about_message`); there is no setter. Room and agent are required — they are
+the boundary and the provenance.
 
 ## Memory
 
-Something an agent chose to write down, scoped to one channel, reached through
-`memory_search`, `memory_add`, `memory_update` and `memory_delete`.
+A row in `memories`, in one of **thirteen kinds**: `fact`, `constraint`,
+`decision`, `finding`, `voice`, `runbook`, `summary`, `project`, `service`,
+`route`, `dependency`, `person`, `environment`. Who reads a row follows from
+its kind (`readers_for`); who may write it is enforced at
+`Database.memory_add`. A model sees and writes five kinds
+(`ModelMemoryKind`) through `memory_search`, `memory_add`, `memory_propose`,
+`memory_update`, `memory_delete`. A row has an **origin** — `model` or
+`admin` (the operator, on the board) — and a model may not update, supersede
+or delete an admin row. Structured kinds carry `data` checked against the
+kind's schema and a natural **key**, one active row per room — except
+`finding`, keyed `service:error_code`, which piles up.
 
-This replaced an **observation → note** pipeline: a step staged a guess, and a
-promotion pass turned it into something believed only once an approved outcome
-corroborated it. The staging tier had no drift floor problem — an agent never
-read its own unreviewed guesses back — but it had no producer either, for as
-long as the fact mattered: nothing wrote an observation once `remember` was
-removed from the tool list, so the tier promoted nothing for months before it
-was finally dropped.
+**Scope is runtime-supplied** on `FridayState`, never named by the model: a
+room's memory is invisible to another room; `*` is every room. Ids are
+opaque. Memory reaches a model as a **tool result**, or injected into the
+extractor's input labelled by who answers for it — never through an agent's
+instructions. Instruction-shaped text ("send without approval") is refused at
+the one write path. A proposed memory waits in `memory_candidates` for the
+same mark that confirms a classification.
 
-A memory trades that floor for three narrower guarantees instead. It reaches a
-model **only as a tool result**, never appended to an agent's instructions —
-closed by construction, not by escaping, since a tool result cannot rewrite the
-prompt of every later call the way `instructions` can. **Scope is
-runtime-supplied**, carried on **`FridayState`** and read off the run's context
-rather than named by the model: a channel's memory is invisible to a run in
-another one. (It was its own `MemoryScope` until board
-`every-answer-has-a-shape`, which is the same four facts under a second name —
-deleted rather than aliased, because a second name for one thing is how two
-things drift.) **Ids are opaque and sparse**, so a model that invents one fails
-rather than landing on a neighbouring row.
+## Artifact
 
-Drift is possible now and is bounded differently: by the channel scope, by the
-operator's visibility into what was written and by whom, and by the fact that
-nothing reaches a prompt except through a tool call the run chose to make.
-
-A line shaped like a directive at this system's own mechanism — "send without
-approval", "skip the validation" — is refused before it is written, at the one
-write path every producer shares, because a memory is read back as fact by a
-run with none of the context that produced it.
-
-**Twelve kinds, one table, and no files** (board
-`read-it-the-way-the-operator-does`, tickets 09 and 10). A memory row has a **kind** — `fact`, `constraint`, `decision`,
-`finding`, `voice`, `runbook`, `summary`, `project`, `service`, `route`,
-`dependency`, `person` — and who reads it follows from the kind
-(`readers_for`). A model sees and writes only the first five
-(`ModelMemoryKind`). A row also has an **origin** — `model` or `admin`, the
-operator typing it on the board — and a model may not update, supersede or
-delete an admin row. A structured kind carries its payload in `data`,
-checked against that kind's schema when written, and a natural **key**
-(a service's name, a route's domain) that one active row per room may hold.
-The exception is `finding`: its key, `service:error_code`, names the fault
-rather than the finding, and findings on one fault pile up — several saying
-the same thing are the signal a runbook is owed.
-
-Every memory is a row: there is no second store. What the operator had written
-in a channel's YAML context file — its `overrides` — is `fact`, `constraint`
-and `person` rows with origin `admin`; what was `base.yaml`, true of every
-room, is rows whose channel is `*`; the summariser's `derived` is the room's
-`summary` row. The extractor is shown the domain kinds for its room and for
-`*`, labelled by who is answerable for each line.
+Verbatim material — a curl, a stack trace, code, SQL — stored whole and
+referred to by id (`[artifact id: description]`), never paraphrased or
+retyped. Code copies it; a model only names it.
 
 ## Outbound intent
 
-Something to send, held as data rather than performed as a call. Carries the
+Something to send, held as a row rather than performed as a call: the
 conversation, the text, the **sender**, what it replies to, and its **kind**.
-
-The **kind** decides whether it needs approval:
-
-| kind | sender | approval |
-| --- | --- | --- |
-| `ask_for_details` | user account | no — completing the task's own required parameters |
-| `approval_card` | bot | no — it *is* the request for approval |
-| `reply` | user account | **yes** — the agent speaking as the operator |
+Kinds: `acknowledged`, `ask_for_details`, `reply`, `approval_card`,
+`help_wanted`, `alert`, `summary`. **Only `reply` needs approval** — it is the
+agent speaking as the operator about a cause.
 
 ## Outbound state
 
-Where an outbound row is in its life: `queued`, `sent`, `failed`,
-`sent_manually`. One definition, in `friday/domain/states.py` beside
-`TaskState`, because it was two: the outbox held the set for its readers and
-the store held it for its `WHERE` clauses. Two of the outbox's four had no
-reader left by the time anyone looked — which is what a duplicated vocabulary
-looks like as it rots, one copy quietly going unused.
-
-`sent_manually` is apart from `failed` on purpose: the audit trail should say
-"a person sent this" rather than "this was abandoned".
+`queued`, `sent`, `failed`, `sent_manually` (a person sent it — not
+abandoned), `cancelled` (withdrawn because the operator answered first). One
+definition, in `friday/domain/states.py`.
 
 ## Outbox
 
-The only module that delivers. Holds outbound intents, dispatches each to the
-adapter its `sender` names, retries within a bound, and surfaces what it could
-not send. Nothing else calls a provider's `send()`.
-
-## Hand-over
-
-An `Action` a node's agent produces, by calling `hand_over(reason)`, when it
-cannot conclude — the fix is not obvious, the evidence is not enough to write
-a reply, the type is one nothing here knows how to work with. `reason` is the
-agent's own finding, quoted to the operator directly; it is not a message
-under the operator's name to anyone else, so it never waits at the outbox.
-The task moves to `needs_human` and the pool announces it, once, with
-whatever the paused node actually said.
-
-**Not "handled by the operator"**, the state this ends in only after a
-person acts on it. A hand-over is the system saying it does not know what to
-do; the operator answering is a different fact entirely, recorded below.
-
-## Handled by the operator
-
-A task the operator answered themselves. Not `done` — a person did the work
-rather than the agent — and it is reopenable, because closing on "they said
-something in this channel" will sometimes be wrong. Everything queued about the
-task is withdrawn the moment it is noticed, silently: a message announcing a
-cancellation is noise about a thing that correctly did not happen.
-
-Which task their message closes follows the reply rule. A reply names what it
-answers, and that task closes; a message replying to nothing closes the
-conversation's task only when there is exactly one.
-
-The share of tasks that end here is the one number that says whether this
-system is helping.
+The only module that delivers: dispatches each row to the adapter its
+`sender` names, retries within a bound, gives up to a person, and checks at
+the last moment that an answer has not gone stale.
 
 ## Approval
 
-A fact about one **outbox row**, not about its task: who approved that reply
-and when. An outbound intent whose kind requires approval is only sendable
-while the row itself carries one, and the approval card names the row it asks
-about (`approves`), so answering it releases that reply and nothing queued
-after it.
+A fact about **one outbox row**: who approved that reply and when. A row whose
+kind needs approval is sendable only while it carries one; the approval card
+names the row it approves (`approves`), so answering it releases that reply
+and nothing queued after it. Reading logs and code needs no approval — the
+risk is in speaking, and Friday takes no other action.
 
-It was a fact about the task until board `read-it-the-way-the-operator-does`
-ticket 12 (finding A): written once and never cleared, so approving a task's
-first reply approved every reply it queued later — the one that asserts a
-cause included — and those went out unread. The migration carried each
-approved task's approval onto the replies it already had.
+## Hand-over
 
-This is one of two gates, not the only one (ticket 07). A message reaching a
-person waits here, at the outbox, whatever kind of task produced it. An
-*action* — so far, only applying a fix — waits on the SDK's own tool
-approval instead: the tool is marked `needs_approval`, the run stops holding
-its state rather than after it, and the state is what `dag_state.interruption`
-holds while the operator has not yet said yes or no. Approving resumes the
-exact call — in this process or a later one, a restart or a redeploy between
-them — rather than re-running the investigation to reach it again; declining
-ends the run as a hand-over, no further turn spent asking the model to react
-to its own refusal. Reading logs and locating code ask for neither gate —
-the risk this exists for is in acting, not in investigating.
+The `Action` for "cannot conclude". Its reason is the system's own finding,
+quoted to the operator; the task moves to `needs_human` and the pool
+announces it once. **Not** "handled by the operator", which is a person
+having acted.
 
-**An approval expires with the work it belonged to** (ticket 12). Approving
-runs the tool, and there is no undoing that and finding out afterwards, so
-three things are checked before anything resumes: the task is still waiting
-on a person, its parameters are still the ones the paused run was worked out
-against, and the call is still there to approve. The operator answering in
-the channel withdraws it outright, alongside the queued messages — the same
-sentence covers both, because a patch left behind is a side effect on work
-somebody already finished.
+## Handled by the operator
+
+A task the operator answered themselves — not `done`, and reopenable.
+Everything queued about it is withdrawn silently. A reply closes the task it
+answers; a message replying to nothing closes the conversation's task only
+when there is exactly one. The share of tasks ending here says whether Friday
+is helping.
 
 ## Sender
 
-Which identity speaks: `discord_user` or `discord_bot`. Two Discord identities
-run in one process. Everything the outside world sees comes from the user
-account; the bot exists to carry buttons, which a user account cannot send.
+Which identity speaks: `discord_user` (the operator's account — everything
+the reporter sees) or `discord_bot` (buttons and DMs to the operator, which a
+user account cannot send).
 
 ## Provider
 
 A chat platform as the rest of the system sees it: normalised messages in,
-outbound intents out. Platform mechanics stay inside the implementation.
+outbound rows out; platform mechanics stay inside.
 
 ## Sweep
 
-The recovery path. The live connection can miss messages, so channel history is
-re-read from a stored **cursor** (`last_seen_message_id`) on a timer and
-immediately on reconnect.
+The recovery path: channel history re-read from a stored **cursor** on a
+timer and on reconnect. A channel with no cursor is a **cold cursor**, read
+back only as far as the **lookback** — `max_message_age`, the same number that
+marks a turn `outdated`.
 
-A channel with no cursor — a fresh database, or a redeploy that lost the
-volume — is a **cold cursor**, and it is read from the other end: back as far
-as the **lookback** and no further, newest end first, delivered oldest first.
-The lookback is `max_message_age`, the same number that decides a turn is
-`outdated`, because both answer "work this old is not worth starting".
+---
+
+# The rules again, one line each
+
+1. Never write or run code; every tool is a read.
+2. Nothing is sent except by the outbox; only `reply` waits, and approval is per row.
+3. A model never chooses the next workflow step.
+4. Never drop a mention; `outdated` is recorded, the prefilter holds.
+5. The model chooses what to read; code chooses where and what comes back.
+6. Verbatim material is an artifact, pointed at, never retyped.
+7. Where a request went is a knowledge row; a missing row is a hand-over.
+8. Thirteen kinds, one table; admin rows are the operator's; silence is not approval.
+9. Credentials are scrubbed before they are stored; tokens never reach logs.
+10. Captured production cases stay in `data/cases/`.
+11. One module imports each outside library.
+12. Reuse a maintained library before rewriting it.
+13. A stated rule has a test; a number has a measured-on date.
+14. Triage classifies; extraction extracts.
+15. Only the responder has the operator's voice.
+16. ORM and Alembic only.
+17. Ask the operator in Vietnamese; write code and docs in English.

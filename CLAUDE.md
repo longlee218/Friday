@@ -1,15 +1,14 @@
 # CLAUDE.md
 
-How to work in this repository. Nothing else lives here: no project state,
-no architecture, no layout.
-
-@.claude/AGENT-PROTOCOL.md
+How to work in this repository. Nothing else lives here: no project state, no architecture, no layout.
 
 ## Where things are written
 
 | Question | File |
 | --- | --- |
+| Rules that must not be lost | `CONTEXT.md` § Rules (top, repeated at the bottom) |
 | What is running, which boards are open, what is next | `CONTEXT.md` § Project state |
+| A ticket's status, a dated measurement, what waits on the operator | `.scratch/progress.jsonl` (one row per line; append, never rewrite) |
 | What a word means in this domain | `CONTEXT.md` § Vocabulary |
 | How the system is built, where code lives, which rules are load-bearing | `docs/DESIGN.md` § What exists |
 | Why a decision was made | `docs/DESIGN.md` § Reasoning |
@@ -18,7 +17,8 @@ no architecture, no layout.
 Read `docs/DESIGN.md` § What exists before adding anything non-trivial; if a
 decision recorded there looks wrong, raise it rather than building around
 it. When you change a load-bearing decision, correct `docs/DESIGN.md` in the
-same commit, and when you finish or open work, correct `CONTEXT.md` —
+same commit, and when you finish or open work, append to
+`.scratch/progress.jsonl` and correct `CONTEXT.md` —
 nothing breaks when either is wrong, which is how they go stale. Read
 `CONTEXT.md` § Vocabulary before naming anything, and add the term there
 when you name something new.
