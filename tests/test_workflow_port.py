@@ -181,26 +181,25 @@ async def test_ask_suspends_then_the_answer_reruns_the_asking_node(dbos_sqlite):
     assert paused == [("ask", "Ask"), ("ask", None)]  # told it paused, then resumed
 
 
-async def test_handover_also_suspends_and_reruns_on_the_answer(dbos_sqlite):
-    """`HandOver` suspends the same way `Ask` does (model B) — the two are the
-    port's pause actions and both wait, then re-run the node on the answer."""
+async def test_handover_is_terminal_not_suspended(dbos_sqlite):
+    """`HandOver` does NOT suspend: an `Ask` waits for the reporter, but a
+    `HandOver` escalates to the operator out of band, so it flows on as a
+    terminal result the pool reads off the state (v1 semantics)."""
     from friday.domain.actions import HandOver
 
     async def stuck(state, deps):
         RAN.append("stuck")
-        if deps.answers:
-            return envelope("ok", by=deps.answers[-1])
         return HandOver("needs a human")
 
     dag = DAG(name="ho", nodes=(Node(name="stuck", run=stuck),))
     adapter.register_graph(dag, _no_deps)
 
-    handle = await adapter.start("ho", {}, workflow_id="wf-ho")
-    await _until(lambda: RAN == ["stuck"])
-    await adapter.answer("wf-ho", "stuck", "handled")
+    # No answer is ever sent; the run still completes because HandOver is
+    # terminal, and the state carries it for the pool.
+    state = await adapter.run("ho", {}, workflow_id="wf-ho")
 
-    state = await handle.get_result()
-    assert state["stuck"]["by"] == "handled"
+    assert RAN == ["stuck"]
+    assert isinstance(state["stuck"], HandOver)
 
 
 async def test_a_crash_resumes_from_the_last_incomplete_step(dbos_sqlite):

@@ -30,7 +30,7 @@ from typing import Any
 
 from dbos import DBOS, SetWorkflowID
 
-from friday.domain.actions import Action, Ask, HandOver
+from friday.domain.actions import Action, Ask
 from friday.ops.redact import scrub
 from friday.sdk.workflow import (
     DAG,
@@ -210,15 +210,16 @@ async def _run_node(dag_name: str, node_name: str) -> Any:
 @DBOS.workflow()
 async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
     """Walk the graph on DBOS. Rebuild `Deps` from the scope key, run each node
-    as a memoized step, suspend on `Ask`/`HandOver`, and return the final state
-    as a plain dict. Resume after a crash re-enters here: the memoized steps
-    replay without re-running, so the walk reaches the first incomplete node and
-    continues from there.
+    as a memoized step, suspend on `Ask`, and return the final results. Resume
+    after a crash re-enters here: the memoized steps replay without re-running,
+    so the walk reaches the first incomplete node and continues from there.
 
-    The return is `DAGState.to_dict()`, a plain dict — past this boundary a
-    caller reads results by key without the `MissingNodeResult` guard that
-    `DAGState.__getitem__` gives a node mid-run. The guard's home is the node
-    signature, where the wiring mistakes it catches live.
+    The return is the raw results mapping (node name -> result), **with the
+    domain objects intact** — an `Ask`/`Reply`/`HandOver` a node decided on, not
+    a JSON projection of it: DBOS pickles a workflow's return, so the pool reads
+    the real action off the state the way v1 read it off the live `DAGState`.
+    Past this boundary there is no `MissingNodeResult` guard; that lives in the
+    node signature, where the wiring mistakes it catches happen.
     """
     graph = _GRAPHS[dag_name]
     wfid = DBOS.workflow_id
@@ -246,14 +247,20 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
 
             result = await _run_node(dag_name, current)
 
-            if isinstance(result, (Ask, HandOver)):
+            if isinstance(result, Ask):
                 # Model B, pure suspend: a node that cannot finish without the
-                # reporter (`Ask`) or the operator (`HandOver`) suspends the
-                # workflow in place. The pool is told what it paused on, the
-                # wait is durable (survives a kill — proven by spike), and the
-                # answer re-runs the SAME node with the answer in `deps.answers`
-                # — the durable version of v1's "answer re-runs the asking
-                # node", but only that node re-runs, not the graph from the top.
+                # reporter suspends the workflow in place. The pool is told what
+                # it paused on, the wait is durable (survives a kill — proven by
+                # spike), and the answer re-runs the SAME node with the answer in
+                # `deps.answers` — the durable version of v1's "answer re-runs
+                # the asking node", but only that node re-runs, not the graph
+                # from the top.
+                #
+                # `HandOver` is not here on purpose: an `Ask` waits for the
+                # reporter and the same task resumes, but a `HandOver` escalates
+                # to the operator out of band — there is no answer that re-runs
+                # the node — so it flows on as a terminal result the pool reads
+                # off the state, exactly as v1's walk did.
                 await _record_pause(dag_name, current, result)
                 answer = await DBOS.recv_async(current, timeout_seconds=WAIT_TIMEOUT_SECONDS)
                 await _clear_pause(dag_name, current)
@@ -262,7 +269,7 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
 
             live.state = live.state.with_result(current, result)
             current = graph.dag.next_after(current, live.state)
-        return live.state.to_dict()
+        return dict(live.state.results)
     finally:
         _LIVE.pop(wfid, None)
 
