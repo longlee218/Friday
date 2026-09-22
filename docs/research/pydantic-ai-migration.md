@@ -102,15 +102,50 @@ and the task state machine. Integration rules to design for: `deps` must
 serialise (ids, not live handles); capabilities are attached at
 construction, never per run; custom tools are not wrapped as steps
 automatically (safe while every tool is read-only). Temporal only when
-Friday runs on more than one machine. **Not yet spiked**: DBOS's system
-database beside `friday.db` (or in it), `DBOSDurability` inside a step,
-`recv` with a timeout, queue concurrency, in-flight workflows across an
-application-version change, DBOS under pytest.
+Friday runs on more than one machine.
 https://pydantic.dev/docs/ai/capabilities/durable_execution/dbos/ ·
 https://pydantic.dev/docs/ai/capabilities/durable_execution/temporal/
 
 This work is scheduled **after the DESIGN-v2 restructure** (roadmap,
 `CONTEXT.md` § Project state), not inside it.
+
+## Verified — DBOS spike, 2026-09-22 (ticket 06, step-3 precondition)
+
+`dbos==3.0.0` on Python 3.13, this machine, throwaway file-based SQLite
+(`system_database_url = sqlite:///<file>`), overlay env (`uv run --with dbos
+--no-project`, `pyproject.toml`/`uv.lock` untouched). Every "not yet spiked"
+unknown listed above is now cleared.
+
+| Check | Result |
+| --- | --- |
+| SQLite **file** system DB | Launches, applies its schema migrations, own file separate from `friday.db` |
+| Step memoization | A completed `@DBOS.step` is **not** re-run on recovery (side-effect log written once) |
+| Kill mid-workflow → restart → resume from last incomplete step | `MARKS=['a','CRASH','b']`, `STATUS=SUCCESS`; `step_a` not re-run, `step_b` runs |
+| `recv(topic, timeout_seconds=)` | Returns `None` after the timeout (the `Ask`/`HandOver` wait) |
+| **Suspend model (exec model B):** workflow blocked on `recv`, killed, restarted | Resumes **still-waiting** — `MARKS=['a','WAIT','KILL','WAIT','b:forty-two']`: `step_a` memoized, re-blocks on `recv`, a later `DBOS.send(wfid, …, topic=)` delivers and the run finishes `SUCCESS` |
+| DBOS under pytest, multiple tests | Passes with a destroy-first fixture: `DBOS.destroy(destroy_registry=False)` at fixture **start** (keeps decorated-workflow registrations), then reconstruct + `DBOS.launch()`, per-test tempdir SQLite |
+
+**Gotchas found (shape the adapter):**
+
+- App `name` must be 3–256 chars, `[a-z0-9_-]` only. A shorter name throws a
+  misleading `DBOSInitializationError` at launch.
+- Recovery is keyed by an **application-version hash** (auto-derived). Only
+  same-version PENDING workflows auto-recover — which *is* the box-4 / US15
+  scheme (drop the `DAG.version` digest, use DBOS app-version + memoization),
+  but means a graph code change will not auto-resume old in-flight runs.
+- Pulls `psycopg-binary` even on SQLite; prints a Conductor URL banner at
+  launch — silence it in the run environment.
+- `DBOS(config=)` is a process-global singleton; `destroy()` clears the
+  instance but `destroy_registry=False` keeps the `@DBOS.workflow`/`@DBOS.step`
+  registrations done at import.
+
+**Execution model chosen (operator, 2026-09-22): full DBOS suspend (B).** A
+graph is a `@DBOS.workflow`; each node a memoized `@DBOS.step`. On `Ask`/
+`HandOver` the workflow **suspends in place** on `DBOS.recv(topic, timeout=)`
+and resumes when the pool `DBOS.send`s the answer — not the current
+"run-ends-and-re-enters-from-node-0" model. The wait becomes a live suspended
+workflow rather than a re-entry, so the pool's task state machine changes; that
+is in scope for the port.
 
 ## Suggested order
 
