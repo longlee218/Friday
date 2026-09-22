@@ -269,10 +269,14 @@ async def test_the_correction_names_the_field_and_quotes_nothing_back():
 
     await harness.run_structured("ask")
 
+    # The correction comes back to the model as a `RetryPromptPart` in the
+    # second request's history — Pydantic AI's own replay of the rejected call,
+    # carrying the reason `fits` produced.
     turned_back = [
-        item["output"]
-        for item in harness.agent.model.calls[1].input
-        if isinstance(item, dict) and item.get("type") == "function_call_output"
+        str(part.content)
+        for message in harness.agent.model.calls[1].input
+        for part in getattr(message, "parts", [])
+        if getattr(part, "part_kind", "") == "retry-prompt"
     ]
 
     assert any("count" in said for said in turned_back), (

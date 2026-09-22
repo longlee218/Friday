@@ -180,7 +180,7 @@ def test_the_memory_tools_offer_a_model_no_kind_outside_its_five():
     tools = memory_tools(object())
     assert tools
     for built in tools:
-        values = {str(v) for v in offered(built.params_json_schema)}
+        values = {str(v) for v in offered(built.function_schema.json_schema)}
         assert not hidden & values, f"{built.name} offers {hidden & values}"
 
 

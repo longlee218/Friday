@@ -10,8 +10,13 @@ and `tests/test_memory_kinds.py`). What is left here is the summariser.
 from __future__ import annotations
 
 import pytest
-from friday.sdk.testing import Model
-from friday.sdk.testing import ScriptedModel, assistant_message
+from friday.sdk.testing import (
+    FunctionModel,
+    ModelResponse,
+    ScriptedModel,
+    assistant_message,
+    function_call,
+)
 
 from friday.memory.channel_context import ContextRebuilder
 from friday.config import AgentConfig
@@ -41,6 +46,19 @@ def _says(topic: str) -> str:
     import json
 
     return json.dumps({"topic": topic, "facts": [], "decisions": [], "constraints": []})
+
+
+def _transcript(messages) -> str:
+    """The per-call input the model was shown — the user turn, not the standing
+    instructions — as one string, so a test can assert on what reached it. The
+    predecessor doubles captured `str(input)`, which was that same turn."""
+    bits: list[str] = []
+    for message in messages:
+        for part in getattr(message, "parts", []):
+            if getattr(part, "part_kind", "") == "user-prompt":
+                content = part.content
+                bits.append(content if isinstance(content, str) else str(content))
+    return "\n".join(bits)
 
 
 async def test_the_heartbeat_always_calls_rebuild_all(db):
@@ -187,21 +205,22 @@ async def test_what_a_reporter_typed_survives_the_whole_round_trip(db, tmp_path)
 
     seen: list[str] = []
 
-    class Echoing(Model):
+    def echoing(messages, info):
         """Answers with the escaped form its transcript contained."""
-
-        async def get_response(self, *a, **kw):
-            seen.append(str(a) + str(kw))
-            return await ScriptedModel(
-                [[assistant_message(_says("bao api &lt;b&gt;loi&lt;/b&gt;"))]]
-            ).get_response(*a, **kw)
-
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
+        seen.append(_transcript(messages))
+        return ModelResponse(
+            parts=[
+                function_call(
+                    "answer", {"topic": "bao api &lt;b&gt;loi&lt;/b&gt;",
+                               "facts": [], "decisions": [], "constraints": []},
+                )
+            ]
+        )
 
     rebuilder = ContextRebuilder(
         db=db, channels=["100"],
-        summary_config=SUMMARY_CONFIG, model=Echoing(),
+        summary_config=SUMMARY_CONFIG,
+        model=FunctionModel(echoing, model_name="test-model"),
     )
     await rebuilder.rebuild_all()
 
@@ -255,18 +274,14 @@ async def test_the_seam_still_cannot_be_talked_out_of_escaping(db, tmp_path):
 # --- ticket 40: the room decides the register --------------------------------
 
 
-class FieldsCapture(Model):
+def FieldsCapture(into: list[str]) -> FunctionModel:
     """Records the user turn it was given, answers nothing."""
 
-    def __init__(self, into: list[str]) -> None:
-        self._into = into
-
-    async def get_response(self, system_instructions, input, *a, **kw):
-        self._into.append(str(input))
+    def capture(messages, info):
+        into.append(_transcript(messages))
         raise RuntimeError("captured; stopping")
 
-    def stream_response(self, *a, **kw):
-        raise NotImplementedError
+    return FunctionModel(capture, model_name="test-model")
 
 
 async def test_the_responder_writes_differently_in_a_different_room(db):
@@ -365,36 +380,21 @@ def _scripted(seen: list):
     internals the first version of this reached into and broke — the summary
     then failed on every pass, and the test read that as the behaviour it was
     checking for."""
-    from friday.sdk.testing import ModelResponse
-    from friday.sdk.testing import Model
-    from friday.sdk.testing import Usage
-    from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+    def answers(messages, info):
+        seen.append("asked")
+        # A tool call rather than prose, because this test counts *how often the
+        # room is summarised* — a written answer would take the forced tool's
+        # correction turn per rebuild, so the count would measure the retry.
+        return ModelResponse(
+            parts=[
+                function_call(
+                    "answer", {"topic": "họ hay deploy vào thứ sáu",
+                               "facts": [], "decisions": [], "constraints": []},
+                )
+            ]
+        )
 
-    class Answers(Model):
-        async def get_response(self, *a, **kw):
-            seen.append("asked")
-            return ModelResponse(
-                output=[
-                    ResponseOutputMessage(
-                        id="1", role="assistant", status="completed", type="message",
-                        content=[ResponseOutputText(
-                            # A well-shaped answer, because this test counts
-                            # *how often the room is summarised* — prose here
-                            # would cost a correction turn per rebuild and
-                            # the count would measure the retry instead.
-                            text=_says("họ hay deploy vào thứ sáu"),
-                            type="output_text", annotations=[],
-                        )],
-                    )
-                ],
-                usage=Usage(requests=1, input_tokens=5, output_tokens=2),
-                response_id=None,
-            )
-
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
-
-    return Answers()
+    return FunctionModel(answers, model_name="test-model")
 
 
 

@@ -12,7 +12,6 @@ dependencies = [
     "fastapi>=0.141.1",
     "httpx2>=2.12.0",
     "jinja2>=3.1.6",
-    "openai-agents>=0.22.0",
     "pydantic>=2.13.5",
     "pydantic-ai-slim[mcp,openai]==2.46.0",
     "python-dotenv>=1.2.3",

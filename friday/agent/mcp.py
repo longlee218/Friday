@@ -10,6 +10,11 @@ whatever it offers, and a trace is a read-only act: nothing about answering
 "why did this request fail" should be able to delete a log stream. The filter is
 the guard, and it is declared next to the server rather than trusted to the
 agent's instructions — a prompt is a request, and a filter is not.
+
+Each server becomes a Pydantic AI `MCPToolset` over a FastMCP transport, with
+the allow-list applied as a `.filtered()` wrapper. The vendor names come through
+`harness.py`, which is the one module allowed to import the SDK; this module
+builds toolsets from them.
 """
 
 from __future__ import annotations
@@ -18,33 +23,37 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
-from friday.config import ConfigError, MCPServerConfig
 from friday.agent.harness import (
-    MCPServer,
-    MCPServerSse,
-    MCPServerStdio,
-    MCPServerStreamableHttp,
-    create_static_tool_filter,
+    MCPToolset,
+    SSETransport,
+    StdioTransport,
+    StreamableHttpTransport,
 )
+from friday.config import ConfigError, MCPServerConfig
 
-__all__ = ["build"]
+__all__ = ["build", "name_of"]
 
 log = logging.getLogger(__name__)
 
 
-def build(
-    configs: Sequence[MCPServerConfig], *, allowed: frozenset[str]
-) -> list[MCPServer]:
-    """Turn configuration into servers. Nothing is connected yet.
+def name_of(toolset) -> str:
+    """The configured name of a toolset `build` produced. A `FilteredToolset`
+    does not carry its own id, so it is read off the `MCPToolset` it wraps —
+    the one place the name this module set with `id=` still lives."""
+    return getattr(getattr(toolset, "wrapped", None), "id", None) or ""
+
+
+def build(configs: Sequence[MCPServerConfig], *, allowed: frozenset[str]) -> list:
+    """Turn configuration into toolsets. Nothing is connected yet.
 
     Connecting is the composition root's business, because a connection has a
-    lifetime and something has to close it.
+    lifetime and something has to close it — each toolset is an async context
+    manager the root enters and the run unwinds.
 
-    `allowed` is every tool any reader in this build declares it calls, and
-    it is passed in rather than read from configuration: the operator's call
-    of 2026-09-21 moved that list into code, onto the classes that make the
-    calls, so a file cannot widen what a server offers. A server whose
-    catalogue holds `release_rollback` hands over a catalogue that does not.
+    `allowed` is every tool any reader in this build declares it calls, and it
+    is passed in rather than read from configuration: the operator's call of
+    2026-09-21 moved that list into code, onto the classes that make the calls,
+    so a file cannot widen what a server offers.
     """
     return [_one(config, allowed) for config in configs]
 
@@ -70,10 +79,8 @@ def _auth(config: MCPServerConfig) -> Any:
 
     # **Nothing is required in the block.** The sign-in is `authorize.py`'s,
     # once, with a person and a browser; it discovers the token endpoint,
-    # registers this machine, and writes both beside the refresh token. What
-    # is missing at boot is therefore the sign-in itself and never the
-    # configuration to go and do it — and a value set here still wins, for
-    # an install that has to pin one.
+    # registers this machine, and writes both beside the refresh token. A value
+    # set here still wins, for an install that has to pin one.
     return SsoTokens(
         store=TokenStore(Path("data/credentials") / f"{config.name}.json"),
         token_url=str(config.auth.get("token_url", "")),
@@ -82,59 +89,51 @@ def _auth(config: MCPServerConfig) -> Any:
     )
 
 
-def _one(config: MCPServerConfig, allowed: frozenset[str]) -> MCPServer:
-    # Always a filter, and never an empty one. "No filter means every tool"
-    # was a choice this module used to state and can no longer justify: the
-    # one server it actually talks to offers fifteen tools that change
-    # production.
-    tool_filter = create_static_tool_filter(allowed_tool_names=sorted(allowed))
+def _one(config: MCPServerConfig, allowed: frozenset[str]):
+    """One server, as an allow-listed toolset.
+
+    Always a filter, and never an empty one: "no filter means every tool" was a
+    choice this module used to state and can no longer justify — the one server
+    it actually talks to offers fifteen tools that change production, so an empty
+    declaration means a server that offers nothing.
+
+    `tool_error_behavior='failed'` so a failing tool becomes a message the model
+    is told and carries on past, rather than a retry of a call it cannot fix.
+    """
+    def offered(ctx, tool_def) -> bool:
+        return tool_def.name in allowed
+
     auth = _auth(config)
+    transport: Any
     if config.url:
-        # Two ways to speak to a server that is already running, and the
-        # choice is the server's rather than ours. The devops MCP measured on
-        # 2026-09-21 is streamable HTTP; SSE is what this module assumed, and
-        # an SSE client against an HTTP server fails at connect with nothing
-        # about transports in the message.
-        #
-        # `headers` is how a token reaches it. Nothing here obtains one: this
-        # server authenticates per person, and a graph that could mint its
-        # own credential is a graph that can reach further than the operator
-        # meant it to.
+        # Two ways to speak to a server that is already running, and the choice
+        # is the server's rather than ours. The devops MCP measured on
+        # 2026-09-21 is streamable HTTP; SSE is what this module assumed, and an
+        # SSE client against an HTTP server fails at connect with nothing about
+        # transports in the message. `auth` reaches the server per request: a
+        # Keycloak access token lapses in minutes, so it is decided on each call
+        # rather than baked into a header set once.
         if config.transport == "sse":
             log.info("mcp server %s over sse: %s", config.name, config.url)
-            return MCPServerSse(
-                params={
-                    "url": config.url,
-                    "headers": dict(config.headers),
-                    "auth": auth,
-                },
-                name=config.name,
-                tool_filter=tool_filter,
-                cache_tools_list=True,
+            transport = SSETransport(
+                url=config.url, headers=dict(config.headers), auth=auth
             )
-        log.info("mcp server %s over http: %s", config.name, config.url)
-        return MCPServerStreamableHttp(
-            params={
-                "url": config.url,
-                "headers": dict(config.headers),
-                # Decided per request rather than baked into a header: a
-                # Keycloak access token lapses in minutes, and a header is
-                # set once when this object is built.
-                "auth": auth,
-            },
-            name=config.name,
-            tool_filter=tool_filter,
-            cache_tools_list=True,
+        else:
+            log.info("mcp server %s over http: %s", config.name, config.url)
+            transport = StreamableHttpTransport(
+                url=config.url, headers=dict(config.headers), auth=auth
+            )
+    else:
+        log.info("mcp server %s over stdio: %s", config.name, config.command)
+        transport = StdioTransport(
+            command=config.command, args=list(config.args), env=dict(config.env)
         )
-    log.info("mcp server %s over stdio: %s", config.name, config.command)
-    return MCPServerStdio(
-        params={
-            "command": config.command,
-            "args": list(config.args),
-            "env": dict(config.env),
-        },
-        name=config.name,
-        tool_filter=tool_filter,
+
+    toolset = MCPToolset(
+        transport,
+        id=config.name,
+        tool_error_behavior="failed",
         # The list rarely changes and fetching it costs a round trip per run.
-        cache_tools_list=True,
+        cache_tools=True,
     )
+    return toolset.filtered(offered)

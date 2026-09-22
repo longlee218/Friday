@@ -50,23 +50,15 @@ def built(source=None, project=None, tag=""):
 
 
 def call(tool, **kw):
-    """Invoke an SDK tool the way the runtime does — through
-    `on_invoke_tool` with a real `ToolContext`, which is what the SDK builds
-    around the function and what a test bypassing it would not exercise."""
-    import json
+    """Invoke a tool's own function with the model's arguments. These tools take
+    no run context — they close over the evidence and placement a run resolved —
+    so the call is the function directly, awaited if it is async."""
+    import inspect
 
-    from friday.sdk.testing import ToolContext
-
-    arguments = json.dumps(kw)
-    return asyncio.run(
-        tool.on_invoke_tool(
-            ToolContext(
-                context=None, tool_name=tool.name, tool_call_id="1",
-                tool_arguments=arguments,
-            ),
-            arguments,
-        )
-    )
+    result = tool.function(**kw)
+    if inspect.isawaitable(result):
+        return asyncio.run(result)
+    return result
 
 
 # --- the grounding index ----------------------------------------------------
@@ -545,19 +537,14 @@ async def test_what_a_tool_could_not_check_reaches_the_envelope(db):
 
 
 def _tool_named(harness, name):
-    """The tool the harness was built with, callable as the model calls it."""
-    import json
-
-    from friday.sdk.testing import ToolContext
+    """The tool the harness was built with, callable as the model calls it —
+    these tools take no run context, so the call is the function directly."""
+    import inspect
 
     tool = next(t for t in harness._tools if t.name == name)
 
     async def invoke(**kw):
-        arguments = json.dumps(kw)
-        return await tool.on_invoke_tool(
-            ToolContext(context=None, tool_name=name, tool_call_id="1",
-                        tool_arguments=arguments),
-            arguments,
-        )
+        result = tool.function(**kw)
+        return await result if inspect.isawaitable(result) else result
 
     return invoke

@@ -284,7 +284,7 @@ def test_the_responder_is_given_the_catalogue_and_the_tool(tmp_path):
 
     responder = Responder(config=cfg, skills=_library(tmp_path))
 
-    assert [t.name for t in responder._run.agent.tools] == [
+    assert [t.name for t in responder._run.tools] == [
         "fetch_skill",
         "search_skills",
         "describe_skill",
@@ -318,7 +318,7 @@ def test_an_empty_library_gives_neither_the_tools_nor_the_sections(tmp_path):
     responder = Responder(config=cfg, skills=empty)
     text = build_input(asking="x")
 
-    assert responder._run.agent.tools == []
+    assert responder._run.tools == []
     # The four skill tools used to be described in three separate sections
     # (`search_skills_system`, `describe_skill_system`,
     # `read_skill_file_system`). Those sections are gone — the SDK
@@ -339,7 +339,7 @@ def test_the_responder_without_skills_carries_no_tool():
         model="m",
     )
 
-    assert Responder(config=cfg)._run.agent.tools == []
+    assert Responder(config=cfg)._run.tools == []
 
 
 def test_the_catalogue_reaches_the_prompt_the_responder_builds(tmp_path):

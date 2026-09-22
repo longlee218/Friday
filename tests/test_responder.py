@@ -8,7 +8,7 @@ sentence every time, and that stops being true the moment a model writes it.
 
 from __future__ import annotations
 
-from friday.sdk.testing import Model
+from friday.sdk.testing import FunctionModel
 from friday.sdk.testing import ScriptedModel, assistant_message
 
 from conftest import make_event
@@ -85,16 +85,12 @@ async def test_a_model_failure_produces_no_draft_rather_than_a_bad_one():
     """The caller falls back to the template. Never a wrong reply in someone
     else's name, and never silence either."""
 
-    class Broken(Model):
-        async def get_response(self, *a, **kw):
-            raise RuntimeError("provider down")
+    def _down(messages, info):
+        raise RuntimeError("provider down")
 
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
-
-    draft = await Responder(config=CONFIG, model=Broken()).draft(
-        asking="ask", context=(), tone=TONE
-    )
+    draft = await Responder(
+        config=CONFIG, model=FunctionModel(_down, model_name="test-model")
+    ).draft(asking="ask", context=(), tone=TONE)
 
     assert draft is None
 
@@ -203,7 +199,7 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
     section lives in `build_input`'s output, not in the static
     `instructions` — captured through `record=`, the same sink `collecting()`
     already uses elsewhere in this file. The wiring is checked by reaching
-    into `._run.agent.tools`, the way
+    into `._run.tools`, the way
     `test_max_tokens_reaches_the_model_settings_without_a_knob_for_it`
     already reaches into `.agent.model_settings` — one specific construction,
     not a production caller `harness.py`'s own rule is about.
@@ -234,8 +230,8 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
         state=FridayState(channel_id="c1", agent="responder"),
     )
 
-    without_names = {t.name for t in without._run.agent.tools}
-    with_names = {t.name for t in with_store._run.agent.tools}
+    without_names = {t.name for t in without._run.tools}
+    with_names = {t.name for t in with_store._run.tools}
 
     assert "memory_search" not in without_names
     assert "memory_search" not in without_calls[0].prompt

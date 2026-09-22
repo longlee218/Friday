@@ -6,7 +6,7 @@ fact. A log line answers it while the process is alive and never again.
 
 from __future__ import annotations
 
-from friday.sdk.testing import Model
+from friday.sdk.testing import FunctionModel
 from dataclasses import asdict
 
 from friday.sdk.testing import ScriptedModel, function_call
@@ -108,18 +108,16 @@ async def test_a_credential_never_reaches_storage(inbox, provider, db):
     place it must never turn up, and the realistic leak is an exception."""
     from friday.triage.runner import TriageRunner
 
-    class Leaking(Model):
-        async def get_response(self, *a, **kw):
-            raise RuntimeError("401 from Bearer sk-abcdefghijklmnopqrstuvwxyz012345")
+    def _leak(messages, info):
+        raise RuntimeError("401 from Bearer sk-abcdefghijklmnopqrstuvwxyz012345")
 
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
+    leaking = FunctionModel(_leak, model_name="test-model")
 
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
 
     await TriageRunner(
-        db=db, triage=Triage(config=CONFIG, model=Leaking()), confidence_threshold=0.7
+        db=db, triage=Triage(config=CONFIG, model=leaking), confidence_threshold=0.7
     ).run_once()
 
     (decision,) = await db.decisions()

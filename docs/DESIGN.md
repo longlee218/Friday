@@ -15,10 +15,13 @@ Project state (what is running, which boards are open) lives in
 
 ## Environment
 
-Python **3.13** (`.python-version`), managed with **uv**. Runtime
-dependencies in `pyproject.toml` are deliberately few — `openai-agents` is
-here for speed, not for keeps: `friday/agent/harness.py` is the only module
-allowed to import it.
+Python **3.13** (`.python-version`), managed with **uv**. The agent runtime is
+**`pydantic-ai-slim[openai,mcp]`** (pinned): `friday/agent/harness.py` is the
+only module allowed to import it, and `mcp.py` and `llm_log.py` take its names
+through the harness. It replaced `openai-agents` in ticket 05 — a stability
+policy instead of a 0.x line, and structured output, typed run context and hook
+capabilities as the framework's main paths rather than a hand-built tool, an
+identity trick and a per-run mutation of a shared agent.
 
 `web/` is React + Vite, built to static files that `friday/ops/api.py`
 serves from the same process — one container, no Node at runtime.
@@ -105,22 +108,22 @@ package.
 **Every tool lives in `friday/tools/`.** `tests/test_tools.py` asserts the
 tool list — built from the registered factories, not `vars(module)`, so a
 tool living in a closure is still caught — and forbids declaring one
-anywhere else. **One exemption**: the answer tool `Harness(answers=...)`
-builds lives in `friday/agent/harness.py`, because it needs the SDK's
-`FunctionTool` and answering is not a capability an agent chooses among;
-`test_the_one_tool_outside_the_package_is_the_answer_tool` pins that it
-stays the only occupant.
+anywhere else. The answer an `Harness(answers=...)` agent gives is **not** a
+tool in that list: it is the run's *output*, a Pydantic AI `ToolOutput`
+generated per shape from the shape's own fields, so `harness.py` declares no
+tool of its own; `test_the_answer_is_a_run_s_output_not_a_door_an_agent_chooses`
+pins that.
 
-`harness.tool` wraps the SDK's `function_tool` and defaults
-`failure_error_function`, so a failing tool body tells the model
-"unavailable, carry on" instead of leaking a raw exception. A
-`ModelBehaviorError` (bad JSON, schema violation) is exempt and keeps the
-SDK's own message — the one failure the model can fix inside the same run.
-An agent built with `Harness(answers=...)` stops the run the moment the
-answer tool returns an **instance** of the shape, not on the first tool
-output. `ToolContext` is the SDK's own type, never a subclass —
-`function_schema` decides whether a first parameter is the run context by
-identity. Four tools reach a skill, split by what the agent already knows:
+`harness.tool` wraps Pydantic AI's `Tool`; the "failing tool body tells the
+model 'unavailable, carry on'" rule lives in the run's hooks
+(`llm_log.py`'s `tool_execute_error`), where the substitution and the record
+are one decision. A `ModelRetry` a tool raises is passed through untouched —
+the one failure the model can fix inside the same run — and bad-argument
+failures Pydantic AI retries for us before the body runs. The answer output
+tool is *forced* (no text output is allowed), so the run ends the moment the
+model calls it. `ToolContext` is an alias of `RunContext`, hidden from the
+tool's JSON schema by design, and a tool reads its per-run state off
+`ctx.deps`. Four tools reach a skill, split by what the agent already knows:
 `fetch_skill` by name, `search_skills` when it has no name,
 `describe_skill` for metadata, `read_skill_file` for a path a body linked
 to.
@@ -176,8 +179,10 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   which the configured provider accepts and silently ignores — validated
   in-process (`fits`). One correction, and it is the turn budget. A refusal
   never quotes the failing value back.
-- **`friday/agent/harness.py` is the only module that may import `agents`.**
-  `tests/test_harness.py` enforces this.
+- **`friday/agent/harness.py` is the only module that may import the agent
+  SDK** (`pydantic_ai`, `fastmcp`), the one exception being
+  `friday/sdk/testing/` (the test-double seam). `tests/test_harness.py`
+  enforces this.
 - **A hiccup is retried here and nowhere else.** `Harness._attempts` retries
   connection errors, timeouts, 429 and 5xx — never a 400 — with the client's
   own retry off. `timeout_seconds` bounds the whole run.
@@ -185,8 +190,9 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   agent wrote, failing open on a store error. What a refusal becomes is the
   caller's.
 - **One state travels a message's whole journey, and it is read-only.**
-  `FridayState` is the SDK's per-run `context`; every change is a named
-  method returning a new state. `tests/test_run_context.py` enforces it.
+  `FridayState` is the SDK's per-run dependency (`RunContext.deps`); every
+  change is a named method returning a new state. `tests/test_run_context.py`
+  enforces it.
 
 ### Workflow / DAG
 
@@ -339,8 +345,10 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   `record_model_call`/`record_tool_call` publish on the in-process
   `EventBus` after commit; `/api/events` replays from the bus on reconnect
   (`Last-Event-ID`).
-- **Nothing takes a dangerous action, so there is no second gate.**
-  `Harness.checkpoint`/`resume` still exist; nothing calls them.
+- **Nothing takes a dangerous action, so there is no second gate.** The
+  `Harness.checkpoint`/`resume` pair that could pause a run for approval was
+  deleted in ticket 05 (nothing called it); Pydantic AI's deferred-tool
+  mechanism is where it would be rebuilt if human-in-the-loop returns.
 
 ### Triage & extraction
 
@@ -589,22 +597,24 @@ Only two steps use a model. The control flow between them is ordinary code.
 
 ## LLM runtime
 
-**The OpenAI Agents SDK** (`openai-agents`), driven through the **Chat
-Completions** API rather than Responses. Chat Completions is the de-facto
-standard that other providers implement, so `base_url`, `api_key` and `model`
-are configuration — DeepSeek, MiniMax or anything else OpenAI-compatible can be
-swapped in without touching code.
+**Pydantic AI** (`pydantic-ai-slim`), driven through the **Chat Completions**
+API rather than Responses. Chat Completions is the de-facto standard that other
+providers implement, so `base_url`, `api_key` and `model` are configuration —
+DeepSeek, MiniMax or anything else OpenAI-compatible can be swapped in without
+touching code.
 
 ```python
-client = AsyncOpenAI(base_url=..., api_key=...)
-Agent(model=OpenAIChatCompletionsModel(model=..., openai_client=client))
+client = AsyncOpenAI(base_url=..., api_key=..., max_retries=0)
+OpenAIChatModel(model, provider=OpenAIProvider(openai_client=client))
 ```
 
-**Tracing must be disabled** (`set_tracing_disabled(True)`). It is on by
-default and exports to OpenAI using the same key as model requests — with a
-third-party provider that leaks both the traffic and the credential.
+**No telemetry is emitted** unless an agent is instrumented, and Friday never
+instruments one — the openai-agents predecessor exported traces to OpenAI using
+the same key as model requests, which with a third-party provider leaked both
+the traffic and the credential, and had to be switched off explicitly.
 
-**A known compatibility risk:** the SDK sends `response_format: json_schema`
+**A known compatibility risk:** a `json_schema` structured-output mode sends
+`response_format: json_schema`
 for structured output, and some OpenAI-compatible providers reject it with a
 400. This is why triage expresses its result as a **tool call** rather than a
 structured output type — tool calling is the better-supported surface. Verify
@@ -627,14 +637,20 @@ rejects the parameter is one you find out about immediately; one that accepts
 and ignores it leaves a schema in the code that reads like a guarantee and
 enforces nothing. **Neither surface constrains this provider** — tool calling
 is not enforced on the wire either, and what makes the tool path safe is that
-the SDK validates arguments *client-side* with pydantic and hands a malformed
-call back for one retry.
+the arguments are validated *in this process* and a malformed call handed back
+for one correction.
 
-That is the mechanism generalised in `friday/agent/structured.py` and
-`Harness.run_structured`: the shape is a dataclass, it is described to the
-model in the prompt, the answer is validated in this process, and an answer
-that does not fit earns exactly one correction turn. Nothing is sent on the
-wire, because sending it buys nothing here and costs a false sense of safety.
+That is the mechanism in `friday/agent/structured.py` and
+`Harness.run_structured`: the shape is a dataclass carried by a Pydantic AI
+`ToolOutput` whose function receives the model's raw arguments and validates
+them with `fits` (not the framework's own pydantic validation, whose retry
+message would quote the offending value — an extractor's arguments are
+reporter-controlled text). The shape is described to the model in the prompt,
+the answer is validated here, and one that does not fit earns exactly one
+correction turn (`retries={'output': 1}`). A reply the model writes as prose
+anyway is still read, off the run's captured messages (D13). Nothing is sent on
+the wire to enforce the shape, because sending it buys nothing here and costs a
+false sense of safety.
 
 ## Triage
 
@@ -661,8 +677,9 @@ skip(confidence)
 > extractor per task type. A test now fails if a triage tool asks for anything
 > but `confidence`, so the schemas written above are the ones the code forbids.
 
-`tool_use_behavior="stop_on_first_tool"` ends the run on the first call, so this
-is a single turn with no loop.
+Triage's answer is a Pydantic AI **output tool** the framework forces (no text
+output is allowed), so the run ends the moment the model calls it — a single
+turn with no loop, and no way for the model to answer in prose instead.
 
 **The tool reports the decision; it does not act on it.** Triage stays pure, so
 it is testable with no database — the caller applies the outcome.
@@ -687,9 +704,11 @@ asked for — and a reporter who wrote "login API, deviceId X, 500" has
 already named a request the log can be searched for. The endpoint alone does
 not count: it matches every caller of it.
 
-**Never-drop is enforced through the SDK's `error_handlers`**, which recover
-from `max_turns`, `model_refusal` and `invalid_final_output` by returning a
-value instead of raising. Each maps to a task needing human input.
+**Never-drop is enforced in `Harness._settle`**, which turns every failure —
+a provider exception, a timeout, a turn cap (`UsageLimitExceeded`), a
+structured answer that never fit (`UnexpectedModelBehavior`) — into `None` and
+a scrubbed `last_error` rather than an exception a caller must catch. Each maps
+to a task needing human input.
 
 **Triage runs off a queue, not inline.** Events are already persisted, so a
 separate task picks up untriaged ones. A model call inside the ingest loop would

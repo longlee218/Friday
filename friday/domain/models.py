@@ -1164,10 +1164,10 @@ class ToolCall:
     answer, and it becomes an expensive one the day a tool leaves this process
     with arguments a model chose.
 
-    `failed` rather than an error string, because a tool that fails here does
-    not raise: `harness._tool_failed` turns it into a message for the model,
-    which is a *result* as far as the SDK is concerned. Without this flag a
-    failure is indistinguishable from an answer that happens to read like one.
+    `failed` rather than an error string, because a tool that fails does not
+    reach the recorder as a failure: the run's tool-failure hook turns it into a
+    "carry on without it" message for the model, an ordinary *result*. Without
+    this flag a failure is indistinguishable from an answer that reads like one.
     """
 
     agent: str

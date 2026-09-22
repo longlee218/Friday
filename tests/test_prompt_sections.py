@@ -424,7 +424,7 @@ async def test_an_empty_extraction_is_not_a_successful_one():
             self.answer = answer
 
         async def run(self, prompt, **kwargs):
-            return type("R", (), {"final_output": self.answer})()
+            return type("R", (), {"output": self.answer})()
 
     nothing = build_extractor(
         params_cls=ApiIssueParams, harness=Says(""), name="silent",

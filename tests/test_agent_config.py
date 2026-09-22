@@ -110,7 +110,7 @@ def test_max_tokens_reaches_the_model_settings_without_a_knob_for_it():
         instructions="i",
     )
 
-    assert built.agent.model_settings.max_tokens == 4096
+    assert built.agent.model_settings["max_tokens"] == 4096
 
 
 def test_the_client_retries_nothing_and_waits_no_longer_than_the_run():
@@ -133,8 +133,8 @@ def test_the_client_retries_nothing_and_waits_no_longer_than_the_run():
         )
     )
 
-    assert model._client.max_retries == 0
+    assert model.client.max_retries == 0
     # One attempt allowed, so one attempt gets the whole budget. What a share
     # of it buys when there is more than one is
     # `test_one_request_may_not_spend_the_whole_run`.
-    assert model._client.timeout == 45.0
+    assert model.client.timeout == 45.0

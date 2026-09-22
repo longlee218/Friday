@@ -829,24 +829,27 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
 
 
 async def test_the_stranger_line_reaches_the_prompt_and_only_then(tmp_path):
-    from friday.sdk.testing import Model
+    from friday.sdk.testing import FunctionModel
 
     from friday.config import AgentConfig
     from friday.responder import Responder
 
     prompts: list[str] = []
 
-    class Capture(Model):
-        async def get_response(self, system_instructions, input, *a, **kw):
-            prompts.append(str(input))
-            raise RuntimeError("captured")
-
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
+    def capture(messages, info):
+        shown = [
+            part.content
+            for message in messages
+            for part in getattr(message, "parts", [])
+            if getattr(part, "part_kind", "") == "user-prompt"
+            and isinstance(part.content, str)
+        ]
+        prompts.append("\n".join(shown))
+        raise RuntimeError("captured")
 
     responder = Responder(
         config=AgentConfig(name="r", api_key="k", base_url="http://x/v1", model="m"),
-        model=Capture(),
+        model=FunctionModel(capture, model_name="test-model"),
     )
     await responder.draft(asking="q", stranger=True)
     await responder.draft(asking="q", stranger=False)

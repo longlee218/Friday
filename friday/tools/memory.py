@@ -39,13 +39,11 @@ and sparse rather than sequential, so a hallucinated one fails instead of
 landing on somebody else's row. With `1, 2, 3…` a model that invents `m12`
 deletes whatever `m12` happens to be.
 
-The docstrings below *are* the schema: `harness.tool` leaves
-`use_docstring_info` at the SDK's default of True — the knob LangChain calls
-`parse_docstring`, where it defaults to False — so an
-`Args:` line reaches the model as that parameter's description. The one for
-`memory_id` is load-bearing: without it the model is handed a bare
-`memory_id: string` and nothing saying it must be one it read back, which is
-the whole of what makes an opaque id safe.
+The docstrings below *are* the schema: Pydantic AI reads a google-style `Args:`
+line off each function's docstring and hands it to the model as that
+parameter's description. The one for `memory_id` is load-bearing: without it the
+model is handed a bare `memory_id: string` and nothing saying it must be one it
+read back, which is the whole of what makes an opaque id safe.
 """
 
 from __future__ import annotations
@@ -97,14 +95,14 @@ def memory_tools(db):
     The split is by lifetime. `db` lives as long as the process, so it is
     closed over; the state lives as long as one run, so it is
     `Harness.run(context=FridayState(...))` and each tool reads it off
-    `ctx.context` through `_state`. An agent given these must therefore be
+    `ctx.deps` through `_state`. An agent given these must therefore be
     built with `context_type=FridayState`.
 
-    A store that raises is not this module's problem to phrase. `harness.tool`
-    replaces the SDK's failure message for every tool here, because the
-    default leaks `str(error)` to the model and tells it to try again — and
-    "try again" after a write that may have landed is how a room ends up with
-    the same memory twice.
+    A store that raises is not this module's problem to phrase. The run's
+    tool-failure hook replaces the model-facing message for every tool here with
+    "unavailable, carry on", because leaking `str(error)` and telling the model
+    to try again — after a write that may have landed — is how a room ends up
+    with the same memory twice.
 
     `db` is `friday/store/db.py`'s `Database`, answering five methods:
 
@@ -305,8 +303,8 @@ class NotWired(RuntimeError):
     """The agent holding these tools was run without a `FridayState`.
 
     Its own class so the log line names the mistake. Without it the state was
-    dereferenced straight off `ctx.context`, an `AttributeError` on `None`
-    reached `harness._tool_failed`, and the operator was told a tool was
+    dereferenced straight off `ctx.deps`, an `AttributeError` on `None`
+    reached the run's tool-failure hook, and the operator was told a tool was
     unavailable — which reads as the store being down, and is instead an agent
     that was built without `context_type=FridayState` or run without a
     `context=`. That is the failure mode of wiring a *new* agent to these,
@@ -329,7 +327,7 @@ def _state(ctx) -> FridayState:
     that slot (D10) — and the rename was left half-done for a commit, so this
     function said "state" in its name and "scope" in every line of its body.
     """
-    state = getattr(ctx, "context", None)
+    state = getattr(ctx, "deps", None)
     if not isinstance(state, FridayState):
         raise NotWired(
             "memory tools were run without a FridayState: build the agent with "

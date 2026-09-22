@@ -123,7 +123,6 @@ async def test_a_multi_message_row_reaches_triage_as_a_real_turn(tmp_path):
     a joined string — otherwise nothing here ever exercises the ownership
     mark or a real multi-line render, which is exactly the gap ticket 09's
     own criterion named."""
-    from friday.sdk.testing import Model
 
     from evals.dataset import write_jsonl
     from friday.triage import Triage
@@ -145,21 +144,16 @@ async def test_a_multi_message_row_reaches_triage_as_a_real_turn(tmp_path):
 
     seen_turns: list = []
 
-    class _Capturing(Model):
-        async def get_response(self, *a, **kw):
-            return await ScriptedModel([
-                function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")
-            ]).get_response(*a, **kw)
-
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
+    answering = ScriptedModel(
+        [[function_call("answer", {"type": "api_issue", "confidence": 0.9})]]
+    )
 
     class _RecordingTriage(Triage):
         async def decide(self, event, *, turn=()):
             seen_turns.append(turn)
             return await super().decide(event, turn=turn)
 
-    triage = _RecordingTriage(config=CONFIG, model=_Capturing())
+    triage = _RecordingTriage(config=CONFIG, model=answering)
 
     await run(dataset_path=dataset, triage=triage)
 

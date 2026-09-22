@@ -14,8 +14,12 @@ the tool schema is the only thing stopping a model from being asked to do both.
 from __future__ import annotations
 
 import pytest
-from friday.sdk.testing import Model
-from friday.sdk.testing import ScriptedModel, assistant_message, function_call
+from friday.sdk.testing import (
+    FunctionModel,
+    ScriptedModel,
+    assistant_message,
+    function_call,
+)
 
 from conftest import make_event, summary_row
 from friday.config import AgentConfig
@@ -33,6 +37,51 @@ CONFIG = AgentConfig(
 
 def triage_with(*steps) -> Triage:
     return Triage(config=CONFIG, model=ScriptedModel(list(steps)))
+
+
+def _raising(exc) -> FunctionModel:
+    """A model that raises, so a provider failure can be scripted."""
+
+    def fn(messages, info):
+        raise exc
+
+    return FunctionModel(fn, model_name="test-model")
+
+
+def _shown(messages) -> str:
+    """Everything the model was shown across a request's message history, as one
+    string — instructions and every text part — so a test can assert on what
+    actually reached it."""
+    bits: list[str] = []
+    for message in messages:
+        instructions = getattr(message, "instructions", None)
+        if instructions:
+            bits.append(instructions)
+        for part in getattr(message, "parts", []):
+            content = getattr(part, "content", None)
+            if isinstance(content, str):
+                bits.append(content)
+            elif isinstance(content, list):
+                bits.append(
+                    " ".join(
+                        item if isinstance(item, str) else getattr(item, "text", "")
+                        for item in content
+                    )
+                )
+    return "\n".join(bits)
+
+
+def _capturing(seen: list) -> FunctionModel:
+    """A model that records what it was shown, then answers `api_issue`."""
+    from friday.sdk.testing import ModelResponse
+
+    def fn(messages, info):
+        seen.append(_shown(messages))
+        return ModelResponse(
+            parts=[function_call("answer", {"type": "api_issue", "confidence": 0.9})]
+        )
+
+    return FunctionModel(fn, model_name="test-model")
 
 
 async def decide(triage, text="the api is wrong", turn=()):
@@ -88,7 +137,7 @@ async def test_a_message_carrying_nothing_still_decides():
 
 async def test_answering_without_calling_a_tool_asks_for_a_human():
     """Never-drop: an undecided message becomes a task, not silence."""
-    triage = triage_with([[assistant_message("I am not sure what this is.")]])
+    triage = triage_with([assistant_message("I am not sure what this is.")])
 
     outcome = await decide(triage)
 
@@ -96,7 +145,7 @@ async def test_answering_without_calling_a_tool_asks_for_a_human():
 
 
 async def test_a_model_failure_asks_for_a_human():
-    triage = triage_with(RuntimeError("provider exploded"))
+    triage = Triage(config=CONFIG, model=_raising(RuntimeError("provider exploded")))
 
     outcome = await decide(triage)
 
@@ -111,7 +160,7 @@ async def test_triage_needs_no_database():
     assert "db" not in inspect.signature(Triage.__init__).parameters
 
 
-class NeverCalled(Model):
+class NeverCalled(FunctionModel):
     """A model that records being reached, and refuses to answer.
 
     It **counts** rather than only raising, and the difference is the whole
@@ -129,13 +178,11 @@ class NeverCalled(Model):
     def __init__(self) -> None:
         self.reached = 0
 
-    async def get_response(self, *a, **kw):
-        self.reached += 1
-        raise AssertionError("the model was called")
+        def fn(messages, info):
+            self.reached += 1
+            raise AssertionError("the model was called")
 
-    def stream_response(self, *a, **kw):
-        self.reached += 1
-        raise AssertionError("the model was called")
+        super().__init__(fn, model_name="test-model")
 
 
 WORDS = Sensitive(["lương", "thưởng", "salary", "bonus", "mật khẩu", "xin api key"])
@@ -322,7 +369,7 @@ def test_triage_carries_no_skill_catalogue_and_cannot_be_given_one():
     # mutation that appended a catalogue to the real call passed a first
     # version of this test that checked the constant — the same "assert on a
     # proxy" mistake this session has already made twice.
-    built = Triage(config=CONFIG)._run.agent.instructions
+    built = Triage(config=CONFIG)._run.instructions
 
     for where_from, text in (("the constant", INSTRUCTIONS), ("the agent", built)):
         assert "<skill_system>" not in text, f"a catalogue reached {where_from}"
@@ -337,15 +384,15 @@ def test_triage_carries_no_skill_catalogue_and_cannot_be_given_one():
 def test_triage_still_has_exactly_the_one_tool_that_is_its_answer():
     """Removing the catalogue must not remove the answer.
 
-    It was two tools — `classify` naming everything that opens work, `skip`
-    naming the absence of it — and D6 made them one closed set on one tool,
-    so this counts one where it used to count two.
+    The answer is the run's *output* now, not a door in the tool list — Pydantic
+    AI forces the output tool that carries the closed set (D6 made `classify` and
+    `skip` one set on one shape). So triage carries no function tools at all, and
+    its answer shape is what remains.
     """
-    from friday.agent.harness import ANSWER
-
     triage = triage_with()
 
-    assert [t.name for t in triage._run.tools] == [ANSWER]
+    assert triage._run.tools == [], "triage carries no doors, only its answer"
+    assert triage._run.answers is not None, "the answer shape is still declared"
 
 
 # --- triage reads a light context (ticket 09) -----------------------------
@@ -433,17 +480,7 @@ async def test_decide_resolves_the_room_from_its_own_store():
 
     seen = []
 
-    class _Capturing(Model):
-        async def get_response(self, *a, **kw):
-            seen.append(kw.get("input") or a)
-            return await ScriptedModel([
-                function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")
-            ]).get_response(*a, **kw)
-
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
-
-    triage = Triage(config=CONFIG, model=_Capturing(), summaries=_Summaries())
+    triage = Triage(config=CONFIG, model=_capturing(seen), summaries=_Summaries())
 
     await triage.decide(make_event(text="api lỗi", channel_id="watched"))
     said = str(seen[0])
@@ -465,17 +502,7 @@ async def test_decide_renders_the_given_turn_not_just_the_one_event():
     caught nothing because of it."""
     seen = []
 
-    class _Capturing(Model):
-        async def get_response(self, *a, **kw):
-            seen.append(str(kw.get("input") or a))
-            return await ScriptedModel([
-                function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")
-            ]).get_response(*a, **kw)
-
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
-
-    triage = Triage(config=CONFIG, model=_Capturing())
+    triage = Triage(config=CONFIG, model=_capturing(seen))
 
     await triage.decide(
         make_event(message_id="1", text="ignored — turn is given instead"),
@@ -697,7 +724,7 @@ def test_the_shared_prefix_between_two_triage_calls_is_almost_the_whole_prompt()
     from friday.triage.context import LightContext
     from friday.triage.prompt import build_input
 
-    instructions = Triage(config=CONFIG)._run.agent.instructions
+    instructions = Triage(config=CONFIG)._run.instructions
     room = summary_row(
         topic="the reelme wrapper api",
         facts=["test.apero is the staging host"],

@@ -94,7 +94,7 @@ def test_a_server_offers_only_what_some_reader_declared():
         allowed=frozenset({"loki_query_range"}),
     )
 
-    assert server.tool_filter is not None
+    assert server.filter_func is not None
 
 
 def test_there_is_always_a_filter_now_and_that_is_the_reversal():
@@ -108,4 +108,4 @@ def test_there_is_always_a_filter_now_and_that_is_the_reversal():
         allowed=frozenset(),
     )
 
-    assert server.tool_filter is not None
+    assert server.filter_func is not None

@@ -253,7 +253,7 @@ class Responder:
             log.warning("falling back to the template")
             return None
 
-        text = _without_reasoning(result.final_output or "")
+        text = _without_reasoning(result.output or "")
         if not text:
             log.warning("responder returned nothing, falling back to the template")
             return None

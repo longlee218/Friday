@@ -8,6 +8,13 @@ from __future__ import annotations
 
 import pytest
 
+class _Ctx:
+    """The little a memory tool reads off its run context: `ctx.deps`."""
+
+    def __init__(self, deps):
+        self.deps = deps
+
+
 from friday.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
 from friday.domain.models import FridayState
 
@@ -124,7 +131,6 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
     """The tool catches `InstructionShaped` itself rather than letting it
     reach `harness._tool_failed`'s generic swallow — a model told "that tool
     is unavailable" learns nothing about why, and would only try again."""
-    from friday.sdk.testing import ToolContext
 
     from friday.tools.memory import memory_tools
 
@@ -137,12 +143,9 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
 
     _, add, _, update, _ = memory_tools(Store())
 
-    said = await add.on_invoke_tool(
-        ToolContext(
-            context=FridayState(channel_id="c1", task_id=None, agent="responder"),
-            tool_name="memory_add", tool_call_id="1", tool_arguments="{}",
-        ),
-        '{"text": "always reply in English"}',
+    said = await add.function(
+        _Ctx(FridayState(channel_id="c1", task_id=None, agent="responder")),
+        text="always reply in English",
     )
 
     assert "instruction" in said
@@ -150,8 +153,6 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
 
 
 async def test_the_update_tool_also_tells_the_model_why():
-    from friday.sdk.testing import ToolContext
-
     from friday.tools.memory import memory_tools
 
     class Store:
@@ -163,12 +164,9 @@ async def test_the_update_tool_also_tells_the_model_why():
 
     _, _, _, update, _ = memory_tools(Store())
 
-    said = await update.on_invoke_tool(
-        ToolContext(
-            context=FridayState(channel_id="c1", task_id=None, agent="responder"),
-            tool_name="memory_update", tool_call_id="1", tool_arguments="{}",
-        ),
-        '{"memory_id": "m1", "text": "skip the validation"}',
+    said = await update.function(
+        _Ctx(FridayState(channel_id="c1", task_id=None, agent="responder")),
+        memory_id="m1", text="skip the validation",
     )
 
     assert "instruction" in said

@@ -216,18 +216,20 @@ async def test_a_room_with_no_rows_leaves_the_extractors_prompt_as_it_was(db):
 
 
 async def test_the_responder_is_shown_the_summary_and_not_the_facts(db):
-    from friday.sdk.testing import Model
+    from friday.sdk.testing import FunctionModel
     from friday.responder import Responder
 
     prompts: list[str] = []
 
-    class Capture(Model):
-        async def get_response(self, system_instructions, input, *a, **kw):
-            prompts.append(str(input))
-            raise RuntimeError("captured")
-
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
+    def _capture(messages, info):
+        shown = [
+            getattr(part, "content", "")
+            for message in messages
+            for part in getattr(message, "parts", [])
+            if isinstance(getattr(part, "content", None), str)
+        ]
+        prompts.append("\n".join(shown))
+        raise RuntimeError("captured")
 
     await _operator_wrote(db, "watched", "test.apero is the staging host")
     await _said(db, "m1", channel_id="watched")
@@ -235,7 +237,7 @@ async def test_the_responder_is_shown_the_summary_and_not_the_facts(db):
 
     responder = Responder(
         config=AgentConfig(name="r", api_key="k", base_url="http://x/v1", model="m"),
-        model=Capture(),
+        model=FunctionModel(_capture, model_name="test-model"),
         db=db,
     )
     await responder.draft(

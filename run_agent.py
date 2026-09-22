@@ -9,6 +9,10 @@ from dataclasses import asdict
 import os
 from pathlib import Path
 
+# Pydantic AI prints a Logfire banner to stdout at first use unless this is set;
+# observability stays off unless configured (research doc, 2026-09-22).
+os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
+
 from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
@@ -19,7 +23,7 @@ from friday.store.db import Database
 from friday.inbox import Inbox
 from friday.ops.api import bind, build_api, check_exposure
 from friday.ops.liveness import Heartbeat, Liveness
-from friday.agent.mcp import build as build_mcp
+from friday.agent.mcp import build as build_mcp, name_of
 from friday.ops.redact import Redacting, install_excepthook
 from friday.outbox import Outbox, record_decision
 from friday.ops.single_instance import single_instance_lock
@@ -208,12 +212,12 @@ async def _run(stack: AsyncExitStack) -> None:
             # unattended. The graph says which source it wanted and skips.
             log.warning(
                 "mcp %s is not available and is being skipped — %s: %s",
-                server.name, type(refused).__name__, refused,
+                name_of(server), type(refused).__name__, refused,
             )
             continue
         servers.append(server)
     if servers:
-        log.info("mcp: %s", ", ".join(s.name for s in servers))
+        log.info("mcp: %s", ", ".join(name_of(s) for s in servers))
 
     # Register the workflow's extraction agents. Composition root does not
     # know about each one — it asks the extractor module to wire itself
@@ -236,7 +240,7 @@ async def _run(stack: AsyncExitStack) -> None:
 
     register_dags(
         config,
-        servers={s.name: s for s in servers},
+        servers={name_of(s): s for s in servers},
         skills=skills,
         # `api_issue`'s one model node is built here, the same way the
         # extractors and the responder are — so its calls are recorded and

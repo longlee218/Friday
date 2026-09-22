@@ -614,18 +614,16 @@ async def test_a_mention_is_never_lost_to_a_spent_budget(db, provider, inbox):
     """
     from dataclasses import replace as _replace
 
-    from friday.sdk.testing import Model
+    from friday.sdk.testing import FunctionModel
 
     from friday.config import AgentConfig
     from friday.triage import Triage
     from friday.triage.runner import NEEDS_HUMAN, TriageRunner
 
-    class NeverReached(Model):
-        async def get_response(self, *a, **kw):
-            raise AssertionError("the provider was called despite the ceiling")
+    def _never(messages, info):
+        raise AssertionError("the provider was called despite the ceiling")
 
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
+    never_reached = FunctionModel(_never, model_name="test-model")
 
     config = AgentConfig(
         name="triage", api_key="k", base_url="https://example.invalid/v1",
@@ -637,7 +635,7 @@ async def test_a_mention_is_never_lost_to_a_spent_budget(db, provider, inbox):
     await TriageRunner(
         db=db,
         triage=Triage(
-            config=config, model=NeverReached(), spent=lambda agent: _spent(999)
+            config=config, model=never_reached, spent=lambda agent: _spent(999)
         ),
         confidence_threshold=0.7,
     ).run_once()
@@ -661,19 +659,17 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(db, provider, inbo
     """
     from dataclasses import replace as _replace
 
-    from friday.sdk.testing import Model
+    from friday.sdk.testing import FunctionModel
 
     from friday.config import AgentConfig
     from friday.triage import Triage
     from friday.triage.runner import NEEDS_HUMAN, TriageRunner
     from tests.test_harness import _rate_limited
 
-    class AlwaysBusy(Model):
-        async def get_response(self, *a, **kw):
-            raise _rate_limited()
+    def _busy(messages, info):
+        raise _rate_limited()
 
-        def stream_response(self, *a, **kw):
-            raise NotImplementedError
+    always_busy = FunctionModel(_busy, model_name="test-model")
 
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
@@ -685,7 +681,7 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(db, provider, inbo
                 name="triage", api_key="k", base_url="https://example.invalid/v1",
                 model="test-model", max_attempts=3, retry_backoff_seconds=0.0,
             ),
-            model=AlwaysBusy(),
+            model=always_busy,
         ),
         confidence_threshold=0.7,
     ).run_once()

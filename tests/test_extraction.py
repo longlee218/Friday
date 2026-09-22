@@ -133,7 +133,7 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
         )
 
     class StubResult:
-        final_output = '{"environment": "production"}'
+        output = '{"environment": "production"}'
 
     class StubHarness(ScriptedHarness):
         tool_turns = 0
@@ -190,7 +190,7 @@ def test_an_extractor_returns_none_when_harness_fails():
 
 def test_an_extractor_returns_none_when_output_does_not_parse():
     class StubResult:
-        final_output = "not even close to JSON"
+        output = "not even close to JSON"
 
     class StubHarness(ScriptedHarness):
         tool_turns = 0
