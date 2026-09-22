@@ -27,14 +27,28 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import mkdtemp
 
 from dotenv import load_dotenv
+from pydantic_evals import Case, Dataset
+from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 
+from evals import outputs_or_raise
 from evals.api_issue import Scored, report, score
 
 CASES = Path("data/cases")
+
+
+@dataclass
+class CauseFound(Evaluator):
+    """The framework's per-case view: 1.0 when the diagnosis carried every token
+    the operator said a correct answer must contain. `report` below is where the
+    three domain numbers and the rows behind them live."""
+
+    def evaluate(self, ctx: EvaluatorContext[dict, Scored]) -> float:
+        return 1.0 if ctx.output.cause_found else 0.0
 
 
 def cases(directory: Path = CASES) -> list[dict]:
@@ -57,10 +71,16 @@ def unlabelled(found: list[dict]) -> list[str]:
 
 
 async def run(found: list[dict], *, into: Path) -> list[Scored]:
+    """Run every captured case through the graph and score it, through a
+    `pydantic-evals` `Dataset`. The framework runs the cases and holds the
+    per-case report; the task replays one case with the model on and scores it,
+    and the three domain numbers stay in `report`. **Sequential**: each replay
+    is a full graph run against the live provider, and running them side by side
+    would only interleave their output directories for nothing.
+    """
     from replay_case import run_captured
 
-    scored: list[Scored] = []
-    for case in found:
+    async def diagnose(case: dict) -> Scored:
         final, _runs, _wall, _reports = await run_captured(
             case, with_model=True, into=into / str(case.get("id", "case"))
         )
@@ -68,8 +88,20 @@ async def run(found: list[dict], *, into: Path) -> list[Scored]:
         diagnosis = (
             thought.get("diagnosis") if isinstance(thought, dict) else None
         )
-        scored.append(score(case, diagnosis))
-    return scored
+        return score(case, diagnosis)
+
+    dataset = Dataset[dict, Scored, None](
+        name="api_issue",
+        cases=[
+            Case(name=str(case.get("id", f"case-{i}")), inputs=case, expected_output=None)
+            for i, case in enumerate(found)
+        ],
+        evaluators=[CauseFound()],
+    )
+    report_ = await dataset.evaluate(diagnose, max_concurrency=1, progress=False)
+    # A case whose replay raised is dropped by the framework; surface it rather
+    # than score a smaller set than was given (see `outputs_or_raise`).
+    return outputs_or_raise(report_)
 
 
 async def main() -> int:

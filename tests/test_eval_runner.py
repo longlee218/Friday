@@ -223,3 +223,45 @@ async def test_a_clean_run_still_reports_the_number_as_zero(tmp_path):
     assert "decisions outside the closed set: 0" in report(
         await run(dataset, triage=triage)
     )
+
+
+# --- the fail-loud guard on the pydantic-evals runner (ticket 18) ------------
+
+
+class _FakeCase:
+    def __init__(self, output):
+        self.output = output
+
+
+class _FakeFailure:
+    name = "eval-3"
+    error_message = "provider down"
+
+
+class _FakeReport:
+    def __init__(self, cases, failures):
+        self.cases = cases
+        self.failures = failures
+
+
+def test_a_dropped_eval_row_is_an_error_not_a_quietly_smaller_set():
+    """`pydantic-evals` parks a row whose task raised in `report.failures` and
+    returns only the successes. For a scored regression net that is the wrong
+    default — accuracy and the confusion matrix would be computed over a smaller
+    denominator with nothing saying so — so the runner raises instead. Deleting
+    the `report.failures` check turns a transient provider error into a
+    better-looking score, which is exactly the silence this guards."""
+    import pytest
+
+    from evals import outputs_or_raise
+
+    with pytest.raises(RuntimeError, match="smaller than the set given"):
+        outputs_or_raise(_FakeReport([_FakeCase("a")], [_FakeFailure()]))
+
+
+def test_when_every_row_ran_their_outputs_come_back_in_order():
+    from evals import outputs_or_raise
+
+    assert outputs_or_raise(
+        _FakeReport([_FakeCase("a"), _FakeCase("b")], [])
+    ) == ["a", "b"]

@@ -13,6 +13,14 @@ is that, built for ticket 06 on `.scratch/nothing-runs-unmeasured/`.
 - **`dataset.py`** / **`scoring.py`** — pure functions, unit-tested under
   `tests/test_eval_dataset.py` and `tests/test_eval_scoring.py`. No network,
   no database.
+- **The runners are `pydantic-evals`** (ticket 18): `run_triage_eval.py` and
+  `run_api_issue_eval.py` build a `Dataset` of `Case`s and run each through a
+  task that calls the live agent, sequentially. The framework owns the plumbing
+  and the per-case report; the aggregate domain metrics — the confusion matrix,
+  the threshold table, the out-of-set number, the `Scored` report — stay in
+  `scoring.py` / `api_issue.py`, fed the run's collected outputs. `triage.jsonl`
+  and those scoring modules did not change; the numbers a run prints did not
+  change either.
 - **`build_triage_set.py`** — refreshes `triage.jsonl` from live data. Run by
   hand, when there is new data worth freezing in:
 

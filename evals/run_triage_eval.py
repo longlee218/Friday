@@ -19,10 +19,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pydantic_evals import Case, Dataset
+from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 
 from friday.config import Config, load_config
 from friday.domain.actions import Decided, TriageOutcome
@@ -31,6 +34,7 @@ from friday.store.db import Database
 from friday.triage import Triage
 from friday.triage.runner import build_triage
 
+from evals import outputs_or_raise
 from evals.dataset import Example, load_jsonl
 from evals.scoring import (
     Prediction,
@@ -43,6 +47,27 @@ from evals.scoring import (
 __all__ = ["DATASET", "main", "report", "run"]
 
 DATASET = Path(__file__).parent / "triage.jsonl"
+
+
+@dataclass
+class _Row:
+    """One dataset row as a `pydantic-evals` `Case` input: the frozen example
+    plus its position, which `_event`/`_turn` need for the unique message ids a
+    turn's messages are correlated by."""
+
+    index: int
+    example: Example
+
+
+@dataclass
+class Correct(Evaluator):
+    """The framework's per-case view: 1.0 when the classifier named the label
+    the row expects. It is exact-match like `accuracy` in `scoring.py`, and it
+    exists so `pydantic-evals`' own report (and Logfire) show pass/fail per row;
+    the aggregate domain metrics stay in `scoring.py`."""
+
+    def evaluate(self, ctx: EvaluatorContext[_Row, Prediction]) -> float:
+        return 1.0 if ctx.output.predicted == ctx.output.expected else 0.0
 
 
 def _to_prediction(example: Example, outcome: TriageOutcome) -> Prediction:
@@ -145,21 +170,43 @@ async def run(
     *,
     triage: Triage | None = None,
     config: Config | None = None,
+    progress: bool = False,
 ) -> list[Prediction]:
-    """Score every row in `dataset_path`.
+    """Score every row in `dataset_path`, through a `pydantic-evals` `Dataset`.
 
-    `triage` is for tests — a `Triage` built on `ScriptedModel`, so wiring
-    can be checked with no network and no live database. The real caller,
-    `main`, leaves it `None` and gets one built from configuration against
-    the configured provider.
+    The framework owns the plumbing — running each `Case`, the per-case report,
+    a Logfire path if configured; the task calls the live `Triage` and returns a
+    `Prediction`, and the aggregate domain metrics stay in `report` below.
+
+    `triage` is for tests — a `Triage` built on `ScriptedModel`, so wiring can be
+    checked with no network and no live database. **Sequential
+    (`max_concurrency=1`)**: a scripted model replays by call order, and the
+    triage harness serialises at `_one_run` anyway, so parallelism would only
+    make the run non-deterministic for nothing.
     """
     if triage is None:
         triage = await _build_triage(config or load_config())
-    predictions = []
-    for index, example in enumerate(load_jsonl(dataset_path)):
-        outcome = await triage.decide(_event(example, index), turn=_turn(example, index))
-        predictions.append(_to_prediction(example, outcome))
-    return predictions
+
+    async def classify(row: _Row) -> Prediction:
+        outcome = await triage.decide(
+            _event(row.example, row.index), turn=_turn(row.example, row.index)
+        )
+        return _to_prediction(row.example, outcome)
+
+    dataset = Dataset[_Row, Prediction, None](
+        name="triage",
+        cases=[
+            Case(name=f"eval-{i}", inputs=_Row(i, example), expected_output=None)
+            for i, example in enumerate(load_jsonl(dataset_path))
+        ],
+        evaluators=[Correct()],
+    )
+    report_ = await dataset.evaluate(classify, max_concurrency=1, progress=progress)
+    # `outputs_or_raise`, not `[c.output for c in cases]`: a row whose task
+    # raised is dropped by the framework, and scoring a quietly smaller set is
+    # the one thing a regression net must not do. Order-independent otherwise —
+    # every metric below is a count or a rate over the set.
+    return outputs_or_raise(report_)
 
 
 def report(predictions: list[Prediction]) -> str:
@@ -197,7 +244,7 @@ def report(predictions: list[Prediction]) -> str:
 
 async def main() -> None:
     load_dotenv()  # `run_agent.py`'s own first step — secrets from .env, never config.yaml.
-    predictions = await run()
+    predictions = await run(progress=True)
     print(report(predictions))
 
 

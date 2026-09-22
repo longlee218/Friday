@@ -96,7 +96,7 @@ only and reached with `ssh -N -L 8086:127.0.0.1:8086 <host>`.
 | `tests/` | Driven through two seams: a fake `Provider` and a scripted model transport |
 | `docs/` | `DESIGN.md` (this file), `SPEC.md`, `agents/` |
 | `.scratch/` | Local issue tracker: one board per feature |
-| `evals/` | The classifier's regression net: `triage.jsonl` (frozen), `build_triage_set.py` (refreshes it by hand), `run_triage_eval.py` (scores the live classifier — calls the configured provider, not run by the suite). See `evals/README.md` |
+| `evals/` | The classifier's regression net: `triage.jsonl` (frozen), `build_triage_set.py` (refreshes it by hand), `run_triage_eval.py` / `run_api_issue_eval.py` (score the live agents — call the configured provider, not run by the suite). The runners are `pydantic-evals` `Dataset`/`Case`/`evaluate`; the aggregate metrics stay Friday's (`scoring.py`, `api_issue.py`). See `evals/README.md` |
 
 Packaging: **explicit `__init__.py`**, not namespace packages — importing
 any submodule runs the parent's `__init__.py` first, so only re-exports
