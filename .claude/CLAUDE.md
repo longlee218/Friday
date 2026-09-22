@@ -47,6 +47,10 @@ Done criteria:      <verifiable conditions, not vague goals such as "make it wor
 Verified by:        <commands/tests/real observations actually performed — not assumptions>
 Diff matches scope: <can every changed line be traced back to the request?
                      was anything added merely because it was convenient?>
+Ticket state updated: <if this finished or advanced a ticket: which acceptance
+                     boxes you ticked in .scratch/<feature>/issues/<NN>-*.md, and
+                     committed with the work — or "n/a, no ticket". Never leave a
+                     finished ticket's boxes unticked. See docs/agents/issue-tracker.md>
 Unverified/untested: <state clearly what has not been verified, even if the task
                      is otherwise considered complete>
 ```

@@ -12,4 +12,22 @@ Run typechecking regularly, single test files regularly, and the full test suite
 
 Once done, use /code-review to review the work.
 
-Commit your work to the current branch.
+Close out the ticket. This tracker has no "done" label; a finished ticket is
+one whose checklist is satisfied and whose work is committed (see
+`docs/agents/issue-tracker.md`). So before you report completion, for each
+ticket you finished:
+
+- Tick every acceptance box it lists — `- [ ]` → `- [x]` in
+  `.scratch/<feature-slug>/issues/<NN>-*.md` — but only for items you actually
+  verified. Leave a box unticked (and say so) if its criterion is unmet.
+- If the ticket carries a `Status:` line and it is now blocking nothing you
+  still owe, leave it as the triage role it holds; do not invent a new status
+  string.
+- Do not touch `.scratch/progress.jsonl` here — the ticket file is where a
+  ticket's status lives.
+
+Commit your work to the current branch, including the ticked ticket file, so
+the completed checklist lands with the change it describes.
+
+In your final report, state which boxes you ticked and name any you left
+unticked and why.
