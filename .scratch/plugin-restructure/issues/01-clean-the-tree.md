@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] Uncommitted `api_issue` work is landed or stashed
-- [ ] The params-migration fix is committed
-- [ ] `git status` is clean
-- [ ] `uv run pytest -q` passes
+- [x] Uncommitted `api_issue` work is landed or stashed
+- [x] The params-migration fix is committed
+- [x] `git status` is clean
+- [x] `uv run pytest -q` passes
