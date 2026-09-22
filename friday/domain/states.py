@@ -27,9 +27,11 @@ class TaskState(StrEnum):
     #: A person has to look. Every failure lands here — low confidence, a
     #: changed subject, a refused send, a type nothing can act on yet.
     NEEDS_HUMAN = "needs_human"
-    #: A draft is waiting for approval before it can be sent. Ticket 06 fills
-    #: this in; it is named here so the graph is complete rather than growing
-    #: a state at the moment it is first needed.
+    #: A draft is waiting for approval before it can be sent. Named here
+    #: before anything used it, so the graph was complete rather than growing
+    #: a state at the moment it was first needed — and **filled in on
+    #: 2026-09-22**, when `api_issue` began offering the reporter the cause
+    #: it found instead of handing the whole task to a person.
     REVIEW = "review"
     #: Finished. Terminal, so a stray follow-up cannot reopen work someone
     #: deliberately closed.

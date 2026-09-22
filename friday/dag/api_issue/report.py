@@ -22,7 +22,8 @@ from typing import Any
 from friday.dag.api_issue.diagnose import diagnosis_of
 from friday.dag.api_issue.resolve import resolved
 from friday.dag.engine import DAGDeps, DAGState, Node, status_of
-from friday.domain.actions import HandOver
+from friday.domain.actions import HandOver, Reply
+from friday.outbox import Kind
 from friday.ops.redact import scrub
 
 __all__ = ["render", "report_node"]
@@ -132,8 +133,33 @@ def render(state: DAGState, *, task_id: int, at: datetime) -> str:
     return scrub("\n".join(lines))
 
 
+def brief(diagnosis: Any) -> str:
+    """What the reporter is offered, once somebody approves it.
+
+    The cause and nothing else — no dossier, no file path, no frame. They
+    asked what was wrong with their request; the evidence is the operator's
+    to look at, and a local filesystem path means nothing to them and says
+    more about this machine than they need.
+
+    `next_checks` is left out on purpose: it is what *this* investigation
+    would do next, which is a note to the operator and reads to a reporter
+    as a list of things they have been asked to do.
+    """
+    said = str(getattr(diagnosis, "cause", "")).strip()
+    if not getattr(diagnosis, "conclusive", False):
+        # Said plainly rather than hedged into the sentence, so nobody has to
+        # notice a missing word to know how far this got.
+        said += " (chưa kết luận chắc chắn — cần kiểm thêm)"
+    return said
+
+
 def report_node(*, reports_dir: Path) -> Node:
-    """Build node 5. Always hands over: the slice sends nothing.
+    """Build node 5: the report file, and the two rows that follow it.
+
+    Hands over only when nothing was concluded. With a cause it returns a
+    `Reply`, which is how the pool queues the reporter's copy behind an
+    approval card — the risk this queue guards is in *answering*, and this
+    is the one output that answers.
 
     `reports_dir` is required rather than defaulted, because there was a
     default here *and* one on `ApiIssueConfig.reports_dir`, spelled
@@ -173,10 +199,39 @@ def report_node(*, reports_dir: Path) -> Node:
                 thought.get("reason", "") if isinstance(thought, dict) else ""
             ) or "nothing was diagnosed"
 
-        return HandOver(
+        told = (
             f"{headline}"
             + (f" — the full report is in {written}" if written else "")
-            + ". Nothing has been sent to anyone."
         )
+
+        # **The operator is told either way**, and told the one thing the
+        # approval card cannot carry: where to read the whole of it. The card
+        # shows what the *reporter* would see; this is the reading done
+        # before deciding whether they should see it.
+        #
+        # **`approver`, never `sender`.** `sender` posts into the reporter's
+        # channel as the watched account; this row carries the cause and an
+        # absolute path on the operator's machine, and it is queued before
+        # anything has been approved. Sending it as `sender` — which this did
+        # until review caught it — would publish both, unapproved, ahead of
+        # the card that asks whether to publish anything at all.
+        approver = deps.extra.get("approver", "")
+        if approver:
+            await deps.db.queue_outbound(
+                task_id=deps.task.id,
+                conversation=deps.task.conversation,
+                kind=Kind.FINDING,
+                sender=approver,
+                text=told,
+            )
+
+        if diagnosis is None:
+            # **Nothing concluded, so nothing offered to the reporter.** A
+            # brief with no cause in it is a message that costs the operator
+            # an approval and tells the reporter that the thing they asked
+            # about is still unanswered — which the silence already said.
+            return HandOver(told + ". Nothing has been sent to the reporter.")
+
+        return Reply(brief(diagnosis))
 
     return Node("report", _report)

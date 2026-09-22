@@ -239,6 +239,7 @@ def register_dags(
     classifiable type there is. Build a multi-node graph when there are steps
     worth skipping and somebody has said what they are.
     """
+    from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
     from friday.dag.api_issue import (
         TASK_TYPE as API_ISSUE,
         build_diagnose_harness,
@@ -260,9 +261,21 @@ def register_dags(
     # graph cannot hold: the log sources, which wrap connections this process
     # opened and closes.
     DAG_DEPS_EXTRA.clear()
+    # The account the graph's own rows are sent from. It is the pool's
+    # `sender` — the watched account — and the graph needs it because two of
+    # its three outputs are queued mid-run, before any action reaches the
+    # pool that would have known it.
+    # **Two identities, and which one a row carries decides who reads it.**
+    # `sender` posts into the reporter's channel as the watched account;
+    # `approver` direct-messages the operator. The graph needs both because
+    # it queues rows for both, mid-run, before any action reaches the pool.
+    extra: dict[str, Any] = {
+        "sender": DEFAULT_SENDER, "approver": DEFAULT_APPROVER,
+    }
     sources = build_log_sources(config, dict(servers or {}))
     if sources:
-        DAG_DEPS_EXTRA[API_ISSUE] = {"log_sources": sources}
+        extra["log_sources"] = sources
+    DAG_DEPS_EXTRA[API_ISSUE] = extra
     # Replaced, not merged. Merging means a second call — a test, a restart in
     # the same process — leaves the previous run's servers reachable, and a
     # closed connection that is still in the dict is worse than an absent one:

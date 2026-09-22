@@ -421,3 +421,22 @@ async def test_a_question_still_queued_is_not_yet_a_question(db):
     )
 
     assert await db.unanswered_questions(task.id) == ()
+
+
+def test_the_two_lists_of_what_needs_approval_cannot_drift():
+    """**Which kinds wait is answered twice**, and only one of the two is a
+    rule anybody reads. `Kind.needs_approval` is where the reasoning lives;
+    `friday.store.db._NEEDS_APPROVAL` is the `WHERE` clause that actually
+    holds a row back, and it is a tuple of bare strings sitting in another
+    module.
+
+    Nothing connected them until this. Adding a kind that needs approval and
+    forgetting the tuple does not fail, does not warn, and does not look
+    wrong in review — it sends the message. Two kinds were added on
+    2026-09-22 and it was luck that neither needed approval.
+    """
+    import friday.store.db as store
+
+    from friday.outbox import Kind
+
+    assert {k.value for k in Kind if k.needs_approval} == set(store._NEEDS_APPROVAL)

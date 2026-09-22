@@ -28,7 +28,7 @@ from friday.store.db import Database
 from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.states import TaskState
 from friday.domain.models import PARAMS, FridayState, Task
-from friday.outbox import Kind
+from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind
 from friday.responder.check import rejected
 
 __all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "REVIEW", "Pool"]
@@ -79,10 +79,10 @@ class Pool:
         auto_ask: bool,
         responder=None,
         max_asks: int = 3,
-        sender: str = "discord_user",
+        sender: str = DEFAULT_SENDER,
         #: Which identity asks. Not the one that speaks: buttons are an
         #: application-only feature, so the question goes out as the bot.
-        approver: str = "discord_bot",
+        approver: str = DEFAULT_APPROVER,
         batch_size: int = 20,
         concurrency: int = 2,
     ) -> None:

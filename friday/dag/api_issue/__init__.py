@@ -22,6 +22,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from friday.dag.api_issue.acknowledge import acknowledge_node
 from friday.dag.api_issue.code import read_failing_code_node
 from friday.dag.api_issue.diagnose import diagnose_node
 from friday.dag.api_issue.logs import find_request_log_node
@@ -98,6 +99,7 @@ def build_api_issue_dag(
                 ),
             ),
             resolve_node(),
+            acknowledge_node(),
             find_request_log_node(timeout_seconds=LOG_TIMEOUT_SECONDS),
             read_failing_code_node(timeout_seconds=CODE_TIMEOUT_SECONDS),
             diagnose_node(
@@ -116,9 +118,18 @@ def build_api_issue_dag(
             # a `HandOver` from it ends the pass before any edge is read — so
             # this one is unconditional by construction, not by hope.
             Edge("prepare", "resolve"),
-            # `Resolve` hands over on an external domain or a missing row.
-            # Nothing past it can run without a placement.
-            Edge("resolve", "find_request_log", when=_ran_ok("resolve")),
+            # `Resolve` hands over on an external domain or a missing row,
+            # and nothing past it can run without a placement.
+            #
+            # **Told only once the placement is known.** An external domain,
+            # an unknown route or a service with no row all end the run at
+            # `resolve`, and none of them should have told anybody that work
+            # was starting.
+            Edge("resolve", "acknowledge", when=_ran_ok("resolve")),
+            # Unconditional: a reporter who could not be acknowledged — no
+            # sender configured — is still a reporter whose request is worth
+            # investigating.
+            Edge("acknowledge", "find_request_log"),
             # The three after it always follow: a skipped log node still has
             # a report to write, and saying "nothing was read" is the output
             # the deleted graph never produced.

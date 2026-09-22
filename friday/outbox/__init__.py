@@ -29,6 +29,32 @@ QUEUED = OutboundState.QUEUED
 FAILED = OutboundState.FAILED
 
 
+#: Which identity a row is sent as. Not an account — a key into the senders
+#: the outbox was built with; `run_agent.py` maps it to a provider.
+#:
+#: Here rather than defaulted twice. The pool has always defaulted to it, and
+#: the `api_issue` graph now queues rows of its own before any action reaches
+#: the pool — two defaults spelled separately are two answers to one
+#: question, and the day they disagree the graph's rows go out as somebody
+#: else or not at all.
+DEFAULT_SENDER = "discord_user"
+
+#: Which identity reaches the **operator**, privately. Not a stylistic
+#: difference from `DEFAULT_SENDER`: that one posts into the conversation as
+#: the watched account, so it is public and it is the reporter who reads it;
+#: this one direct-messages the operator and ignores the conversation
+#: entirely.
+#:
+#: Getting them the wrong way round is not a cosmetic mistake, and it was
+#: made once here (2026-09-22, caught in review): a row meant to tell the
+#: operator a cause and the path of the report file was queued as
+#: `DEFAULT_SENDER`, which would have posted both into the reporter's channel
+#: unapproved — ahead of the approval card, and carrying an absolute path on
+#: the operator's own machine. Whoever reads a row's `sender` is deciding who
+#: sees it.
+DEFAULT_APPROVER = "discord_bot"
+
+
 class Kind(StrEnum):
     """What a message is, which is what decides whether it needs approval."""
 
@@ -53,6 +79,18 @@ class Kind(StrEnum):
     #: A task nobody can act on. Not a question — the operator is being told,
     #: because a task in a column nobody watches is the same as a lost one.
     HELP_WANTED = "help_wanted"
+    #: "I have this and I am working on it", to the reporter, while the work
+    #: runs. **Sent without approval, and that is the operator's call**
+    #: (2026-09-22): an acknowledgement that waits for a person is an
+    #: acknowledgement that arrives after the answer it was meant to precede.
+    #: It promises nothing and concludes nothing, which is what makes it
+    #: safe to send unread — the risk this queue guards is in *answering*.
+    ACKNOWLEDGED = "acknowledged"
+    #: An investigation finished: the cause, and where the full report is.
+    #: To the operator, not to the reporter, and so not approved — it is the
+    #: reading they do *before* approving the reporter's copy, and a card
+    #: that waited for its own approval would be a deadlock.
+    FINDING = "finding"
 
     @property
     def needs_approval(self) -> bool:

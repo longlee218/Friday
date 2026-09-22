@@ -30,7 +30,7 @@ from friday.dag.api_issue.logs import find_request_log_node
 from friday.dag.api_issue.report import render, report_node
 from friday.dag.api_issue.resolve import resolve_node
 from friday.dag.engine import DAGDeps, DAGState, status_of
-from friday.domain.actions import HandOver
+from friday.domain.actions import HandOver, Reply
 from friday.domain.conversation import ConversationId
 from friday.domain.models import ApiIssueParams, FridayState, MemoryKind, MemoryOrigin
 
@@ -733,7 +733,7 @@ async def test_no_diagnose_agent_skips_rather_than_failing(db):
 # --- report -----------------------------------------------------------------
 
 
-async def test_the_report_is_written_and_the_task_is_handed_over(db, tmp_path):
+async def test_the_report_is_written_and_the_reporter_is_offered_the_cause(db, tmp_path):
     state = (
         prepared()
         .with_result("resolve", {"status": "ok", "reason": "", "placement": {
@@ -763,8 +763,8 @@ async def test_the_report_is_written_and_the_task_is_handed_over(db, tmp_path):
     # a re-run after the reporter answers replaces it rather than leaving two
     # reports that disagree.
     assert written.name == "1.md"
-    assert isinstance(result, HandOver)
-    assert "Nothing has been sent to anyone" in result.reason
+    assert isinstance(result, Reply)
+    assert "ERR19" in result.text
     assert "ERR19" in written.read_text()
     assert "read at HEAD" in written.read_text()
 
@@ -787,12 +787,205 @@ def test_the_report_says_what_it_did_not_check_even_with_no_diagnosis():
 # --- the graph --------------------------------------------------------------
 
 
+# --- three outputs, one of them approved (ticket 06) ------------------------
+
+
+async def test_the_reporter_is_told_it_is_being_worked_on(db):
+    """Seconds of log reading, a clone and a model call. A reporter told
+    nothing in that time does not know anything is happening, and what people
+    do about silence is ask again."""
+    from conftest import make_event
+
+    from friday.dag.api_issue.acknowledge import SAYS, acknowledge_node
+    from friday.outbox import DEFAULT_SENDER, Kind
+
+    await db.record_message(make_event(message_id="m1"))
+    result = await acknowledge_node().run(
+        prepared(), deps_for(db, extra={"sender": DEFAULT_SENDER})
+    )
+
+    assert status_of(result) == "ok"
+    (row,) = await db.outbound()
+    assert row.kind == Kind.ACKNOWLEDGED
+    assert row.text == SAYS
+    assert row.sender == DEFAULT_SENDER, "the reporter's channel, not a DM"
+    # Hung under the message it answers, which is what keeps a busy channel
+    # readable. A real mention is recorded first, or both sides of this are
+    # `None` and it asserts nothing — which is what it did until review
+    # pointed out that deleting the `reply_to` changed no test.
+    assert row.reply_to == "m1"
+
+
+async def test_the_acknowledgement_does_not_wait_for_approval(db):
+    """The operator's call, 2026-09-22. It promises no finding, quotes no
+    log line and names no fault — and one that waits for a person arrives
+    after the reply it was meant to precede."""
+    from friday.dag.api_issue.acknowledge import acknowledge_node
+    from friday.outbox import DEFAULT_SENDER, Kind
+
+    await acknowledge_node().run(
+        prepared(), deps_for(db, extra={"sender": DEFAULT_SENDER})
+    )
+
+    assert not Kind.ACKNOWLEDGED.needs_approval
+    assert [r.kind for r in await db.sendable_outbound()] == [Kind.ACKNOWLEDGED]
+
+
+async def test_a_resumed_graph_does_not_acknowledge_twice(db):
+    """A graph re-runs from its checkpoint after the reporter answers a
+    question. A second "đang xử lý" three minutes after the first reads as a
+    stuck robot."""
+    from friday.dag.api_issue.acknowledge import acknowledge_node
+    from friday.outbox import DEFAULT_SENDER
+
+    deps = deps_for(db, extra={"sender": DEFAULT_SENDER})
+    await acknowledge_node().run(prepared(), deps)
+    again = await acknowledge_node().run(prepared(), deps)
+
+    assert status_of(again) == "skipped"
+    assert len(await db.outbound()) == 1
+
+
+def test_nobody_is_acknowledged_before_the_placement_is_known():
+    """An external domain, an unknown route or a service with no row all end
+    the run at `resolve`. None of them should have told anybody that work was
+    starting.
+
+    Asserts *which node* `resolve` leads to, not merely that a hand-over
+    stops the walk — the first version of this test asserted the latter,
+    which is a different test that already existed, and stayed green with
+    `acknowledge` moved ahead of `resolve`.
+    """
+    dag = build_api_issue_dag()
+    ok = DAGState.empty().with_result("resolve", {"status": "ok", "reason": ""})
+
+    assert dag.next_after("resolve", ok) == "acknowledge"
+    assert dag.next_after(
+        "resolve", DAGState.empty().with_result("resolve", HandOver("not ours"))
+    ) is None
+    assert [n.name for n in dag.nodes].index("acknowledge") > \
+        [n.name for n in dag.nodes].index("resolve")
+
+
+async def test_a_run_with_no_sender_investigates_anyway(db):
+    """Nothing here is worth failing an investigation over — and a run that
+    says why it stayed quiet beats one that is quiet about being quiet."""
+    from friday.dag.api_issue.acknowledge import acknowledge_node
+
+    result = await acknowledge_node().run(prepared(), deps_for(db))
+
+    assert status_of(result) == "skipped"
+    assert "sender" in result["reason"]
+    assert build_api_issue_dag().next_after(
+        "acknowledge", DAGState.empty().with_result("acknowledge", result)
+    ) == "find_request_log"
+
+
+def _diagnosed() -> DAGState:
+    """A state that reached a cause, which is what the last two outputs need."""
+    return prepared().with_result("diagnose", {
+        "status": "ok", "reason": "",
+        "diagnosis": {
+            "cause": "ERR19 ở orders.init", "confidence": "likely",
+            "conclusive": False, "refs": ["L1"], "next_checks": [],
+        },
+        "quotes": [], "not_checked": [],
+    })
+
+
+async def test_the_operator_is_told_where_the_whole_report_is(db, tmp_path):
+    """The approval card carries what the *reporter* would see. This is the
+    reading done before deciding whether they should see it."""
+    from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind
+
+    state = _diagnosed()
+
+    await report_node(reports_dir=tmp_path).run(
+        state,
+        deps_for(db, extra={"sender": DEFAULT_SENDER, "approver": DEFAULT_APPROVER}),
+    )
+
+    (row,) = [r for r in await db.outbound() if r.kind == Kind.FINDING]
+    assert "1.md" in row.text
+    assert "ERR19" in row.text
+    # **Who reads it, not just what it says.** `sender` posts into the
+    # reporter's channel as the watched account; `approver` DMs the operator.
+    # Queued as `sender` — which this did until review caught it — the cause
+    # and an absolute path on the operator's machine would be published
+    # unapproved, ahead of the card asking whether to publish anything.
+    assert row.sender == DEFAULT_APPROVER
+
+
+async def test_with_nothing_concluded_the_reporter_is_offered_nothing(db, tmp_path):
+    """A brief with no cause costs the operator an approval and tells the
+    reporter that what they asked about is still unanswered — which the
+    silence already said."""
+    from friday.outbox import DEFAULT_APPROVER, Kind
+
+    state = prepared().with_result(
+        "diagnose", {"status": "skipped", "reason": "no diagnose agent"}
+    )
+
+    result = await report_node(reports_dir=tmp_path).run(
+        state, deps_for(db, extra={"approver": DEFAULT_APPROVER})
+    )
+
+    assert isinstance(result, HandOver)
+    assert [r.kind for r in await db.outbound()] == [Kind.FINDING]
+
+
+def test_the_brief_carries_the_cause_and_not_the_evidence():
+    """They asked what was wrong with their request. A local filesystem path
+    says more about this machine than they need, and `next_checks` is what
+    *this* investigation would do next — to a reporter it reads as a list of
+    things they have been asked to do."""
+    from friday.dag.api_issue.report import brief
+
+    said = brief(Diagnosis(
+        cause="categoryId rỗng", confidence="certain", conclusive=True,
+        refs=["L1"], next_checks=["hỏi BE về mapping"],
+    ))
+
+    assert said == "categoryId rỗng"
+
+
+def test_a_brief_that_is_not_conclusive_says_so_in_words():
+    from friday.dag.api_issue.report import brief
+
+    said = brief(Diagnosis(
+        cause="có thể do cache", confidence="likely", conclusive=False, refs=["L1"],
+    ))
+
+    assert "chưa kết luận" in said
+
+
+def test_the_pool_and_the_graph_send_as_the_same_two_identities():
+    """The pool has always defaulted to them and the graph now queues rows of
+    its own. Two defaults spelled separately are two answers to one question,
+    and the day they disagree the graph's rows go out as somebody else — or
+    to somebody else, which is worse.
+
+    Compares the *values*, not the source text: the first version asserted
+    the literal was absent from `pool.py`, which stayed green when the
+    default was changed to a different string.
+    """
+    import inspect
+
+    from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
+    from friday.tasks.pool import Pool
+
+    taken = inspect.signature(Pool.__init__).parameters
+
+    assert taken["sender"].default == DEFAULT_SENDER
+    assert taken["approver"].default == DEFAULT_APPROVER
+
+
 def test_api_issue_is_the_one_graph_with_an_investigation_past_node_zero():
     dag = build_api_issue_dag()
 
     assert [n.name for n in dag.nodes] == [
-        "prepare", "resolve", "find_request_log", "read_failing_code",
-        "diagnose", "report",
+        "prepare", "resolve", "acknowledge", "find_request_log",
+        "read_failing_code", "diagnose", "report",
     ]
 
 
@@ -909,9 +1102,13 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
     # the runner already recorded, so the trail starts where the walk does.
     # `Pool._run_dag` does exactly this on a fresh pass.
     assert runner.trail == [
-        "resolve", "find_request_log", "read_failing_code", "diagnose", "report",
+        "resolve", "acknowledge", "find_request_log", "read_failing_code",
+        "diagnose", "report",
     ]
-    assert isinstance(final["report"], HandOver)
+    # A cause was reached, so the reporter is offered one — and it waits for
+    # approval, which is what `Reply` means to the pool.
+    assert isinstance(final["report"], Reply)
+    assert "ERR19 ở orders.init" in final["report"].text
     (written,) = list(reports_dir.glob("*.md"))
     text = written.read_text()
     assert "ERR19 ở orders.init" in text
