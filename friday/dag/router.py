@@ -303,6 +303,7 @@ def register_dags(
         TASK_TYPE as API_ISSUE,
         build_diagnose_harness,
         build_log_sources,
+        build_release_source,
     )
 
     EDGE_ROUTER.clear()
@@ -335,6 +336,9 @@ def register_dags(
     sources = build_log_sources(config, dict(servers or {}))
     if sources:
         extra["log_sources"] = sources
+    release = build_release_source(config, dict(servers or {}))
+    if release is not None:
+        extra["release_source"] = release
     DAG_DEPS_EXTRA[API_ISSUE] = extra
     # Replaced, not merged. Merging means a second call — a test, a restart in
     # the same process — leaves the previous run's servers reachable, and a

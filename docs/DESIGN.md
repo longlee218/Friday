@@ -240,6 +240,19 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   node is a boundary, not a unit of reuse. Reordering a graph is a change to
   its `edges` in one function, and `DAG.version` is a digest of the shape, so
   it discards the checkpoints that no longer apply by itself.
+- **The code a diagnosis quotes is checked against the version that is
+  running.** The operator's rule is that the image tag *is* the release tag,
+  so `ReleaseSource.running_tag` asks the cluster which tag a service
+  deploys and the code node compares the clone's copy of each file against
+  it. Identical and it says so; different and it shows the tag's copy and
+  says that; unresolved and it says that too. **Never a checkout and never a
+  worktree** — `git show <ref>:<path>` reads the blob without touching a
+  clone that is open in somebody's editor, and a ref that could be read as
+  an option never reaches the command line. Until 2026-09-22 the node
+  carried a standing caveat instead ("read at the clone's current HEAD …
+  they may differ"), which is an admission rather than a check: measured by
+  hand the day before, production ran `0.4.4` while the clone sat on
+  `develop`, and the files happened to match.
 - **Narrowing a read belongs to the source, because a `limit` is a tail and
   not a sample.** `LogSource.lines` takes a `needle`; Loki turns it into
   LogQL's `|=` and `kubectl` into a `grep` on the far side. Measured against

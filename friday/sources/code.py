@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -77,15 +78,54 @@ def repo_file(frame: str, repo_path: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def excerpt(path: Path, line: int, *, before: int = BEFORE, after: int = AFTER) -> str:
-    """The lines around `line`, numbered, so a diagnosis can cite one."""
-    text = path.read_text(errors="replace").splitlines()
+def at_ref(repo_path: str, path: Path, ref: str) -> str | None:
+    """The file's text as it is at a git ref, or `None`.
+
+    **`git show`, never a checkout and never a worktree.** The clone belongs
+    to the operator and is open in their editor; moving its HEAD to answer a
+    question is the one thing this must not do, and a detached worktree is
+    disk, cleanup and a failure mode for a read that needs none of it.
+
+    `None` for every way of not having it — no such ref, the file did not
+    exist at it, git not on PATH. The caller says so and reads what it has.
+    """
+    if not ref or ref.startswith("-"):
+        # A ref out of an MCP answer, going onto a command line. `git show`
+        # takes no `--` before its `rev:path`, so a leading dash would be
+        # read as an option; nothing else here can make it one.
+        return None
+    root = Path(repo_path).expanduser().resolve()
+    try:
+        relative = path.resolve().relative_to(root)
+    except ValueError:
+        return None
+    done = subprocess.run(
+        ["git", "-C", str(root), "show", f"{ref}:{relative.as_posix()}"],
+        capture_output=True, text=True, timeout=20.0, check=False,
+    )
+    return done.stdout if done.returncode == 0 else None
+
+
+def numbered(text: str, line: int, *, before: int = BEFORE, after: int = AFTER) -> str:
+    """The lines around `line`, numbered, so a diagnosis can cite one.
+
+    Split out of `excerpt` so the same window can be taken of text that is
+    not on disk — what a file looked like at the tag that is running.
+    """
+    lines = text.splitlines()
     start = max(0, line - 1 - before)
-    end = min(len(text), line + after)
+    end = min(len(lines), line + after)
     width = len(str(end))
     return "\n".join(
-        f"{i + 1:>{width}} {'>' if i + 1 == line else ' '} {text[i]}"
+        f"{i + 1:>{width}} {'>' if i + 1 == line else ' '} {lines[i]}"
         for i in range(start, end)
+    )
+
+
+def excerpt(path: Path, line: int, *, before: int = BEFORE, after: int = AFTER) -> str:
+    """The lines around `line`, numbered, so a diagnosis can cite one."""
+    return numbered(
+        path.read_text(errors="replace"), line, before=before, after=after
     )
 
 

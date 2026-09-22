@@ -1944,8 +1944,9 @@ def test_what_a_server_is_filtered_to_is_read_off_the_readers():
     from friday.sources import declared
     from friday.sources.db import DbSource
     from friday.sources.logs import LokiSource
+    from friday.sources.release import ReleaseSource
 
-    assert declared() == LokiSource.TOOLS | DbSource.TOOLS
+    assert declared() == LokiSource.TOOLS | DbSource.TOOLS | ReleaseSource.TOOLS
     assert "execute_mongo_query" not in declared(), "no caller yet"
 
 
@@ -2507,3 +2508,202 @@ async def test_a_dead_correlation_id_still_says_so_when_the_endpoint_matched(db)
 
     assert "/v1/pod/orders/init" in result["dossier"], "the fallback still ran"
     assert any("never-logged" in line for line in result["not_checked"])
+
+
+# --- reading the code that is actually running (ticket 04) -------------------
+
+
+def test_the_running_tag_is_read_out_of_the_release_answer():
+    """Measured 2026-09-21: `release_status` answers 104,761 characters, of
+    which the tag is one field. It is read out at the source so nothing above
+    ever holds a rendered Helm chart — in memory or in a prompt."""
+    import asyncio
+    import json
+
+    from friday.sources.release import ReleaseSource
+
+    class Server:
+        async def call(self, tool, arguments):
+            assert tool == "release_status"
+            return json.dumps({
+                "status": {"config": {"image": {
+                    "repository": "…/backend-reelme-v2", "tag": "0.4.4",
+                }}},
+                "manifest": "x" * 50_000,
+            })
+
+    got = asyncio.run(ReleaseSource(server=Server()).running_tag("p", "prod"))
+
+    assert got == "0.4.4"
+
+
+def test_not_knowing_which_version_runs_is_an_answer_not_a_failure():
+    """A node that raised here would turn "I could not check which version
+    runs" into a failed investigation."""
+    import asyncio
+
+    from friday.sources.release import ReleaseSource
+
+    class Broken:
+        async def call(self, tool, arguments):
+            raise RuntimeError("no route to host")
+
+    class Odd:
+        async def call(self, tool, arguments):
+            return '{"status": {"config": {}}}'
+
+    assert asyncio.run(ReleaseSource(server=Broken()).running_tag("p", "prod")) == ""
+    assert asyncio.run(ReleaseSource(server=Odd()).running_tag("p", "prod")) == ""
+
+
+def test_reading_at_a_ref_never_moves_the_operators_clone(tmp_path):
+    """The clone is open in their editor. Moving its HEAD to answer a
+    question is the one thing this must not do, and a detached worktree is
+    disk, cleanup and a failure mode for a read that needs none of it."""
+    import subprocess
+
+    from friday.sources.code import at_ref
+
+    root = tmp_path / "clone"
+    root.mkdir()
+    run = lambda *a: subprocess.run(  # noqa: E731
+        ["git", "-C", str(root), *a], capture_output=True, text=True, check=True
+    )
+    run("init", "-q")
+    run("config", "user.email", "t@t")
+    run("config", "user.name", "t")
+    (root / "a.ts").write_text("released\n")
+    run("add", "a.ts")
+    run("commit", "-qm", "one")
+    run("tag", "1.0.0")
+    (root / "a.ts").write_text("edited since\n")
+
+    before = run("rev-parse", "HEAD").stdout
+
+    assert at_ref(str(root), root / "a.ts", "1.0.0") == "released\n"
+    assert (root / "a.ts").read_text() == "edited since\n", "the tree is untouched"
+    assert run("rev-parse", "HEAD").stdout == before, "HEAD did not move"
+
+
+def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monkeypatch):
+    """The ref comes out of an MCP answer and goes onto a command line.
+    `git show` takes no `--` before its `rev:path`, so a leading dash would
+    be read as an option.
+
+    Asserts git is never *invoked*, not that the call returned `None` — a
+    bad ref makes `git show` fail and return `None` too, so the weaker
+    assertion passed with the guard deleted."""
+    from friday.sources import code as code_source
+
+    ran = []
+    monkeypatch.setattr(
+        code_source.subprocess, "run", lambda *a, **k: ran.append(a) or (_ for _ in ()).throw(AssertionError("git was run"))
+    )
+
+    assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "--upload-pack=x") is None
+    assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "") is None
+    assert ran == []
+
+
+def _clone_with_tag(tmp_path, *, released: str, now: str):
+    """A clone whose tag `1.0.0` holds `released` and whose tree holds `now`."""
+    import subprocess
+
+    root = tmp_path / "clone"
+    root.mkdir()
+    run = lambda *a: subprocess.run(  # noqa: E731
+        ["git", "-C", str(root), *a], capture_output=True, text=True, check=True
+    )
+    run("init", "-q")
+    run("config", "user.email", "t@t")
+    run("config", "user.name", "t")
+    (root / "orders.ts").write_text(released)
+    run("add", "orders.ts")
+    run("commit", "-qm", "released")
+    run("tag", "1.0.0")
+    (root / "orders.ts").write_text(now)
+    return root
+
+
+class Release:
+    def __init__(self, tag="1.0.0"):
+        self.tag = tag
+        self.asked = []
+
+    async def running_tag(self, project, env):
+        self.asked.append((project, env))
+        return self.tag
+
+
+async def _code_for(db, root, release=None, env="production"):
+    await write_rows(db, env=env, repo=str(root))
+    curl = PROD_CURL if env == "production" else CURL
+    resolve = await resolve_node().run(prepared(curl=curl), deps_for(db))
+    state = (
+        prepared(curl=curl)
+        .with_result("resolve", resolve)
+        .with_result(
+            "find_request_log",
+            {"status": "ok", "reason": "", "frames": [["/app/orders.ts", 3]]},
+        )
+    )
+    extra = {} if release is None else {"release_source": release}
+    return await read_failing_code_node().run(state, deps_for(db, extra=extra))
+
+
+async def test_code_identical_to_the_running_tag_says_so_instead_of_hedging(
+    db, tmp_path
+):
+    """The question is not "which ref shall I read" but "is what I just read
+    the code that is running". When the clone's copy is byte-identical to the
+    tag's, HEAD *is* the running version for this file, and saying so is
+    worth more than the standing caveat."""
+    same = "\n".join(f"line {i}" for i in range(20))
+    root = _clone_with_tag(tmp_path, released=same, now=same)
+
+    result = await _code_for(db, root, Release("1.0.0"))
+
+    assert "identical to the running tag 1.0.0" in result["code"]
+    assert not any("HEAD" in line for line in result["not_checked"])
+
+
+async def test_code_that_differs_shows_the_tag_s_copy_and_says_which(db, tmp_path):
+    """What the operator is told about is what production is running. The
+    clone is whatever the last person checked out."""
+    root = _clone_with_tag(
+        tmp_path,
+        released="\n".join(f"released {i}" for i in range(20)),
+        now="\n".join(f"working tree {i}" for i in range(20)),
+    )
+
+    result = await _code_for(db, root, Release("1.0.0"))
+
+    assert "released 2" in result["code"]
+    assert "working tree 2" not in result["code"]
+    assert any("differs from the running tag 1.0.0" in l for l in result["not_checked"])
+
+
+async def test_with_the_version_unresolved_it_still_reads_and_still_says_so(
+    db, tmp_path
+):
+    """Not knowing which version runs is not a failed investigation — but it
+    is not silence either."""
+    root = _clone_with_tag(tmp_path, released="a\nb\nc\nd\n", now="a\nb\nc\nd\n")
+
+    result = await _code_for(db, root, Release(""))
+
+    assert status_of(result) == "ok"
+    assert any(
+        "could not be resolved" in line for line in result["not_checked"]
+    )
+
+
+async def test_dev_is_not_asked_which_tag_is_running(db, tmp_path):
+    """Dev deploys from a branch. There is no tag to compare against, and
+    asking would be a round trip for an answer that does not exist."""
+    root = _clone_with_tag(tmp_path, released="a\nb\nc\nd\n", now="a\nb\nc\nd\n")
+    release = Release("1.0.0")
+
+    await _code_for(db, root, release, env="dev")
+
+    assert release.asked == []

@@ -182,9 +182,10 @@ def declared() -> frozenset[str]:
     """
     from friday.sources.db import DbSource
     from friday.sources.logs import LokiSource
+    from friday.sources.release import ReleaseSource
 
     return frozenset().union(
-        *(source.TOOLS for source in (LokiSource, DbSource))
+        *(source.TOOLS for source in (LokiSource, DbSource, ReleaseSource))
     )
 
 

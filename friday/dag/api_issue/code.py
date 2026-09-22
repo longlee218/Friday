@@ -18,7 +18,14 @@ from pathlib import Path
 from typing import Any
 
 from friday.dag.engine import DAGDeps, DAGState, Node, envelope
-from friday.sources.code import NOT_OURS, excerpt, meanings, original, repo_file
+from friday.sources.code import (
+    NOT_OURS,
+    at_ref,
+    meanings,
+    numbered,
+    original,
+    repo_file,
+)
 
 __all__ = ["code_of", "read_failing_code_node"]
 
@@ -100,11 +107,29 @@ def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
                 f"the project row {project.get('name', '')!r} names no "
                 "repository path, so no code was read",
             )
+        # **Which version is actually running** (ticket 04, the operator's
+        # rule: the image tag *is* the release tag). Production only — dev
+        # deploys from a branch and has no tag to compare against.
+        release = deps.extra.get("release_source")
+        placement, _ = resolved(state["resolve"])
+        tag = ""
+        if release is not None and placement.env == "production":
+            tag = await release.running_tag(
+                project.get("name") or placement.service, placement.env
+            )
+
         pieces: list[str] = []
-        not_checked: list[str] = [
-            f"read at the clone's current HEAD in {repo_path}, not at the "
-            f"version actually running — they may differ"
-        ]
+        not_checked: list[str] = []
+        if not tag:
+            not_checked.append(
+                f"read at the clone's current HEAD in {repo_path}, not at the "
+                f"version actually running — they may differ"
+                + (
+                    ", and which version that is could not be resolved"
+                    if release is not None and placement.env == "production"
+                    else ""
+                )
+            )
         for file, line in frames:
             if pieces:
                 # The first frame that resolves is the throw site; the spec
@@ -132,7 +157,32 @@ def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
                         f"so this is the built line, not the one you wrote"
                     )
             try:
-                pieces.append(f"--- {shown}\n{excerpt(path, int(line))}")
+                # **The question is not "which ref shall I read" but "is what
+                # I just read the code that is running".** When the clone's
+                # copy is byte-identical to the tag's, HEAD *is* the running
+                # version for this file and saying so is worth more than
+                # re-reading it. When they differ, the tag's copy is the one
+                # the operator is being told about, so it is the one shown.
+                here = path.read_text(errors="replace")
+                there = at_ref(repo_path, path, tag) if tag else None
+                if there is None:
+                    text, whose = here, ""
+                    if tag:
+                        not_checked.append(
+                            f"{path.name} does not exist at the running tag "
+                            f"{tag} — this is the clone's copy"
+                        )
+                elif there == here:
+                    text, whose = here, f", identical to the running tag {tag}"
+                else:
+                    text, whose = there, f", as it is at the running tag {tag}"
+                    not_checked.append(
+                        f"the clone's copy of {path.name} differs from the "
+                        f"running tag {tag}; what is shown is the tag's"
+                    )
+                pieces.append(
+                    f"--- {shown}{whose}\n{numbered(text, int(line))}"
+                )
             except OSError as exc:  # noqa: PERF203 — one bad file is not the run
                 not_checked.append(f"{file} could not be read: {exc}")
 

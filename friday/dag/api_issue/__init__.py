@@ -32,6 +32,7 @@ from friday.dag.engine import DAG, DAGState, Edge, status_of
 from friday.dag.prepare import prepare_node
 from friday.sources import Reads
 from friday.sources.logs import LokiSource, SshKubectlSource
+from friday.sources.release import ReleaseSource
 
 __all__ = ["build_api_issue_dag", "build_diagnose_harness", "build_log_sources"]
 
@@ -188,6 +189,23 @@ def build_log_sources(config: Any, servers: dict[str, Any]) -> dict[str, Any]:
             settings.loki_server,
         )
     return sources
+
+
+def build_release_source(config: Any, servers: dict[str, Any]) -> Any:
+    """What the cluster says it is running, or `None`.
+
+    The same server the Loki tools come from — it carries both — and
+    narrowed the same way: `Reads` over what `ReleaseSource` declares, which
+    is one read on a server that also offers `release_apply`,
+    `release_rollback` and `release_set_env`.
+    """
+    settings = getattr(config, "api_issue", None)
+    if settings is None:
+        return None
+    server = servers.get(settings.loki_server)
+    if server is None:
+        return None
+    return ReleaseSource(server=Reads(server, ReleaseSource.TOOLS))
 
 
 def build_diagnose_harness(config: Any, *, record: Any = None, spent: Any = None) -> Any:
