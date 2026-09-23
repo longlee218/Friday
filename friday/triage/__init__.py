@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from friday.triage.context import build_light_context
 from friday.triage.prompt import build_input, build_instructions
 from friday.config import AgentConfig
 from friday.agent.harness import Harness
-from friday.domain.actions import Decided, NeedsHuman, TriageOutcome
+from friday.domain.actions import Decided, NeedsHuman, TriageOutcome, make_decided
 from friday.domain.models import FridayState, InboundEvent
 from friday.triage.prefilter import Sensitive
 
@@ -25,10 +25,10 @@ class Triage:
     """Decides what a mention is. Performs no writes.
 
     **One answer, one closed set** (board `every-answer-has-a-shape`, D6). It
-    answers a `Decided` — a member of `DECISIONS`, which is every task type
-    plus `skip`, and a confidence — through the tool `Harness` generates from
-    that shape, and the arguments are validated here before anything acts on
-    them.
+    answers a `Decided` — a registered task type plus `skip`, and a confidence
+    — through the tool `Harness` generates from the boot schema `make_decided`
+    builds from the registry, and the arguments are validated there before
+    anything acts on them (ticket 11).
 
     It was two tools writing into a per-run capture the caller read back, so
     the classification was not the return value of anything and the two halves
@@ -45,6 +45,10 @@ class Triage:
         sensitive: Sensitive | None = None,
         record=None,
         spent=None,
+        #: The `task_type -> Params` mapping the classifier's closed set is built
+        #: from (ticket 11). The registry fills this at boot; `None` falls back
+        #: to the current task-type catalog, so a bare test needs no registry.
+        decisions: Mapping[str, type] | None = None,
         #: Where the room's summary row is read from — anything with
         #: `room_summary(channel_id)`, which is the store in production. Held
         #: for the process, read per call: a store outlives every call, a
@@ -59,6 +63,7 @@ class Triage:
         #: guesses about what is sensitive in their workplace.
         self._sensitive = sensitive or Sensitive(())
         self._summaries = summaries
+        self._decisions = decisions
         # Examples are appended to the instructions rather than passed per
         # call: the instructions are the stable prefix, and a list that
         # changed per call would cost the cache hit on everything after it.
@@ -69,15 +74,28 @@ class Triage:
             model=model,
             record=record,
             spent=spent,
-            # The shape this agent answers. The harness generates the tool it
-            # arrives through, forces the call, ends the run on an actual
-            # `Decided` rather than on any tool output, and validates the
-            # arguments — all four from this one class. Each of those was a
-            # line here, and the last of them was a `stop_when` predicate over
-            # a capture nobody could find from a signature.
-            answers=Decided,
+            # The shape this agent answers, built at boot from the registry's
+            # task types (ticket 11): `type` closed to those plus `skip`. The
+            # harness generates the tool it arrives through, forces the call,
+            # ends on an actual answer of this shape and validates it — so a type
+            # outside the set is refused here, before anything acts on it,
+            # exactly as the old static `Literal` did.
+            answers=self._answer_type,
             context_type=FridayState,
         )
+
+    @property
+    def _answer_type(self) -> type:
+        decisions = self._decisions
+        if decisions is None:
+            # The registry is the catalog: whatever task types are registered
+            # (the composition root fills it at boot; the autouse test fixture
+            # fills it for a bare `Triage`). An explicit `decisions` overrides,
+            # for a test that wants a specific set.
+            from friday.dag import registry
+
+            decisions = registry.decision_params()
+        return make_decided(decisions)
 
     async def decide(
         self,
@@ -172,4 +190,7 @@ class Triage:
             decided.type,
             decided.confidence,
         )
-        return decided
+        # `decided` is an instance of the boot-built schema (its `type` already
+        # validated against the closed set); the rest of the system speaks in
+        # `Decided` values, so hand back one.
+        return Decided(type=decided.type, confidence=decided.confidence)

@@ -535,6 +535,16 @@ How a plugin declares a task type (`name`, `params`, `extractor`, `graph`,
 fields are added on their trigger, each with a test, so no inert field pretends
 to be a rule.
 
+## Task-type registry
+
+`friday/dag/registry.py` — the one place a task type is known (ticket 11),
+filled by each type's `register()` (`friday/dag/task_types.py`). It replaced the
+hand-maintained `PARAMS`/`DECISIONS` maps, the extractor map and the router's
+`_graphs`. `decision_params()` is the old `PARAMS`; `decisions()` the old
+`DECISIONS` (types + `skip`). The router reads it and **names no task type**;
+triage builds its closed-set schema from it at boot (`make_decided`); the store
+takes the decision set as an argument so `domain` never reaches up.
+
 ## Dependency rule
 
 The one direction the restructure rests on, enforced by

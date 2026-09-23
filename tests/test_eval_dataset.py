@@ -11,7 +11,7 @@ import json
 
 from pathlib import Path
 
-from friday.domain.models import DECISIONS
+from friday.dag import registry
 
 from evals.dataset import Example, build_frozen_set, load_jsonl, write_jsonl
 
@@ -196,7 +196,7 @@ def test_a_set_with_no_multi_message_turn_says_so():
     from evals.dataset import unfit
 
     every_decision = [
-        Example(text=f"about {decision}", expected=decision) for decision in DECISIONS
+        Example(text=f"about {decision}", expected=decision) for decision in registry.decisions()
     ]
 
     assert any("turn" in line for line in unfit(every_decision))
@@ -217,7 +217,7 @@ def test_a_set_that_covers_everything_is_reported_as_fit():
     from evals.dataset import unfit
 
     covering = [
-        Example(text=f"about {decision}", expected=decision) for decision in DECISIONS
+        Example(text=f"about {decision}", expected=decision) for decision in registry.decisions()
     ]
     covering.append(
         Example(

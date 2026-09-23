@@ -19,7 +19,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from friday.domain.models import PARAMS, MemoryKind
+from friday.domain.models import MemoryKind
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -29,9 +29,15 @@ ROOT = Path(__file__).resolve().parent.parent
 CORE_KINDS = {"fact", "constraint", "decision", "voice", "summary", "finding", "person"}
 PACK_KINDS = {k.value for k in MemoryKind} - CORE_KINDS
 
-#: The literals G1 forbids inside `friday/kernel`: a task type's name or a pack
-#: kind's name hardcoded there is the core knowing a plugin by name.
-FORBIDDEN_LITERALS = set(PARAMS) | PACK_KINDS
+
+def _forbidden_literals() -> set[str]:
+    """The literals G1 forbids inside `friday/kernel`: a task type's name or a
+    pack kind's name hardcoded there is the core knowing a plugin by name. The
+    task types come from the registry (the autouse fixture fills it), not a
+    hand-maintained catalog — the point of ticket 11."""
+    from friday.dag import registry
+
+    return set(registry.decision_params()) | PACK_KINDS
 
 
 def _modules(base: Path) -> list[tuple[str, ast.Module]]:
@@ -124,12 +130,13 @@ def test_the_kernel_carries_no_task_type_or_pack_kind_literal():
     """G1, half two: no task-type or pack-kind name hardcoded in `friday/kernel`.
     A string constant equal to one is the core knowing a plugin's id — the guard
     that keeps the kernel detachable from what registers against it."""
+    forbidden = _forbidden_literals()
     offenders = {
         (rel, node.value)
         for rel, tree in _modules(ROOT / "friday" / "kernel")
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant)
         and isinstance(node.value, str)
-        and node.value in FORBIDDEN_LITERALS
+        and node.value in forbidden
     }
     assert offenders == set(), f"the kernel hardcoded a plugin's id: {sorted(offenders)}"

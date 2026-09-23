@@ -1,29 +1,27 @@
-"""Which graph runs a task type, and what it is built from.
+"""Which graph runs a task type, and the clocks it must respect.
 
-One module answers both questions. Registering a graph is adding an entry to
-`EDGE_ROUTER`; nothing else in the system needs to change, which is the
-property ticket 32 exists to buy. Building the agents behind a graph's nodes
-is wiring, and it used to live in a second module that this one's `register_
-dag` and `dag_for` were never read apart from — the composition root calls
-`register_dags` once, which is the only caller of everything else here.
+`EDGE_ROUTER` maps a task type to its `DAG`; `register_dags` fills it at boot
+from the registry (`friday.dag.task_types`), which each task type registers
+itself into — so this module names no task type. Ticket 11 moved the
+per-type building (`api_issue`'s investigation graph, the one-node graph for the
+rest) out to `task_types.py`; what stays here is the map, the clock checks, and
+the one-node graph builder every simple type shares.
 
-Every classifiable task type has a graph — `register_dags` covers every entry
-in `PARAMS`, `api_issue` by name and everything else as a one-node graph built
-here. `dag_for` returning `None` for a *known* type would be a wiring bug, not
-a normal outcome; ticket 04 deleted the second way of deciding what to do with
-a task, and with it the branch that used to read that `None`.
+`dag_for` returning `None` for a *known* type would be a wiring bug, not a normal
+outcome; ticket 04 deleted the second way of deciding what to do with a task, and
+with it the branch that used to read that `None`.
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from friday.config import ConfigError
 from friday.sdk.workflow import DAG
+from friday.dag import registry
 from friday.dag.prepare import plan_by_required_parameters, prepare_node
-from friday.domain.models import PARAMS, Params
+from friday.domain.models import Params
 
 __all__ = [
     "EDGE_ROUTER",
@@ -105,22 +103,6 @@ def check_node_clocks(dags: Any, agents: dict[str, Any]) -> None:
                     f"least {floor}s, or it cancels the run before the harness "
                     "can say why it stopped"
                 )
-
-
-def _budgets(config: Any) -> dict[str, float]:
-    """How long one task of each type may hold a pool slot.
-
-    One entry today. A graph with no budget is not checked, which is the
-    honest default for the one-node graphs: their single node's clock *is*
-    the bound.
-    """
-    # Imported here rather than at the top, the way the rest of this module
-    # reaches the graph packages: they import back from it.
-    from friday.dag.api_issue import TASK_TYPE as API_ISSUE
-
-    api_issue = getattr(config, "api_issue", None)
-    clock = getattr(api_issue, "timeout_seconds", None)
-    return {} if clock is None else {API_ISSUE: float(clock)}
 
 
 def check_graph_clocks(dags: Any, budgets: dict[str, float]) -> None:
@@ -212,65 +194,26 @@ def build_simple_dag(
     )
 
 
-def _graphs(
-    config: Any, *, diagnose_harness: Any = None,
-    make_diagnose_harness: Any = None,
-) -> dict[str, DAG]:
-    """Every type's graph, built from the configuration.
-
-    One of them is not the one-node graph: `api_issue` has an investigation
-    past node 0 again (ticket 00). Which nodes those are is that package's
-    business — this function asks it for a graph and registers what it gets.
-    """
-    from friday.dag.api_issue import (
-        TASK_TYPE as API_ISSUE,
-        build_api_issue_dag,
-        build_diagnose_harness,
-    )
-
-    budget_tokens = config.context.extraction_budget_tokens
-    extractor = config.agents.get("extractor")
-    settings = getattr(config, "api_issue", None)
-    graphs = {
-        task_type: build_simple_dag(
-            task_type,
-            params_cls,
-            budget_tokens=budget_tokens,
-            extractor=extractor,
-        )
-        for task_type, params_cls in PARAMS.items()
-        if task_type != API_ISSUE
-    }
-    if API_ISSUE in PARAMS:
-        graphs[API_ISSUE] = build_api_issue_dag(
-            extractor=extractor,
-            diagnose=config.agents.get("diagnose"),
-            diagnose_harness=diagnose_harness,
-            # **v3.3, and only when the switch is on.** A factory rather than
-            # a harness, because under v3.3 the tools carry this run's
-            # placement and its numbering — one built at boot would read the
-            # previous case's service.
-            make_diagnose_harness=(
-                make_diagnose_harness
-                if settings is not None and settings.diagnose_reads
-                else None
-            ),
-            budget_tokens=budget_tokens,
-            reports_dir=(
-                None if settings is None else Path(settings.reports_dir)
-            ),
-        )
-    return graphs
-
-
 def check_graphs(config: Any) -> None:
     """Refuse a configuration under which a model node's clock would cut its
-    harness short — from the configuration alone, so the composition root
-    runs it straight after `load_config`, before it opens the database or
-    builds anything a graph is later handed. `register_dags` checks again
-    what it actually registers."""
-    check_node_clocks(_graphs(config).values(), config.agents)
-    check_graph_clocks(_graphs(config).values(), _budgets(config))
+    harness short — from the configuration alone, so the composition root runs
+    it straight after `load_config`, before it opens the database or builds
+    anything a graph is later handed. `register_dags` checks again what it
+    actually registers.
+
+    **Fills the registry as it goes** — the graphs are what the clocks are
+    checked on — and the composition root leans on that: it runs `check_graphs`
+    first, then `register_extractors`, which reads `registry.decision_params()`
+    to know which types to wire. So this is not a throwaway side effect;
+    `register_extractors` depends on it, and `register_dags` clears and refills
+    the registry afterwards with the run's real servers. Reorder these three and
+    `register_extractors` would wire nothing — the order is the contract."""
+    from friday.dag.task_types import BootContext, register_all
+
+    register_all(BootContext(config))
+    dags = [registry.dag_of(name) for name in registry.specs()]
+    check_node_clocks(dags, config.agents)
+    check_graph_clocks(dags, registry.BUDGETS)
 
 
 def register_dags(
@@ -290,98 +233,44 @@ def register_dags(
     #: node directly with a stub rather than running the durable workflow.
     db: Any = None,
 ) -> None:
-    """Register every graph this build knows about.
+    """Register every graph this build knows about, from the registry.
 
-    Idempotent, and it says so once here rather than by disarming
-    `register_dag`'s guard at each call. It used to `pop` the key immediately
-    before every registration, which meant the "refuses to overwrite" check
-    could not fire anywhere but in a test — a guard deleted at every call site
-    that mattered (ticket 13). Starting from empty states the same intention
-    and leaves the guard live for everyone else.
+    Each task type registers itself (`friday.dag.task_types.register_all`); this
+    reads the registry and maps each type to its graph. Nothing here names a
+    type — adding one is registering a `TaskTypeSpec`, not editing this function.
 
-    Every entry in `PARAMS` gets the same one-node graph except `api_issue`,
-    which has an investigation past node 0 (ticket 00).
-
-    There was a five-node `api_issue` graph before this one — read the logs,
-    find the code, analyse, propose a patch, compose a reply — and the
-    operator removed it: "a workflow nobody had described, built from a guess
-    at what investigating an API fault looks like, and every node of it
-    skipped on every run because no tool server was ever configured". The
-    graph registered here answers both halves of that. It is a transcription
-    of the operator's own routine, taken one question at a time; and a node
-    with nothing to read skips **out loud** — an envelope with a reason,
-    rendered on the board and carried into the report — rather than silently.
-
-    It is still a slice, and it is allowed to be thrown away: five past cases
-    are what decide whether the shape is right.
+    Idempotent: `register_all` clears the registry and `EDGE_ROUTER` starts from
+    empty, so the "refuses to overwrite" guard stays live for everyone else
+    rather than being disarmed at each call site.
 
     `dag_for` never answers "no graph" for a type this covers, which is every
-    classifiable type there is. Build a multi-node graph when there are steps
-    worth skipping and somebody has said what they are.
+    classifiable type there is.
     """
-    from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
-    from friday.dag.api_issue import (
-        TASK_TYPE as API_ISSUE,
-        build_diagnose_harness,
-        build_log_sources,
-        build_release_source,
+    from friday.dag.task_types import BootContext, register_all
+
+    register_all(
+        BootContext(
+            config=config,
+            record=record,
+            spent=spent,
+            servers=dict(servers or {}),
+            skills=skills,
+        )
     )
 
     EDGE_ROUTER.clear()
-    for task_type, dag in _graphs(
-        config,
-        diagnose_harness=build_diagnose_harness(config, record=record, spent=spent),
-        # **A factory, because under v3.3 the tools carry this run's
-        # placement and its numbering.** One harness built at boot would read
-        # the previous case's service. Built here because this is where
-        # `record` and `spent` are — they belong to the composition root, and
-        # a lambda reaching for them from `_graphs` would have been a name
-        # error the moment the switch was turned on.
-        make_diagnose_harness=lambda *, tools: build_diagnose_harness(
-            config, record=record, spent=spent, tools=tools
-        ),
-    ).items():
-        register_dag(task_type, dag)
+    for task_type in registry.specs():
+        register_dag(task_type, registry.dag_of(task_type))
 
     check_node_clocks(EDGE_ROUTER.values(), config.agents)
-    check_graph_clocks(EDGE_ROUTER.values(), _budgets(config))
+    check_graph_clocks(EDGE_ROUTER.values(), registry.BUDGETS)
 
-    # Node 0 reaches its extractor through `friday.extraction`'s registry,
-    # not through here, and `Diagnose` is handed its harness when the graph is
-    # built. What travels in `DAG_DEPS_EXTRA` is what a *run* needs and a
-    # graph cannot hold: the log sources, which wrap connections this process
-    # opened and closes.
-    DAG_DEPS_EXTRA.clear()
-    # The account the graph's own rows are sent from. It is the pool's
-    # `sender` — the watched account — and the graph needs it because two of
-    # its three outputs are queued mid-run, before any action reaches the
-    # pool that would have known it.
-    # **Two identities, and which one a row carries decides who reads it.**
-    # `sender` posts into the reporter's channel as the watched account;
-    # `approver` direct-messages the operator. The graph needs both because
-    # it queues rows for both, mid-run, before any action reaches the pool.
-    extra: dict[str, Any] = {
-        "sender": DEFAULT_SENDER, "approver": DEFAULT_APPROVER,
-    }
-    sources = build_log_sources(config, dict(servers or {}))
-    if sources:
-        extra["log_sources"] = sources
-    release = build_release_source(config, dict(servers or {}))
-    if release is not None:
-        extra["release_source"] = release
-    DAG_DEPS_EXTRA[API_ISSUE] = extra
-    # Replaced, not merged. Merging means a second call — a test, a restart in
-    # the same process — leaves the previous run's servers reachable, and a
-    # closed connection that is still in the dict is worse than an absent one:
-    # the node stops skipping and starts failing.
-    DAG_SERVERS.clear()
-    DAG_SERVERS.update(servers or {})
-
-    # Register the same graphs on the DBOS adapter (ticket 06), the way the
-    # pool runs them past node 0. The adapter rebuilds each run's `Deps` from a
+    # Register the same graphs on the DBOS adapter (ticket 06), the way the pool
+    # runs them past node 0. The adapter rebuilds each run's `Deps` from a
     # serializable scope key inside the workflow — a live source cannot cross a
-    # step boundary — so it reads the task back from the store and the sources
-    # from the globals just filled in above.
+    # step boundary — so it reads the task back from the store and the run
+    # handles from the registry's `DEPS_EXTRA`/`SERVERS`, filled by
+    # `register_all` above.
     if db is not None:
         _register_on_adapter(db)
 
@@ -398,8 +287,8 @@ def _register_on_adapter(db: Any) -> None:
         return Deps(
             task=task,
             db=db,
-            servers=dict(DAG_SERVERS),
-            extra=dict(DAG_DEPS_EXTRA.get(scope_key.get("task_type", ""), {})),
+            servers=dict(registry.SERVERS),
+            extra=dict(registry.DEPS_EXTRA.get(scope_key.get("task_type", ""), {})),
         )
 
     def recorder_factory(scope_key: dict[str, Any]):
@@ -413,11 +302,3 @@ def _register_on_adapter(db: Any) -> None:
     adapter.clear_graphs()
     for dag in EDGE_ROUTER.values():
         adapter.register_graph(dag, deps_factory, recorder_factory=recorder_factory)
-
-
-#: Node name -> agent, per task type. Read by `Pool` when it builds
-#: `DAGDeps`; empty until `register_dags` runs.
-DAG_DEPS_EXTRA: dict[str, dict[str, Any]] = {}
-
-#: Tool servers available to every graph, by name.
-DAG_SERVERS: dict[str, Any] = {}

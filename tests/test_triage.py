@@ -845,12 +845,16 @@ def test_every_decision_the_model_may_name_carries_its_own_description():
     which asserted the same thing about `classify`'s enum.
     """
     from friday.agent.harness import _answer_params
-    from friday.domain.models import DECISIONS, PARAMS
+    from friday.dag import registry
+    from friday.domain.actions import make_decided
 
-    described = _answer_params(Decided)["properties"]["type"]
+    # The closed set now lives on the boot-built schema (ticket 11), not on the
+    # `Decided` value type — `make_decided` builds it from the registry's types.
+    params = registry.decision_params()
+    described = _answer_params(make_decided(params))["properties"]["type"]
 
-    assert set(described["enum"]) == set(DECISIONS)
-    for name, params_cls in PARAMS.items():
+    assert set(described["enum"]) == set(registry.decisions())
+    for name, params_cls in params.items():
         # Whitespace collapsed, the way `_means` renders it: a definition long
         # enough to be worth writing is wrapped in the source, and the enum
         # keeps one line per label.

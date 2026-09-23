@@ -9,13 +9,16 @@ cycle with no reason for the direction it happened to take.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass, field, make_dataclass
+from functools import lru_cache
 from typing import Any, Literal
 
-from friday.domain.models import DECISIONS, PARAMS, SKIP
+from friday.domain.models import SKIP
 
 __all__ = [
     "Action", "Ask", "Decided", "HandOver", "NeedsHuman", "Reply", "TriageOutcome",
+    "make_decided",
 ]
 
 
@@ -108,15 +111,19 @@ def _means(name: str, params_cls: type) -> str:
     return f"    {name}: {' '.join(doc.split())}"
 
 
-_TYPE_DOC = "\n".join(
-    [
-        "which kind of task this is, or `skip` —",
-        *(_means(name, cls) for name, cls in PARAMS.items()),
-        f"    {SKIP}: nobody is asking you for anything — social talk, "
-        f"thanks, salary, personal matters, or people talking among "
-        f"themselves.",
-    ]
-)
+def _type_doc(params_by_type: Mapping[str, type]) -> str:
+    """The `type` field's description the classifier reads: one line per task
+    type from its own `Params` docstring, plus `skip`. Built from the registry's
+    task types, so a plugin's type describes itself and the core names none."""
+    return "\n".join(
+        [
+            "which kind of task this is, or `skip` —",
+            *(_means(name, cls) for name, cls in params_by_type.items()),
+            f"    {SKIP}: nobody is asking you for anything — social talk, "
+            f"thanks, salary, personal matters, or people talking among "
+            f"themselves.",
+        ]
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,43 +136,67 @@ class Decided:
     doing both there meant two producers for one set of fields and a merge to
     reconcile them. See `friday/extraction/`.
 
-    **This is also the shape triage answers**, and `type` is closed to
-    `DECISIONS` — every task type plus `skip` (board
-    `every-answer-has-a-shape`, D6). That **reverses** the recorded split
-    between a `classify` tool and a `skip` tool, whose argument was that
-    everything `classify` names opens work while `skip` names the absence of
-    it. True, and it is `TriageRunner._apply`'s business, where it stays. What
-    the split actually bought was two validations for one question: an
-    invented type could reach `_apply` and open a task the pool then discovers
-    has no graph, and "there is no work here" was checked less strictly than
-    "there is".
-
-    Measured, the wire does not close the set: asked for that exact enum, the
-    configured provider answered `hardware_issue`. What closes it is this
-    annotation, checked in this process before anybody is allowed to act on
-    it.
+    **The value type carries a bare `type: str`** (ticket 11). The *closed set*
+    the model is held to is not baked in here — it is every registered task type
+    plus `skip`, which is known only once the registry is filled at boot. So the
+    schema the model answers against is built then, by `make_decided`, and its
+    validated result is converted into this value. A model naming something
+    outside the set is refused by that boot schema before anyone acts on it,
+    exactly as the old static `Literal` did — the check just moved to where the
+    set is known.
     """
 
     #: **Neither field has a default, and that is the guard rather than a
     #: style.** `skip` opens nothing — `TriageRunner._apply` logs a line and
     #: returns — so it is the one decision that must never be reachable by
     #: accident. A default of `skip` made it the decision the system reached
-    #: when the model said *nothing at all*: `fits` drops unknown keys, every
-    #: remaining field had a default, and an empty answer validated cleanly
-    #: into a silent discard. That is CLAUDE.md's "never to a silent discard",
-    #: and it is the same shape as the failure this board was opened for — an
-    #: unreadable answer becoming a successful one because every field had a
-    #: default.
-    #:
-    #: The realistic trigger was not an empty object but a stale field name:
-    #: `task_type` is what the deleted `classify` tool called this, so a model
-    #: carrying that habit named a real type and had it dropped. Without a
-    #: default, pydantic answers "Field required", which is exactly the
-    #: correction the answer tool hands back.
-    type: Literal[DECISIONS] = field(metadata={"doc": _TYPE_DOC})  # type: ignore[valid-type]
-    confidence: float = field(
-        metadata={"doc": "how certain you are of this classification, 0 to 1."}
+    #: when the model said *nothing at all*, which is CLAUDE.md's "never to a
+    #: silent discard". Without a default, the boot schema answers "Field
+    #: required", which is exactly the correction the answer tool hands back.
+    type: str
+    confidence: float
+
+
+def _decided_field(name: str, annotation: Any, doc: str) -> tuple[str, Any, Any]:
+    return (name, annotation, field(metadata={"doc": doc}))
+
+
+@lru_cache(maxsize=None)
+def _make_decided(items: tuple[tuple[str, type], ...]) -> type:
+    params_by_type = dict(items)
+    names = (*params_by_type, SKIP)
+    schema = make_dataclass(
+        "Decided",
+        [
+            _decided_field("type", Literal[names], _type_doc(params_by_type)),  # type: ignore[valid-type]
+            _decided_field(
+                "confidence", float, "how certain you are of this classification, 0 to 1."
+            ),
+        ],
+        frozen=True,
+        slots=True,
     )
+    schema.__module__ = __name__
+    schema.__doc__ = (
+        "The shape triage answers, built at boot from the registry: `type` is "
+        "closed to the registered task types plus `skip`. Validated by the "
+        "harness, then converted to a `Decided` value."
+    )
+    return schema
+
+
+def make_decided(params_by_type: Mapping[str, type]) -> type:
+    """The structured shape the triage harness validates a classification
+    against, built from the registry's `task_type -> Params` mapping.
+
+    `type` is a `Literal` closed to those types plus `skip`, and each carries its
+    own description (`_type_doc`) — the same closed set and per-label docs the
+    static `Literal[DECISIONS]` gave, now sourced from the registry rather than a
+    hand-maintained `PARAMS`. **Memoised by the exact mapping**, so equal sets
+    yield the identical class and `isinstance`/`==` hold across callers (the boot
+    schema and a test that rebuilds it are the same object).
+    """
+    return _make_decided(tuple(params_by_type.items()))
 
 
 @dataclass(frozen=True, slots=True)

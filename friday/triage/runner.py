@@ -30,9 +30,9 @@ log = logging.getLogger(__name__)
 #: What triage concluded about a message too old to be worth answering. A
 #: decision and not a `TaskState` (D3): everything `classify` names opens
 #: work, and this names the absence of it — the shape `skip` already has.
-#: Deliberately not in `models.DECISIONS`, which decides what may become a
-#: few-shot example: "this was old" is a fact about the clock, not something
-#: to learn to predict from a message's text.
+#: Deliberately not a registered task type (not in the registry's decision set,
+#: `registry.decisions()`): "this was old" is a fact about the clock, not
+#: something to learn to predict from a message's text.
 OUTDATED = "outdated"
 
 PENDING = TaskState.PENDING

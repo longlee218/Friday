@@ -67,7 +67,8 @@ async def test_triage_and_the_extractors_are_told_nothing_about_voice():
     message. There is no sentence either writes that a voice could improve,
     and every word would be paid for on the highest-volume calls in the
     system to change nothing."""
-    from friday.extraction import EXTRACTS, register_extractors, registered
+    from friday.dag import registry
+    from friday.extraction import register_extractors, registered
     from friday.triage.runner import TriageRunner
 
     config = _shipped()
@@ -80,7 +81,7 @@ async def test_triage_and_the_extractors_are_told_nothing_about_voice():
     register_extractors(config)
 
     assert "Long" not in triage._triage._run.instructions
-    for task_type in EXTRACTS:
+    for task_type in registry.decision_params():
         assert "Long" not in registered()[task_type]._harness.instructions
 
 

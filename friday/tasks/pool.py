@@ -21,13 +21,14 @@ import logging
 from dataclasses import asdict
 from typing import Any
 
-from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS, dag_for
+from friday.dag import registry
+from friday.dag.router import dag_for
 from friday.sdk.workflow import DAGState, Deps as DAGDeps, NodeRun, status_of
 from friday.store.db import Database
 from friday.workflow import adapter
 from friday.domain.actions import Action, Ask, HandOver, Reply
 from friday.domain.states import TaskState
-from friday.domain.models import PARAMS, FridayState, Task
+from friday.domain.models import FridayState, Task
 from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind
 from friday.responder.check import rejected
 
@@ -402,7 +403,7 @@ class Pool:
         """Route to this type's graph. Every classifiable type has one — see
         `register_dags` — so there is no second way to decide what to do with
         a task any more."""
-        params_type = PARAMS.get(task.type)
+        params_type = registry.decision_params().get(task.type)
         if params_type is None:
             return HandOver(f"unknown task type {task.type!r}")
 
@@ -414,7 +415,7 @@ class Pool:
             return HandOver(f"cannot read {task.type} parameters: {exc}")
 
         dag = dag_for(task.type)
-        assert dag is not None, f"{task.type!r} is in PARAMS but has no registered graph"
+        assert dag is not None, f"{task.type!r} is registered but has no graph"
         return await self._run_dag(dag, task)
 
     async def _run_dag(self, dag, task: Task) -> Action:
@@ -498,8 +499,8 @@ class Pool:
         return DAGDeps(
             task=task,
             db=self._db,
-            servers=dict(DAG_SERVERS),
-            extra=dict(DAG_DEPS_EXTRA.get(task.type, {})),
+            servers=dict(registry.SERVERS),
+            extra=dict(registry.DEPS_EXTRA.get(task.type, {})),
         )
 
     def _recorder(self, task: Task):
@@ -538,7 +539,7 @@ def _as_params(task: Task):
     """The task's parameters as their declared type, or None if they no longer
     fit it. Best effort: the responder is better off with no params than with
     a crash, and `_plan` has already handed over anything malformed."""
-    params_type = PARAMS.get(task.type)
+    params_type = registry.decision_params().get(task.type)
     if params_type is None:
         return None
     try:

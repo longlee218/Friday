@@ -257,6 +257,6 @@ def _default_reports_dir() -> Path:
 
 
 def _params_cls() -> Any:
-    from friday.domain.models import PARAMS
+    from friday.domain.models import ApiIssueParams
 
-    return PARAMS[TASK_TYPE]
+    return ApiIssueParams

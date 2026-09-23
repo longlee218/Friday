@@ -86,11 +86,12 @@ async def test_every_extractor_records(spy):
     """One block now, but still one agent per task type — the sink has to
     reach each of them. Collapsing the *configuration* must not collapse the
     agents: each type keeps its own prompt and its own schema."""
-    from friday.extraction import EXTRACTS, register_extractors
+    from friday.dag import registry
+    from friday.extraction import register_extractors
 
     register_extractors(_config(extractor=CONFIG), record=SINK, spent=LEDGER)
 
-    assert spy == [(SINK, LEDGER)] * len(EXTRACTS), "one per task type"
+    assert spy == [(SINK, LEDGER)] * len(registry.decision_params()), "one per task type"
 
 
 async def test_the_responder_records(spy):

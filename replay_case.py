@@ -52,7 +52,7 @@ from friday.config import load_config
 from friday.dag.api_issue import build_api_issue_dag, build_diagnose_harness, build_log_sources
 from friday.domain.actions import Ask, HandOver, Reply
 from friday.domain.conversation import ConversationId
-from friday.domain.models import PARAMS
+from friday.domain.models import ApiIssueParams
 from friday.sdk.workflow import DAG, Deps as DAGDeps, NodeRun
 from friday.sources.logs import LokiSource, SshKubectlSource
 from friday.store.db import Database
@@ -280,7 +280,7 @@ def case_params(case: dict[str, Any]) -> dict[str, Any]:
     names declared on the class itself and would start quietly dropping
     inherited parameters the day one of these grows a base class.
     """
-    known = {f.name for f in fields(PARAMS["api_issue"])}
+    known = {f.name for f in fields(ApiIssueParams)}
     unknown = sorted(set(case) - known - CASE_KEYS)
     if unknown:
         raise ValueError(
@@ -360,7 +360,7 @@ async def run_captured(case: dict, *, with_model: bool, into: Path):
         final, runs, wall_s = await _run_on_adapter(
             dag,
             deps=deps,
-            seed={"prepare": PARAMS["api_issue"](**params)},
+            seed={"prepare": ApiIssueParams(**params)},
             system_db=into / "replay-system.db",
             wfid=f"replay-{case['id']}",
         )
@@ -404,7 +404,7 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
         if task is None:
             print(f"no task {task_id}", file=sys.stderr)
             return 1
-        if task.type not in PARAMS or task.type != "api_issue":
+        if task.type != "api_issue":
             print(f"task {task_id} is {task.type}, not api_issue", file=sys.stderr)
             return 1
 
@@ -427,7 +427,7 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
         final, runs, wall_s = await _run_on_adapter(
             dag,
             deps=deps,
-            seed={"prepare": PARAMS[task.type](**task.params)},
+            seed={"prepare": ApiIssueParams(**task.params)},
             system_db=into / "replay-system.db",
             wfid=f"replay-task-{task_id}",
         )

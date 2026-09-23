@@ -7,9 +7,9 @@ hallucinate; that is the cost of LLM extraction, and ticket 30's validate
 engine catches what it gets wrong.
 
 Registered at startup by `register_extractors`, looked up by task type, and
-called by `prepare()`, which is node 0 of every graph. Adding one is an entry
-in `EXTRACTS` and a block in `config.yaml`, not a change to the composition
-root.
+called by `prepare()`, which is node 0 of every graph. Adding one is registering
+a task type (ticket 11) and a block in `config.yaml`, not a change to the
+composition root — the types come from the registry the graphs are built from.
 
 An extraction is **one validated object** (board `every-answer-has-a-shape`,
 D7): that type's own parameters, plus which of its own fields the extractor
@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 from friday.agent.harness import Harness, Refused
 from friday.extraction.answer import Clarify, answer_shape, params_and_clarify
 from friday.extraction.context import FullContext
-from friday.domain.models import MODEL_AUTHORED, PARAMS, Params
+from friday.domain.models import MODEL_AUTHORED, Params
 from friday.extraction.prompt import build_input, build_instructions
 
 if TYPE_CHECKING:
@@ -53,7 +53,6 @@ if TYPE_CHECKING:
 __all__ = [
     "input_fingerprint",
     "Clarify",
-    "EXTRACTS",
     "Extractor",
     "build_extractor",
     "extract",
@@ -287,10 +286,9 @@ def register(
     only in which `Params` they fill, and three copies of the same twenty
     lines is three places for them to drift.
 
-    The params class is checked against `PARAMS` rather than trusted. An
-    extractor registered against the wrong schema produces the wrong `Params`
-    at runtime, in the middle of a task, where the only symptom is fields that
-    never fill in. Refusing at startup costs a restart.
+    The `params_cls` is the registry's own (`register_extractors` reads it from
+    the same `TaskTypeSpec` the graph is built from), so the schema an extractor
+    fills and the schema its type declares cannot drift apart.
 
     **No `context=`/`db=` any more** (ticket 15, D26): the room, the domain
     memories and the open questions were injected here and read per call
@@ -300,12 +298,6 @@ def register(
     model to a schema.
     """
     from friday.agent.harness import Harness, Refused
-
-    if PARAMS.get(task_type) is not params_cls:
-        raise ValueError(
-            f"cannot register the {task_type} extractor: PARAMS[{task_type!r}] "
-            f"is not {params_cls.__name__} (got {PARAMS.get(task_type)})"
-        )
 
     from friday.agent.instruction_prompt import SkillMeta
 
@@ -380,17 +372,6 @@ def _hygiene(params: Params) -> Params:
 #: it too.
 
 
-#: Task type -> the `Params` its extractor fills. Every classifiable type is
-#: here, because triage no longer fills anything: a type whose extractor is
-#: not configured opens tasks with empty parameters, and the reporter is asked
-#: for what they already said.
-EXTRACTS = {
-    "api_issue": "ApiIssueParams",
-    "access_request": "AccessRequestParams",
-    "doc_question": "DocQuestionParams",
-}
-
-
 def register_extractors(
     config: Config,
     *,
@@ -401,8 +382,10 @@ def register_extractors(
     """Wire every extractor the configuration declares.
 
     Composition root calls this once at startup and learns nothing about any
-    individual extractor. Adding one is a line in `EXTRACTS` and a block in
-    `config.yaml`, not a change there.
+    individual extractor. Adding one is registering a task type (ticket 11) and a
+    block in `config.yaml`, not a change there — the types come from the registry
+    the graphs are built from, so an extractor cannot be wired to a type with no
+    graph or missed for one that has.
 
     A missing block is a warning rather than a failure, because a broken
     install that starts and says what is wrong beats one that will not start.
@@ -423,7 +406,7 @@ def register_extractors(
     schema, its own registration — because that part was never the
     duplication. Only where the model lives is shared.
     """
-    from friday.domain import models
+    from friday.dag import registry
 
     agent_config = config.agents.get("extractor")
     if agent_config is None:
@@ -434,10 +417,10 @@ def register_extractors(
         )
         return
 
-    for task_type, params_name in EXTRACTS.items():
+    for task_type, params_cls in registry.decision_params().items():
         register(
             task_type,
-            getattr(models, params_name),
+            params_cls,
             agent_config,
             skills=skills,
             record=record,

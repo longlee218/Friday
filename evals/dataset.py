@@ -127,12 +127,12 @@ def unfit(examples: Sequence[Example]) -> list[str]:
     decision with no row at all, a set that never shows the classifier a turn,
     and a row that counts twice.
     """
-    from friday.domain.models import DECISIONS
+    from friday.dag import registry
 
     problems = []
 
     scored = {e.expected for e in examples}
-    for missing in sorted(set(DECISIONS) - scored):
+    for missing in sorted(set(registry.decisions()) - scored):
         problems.append(
             f"no row expects {missing!r} — it is one of the decisions triage "
             f"may reach, so nothing is scoring it"

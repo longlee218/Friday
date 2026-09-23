@@ -53,7 +53,6 @@ from friday.domain.models import (
     Memory,
     MemoryCandidate,
     MemoryKind,
-    DECISIONS,
     FridayState,
     MEMORY_DATA,
     MemoryKeyTaken,
@@ -3172,7 +3171,7 @@ class Database:
             return (row.mark, row.marked_by) if row else None
 
     async def confirmed_classifications(
-        self, *, limit: int = 20
+        self, *, limit: int = 20, decisions: "tuple[str, ...] | None" = None
     ) -> list[tuple[str, str]]:
         """Message text and the type it was marked *right* as.
 
@@ -3185,7 +3184,18 @@ class Database:
         `skip` is a realistic afternoon — and eight of eight examples reading
         "this one is skip" teaches the classifier to skip. Recency still
         orders *within* a type; what is shared out is the eight slots.
+
+        `decisions` is the closed set a right-marked row must name to count
+        (the task types plus `skip`). It can arrive as an argument so the store
+        stays below the registry that holds it; `None` reads the registry here —
+        the path the production caller (`triage/runner.py`) takes, not only a
+        test — through a lazy import, so the store names no registry at module
+        load and the layering holds.
         """
+        if decisions is None:
+            from friday.dag import registry
+
+            decisions = registry.decisions()
         async with self._sessions() as session:
             rows = await session.execute(
                 select(schema.Message.text, schema.Message.decision_type)
@@ -3205,7 +3215,7 @@ class Database:
                     # marking that right is a perfectly sensible thing for
                     # the operator to do. Showing it back as an example
                     # would teach the classifier a label it has no tool for.
-                    schema.Message.decision_type.in_(DECISIONS),
+                    schema.Message.decision_type.in_(decisions),
                 )
                 .order_by(schema.Verdict.marked_at.desc())
                 # Deeper than `limit`, because the balancing below picks from

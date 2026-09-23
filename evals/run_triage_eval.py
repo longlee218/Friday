@@ -157,6 +157,14 @@ async def _build_triage(config: Config) -> Triage:
     No `record=` sink and no `spent=` ledger: this reports confidence, it
     does not act on a budget or keep an audit trail of its own.
     """
+    # Fill the task-type registry the way the composition root does (ticket 11):
+    # triage's closed set is built from it, so it must be populated before the
+    # classifier is assembled. No servers/db needed — the eval scores triage,
+    # which reads only the registered task types, not their graphs' sources.
+    from friday.dag.router import register_dags
+
+    register_dags(config, servers={})
+
     db_path = os.environ.get("FRIDAY_DB") or config.database_path
     db = await Database.connect(db_path)
     try:

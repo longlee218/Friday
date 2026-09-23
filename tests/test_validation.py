@@ -312,27 +312,27 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
     rather than through a wrapper only tests used.
     """
     from friday.domain.validation import Matches
-    from friday.domain.models import PARAMS
+    from friday.dag import registry
     from friday.dag.prepare import plan_by_required_parameters, prepare
+    from friday.sdk.plugin import TaskTypeSpec
 
     @dataclass
     class StrictParams:
         cid: str = field(default="", metadata={"ask": "the correlationId"})
         _RULES = {"cid": Matches(r"^[a-f0-9-]{36}$", name="uuid")}
 
-    PARAMS["strict_test_type"] = StrictParams
+    # Register a throwaway task type; the autouse fixture clears the registry
+    # after the test, so it does not leak.
+    registry.register_task_type(TaskTypeSpec(name="strict_test_type", params=StrictParams))
 
-    try:
-        params, problem = await prepare(
-            "strict_test_type", StrictParams(cid="not-a-uuid")
-        )
-        action = problem or plan_by_required_parameters("strict_test_type", params)
-        from friday.domain.actions import Ask
+    params, problem = await prepare(
+        "strict_test_type", StrictParams(cid="not-a-uuid")
+    )
+    action = problem or plan_by_required_parameters("strict_test_type", params)
+    from friday.domain.actions import Ask
 
-        assert isinstance(action, Ask), "a malformed value was accepted"
-        assert "uuid" in str(action.text)
-    finally:
-        PARAMS.pop("strict_test_type", None)
+    assert isinstance(action, Ask), "a malformed value was accepted"
+    assert "uuid" in str(action.text)
 
 
 # --- how to ask lives beside the field (ticket 13) -----------------------
@@ -355,11 +355,12 @@ def _asks() -> dict[tuple[str, str], str]:
     way it does. A copy of the lookup would keep passing if the metadata key
     were renamed, which is the drift this whole ticket is about.
     """
-    from friday.domain.models import PARAMS, askable_fields
+    from friday.dag import registry
+    from friday.domain.models import askable_fields
     from friday.domain.validation import asked_as
 
     found: dict[tuple[str, str], str] = {}
-    for cls in dict.fromkeys(PARAMS.values()):
+    for cls in dict.fromkeys(registry.decision_params().values()):
         subjects = set(askable_fields(cls)) | set(getattr(cls, "_RULES", {}))
         for subject in subjects:
             try:

@@ -377,7 +377,7 @@ def test_one_extractor_block_serves_every_classifiable_type():
     import os
 
     from friday.config import load_config
-    from friday.extraction import EXTRACTS
+    from friday.dag import registry
 
     for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY"):
         os.environ.setdefault(key, "test-key")
@@ -387,18 +387,32 @@ def test_one_extractor_block_serves_every_classifiable_type():
     agents = load_config(repo / "config.yaml").agents
 
     assert "extractor" in agents, "no extractor configured at all"
-    assert EXTRACTS, "nothing to extract for"
+    assert registry.decision_params(), "no task types registered to extract for"
     stale = [name for name in agents if name.startswith("extractor_")]
     assert stale == [], f"per-type extractor blocks are gone; found {stale}"
 
 
-def test_extracts_covers_every_task_type_that_opens_a_task():
-    """`PARAMS` is the set of types that become tasks. Any of them without an
-    entry here has nothing filling its fields."""
-    from friday.extraction import EXTRACTS
-    from friday.domain.models import PARAMS
+def test_register_extractors_covers_every_registered_task_type():
+    """Every task type that opens a task has an extractor filling its fields —
+    the property the old `EXTRACTS == PARAMS` check bought, now that the extractor
+    set is driven by the registry rather than a second hand-maintained map."""
+    import os
+    from pathlib import Path
 
-    assert set(EXTRACTS) == set(PARAMS)
+    from friday.config import load_config
+    from friday.dag import registry
+    from friday.extraction import register_extractors, registered
+
+    for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY", "EXTRACTOR_API_KEY"):
+        os.environ.setdefault(key, "test-key")
+    config = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
+
+    register_extractors(config)
+
+    # Coverage, not equality: `registered()` is a process-global the other
+    # extraction tests also write, so what matters is that every registered task
+    # type got an extractor, not that nothing else is present.
+    assert set(registry.decision_params()) <= set(registered())
 
 
 def test_the_string_null_is_treated_as_absent():
@@ -451,11 +465,11 @@ def test_every_extraction_field_tells_the_model_what_it_means():
     and were deleted with them instead of moved here."""
     from dataclasses import fields as dataclass_fields
 
-    from friday.domain.models import PARAMS
+    from friday.dag import registry
 
     undocumented = [
         f"{cls.__name__}.{f.name}"
-        for cls in set(PARAMS.values())
+        for cls in set(registry.decision_params().values())
         for f in dataclass_fields(cls)
         if not (f.metadata or {}).get("doc")
     ]

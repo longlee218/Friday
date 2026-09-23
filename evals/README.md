@@ -68,7 +68,7 @@ runs it against the committed file. Three things it can decide for itself, and
 a failure names which:
 
 - **Every decision triage may reach has at least one row** — the members of
-  `friday.domain.models.DECISIONS`, which is every task type plus `skip`. A
+  `friday.dag.registry.decisions()`, every registered task type plus `skip`. A
   value nothing is scored against is a value nothing protects, and the day a
   fourth task type is registered this is what says the set has not caught up.
 - **At least one row carries a turn of more than one message.** A turn is what

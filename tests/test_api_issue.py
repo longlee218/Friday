@@ -1210,7 +1210,7 @@ def test_the_parameters_are_read_off_the_dataclass_not_the_class_body():
     a base class."""
     import dataclasses
 
-    from friday.domain.models import PARAMS
+    from friday.domain.models import ApiIssueParams
     from replay_case import case_params
 
     kept = case_params({
@@ -1220,7 +1220,7 @@ def test_the_parameters_are_read_off_the_dataclass_not_the_class_body():
         "identifier": "device-1",
     })
 
-    assert set(kept) == {f.name for f in dataclasses.fields(PARAMS["api_issue"])}
+    assert set(kept) == {f.name for f in dataclasses.fields(ApiIssueParams)}
 
 
 def test_a_dev_case_is_captured_from_kubectl_and_replays_through_it():
@@ -2963,13 +2963,17 @@ async def test_the_switch_decides_which_way_diagnose_answers(db):
     The first version of this test built both graphs and asserted `True`; it
     was written while fixing tests that guarded nothing.
     """
+    import friday.dag.api_issue as api_issue
     from friday.config import ApiIssueConfig
-    from friday.dag import router
+    from friday.dag import registry, task_types
 
     reached = []
 
-    def factory(*, tools):
-        reached.append(tools)
+    def spy(config, *, record=None, spent=None, tools=None):
+        # The v3.3 factory is invoked with this run's `tools`; a boot-time build
+        # gets none. Recording only the tool'd calls is recording the factory.
+        if tools is not None:
+            reached.append(tools)
         return None  # "no agent configured" — the node skips, which is enough
 
     state = (
@@ -2983,15 +2987,24 @@ async def test_the_switch_decides_which_way_diagnose_answers(db):
         .with_result("read_failing_code", {"status": "empty", "reason": "none"})
     )
 
-    for reads in (False, True):
-        reached.clear()
-        graphs = router._graphs(
-            SimpleNamespace(
-                context=SimpleNamespace(extraction_budget_tokens=1000),
-                agents={},
-                api_issue=ApiIssueConfig(diagnose_reads=reads),
-            ),
-            make_diagnose_harness=factory,
-        )
-        await graphs["api_issue"].node("diagnose").run(state, deps_for(db))
-        assert bool(reached) is reads, f"diagnose_reads={reads}"
+    original = api_issue.build_diagnose_harness
+    api_issue.build_diagnose_harness = spy
+    try:
+        for reads in (False, True):
+            reached.clear()
+            # The gating (a factory only when `diagnose_reads`) lives in
+            # `task_types` now, not the router — register the graph and read it
+            # back, then run its diagnose node.
+            task_types.register_all(
+                task_types.BootContext(
+                    config=SimpleNamespace(
+                        context=SimpleNamespace(extraction_budget_tokens=1000),
+                        agents={},
+                        api_issue=ApiIssueConfig(diagnose_reads=reads),
+                    )
+                )
+            )
+            await registry.dag_of("api_issue").node("diagnose").run(state, deps_for(db))
+            assert bool(reached) is reads, f"diagnose_reads={reads}"
+    finally:
+        api_issue.build_diagnose_harness = original

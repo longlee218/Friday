@@ -199,7 +199,8 @@ def workflow_graphs():
     """
     from types import SimpleNamespace
 
-    from friday.dag.router import DAG_DEPS_EXTRA, DAG_SERVERS, EDGE_ROUTER, register_dags
+    from friday.dag import registry
+    from friday.dag.router import EDGE_ROUTER, register_dags
 
     register_dags(
         SimpleNamespace(
@@ -211,9 +212,8 @@ def workflow_graphs():
     try:
         yield
     finally:
-        EDGE_ROUTER.pop("api_issue", None)
-        DAG_DEPS_EXTRA.clear()
-        DAG_SERVERS.clear()
+        EDGE_ROUTER.clear()
+        registry.clear()
 
 
 @pytest.fixture

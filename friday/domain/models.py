@@ -431,31 +431,18 @@ class DocQuestionParams:
 #: stopped producing anything but a type and a confidence.
 Params = ApiIssueParams | AccessRequestParams | DocQuestionParams
 
-#: Task type -> its parameters dataclass. Every classifiable type is here;
-#: `register_dags` builds a graph for each entry and `create_task`'s tool
-#: schema is generated from it. `skip` is deliberately absent — see above.
-PARAMS: dict[str, type] = {
-    "api_issue": ApiIssueParams,
-    "access_request": AccessRequestParams,
-    "doc_question": DocQuestionParams,
-}
-
-#: The one decision that opens no work. Everything else in `DECISIONS` names
-#: a kind of task; this names the absence of one.
+#: The one decision that opens no work. Everything a task type names is work;
+#: this names the absence of one, and it is not a task type — so it lives here,
+#: in the value layer, rather than being registered like one.
 SKIP = "skip"
 
-#: **The closed set of things triage may conclude** — every type that can open
-#: a task, plus `SKIP`. Derived from `PARAMS`, so a fourth task type is a
-#: fourth `Params` class and nothing else.
-#:
-#: Written down once because it was written down three times, and in three
-#: shapes that could disagree: a `TaskType` literal here that no annotation
-#: ever used, a `CLASSIFIABLE` tuple in the store, and the `classify`/`skip`
-#: tool pair that only added up to this set if you knew about both. The day a
-#: fourth type is registered, two of those three would have gone on describing
-#: a three-type system with nothing failing. Board `every-answer-has-a-shape`,
-#: ticket 02; D6 builds the model's own enum from it.
-DECISIONS: tuple[str, ...] = (*PARAMS, SKIP)
+#: The task-type catalog (`task_type -> Params`) and the closed set triage may
+#: conclude are no longer written down here (ticket 11). Each task type
+#: registers a `TaskTypeSpec` into `friday.dag.registry`, and the set is read
+#: from there — `friday.dag.registry.decision_params()` for the catalog,
+#: `friday.domain.actions.make_decided` for the classifier's closed set (built
+#: from the catalog plus `SKIP` at boot). This module stays below the registry,
+#: so the values reach it as arguments, never an import.
 
 #: Written by the model about the message, not supplied by the person who
 #: sent it. Asking someone for a summary of their own message is nonsense.
