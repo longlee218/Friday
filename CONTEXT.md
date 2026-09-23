@@ -506,6 +506,43 @@ timer and on reconnect. A channel with no cursor is a **cold cursor**, read
 back only as far as the **lookback** — `max_message_age`, the same number that
 marks a turn `outdated`.
 
+## SDK
+
+`friday/sdk` — the contracts the rest builds on: Protocols and dataclasses
+only, no I/O, no third-party imports. Holds the workflow port (ticket 06) and,
+since ticket 10, the plugin contracts. It may import `friday.domain` (the value
+layer beneath it) and nothing else of ours.
+
+## Kernel
+
+`friday/kernel` — owns the invariants and **names no plugin**. Imports `sdk`
+and nothing higher. Since ticket 10 it holds the **registry**; its other pieces
+move in as their steps land.
+
+## Plugin, PluginAPI, register(api)
+
+A **plugin** is a `Plugin` value (`id`, `register`, `requires`, `config`) plus a
+`register(api)` function — no base class. The kernel hands `register` a
+**PluginAPI** (the registry, by shape), and the plugin calls `api.task_type(…)`
+/ `api.memory_kind(…)` to contribute. Adding a capability is adding a plugin,
+not editing the core.
+
+## TaskTypeSpec, MemoryKindSpec
+
+How a plugin declares a task type (`name`, `params`, `extractor`, `graph`,
+`deps`, `needs`) and a memory kind (`name`, `data`, `writers`, `cardinality`,
+`injected`). Both **trimmed to the fields the registry uses today** — deferred
+fields are added on their trigger, each with a test, so no inert field pretends
+to be a rule.
+
+## Dependency rule
+
+The one direction the restructure rests on, enforced by
+`tests/test_dependency_rule.py`: `sdk` imports nothing of ours but `domain`,
+`kernel` imports `sdk`, a plugin imports `sdk` only. Plus **the kernel names no
+plugin** — no plugin import and no task-type or pack-kind literal in
+`friday/kernel`.
+
 ---
 
 # The rules again, one line each

@@ -6,10 +6,10 @@
 
 **Source:** `spec.md` — Migration order, step 7 (`sdk`/`kernel`/`plugins` split); § Implementation Decisions → "Shape and trust".
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `friday/sdk` holds `Plugin`, `PluginAPI`, `TaskTypeSpec`, `MemoryKindSpec` (beside the workflow port from 06): Protocols and dataclasses only, no I/O, no third-party imports
-- [ ] `friday/kernel` imports `sdk`; a plugin imports `sdk` only
-- [ ] Dependency-rule `ast` test (seam S4): `sdk` imports nothing of ours, `kernel` imports `sdk`, a plugin imports `sdk` only
-- [ ] "Kernel names no plugin": no plugin import and no task-type/pack-kind literal in `friday/kernel` (guard deleted once and watched go red)
-- [ ] `uv run pytest -q` passes
+- [x] `friday/sdk` holds `Plugin`, `PluginAPI`, `TaskTypeSpec`, `MemoryKindSpec` (beside the workflow port from 06): Protocols and dataclasses only, no I/O, no third-party imports
+- [x] `friday/kernel` imports `sdk`; a plugin imports `sdk` only
+- [x] Dependency-rule `ast` test (seam S4): `sdk` imports nothing of ours, `kernel` imports `sdk`, a plugin imports `sdk` only
+- [x] "Kernel names no plugin": no plugin import and no task-type/pack-kind literal in `friday/kernel` (guard deleted once and watched go red)
+- [x] `uv run pytest -q` passes
