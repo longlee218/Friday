@@ -35,6 +35,11 @@ from friday.triage.runner import TriageRunner
 async def main() -> None:
     load_dotenv()
     config = load_config()
+    # The board's memory form reads the kind registry (ticket 12); fill it so a
+    # board served on its own offers the same kinds the agent's does.
+    from friday.memory.registry import register_all_memory_kinds
+
+    register_all_memory_kinds()
     check_exposure(config.board_host)
     db = await Database.connect(config.database_path)
     status = lambda: "not connected (board only)"  # noqa: E731

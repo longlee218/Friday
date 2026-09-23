@@ -113,14 +113,14 @@ def summary_row(channel_id: str = "watched", **fields):
     file's `derived: {summary: ...}` was until board
     `read-it-the-way-the-operator-does`, ticket 10. For a renderer test that
     has no reason to run the summariser to get one."""
-    from friday.domain.models import Memory, MemoryKind, RoomSummary
+    from friday.domain.models import Memory, RoomSummary
 
     now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
     data = {f: fields.get(f, [] if f != "topic" else "") for f in RoomSummary.__dataclass_fields__}
     data.update(summary_of=fields.get("summary_of", "m1"))
     return Memory(
         id="s1", channel_id=channel_id, agent="summary", text=data["topic"],
-        kind=MemoryKind.SUMMARY, created_at=now, updated_at=now,
+        kind="summary", created_at=now, updated_at=now,
         key="room", data=data,
     )
 
@@ -201,7 +201,12 @@ def workflow_graphs():
 
     from friday.dag import registry
     from friday.dag.router import EDGE_ROUTER, register_dags
+    from friday.memory import registry as memory_kinds
 
+    # Memory kinds register themselves too (ticket 12): the store reads the
+    # registry for a kind's writers/schema/natural key, so every test needs it
+    # filled the way the composition root fills it at boot.
+    memory_kinds.register_all_memory_kinds()
     register_dags(
         SimpleNamespace(
             agents={},
@@ -214,6 +219,7 @@ def workflow_graphs():
     finally:
         EDGE_ROUTER.clear()
         registry.clear()
+        memory_kinds.clear()
 
 
 @pytest.fixture

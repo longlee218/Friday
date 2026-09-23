@@ -5,7 +5,7 @@ This module used to hold a store too — one YAML file per channel, inheriting
 `overrides` and the summariser's `state` bookmark. Board
 `read-it-the-way-the-operator-does`, ticket 10, reversed that three-store
 split: every memory is a row in SQLite now. What the summariser writes is one
-active `summary` row per channel (`MemoryKind.SUMMARY`), a rebuild supersedes
+active `summary` row per channel, a rebuild supersedes
 the last one so the history the file never had exists, and the bookmark is
 that row's `data` beside the four fields. What the operator wrote is `fact`,
 `constraint` and `person` rows with `origin=admin`, entered through the
@@ -25,10 +25,10 @@ from friday.config import AgentConfig
 from friday.domain.memory_guard import InstructionShaped
 from friday.domain.models import (
     FridayState,
-    MemoryKind,
     MemoryRefused,
     RoomSummary,
 )
+from friday.memory import registry as memory_kinds
 from friday.store.db import Database
 from friday.agent.harness import Harness
 # Imported at load time since ticket 10: it was deferred inside the two
@@ -271,7 +271,7 @@ class ContextRebuilder:
             try:
                 if current is None:
                     written = await self._db.memory_add(
-                        state, text, kind=MemoryKind.SUMMARY, data=data
+                        state, text, kind=memory_kinds.SUMMARY, data=data
                     )
                 else:
                     written = await self._db.memory_supersede(

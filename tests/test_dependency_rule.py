@@ -19,25 +19,25 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from friday.domain.models import MemoryKind
-
 ROOT = Path(__file__).resolve().parent.parent
 
 #: The core memory kinds — every install has them, they stay unprefixed, and no
-#: plugin owns them (DESIGN-v2 §9.2). Everything else in `MemoryKind` is a pack
-#: kind a plugin ships, so its bare name is a literal the kernel must not carry.
+#: plugin owns them (DESIGN-v2 §9.2). Everything else the memory registry holds
+#: is a pack kind a plugin ships, so its bare name is a literal the kernel must
+#: not carry.
 CORE_KINDS = {"fact", "constraint", "decision", "voice", "summary", "finding", "person"}
-PACK_KINDS = {k.value for k in MemoryKind} - CORE_KINDS
 
 
 def _forbidden_literals() -> set[str]:
     """The literals G1 forbids inside `friday/kernel`: a task type's name or a
-    pack kind's name hardcoded there is the core knowing a plugin by name. The
-    task types come from the registry (the autouse fixture fills it), not a
-    hand-maintained catalog — the point of ticket 11."""
+    pack kind's name hardcoded there is the core knowing a plugin by name. Both
+    come from their registries (the autouse fixture fills them), not a
+    hand-maintained catalog — the point of tickets 11 and 12."""
     from friday.dag import registry
+    from friday.memory import registry as memory_registry
 
-    return set(registry.decision_params()) | PACK_KINDS
+    pack_kinds = set(memory_registry.kinds()) - CORE_KINDS
+    return set(registry.decision_params()) | pack_kinds
 
 
 def _modules(base: Path) -> list[tuple[str, ast.Module]]:

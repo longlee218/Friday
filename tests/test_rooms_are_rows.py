@@ -22,7 +22,6 @@ from friday.sdk.testing import ScriptedModel, assistant_message
 from friday.config import AgentConfig
 from friday.domain.models import (
     FridayState,
-    MemoryKind,
     MemoryOrigin,
     MemoryStatus,
 )
@@ -54,7 +53,7 @@ async def _said(db, message_id, channel_id="100", text="api lỗi"):
     ))
 
 
-async def _operator_wrote(db, channel_id, text, kind=MemoryKind.FACT, data=None):
+async def _operator_wrote(db, channel_id, text, kind="fact", data=None):
     return await db.memory_add(
         FridayState(channel_id=channel_id, agent="operator"),
         text, kind=kind, origin=ADMIN, data=data,
@@ -72,7 +71,7 @@ async def test_a_rebuild_writes_one_summary_row_and_the_next_supersedes_it(db):
     await _summariser(db, _answer("the reelme api")).rebuild_all()
 
     first = await db.room_summary("100")
-    assert first.kind == MemoryKind.SUMMARY and first.origin == MemoryOrigin.MODEL
+    assert first.kind == "summary" and first.origin == MemoryOrigin.MODEL
     assert first.data["topic"] == "the reelme api"
 
     await _said(db, "m2")
@@ -170,13 +169,13 @@ async def test_the_extractor_reads_operator_rows_here_and_everywhere_labelled(db
     from friday.domain.models import ApiIssueParams
 
     await _operator_wrote(db, "watched", "test.apero is\nthe staging host")
-    await _operator_wrote(db, "*", "the company is apero", kind=MemoryKind.CONSTRAINT)
+    await _operator_wrote(db, "*", "the company is apero", kind="constraint")
     await db.memory_add(
         FridayState(channel_id="watched", agent="responder"),
-        "500s here are usually the gateway", kind=MemoryKind.FACT,
+        "500s here are usually the gateway", kind="fact",
     )
     await _operator_wrote(
-        db, "watched", "", kind=MemoryKind.PERSON,
+        db, "watched", "", kind="person",
         data={"discord_id": "42", "name": "Lan Nguyen", "role": "qa", "team": "orders"},
     )
     await _said(db, "m1", channel_id="watched")
@@ -253,7 +252,7 @@ async def test_a_person_row_here_or_everywhere_is_someone_known(db):
     assert not await db.knows_person("watched", "42")
 
     await _operator_wrote(
-        db, "*", "", kind=MemoryKind.PERSON,
+        db, "*", "", kind="person",
         data={"discord_id": "42", "name": "Lan", "role": "qa", "team": "orders"},
     )
 
@@ -311,11 +310,11 @@ async def test_the_import_turns_whatever_files_there_are_into_admin_rows(db, tmp
 
     everywhere = await db.memories_for_channel("*")
     assert [(m.kind, m.text, m.origin) for m in everywhere] == [
-        (MemoryKind.FACT, "company: apero", ADMIN)
+        ("fact", "company: apero", ADMIN)
     ]
     here = {(m.kind, m.text) for m in await db.memories_for_channel("100")}
-    assert (MemoryKind.FACT, "test.apero: the staging host") in here
-    assert (MemoryKind.FACT, "people.dana: thân, gọi em") in here
+    assert ("fact", "test.apero: the staging host") in here
+    assert ("fact", "people.dana: thân, gọi em") in here
     assert await db.knows_person("100", "42")
     # `derived` rebuilds; it is not the operator's to import.
     assert await db.room_summary("100") is None

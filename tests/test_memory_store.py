@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from friday.domain.models import MemoryKind, FridayState
+from friday.domain.models import FridayState
+from friday.memory import registry as memory_kinds
 
 ROOM = FridayState(channel_id="c1", task_id=7, agent="responder")
 OTHER_ROOM = FridayState(channel_id="c2", task_id=None, agent="responder")
@@ -28,21 +29,21 @@ ROOM_WITH_SOURCE = FridayState(
 async def test_a_memory_is_written_and_found_by_search(db):
     await db.memory_add(ROOM, "checkout runs on cluster b")
 
-    (found,) = await db.memory_search(ROOM, "cluster", limit=8, kind=MemoryKind.VOICE)
+    (found,) = await db.memory_search(ROOM, "cluster", limit=8, kind=memory_kinds.VOICE)
 
     assert found.text == "checkout runs on cluster b"
     assert found.channel_id == "c1"
 
 
 async def test_search_finds_nothing_in_an_empty_room(db):
-    assert await db.memory_search(ROOM, "anything", limit=8, kind=MemoryKind.VOICE) == []
+    assert await db.memory_search(ROOM, "anything", limit=8, kind=memory_kinds.VOICE) == []
 
 
 async def test_a_room_cannot_read_another_rooms_memory(db):
     await db.memory_add(OTHER_ROOM, "they deploy on fridays")
 
-    assert await db.memory_search(ROOM, "deploy", limit=8, kind=MemoryKind.VOICE) == []
-    assert await db.memory_search(OTHER_ROOM, "deploy", limit=8, kind=MemoryKind.VOICE) != []
+    assert await db.memory_search(ROOM, "deploy", limit=8, kind=memory_kinds.VOICE) == []
+    assert await db.memory_search(OTHER_ROOM, "deploy", limit=8, kind=memory_kinds.VOICE) != []
 
 
 async def test_correcting_a_memory_replaces_its_text(db):
@@ -51,7 +52,7 @@ async def test_correcting_a_memory_replaces_its_text(db):
     updated = await db.memory_update(ROOM, written.id, "they usually send a curl")
 
     assert updated.text == "they usually send a curl"
-    (found,) = await db.memory_search(ROOM, "curl", limit=8, kind=MemoryKind.VOICE)
+    (found,) = await db.memory_search(ROOM, "curl", limit=8, kind=memory_kinds.VOICE)
     assert found.text == "they usually send a curl"
 
 
@@ -67,7 +68,7 @@ async def test_deleting_a_memory_removes_it_from_search(db):
 
     assert await db.memory_delete(ROOM, written.id) is True
 
-    assert await db.memory_search(ROOM, "staging", limit=8, kind=MemoryKind.VOICE) == []
+    assert await db.memory_search(ROOM, "staging", limit=8, kind=memory_kinds.VOICE) == []
 
 
 async def test_deleting_an_id_from_another_room_fails_the_same_as_missing(db):
@@ -130,7 +131,7 @@ async def test_a_full_channel_refuses_a_new_memory_rather_than_evicting_one(db):
 
     assert await db.memory_add(ROOM, "one more than the room can hold") is None
 
-    still_there = await db.memory_search(ROOM, "fact", limit=1000, kind=MemoryKind.VOICE)
+    still_there = await db.memory_search(ROOM, "fact", limit=1000, kind=memory_kinds.VOICE)
     assert len(still_there) == Database.MEMORY_PER_CHANNEL
     assert any(m.text == "fact number 0" for m in still_there), (
         "the oldest memory was not silently evicted to make room"
@@ -215,7 +216,7 @@ async def test_search_orders_by_recency_not_by_how_well_it_matches(db):
     await db.memory_add(ROOM, "checkout runs on cluster b")
     await db.memory_add(ROOM, "checkout also runs a batch job")
 
-    found = await db.memory_search(ROOM, "checkout", limit=8, kind=MemoryKind.VOICE)
+    found = await db.memory_search(ROOM, "checkout", limit=8, kind=memory_kinds.VOICE)
 
     assert [m.text for m in found] == [
         "checkout also runs a batch job",
@@ -229,7 +230,7 @@ async def test_an_empty_query_returns_the_channels_recent_memories(db):
     await db.memory_add(ROOM, "checkout runs on cluster b")
     await db.memory_add(ROOM, "they deploy on fridays")
 
-    found = await db.memory_search(ROOM, "", limit=8, kind=MemoryKind.VOICE)
+    found = await db.memory_search(ROOM, "", limit=8, kind=memory_kinds.VOICE)
 
     assert len(found) == 2
 
@@ -245,7 +246,7 @@ async def test_deleting_a_memory_frees_its_slot_at_the_cap(db):
         assert await db.memory_add(ROOM, f"fact number {n}") is not None
     assert await db.memory_add(ROOM, "one more than the room can hold") is None
 
-    first = (await db.memory_search(ROOM, "fact number 0", limit=1, kind=MemoryKind.VOICE))[0]
+    first = (await db.memory_search(ROOM, "fact number 0", limit=1, kind=memory_kinds.VOICE))[0]
     await db.memory_delete(ROOM, first.id)
 
     assert await db.memory_add(ROOM, "now there is room again") is not None
@@ -282,7 +283,7 @@ async def test_memory_search_requires_a_limit_rather_than_defaulting_to_one(db):
     import pytest
 
     with pytest.raises(TypeError):
-        await db.memory_search(ROOM, "anything", kind=MemoryKind.VOICE)
+        await db.memory_search(ROOM, "anything", kind=memory_kinds.VOICE)
 
 
 async def test_memory_add_records_the_source_message_id(db):
@@ -311,13 +312,12 @@ def test_the_reader_of_a_memory_follows_from_its_kind():
     (ticket 09), because `finding` has two readers; the whole table is
     pinned in `tests/test_memory_kinds.py`, and this keeps the extractor's
     half of it."""
-    from friday.domain.models import DOMAIN_KINDS, MemoryKind, readers_for
 
-    for kind in DOMAIN_KINDS:
-        assert "extractor" in readers_for(kind)
-    assert readers_for(MemoryKind.VOICE) == {"responder"}
-    assert DOMAIN_KINDS == {
-        MemoryKind.FACT, MemoryKind.CONSTRAINT, MemoryKind.FINDING, MemoryKind.DECISION,
+    for kind in memory_kinds.domain_kinds():
+        assert "extractor" in memory_kinds.readers_for(kind)
+    assert memory_kinds.readers_for(memory_kinds.VOICE) == {"responder"}
+    assert memory_kinds.domain_kinds() == {
+        memory_kinds.FACT, memory_kinds.CONSTRAINT, memory_kinds.FINDING, memory_kinds.DECISION,
     }
 
 
@@ -327,45 +327,42 @@ def test_readers_for_refuses_a_kind_outside_the_closed_set():
     told apart from its neighbours is one a model will place at random."""
     import pytest
 
-    from friday.domain.models import readers_for
 
     with pytest.raises(ValueError):
-        readers_for("preference")
+        memory_kinds.readers_for("preference")
 
 
 async def test_memory_add_defaults_to_voice_and_active(db):
-    """`kind` defaults to `MemoryKind.VOICE` because the only wired producer
+    """`kind` defaults to `memory_kinds.VOICE` because the only wired producer
     today is the responder, which writes nothing else. `status` starts
     `active` regardless of kind."""
     written = await db.memory_add(ROOM, "they usually reply in Vietnamese")
 
-    assert written.kind == MemoryKind.VOICE
+    assert written.kind == memory_kinds.VOICE
     assert written.status == "active"
     assert written.superseded_by is None
 
 
 async def test_memory_add_takes_the_kind_it_is_given(db):
     written = await db.memory_add(
-        ROOM, "test.apero is staging", kind=MemoryKind.FACT
+        ROOM, "test.apero is staging", kind=memory_kinds.FACT
     )
 
-    assert written.kind == MemoryKind.FACT
+    assert written.kind == memory_kinds.FACT
 
 
 async def test_domain_memories_reads_the_four_domain_kinds(db):
     """`db.domain_memories` is the extractor's read path (D14, D21): the four
     domain kinds, newest first, and nothing voice-kind — that is the
     responder's alone."""
-    from friday.domain.models import MemoryKind
-
-    await db.memory_add(ROOM, "test.apero is staging", kind=MemoryKind.FACT)
-    await db.memory_add(ROOM, "never deploy on fridays", kind=MemoryKind.CONSTRAINT)
+    await db.memory_add(ROOM, "test.apero is staging", kind=memory_kinds.FACT)
+    await db.memory_add(ROOM, "never deploy on fridays", kind=memory_kinds.CONSTRAINT)
     await db.memory_add(
-        ROOM, "the timeout was the proxy, not the api", kind=MemoryKind.FINDING,
+        ROOM, "the timeout was the proxy, not the api", kind=memory_kinds.FINDING,
         data={"task_id": 7, "service": "api", "confidence": 0.7},
     )
-    await db.memory_add(ROOM, "moved to the new queue", kind=MemoryKind.DECISION)
-    await db.memory_add(ROOM, "they like short replies", kind=MemoryKind.VOICE)
+    await db.memory_add(ROOM, "moved to the new queue", kind=memory_kinds.DECISION)
+    await db.memory_add(ROOM, "they like short replies", kind=memory_kinds.VOICE)
 
     found = await db.domain_memories(ROOM.channel_id)
 
@@ -375,12 +372,12 @@ async def test_domain_memories_reads_the_four_domain_kinds(db):
         "the timeout was the proxy, not the api",
         "moved to the new queue",
     }
-    assert all(m.kind != MemoryKind.VOICE for m in found)
+    assert all(m.kind != memory_kinds.VOICE for m in found)
 
 
 async def test_domain_memories_does_not_leak_another_rooms(db):
-    await db.memory_add(ROOM, "test.apero is staging", kind=MemoryKind.FACT)
-    await db.memory_add(OTHER_ROOM, "prod.other is production", kind=MemoryKind.FACT)
+    await db.memory_add(ROOM, "test.apero is staging", kind=memory_kinds.FACT)
+    await db.memory_add(OTHER_ROOM, "prod.other is production", kind=memory_kinds.FACT)
 
     found = await db.domain_memories(ROOM.channel_id)
 
@@ -388,23 +385,23 @@ async def test_domain_memories_does_not_leak_another_rooms(db):
 
 
 async def test_memory_search_only_returns_the_kind_it_is_asked_for(db):
-    """The responder's tool always searches `MemoryKind.VOICE` (D14) — a
+    """The responder's tool always searches `memory_kinds.VOICE` (D14) — a
     domain-kind row, however it got written, must not surface in that
     search."""
-    await db.memory_add(ROOM, "test.apero is staging", kind=MemoryKind.FACT)
-    voice = await db.memory_add(ROOM, "they like short replies", kind=MemoryKind.VOICE)
+    await db.memory_add(ROOM, "test.apero is staging", kind=memory_kinds.FACT)
+    voice = await db.memory_add(ROOM, "they like short replies", kind=memory_kinds.VOICE)
 
-    found = await db.memory_search(ROOM, "", kind=MemoryKind.VOICE, limit=8)
+    found = await db.memory_search(ROOM, "", kind=memory_kinds.VOICE, limit=8)
 
     assert [m.id for m in found] == [voice.id]
 
 
 async def test_correcting_a_memory_leaves_its_kind_and_status_alone(db):
-    written = await db.memory_add(ROOM, "test.apero is staging", kind=MemoryKind.FACT)
+    written = await db.memory_add(ROOM, "test.apero is staging", kind=memory_kinds.FACT)
 
     updated = await db.memory_update(ROOM, written.id, "test.apero is dev, not staging")
 
-    assert updated.kind == MemoryKind.FACT
+    assert updated.kind == memory_kinds.FACT
     assert updated.status == "active"
 
 
@@ -413,12 +410,12 @@ async def test_superseding_a_memory_marks_the_old_one_and_writes_a_new_one(db):
     correcting its wording. The old row survives, superseded, pointing at
     the new one; the new row carries the new claim, active, under the same
     kind."""
-    old = await db.memory_add(ROOM, "the queue is rabbitmq", kind=MemoryKind.DECISION)
+    old = await db.memory_add(ROOM, "the queue is rabbitmq", kind=memory_kinds.DECISION)
 
     new = await db.memory_supersede(ROOM, old.id, "the queue moved to kafka")
 
     assert new.text == "the queue moved to kafka"
-    assert new.kind == MemoryKind.DECISION
+    assert new.kind == memory_kinds.DECISION
     assert new.status == "active"
 
     everything = await db.memories_for_channel(ROOM.channel_id)
@@ -429,19 +426,19 @@ async def test_superseding_a_memory_marks_the_old_one_and_writes_a_new_one(db):
 
 
 async def test_a_superseded_memory_is_invisible_to_every_reader_that_serves_a_model(db):
-    old = await db.memory_add(ROOM, "the queue is rabbitmq", kind=MemoryKind.DECISION)
+    old = await db.memory_add(ROOM, "the queue is rabbitmq", kind=memory_kinds.DECISION)
     await db.memory_supersede(ROOM, old.id, "the queue moved to kafka")
 
     assert old.id not in {m.id for m in await db.domain_memories(ROOM.channel_id)}
     assert old.id not in {
-        m.id for m in await db.memory_search(ROOM, "", kind=MemoryKind.DECISION, limit=8)
+        m.id for m in await db.memory_search(ROOM, "", kind=memory_kinds.DECISION, limit=8)
     }
 
 
 async def test_a_superseded_memory_cannot_be_superseded_again_through_its_own_id(db):
     """"The current one" is the row a supersession points at — supersede
     that one instead of trying to reach the row it already replaced."""
-    old = await db.memory_add(ROOM, "the queue is rabbitmq", kind=MemoryKind.DECISION)
+    old = await db.memory_add(ROOM, "the queue is rabbitmq", kind=memory_kinds.DECISION)
     new = await db.memory_supersede(ROOM, old.id, "the queue moved to kafka")
 
     assert await db.memory_supersede(ROOM, old.id, "anything") is None
@@ -453,7 +450,7 @@ async def test_a_superseded_memory_cannot_be_superseded_again_through_its_own_id
 async def test_a_superseded_memory_cannot_be_corrected_or_deleted_either(db):
     """Frozen history (D16): once replaced, a row is not the one to correct
     or retract — the row that replaced it is."""
-    old = await db.memory_add(ROOM, "the queue is rabbitmq", kind=MemoryKind.DECISION)
+    old = await db.memory_add(ROOM, "the queue is rabbitmq", kind=memory_kinds.DECISION)
     await db.memory_supersede(ROOM, old.id, "the queue moved to kafka")
 
     assert await db.memory_update(ROOM, old.id, "anything") is None
@@ -493,7 +490,7 @@ async def test_the_cap_counts_only_active_memories_not_every_superseded_generati
     room look full when it is not."""
     from friday.store.db import Database
 
-    current = await db.memory_add(ROOM, "the queue is rabbitmq", kind=MemoryKind.DECISION)
+    current = await db.memory_add(ROOM, "the queue is rabbitmq", kind=memory_kinds.DECISION)
     for n in range(Database.MEMORY_PER_CHANNEL):
         current = await db.memory_supersede(ROOM, current.id, f"the queue is generation {n}")
 
@@ -520,7 +517,7 @@ async def test_two_writes_racing_for_the_last_slot_do_not_both_land(db):
     )
 
     assert [first is None, second is None].count(True) == 1
-    live = await db.memory_search(ROOM, "", limit=1000, kind=MemoryKind.VOICE)
+    live = await db.memory_search(ROOM, "", limit=1000, kind=memory_kinds.VOICE)
     assert len(live) == Database.MEMORY_PER_CHANNEL
 
 
@@ -538,12 +535,12 @@ async def test_a_structured_row_comes_back_as_its_own_type(db):
     await _project(db, "p")
     await _service(db, "be", "p")
     await db.memory_add(
-        ROOM, "ReelMe on dev", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
+        ROOM, "ReelMe on dev", kind=memory_kinds.ROUTE, origin=MemoryOrigin.ADMIN,
         data={"domain": "api.dev.aperogroup.ai", "env": "dev", "service": "be"},
     )
 
     found = await db.structured_memory(
-        "c1", kind=MemoryKind.ROUTE, key="api.dev.aperogroup.ai"
+        "c1", kind=memory_kinds.ROUTE, key="api.dev.aperogroup.ai"
     )
 
     assert (found.env, found.service) == ("dev", "be")
@@ -564,13 +561,13 @@ async def test_this_rooms_row_wins_over_the_one_written_for_every_room(db):
     await _service(db, "this-room", "p")
     for state, service in ((everywhere, "shared"), (ROOM, "this-room")):
         await db.memory_add(
-            state, "route", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
+            state, "route", kind=memory_kinds.ROUTE, origin=MemoryOrigin.ADMIN,
             data={"domain": "api.aperogroup.ai", "env": "production",
                   "service": service},
         )
 
     found = await db.structured_memory(
-        "c1", kind=MemoryKind.ROUTE, key="api.aperogroup.ai"
+        "c1", kind=memory_kinds.ROUTE, key="api.aperogroup.ai"
     )
 
     assert found.service == "this-room"
@@ -580,7 +577,7 @@ async def test_a_prose_kind_has_no_structured_data_to_ask_for(db):
     import pytest
 
     with pytest.raises(ValueError, match="prose"):
-        await db.structured_memory("c1", kind=MemoryKind.FACT, key="anything")
+        await db.structured_memory("c1", kind=memory_kinds.FACT, key="anything")
 
 
 # --- a row that names another row (ticket 19) -------------------------------
@@ -591,7 +588,7 @@ async def _project(db, name: str, channel: str = "c1"):
 
     return await db.memory_add(
         FridayState(channel_id=channel, agent="operator"), f"repo {name}",
-        kind=MemoryKind.PROJECT, origin=MemoryOrigin.ADMIN,
+        kind=memory_kinds.PROJECT, origin=MemoryOrigin.ADMIN,
         data={"name": name, "repo_path": f"~/{name}",
               "default_branch": "main", "stack": "NestJS"},
     )
@@ -602,7 +599,7 @@ async def _service(db, name: str, project: str, channel: str = "c1"):
 
     return await db.memory_add(
         FridayState(channel_id=channel, agent="operator"), f"service {name}",
-        kind=MemoryKind.SERVICE, origin=MemoryOrigin.ADMIN,
+        kind=memory_kinds.SERVICE, origin=MemoryOrigin.ADMIN,
         data={
             "name": name, "project": project,
             "prod": {"cluster": "c", "namespace": "n", "app": name},
@@ -757,7 +754,7 @@ async def test_a_shared_row_cannot_be_removed_while_one_room_names_it(db):
     await _service(db, "c1-service", "shared", channel="c1")
     shared = [
         m for m in await db.memories_for_channel("*")
-        if m.kind == MemoryKind.PROJECT
+        if m.kind == memory_kinds.PROJECT
     ][0]
 
     with pytest.raises(MemoryRefused, match="c1-service"):

@@ -8,7 +8,7 @@ these tests drive the store directly, the same seam `tests/test_memory_store
 from __future__ import annotations
 
 from friday.domain.memory_guard import InstructionShaped
-from friday.domain.models import CandidateStatus, MemoryKind, FridayState
+from friday.domain.models import CandidateStatus, FridayState
 
 ROOM = FridayState(channel_id="c1", task_id=7, agent="responder", message_id="m1")
 OTHER_ROOM = FridayState(channel_id="c2", task_id=None, agent="responder", message_id="m2")
@@ -21,7 +21,7 @@ async def test_a_proposal_is_pending_and_reads_back_nowhere(db):
     candidate = await db.propose_memory(ROOM, "they usually reply in Vietnamese")
 
     assert candidate.status == CandidateStatus.PENDING
-    assert await db.memory_search(ROOM, "Vietnamese", limit=8, kind=MemoryKind.VOICE) == []
+    assert await db.memory_search(ROOM, "Vietnamese", limit=8, kind="voice") == []
 
 
 async def test_a_pending_candidate_is_visible_to_the_operator(db):
@@ -45,7 +45,7 @@ async def test_marking_right_accepts_and_writes_it_with_its_kind(db):
     """"Marked accepted, it is written with its kind, through the refusal in
     11" — the checklist's own words. `memory_search` proves it actually
     landed, not just that the candidate's own status says so."""
-    await db.propose_memory(ROOM, "they usually reply in Vietnamese", kind=MemoryKind.VOICE)
+    await db.propose_memory(ROOM, "they usually reply in Vietnamese", kind="voice")
 
     (resolved,) = await db.resolve_candidates_for_message(
         provider_message_id="m1", mark="right", by="lee"
@@ -53,9 +53,9 @@ async def test_marking_right_accepts_and_writes_it_with_its_kind(db):
 
     assert resolved.status == CandidateStatus.ACCEPTED
     assert resolved.memory_id is not None
-    (found,) = await db.memory_search(ROOM, "Vietnamese", limit=8, kind=MemoryKind.VOICE)
+    (found,) = await db.memory_search(ROOM, "Vietnamese", limit=8, kind="voice")
     assert found.id == resolved.memory_id
-    assert found.kind == MemoryKind.VOICE
+    assert found.kind == "voice"
 
 
 async def test_marking_wrong_rejects_and_discards_it_visibly(db):
@@ -69,7 +69,7 @@ async def test_marking_wrong_rejects_and_discards_it_visibly(db):
 
     assert resolved.status == CandidateStatus.REJECTED
     assert resolved.memory_id is None
-    assert await db.memory_search(ROOM, "Vietnamese", limit=8, kind=MemoryKind.VOICE) == []
+    assert await db.memory_search(ROOM, "Vietnamese", limit=8, kind="voice") == []
     (still_listed,) = await db.candidates_for_channel("c1")
     assert still_listed.status == CandidateStatus.REJECTED
 
@@ -80,7 +80,7 @@ async def test_silence_is_not_a_mark(db):
     candidate = await db.propose_memory(ROOM, "they usually reply in Vietnamese")
 
     assert await db.candidates_for_channel("c1") == [candidate]
-    assert await db.memory_search(ROOM, "Vietnamese", limit=8, kind=MemoryKind.VOICE) == []
+    assert await db.memory_search(ROOM, "Vietnamese", limit=8, kind="voice") == []
 
 
 async def test_a_candidate_with_no_message_in_scope_is_never_resolved(db):
@@ -110,7 +110,7 @@ async def test_an_instruction_shaped_candidate_is_accepted_but_not_written(db):
 
     assert resolved.status == CandidateStatus.ACCEPTED
     assert resolved.memory_id is None
-    assert await db.memory_search(ROOM, "English", limit=8, kind=MemoryKind.VOICE) == []
+    assert await db.memory_search(ROOM, "English", limit=8, kind="voice") == []
 
 
 async def test_accepting_at_the_channels_cap_leaves_it_unwritten_too(db):
@@ -142,7 +142,7 @@ async def test_a_verdict_that_already_exists_resolves_a_proposal_immediately(db)
 
     assert candidate.status == CandidateStatus.ACCEPTED
     assert candidate.memory_id is not None
-    (found,) = await db.memory_search(ROOM, "Vietnamese", limit=8, kind=MemoryKind.VOICE)
+    (found,) = await db.memory_search(ROOM, "Vietnamese", limit=8, kind="voice")
     assert found.id == candidate.memory_id
 
 

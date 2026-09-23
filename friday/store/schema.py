@@ -345,9 +345,10 @@ class Memory(Base):
     channel_id: Mapped[str] = mapped_column(index=True)
     agent: Mapped[str]
     text: Mapped[str]
-    #: `friday.domain.models.MemoryKind` as a string, the way `Task.state`
-    #: stores `TaskState`. Who reads a row is a function of this value
-    #: (`readers_for`), never a second column.
+    #: A registered memory kind, stored as its string, the way `Task.state`
+    #: stores `TaskState` (a validated string since ticket 12 —
+    #: `friday.memory.registry.validate_kind`). Who reads a row is a function of
+    #: this value (`readers_for`), never a second column.
     kind: Mapped[str]
     task_id: Mapped[int | None] = mapped_column(index=True)
     #: The message that produced this memory. Set by memory_add from the
@@ -360,7 +361,7 @@ class Memory(Base):
     updated_at: Mapped[datetime] = mapped_column(IsoDateTime)
     deleted_at: Mapped[datetime | None] = mapped_column(IsoDateTime, default=None)
     deleted_by: Mapped[str | None] = mapped_column(default=None)
-    #: `MemoryKind`'s lifecycle (D16): `"active"` unless a later memory
+    #: A memory's lifecycle (D16): `"active"` unless a later memory
     #: replaced this one's claim, in which case `"superseded"` and
     #: `superseded_by` names the row that replaced it. The migration backs
     #: this with a server default of `"active"` for any pre-existing row.

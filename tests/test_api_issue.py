@@ -32,7 +32,7 @@ from friday.dag.api_issue.resolve import resolve_node
 from friday.dag.engine import DAGDeps, DAGState, status_of
 from friday.domain.actions import Ask, HandOver, Reply
 from friday.domain.conversation import ConversationId
-from friday.domain.models import ApiIssueParams, FridayState, MemoryKind, MemoryOrigin
+from friday.domain.models import ApiIssueParams, FridayState, MemoryOrigin
 
 CURL = (
     'curl -X POST -H "Content-Type: application/json" '
@@ -75,7 +75,7 @@ async def write_environment_rows(db, channel_id: str = "watched"):
     state = FridayState(channel_id=channel_id, agent="admin")
     for suffix, env in (("aperogroup.ai", "production"), ("dev.aperogroup.ai", "dev")):
         await db.memory_add(
-            state, f"{suffix} is {env}", kind=MemoryKind.ENVIRONMENT,
+            state, f"{suffix} is {env}", kind="environment",
             origin=MemoryOrigin.ADMIN, data={"suffix": suffix, "env": env},
         )
 
@@ -96,7 +96,7 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
         else "api-reelme-v2.aperogroup.ai"
     )
     await db.memory_add(
-        state, "the ReelMe repository", kind=MemoryKind.PROJECT,
+        state, "the ReelMe repository", kind="project",
         origin=MemoryOrigin.ADMIN,
         data={
             "name": "reelme", "repo_path": repo or "/nowhere",
@@ -104,7 +104,7 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
         },
     )
     await db.memory_add(
-        state, "the ReelMe v2 backend", kind=MemoryKind.SERVICE,
+        state, "the ReelMe v2 backend", kind="service",
         origin=MemoryOrigin.ADMIN,
         data={
             "name": "backend-reelme-v2",
@@ -114,7 +114,7 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
         },
     )
     await db.memory_add(
-        state, "ReelMe v2 on dev", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
+        state, "ReelMe v2 on dev", kind="route", origin=MemoryOrigin.ADMIN,
         data={"domain": domain, "env": env, "service": "backend-reelme-v2"},
     )
 
@@ -249,11 +249,11 @@ async def test_a_route_row_that_disagrees_with_the_domain_is_refused(db):
     await db.memory_delete(
         state,
         [m for m in await db.memories_for_channel("watched")
-         if m.kind == MemoryKind.ROUTE][0].id,
+         if m.kind == "route"][0].id,
         origin=MemoryOrigin.ADMIN,
     )
     await db.memory_add(
-        state, "mistyped", kind=MemoryKind.ROUTE, origin=MemoryOrigin.ADMIN,
+        state, "mistyped", kind="route", origin=MemoryOrigin.ADMIN,
         data={
             "domain": "api-reelme-v2.dev.aperogroup.ai",
             "env": "production",

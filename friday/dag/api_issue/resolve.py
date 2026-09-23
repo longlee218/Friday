@@ -34,7 +34,7 @@ from typing import Any
 
 from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
 from friday.domain.actions import HandOver
-from friday.domain.models import MemoryKind
+from friday.memory import registry as memory_kinds
 from friday.sources import Placement
 
 __all__ = [
@@ -141,7 +141,7 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
             )
 
         known = await deps.db.structured_memories(
-            channel_id, kind=MemoryKind.ENVIRONMENT
+            channel_id, kind=memory_kinds.ENVIRONMENT
         )
         if not known:
             # Nothing has been written down about any domain. Saying
@@ -165,7 +165,7 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
             )
 
         route = await deps.db.structured_memory(
-            channel_id, kind=MemoryKind.ROUTE, key=domain
+            channel_id, kind=memory_kinds.ROUTE, key=domain
         )
         if route is None:
             return HandOver(
@@ -179,7 +179,7 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
             )
 
         service = await deps.db.structured_memory(
-            channel_id, kind=MemoryKind.SERVICE, key=route.service
+            channel_id, kind=memory_kinds.SERVICE, key=route.service
         )
         if service is None:
             return HandOver(
@@ -204,7 +204,7 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
             )
         )
         project = await deps.db.structured_memory(
-            channel_id, kind=MemoryKind.PROJECT, key=service.project
+            channel_id, kind=memory_kinds.PROJECT, key=service.project
         )
         if project is None:
             log.info(

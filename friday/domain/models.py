@@ -481,54 +481,9 @@ def askable_fields(params_cls: type) -> tuple[str, ...]:
     )
 
 
-class MemoryKind(StrEnum):
-    """What kind of thing a memory is — thirteen, closed (board
-    `read-it-the-way-the-operator-does`, spec "Memory: one store, twelve
-    kinds", widening D14's five).
-
-    The first five are prose a model reads and writes. The rest were a YAML
-    file and an operator's head: `runbook` (how the operator reasons about
-    one kind of fault, in words), `summary` (one per room, replacing
-    `derived`), and six structured kinds that never reach a model at all and
-    only parameterise code — `project`, `service`, `route`, `dependency`,
-    `person`, `environment`.
-
-    **`environment` is the thirteenth, and it amends D1** ("environment from
-    the domain, by rule, in code"), on the operator's call of 2026-09-21: a
-    rule in code that names `aperogroup.ai` is an installation written into a
-    module, and Friday is meant to serve more rooms than one company's. It is
-    also a rule this company's own domains already break — the 2026-09-18
-    survey found `api-mobile-spec-reviewer.aperogroup.ai` served from `dev`
-    with no `.dev` in it, and `payment-service` on two domains resolving to
-    different endpoints. A longest-suffix table holds both the rule and its
-    exceptions without a branch for either.
-
-    **The reader is a function of the kind, not a second column** — see
-    `readers_for`. `preference` was considered and rejected: in this domain
-    every preference is either `VOICE` or `CONSTRAINT`, and a value that
-    cannot be told apart from its neighbours is one a model will place at
-    random — which is also why a model is offered `ModelMemoryKind`, not
-    this.
-    """
-
-    FACT = "fact"
-    CONSTRAINT = "constraint"
-    FINDING = "finding"
-    DECISION = "decision"
-    VOICE = "voice"
-    RUNBOOK = "runbook"
-    SUMMARY = "summary"
-    PROJECT = "project"
-    SERVICE = "service"
-    ROUTE = "route"
-    DEPENDENCY = "dependency"
-    PERSON = "person"
-    ENVIRONMENT = "environment"
-
-
 class ModelMemoryKind(StrEnum):
     """The five kinds a model sees and writes — the enum the memory tools
-    expose, unchanged by `MemoryKind` growing to twelve. A separate enum
+    expose, unchanged by the memory kinds growing past them. A separate enum
     rather than a subset filtered at each call site, so the tools module has
     no name through which the other seven could reach a schema.
     `tests/test_memory_kinds.py` asserts no tool schema mentions them."""
@@ -561,65 +516,6 @@ class MemoryKeyTaken(MemoryRefused):
     """The one refusal that is a conflict rather than a bad write: an active
     row of this kind already holds this natural key here. Its own class so
     the board can answer 409 without reading the sentence."""
-
-
-_READERS: dict[MemoryKind, frozenset[str]] = {
-    MemoryKind.FACT: frozenset({"extractor", "diagnose"}),
-    MemoryKind.CONSTRAINT: frozenset({"extractor", "diagnose"}),
-    MemoryKind.DECISION: frozenset({"extractor", "diagnose"}),
-    MemoryKind.FINDING: frozenset({"diagnose", "extractor"}),
-    MemoryKind.VOICE: frozenset({"responder"}),
-    MemoryKind.RUNBOOK: frozenset({"diagnose"}),
-    MemoryKind.SUMMARY: frozenset({"triage", "responder"}),
-    MemoryKind.PROJECT: frozenset({"code"}),
-    MemoryKind.SERVICE: frozenset({"code"}),
-    MemoryKind.ROUTE: frozenset({"code"}),
-    MemoryKind.ENVIRONMENT: frozenset({"code"}),
-    MemoryKind.DEPENDENCY: frozenset({"code"}),
-    MemoryKind.PERSON: frozenset({"code"}),
-}
-
-
-def readers_for(kind: str) -> frozenset[str]:
-    """Who reads a memory of this kind — agents by name, or `"code"` for a
-    structured kind only a tool call is parameterised by. A set, because
-    `finding` has two readers. Derived from `kind` rather than stored beside
-    it, so nothing has to keep two fields in agreement (D14). Raises on a
-    kind outside `MemoryKind`, the way a wrong `TaskState` string would."""
-    return _READERS[MemoryKind(kind)]
-
-
-_WRITERS: dict[MemoryKind, frozenset[MemoryOrigin]] = {
-    MemoryKind.FACT: frozenset(MemoryOrigin),
-    MemoryKind.CONSTRAINT: frozenset(MemoryOrigin),
-    MemoryKind.DECISION: frozenset(MemoryOrigin),
-    MemoryKind.VOICE: frozenset(MemoryOrigin),
-    MemoryKind.FINDING: frozenset({MemoryOrigin.MODEL}),
-    MemoryKind.SUMMARY: frozenset({MemoryOrigin.MODEL}),
-    MemoryKind.RUNBOOK: frozenset({MemoryOrigin.ADMIN}),
-    MemoryKind.PROJECT: frozenset({MemoryOrigin.ADMIN}),
-    MemoryKind.SERVICE: frozenset({MemoryOrigin.ADMIN}),
-    MemoryKind.ROUTE: frozenset({MemoryOrigin.ADMIN}),
-    MemoryKind.ENVIRONMENT: frozenset({MemoryOrigin.ADMIN}),
-    MemoryKind.DEPENDENCY: frozenset({MemoryOrigin.ADMIN}),
-    MemoryKind.PERSON: frozenset({MemoryOrigin.ADMIN}),
-}
-
-
-def writers_for(kind: str) -> frozenset[MemoryOrigin]:
-    """Which origin may write a memory of this kind — the spec table's
-    "Written by" column. `Database.memory_add` refuses anything else."""
-    return _WRITERS[MemoryKind(kind)]
-
-
-#: The four kinds the extractor reads. `VOICE` is the responder's alone.
-#: **Derived from `readers_for`, not a second enumeration beside it** — a
-#: `MemoryKind` this misses only if `readers_for` itself would misroute it,
-#: rather than a hand-kept list that could drift from what `readers_for`
-#: actually decides (found in code review: an earlier version of this line
-#: listed the four kinds by hand, which is exactly the "two fields that have
-#: to agree" D14 exists to rule out).
-DOMAIN_KINDS = frozenset(k for k in MemoryKind if "extractor" in readers_for(k))
 
 
 # ---- one schema per structured kind (spec, "Memory: one store, twelve kinds")
@@ -832,83 +728,6 @@ class SummaryData(RoomSummary):
     summary_version: int | None = None
 
 
-#: Each kind's `data` schema; `None` is a prose kind, which carries no `data`.
-MEMORY_DATA: dict[MemoryKind, type | None] = {
-    MemoryKind.FACT: None,
-    MemoryKind.CONSTRAINT: None,
-    MemoryKind.VOICE: None,
-    MemoryKind.DECISION: DecisionData,
-    MemoryKind.FINDING: FindingData,
-    MemoryKind.RUNBOOK: RunbookData,
-    MemoryKind.SUMMARY: SummaryData,
-    MemoryKind.PROJECT: ProjectData,
-    MemoryKind.SERVICE: ServiceData,
-    MemoryKind.ROUTE: RouteData,
-    MemoryKind.ENVIRONMENT: EnvironmentData,
-    MemoryKind.DEPENDENCY: DependencyData,
-    MemoryKind.PERSON: PersonData,
-}
-
-
-def names_in(kind: str) -> dict[str, str]:
-    """This kind's foreign keys: field name -> the kind it names.
-
-    Read off `field(metadata={"names": ...})` rather than listed anywhere,
-    so the declaration and the check cannot disagree — the same reason
-    `readers_for` is derived from the kind rather than stored beside it.
-    Top level only: no nested payload declares one, and a nested foreign key
-    would be a shape worth arguing about before it is supported.
-    """
-    shape = MEMORY_DATA[MemoryKind(kind)]
-    if shape is None:
-        return {}
-    return {
-        f.name: str(f.metadata["names"])
-        for f in dataclass_fields(shape)
-        if f.metadata.get("names")
-    }
-
-
-def named_by(kind: str) -> tuple[tuple[str, str], ...]:
-    """Every `(kind, field)` that names rows of `kind` — the reverse of
-    `names_in`, for asking "who would this rename break?"."""
-    kind = str(MemoryKind(kind))
-    return tuple(
-        (other.value, field)
-        for other in MemoryKind
-        for field, named in names_in(other).items()
-        if named == kind
-    )
-
-
-def natural_key(kind: str, data: dict[str, Any] | None, given: str | None) -> str | None:
-    """A structured kind's natural key — the spec's `key=` column — read off
-    its already-validated `data`, so the key cannot disagree with the row.
-
-    `runbook` is the one kind whose key is not in its data (it is a short
-    name the operator gives), so it is the one that takes `given`, and
-    refuses without it. `summary` has a fixed key, which is what makes the
-    partial unique index hold it to one per room. Prose kinds and
-    `decision` have none.
-    """
-    kind = MemoryKind(kind)
-    d = data or {}
-    if kind is MemoryKind.RUNBOOK:
-        if not (given or "").strip():
-            raise MemoryRefused("a runbook needs a key — a short name for it")
-        return given.strip()
-    return {
-        MemoryKind.FINDING: lambda: f"{d.get('service')}:{d.get('error_code') or ''}",
-        MemoryKind.SUMMARY: lambda: "room",
-        MemoryKind.PROJECT: lambda: d.get("name"),
-        MemoryKind.SERVICE: lambda: d.get("name"),
-        MemoryKind.ROUTE: lambda: d.get("domain"),
-        MemoryKind.ENVIRONMENT: lambda: d.get("suffix"),
-        MemoryKind.DEPENDENCY: lambda: f"{d.get('from_service')}->{d.get('to_service')}",
-        MemoryKind.PERSON: lambda: d.get("discord_id"),
-    }.get(kind, lambda: None)()
-
-
 class MemoryStatus(StrEnum):
     """Whether a memory is still current (D16).
 
@@ -937,7 +756,8 @@ class Memory:
     `id` is opaque and sparse rather than sequential, so a model that invents
     one fails instead of landing on a neighbouring row.
 
-    `kind` decides who reads this row (`readers_for`, D14). `status` and
+    `kind` decides who reads this row (`friday.memory.registry.readers_for`,
+    D14). `status` and
     `superseded_by` are D16's lifecycle: correcting a memory's wording
     (`memory_update`) leaves it `ACTIVE` in place; replacing what it claims
     (`memory_supersede`) marks it `SUPERSEDED` and points `superseded_by` at
@@ -970,9 +790,9 @@ class Memory:
     #: Who is answerable for the row (`MemoryOrigin`). Every row written
     #: before the column existed is a model's.
     origin: str = MemoryOrigin.MODEL
-    #: A structured kind's natural key (`natural_key`); `None` for prose.
+    #: A structured kind's natural key (`registry.natural_key`); `None` for prose.
     key: str | None = None
-    #: A structured kind's payload, already checked against `MEMORY_DATA`.
+    #: A structured kind's payload, already checked against its `data` schema.
     data: dict[str, Any] | None = None
 
 

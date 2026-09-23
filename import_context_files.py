@@ -31,7 +31,8 @@ from dotenv import load_dotenv
 
 from friday.config import load_config
 from friday.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
-from friday.domain.models import FridayState, MemoryKind, MemoryOrigin, MemoryRefused
+from friday.domain.models import FridayState, MemoryOrigin, MemoryRefused
+from friday.memory import registry as memory_kinds
 from friday.store.db import Database
 
 _PERSON = ("name", "role", "team")
@@ -60,11 +61,11 @@ async def _write(db: Database, channel_id: str, written: dict[str, Any]) -> list
             for who, about in value.items():
                 if isinstance(about, dict) and all(k in about for k in _PERSON):
                     data = {"discord_id": str(who), **{k: str(about[k]) for k in _PERSON}}
-                    rows.append((f"people.{who}", "", MemoryKind.PERSON, data, None))
+                    rows.append((f"people.{who}", "", memory_kinds.PERSON, data, None))
                 else:
-                    rows.append((f"people.{who}", f"people.{who}: {about}", MemoryKind.FACT, None, about))
+                    rows.append((f"people.{who}", f"people.{who}: {about}", memory_kinds.FACT, None, about))
         else:
-            rows.append((key, f"{key}: {value}", MemoryKind.FACT, None, value))
+            rows.append((key, f"{key}: {value}", memory_kinds.FACT, None, value))
 
     refused = []
     for key, text, kind, data, value in rows:
@@ -88,6 +89,9 @@ async def _write(db: Database, channel_id: str, written: dict[str, Any]) -> list
 async def main() -> None:
     load_dotenv()
     config = load_config()
+    # Memory kinds register themselves (ticket 12); the store reads the registry
+    # to validate a write, so fill it before writing any row.
+    memory_kinds.register_all_memory_kinds()
     directory = Path(sys.argv[1] if len(sys.argv) > 1 else "context")
     db = await Database.connect(config.database_path)
     try:

@@ -545,6 +545,17 @@ hand-maintained `PARAMS`/`DECISIONS` maps, the extractor map and the router's
 triage builds its closed-set schema from it at boot (`make_decided`); the store
 takes the decision set as an argument so `domain` never reaches up.
 
+## Memory-kind registry
+
+`friday/memory/registry.py` — the one place a memory kind is known (ticket 12),
+filled by `register_all_memory_kinds()`. It replaced the hardcoded `_READERS`/
+`_WRITERS`/`MEMORY_DATA` maps. A kind registers a `MemoryKindSpec` (writers,
+data, cardinality, injected); `MemoryKind` is now a **validated string**
+(`validate_kind`), while `ModelMemoryKind` (the five the tools expose) stays a
+closed enum. **Readers are inverted** — each reader declares the kinds it needs
+(`register_reader`), so a kind names no reader (DESIGN-v2 §9.2); `readers_for`/
+`domain_kinds` derive from that, and `injected` gates what reaches a prompt.
+
 ## Dependency rule
 
 The one direction the restructure rests on, enforced by

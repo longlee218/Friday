@@ -98,6 +98,12 @@ async def _run(stack: AsyncExitStack) -> None:
     from friday.dag.router import check_graphs
 
     check_graphs(config)
+    # Memory kinds register themselves into their registry (ticket 12), which the
+    # store reads for a kind's writers, schema, natural key and reader routing.
+    # Filled before anything opens the database or writes a memory.
+    from friday.memory.registry import register_all_memory_kinds
+
+    register_all_memory_kinds()
     Path(config.database_path).parent.mkdir(parents=True, exist_ok=True)
 
     token = os.environ.get("DISCORD_USER_TOKEN")

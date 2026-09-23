@@ -430,7 +430,7 @@ async def test_build_input_does_not_carry_the_operators_rows(db):
     everywhere — it decides a label, not a value, and those rows are exactly
     the kind of thing a value would be built from. `readers_for` gives
     triage the summary and nothing else."""
-    from friday.domain.models import FridayState, MemoryKind, MemoryOrigin
+    from friday.domain.models import FridayState, MemoryOrigin
     from friday.triage.context import build_light_context
     from friday.triage.prompt import build_input
 
@@ -438,7 +438,7 @@ async def test_build_input_does_not_carry_the_operators_rows(db):
         await db.memory_add(
             FridayState(channel_id=channel, agent="operator"),
             f"test.apero is staging for {channel}",
-            kind=MemoryKind.FACT, origin=MemoryOrigin.ADMIN,
+            kind="fact", origin=MemoryOrigin.ADMIN,
         )
     said = build_input(await build_light_context(
         db, channel_id="watched", turn=[make_event(text="api lỗi")],
@@ -656,13 +656,13 @@ async def test_the_summary_section_does_not_care_how_much_the_room_has_said(db):
     summary row, and nothing writes one but the summariser, on its own
     schedule, strictly less often than every message.
     """
-    from friday.domain.models import FridayState, MemoryKind
+    from friday.domain.models import FridayState
     from friday.triage.context import build_light_context
     from friday.triage.prompt import build_input
 
     await db.memory_add(
         FridayState(channel_id="watched", agent="summary"), "the reelme wrapper api",
-        kind=MemoryKind.SUMMARY,
+        kind="summary",
         data={"topic": "the reelme wrapper api", "facts": ["x"], "summary_of": "1"},
     )
 

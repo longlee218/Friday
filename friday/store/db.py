@@ -48,13 +48,10 @@ from friday.domain.states import OutboundState
 from friday.domain.models import (
     Artifact,
     CandidateStatus,
-    DOMAIN_KINDS,
     ExtractionMark,
     Memory,
     MemoryCandidate,
-    MemoryKind,
     FridayState,
-    MEMORY_DATA,
     MemoryKeyTaken,
     MemoryOrigin,
     MemoryRefused,
@@ -70,13 +67,13 @@ from friday.domain.models import (
     ToolCall,
     Outbound,
     Task,
-    named_by,
     payload_hash,
     payload_hash_of,
-    names_in,
-    natural_key,
-    writers_for,
 )
+# The memory-kind machinery moved out of `domain` into its registry (ticket 12):
+# the kind is a validated string now, and the store reaches up to the registry
+# for a kind's writers, data schema, natural key and reader routing.
+from friday.memory import registry as memory_kinds
 from friday.text.transform import redact
 from friday.ops.redact import scrub
 from friday.domain.states import OPEN, IllegalTransition, TaskState, may_move
@@ -1296,7 +1293,7 @@ class Database:
 
         `kind` is required, the same reasoning `limit` already got: the only
         caller (`friday/tools/memory.py`, scoped to the responder) always
-        knows which kind it means — `MemoryKind.VOICE` — and a default here
+        knows which kind it means — `voice` — and a default here
         would let a second caller agree with that by coincidence rather than
         by saying so. Only `ACTIVE` rows match (D16): a superseded or deleted
         row is for the operator's own view, never a model's.
@@ -1359,7 +1356,7 @@ class Database:
                     schema.Memory.channel_id.in_([channel_id, "*"]),
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
-                    schema.Memory.kind.in_([k.value for k in DOMAIN_KINDS]),
+                    schema.Memory.kind.in_(list(memory_kinds.domain_kinds())),
                 )
                 .order_by(schema.Memory.created_at.desc())
             )
@@ -1376,7 +1373,7 @@ class Database:
                     schema.Memory.channel_id == channel_id,
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
-                    schema.Memory.kind == MemoryKind.SUMMARY,
+                    schema.Memory.kind == memory_kinds.SUMMARY,
                 )
             )
             return _memory(row) if row is not None else None
@@ -1390,7 +1387,7 @@ class Database:
         `route`, `service` and `project` are read by code and never by a model
         (`readers_for`), and what code wants is the typed object, not a
         `Memory` whose `data` dict every call site would rebuild. So this
-        returns the `MEMORY_DATA` instance, or `None`.
+        returns the kind's `data` instance, or `None`.
 
         Checked again on the way out although it was checked on the way in: a
         row written before a schema changed is an ordinary thing, and a graph
@@ -1402,7 +1399,7 @@ class Database:
         key — that is what `'*'` is for — and the more specific is the one
         somebody wrote about this room on purpose.
         """
-        schema_type = MEMORY_DATA[MemoryKind(kind)]
+        schema_type = memory_kinds.data_of(kind)
         if schema_type is None:
             raise ValueError(f"a {kind} is prose — it has no structured data")
         async with self._sessions() as session:
@@ -1412,7 +1409,7 @@ class Database:
                     schema.Memory.channel_id.in_([channel_id, "*"]),
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
-                    schema.Memory.kind == MemoryKind(kind),
+                    schema.Memory.kind == memory_kinds.validate_kind(kind),
                     schema.Memory.key == key,
                 )
                 # The room's own row first; `'*'` sorts before any real
@@ -1446,7 +1443,7 @@ class Database:
         defended against, because defending it would mean a lock around
         every structured write for a race nobody has met.
         """
-        for field_name, names_kind in names_in(kind).items():
+        for field_name, names_kind in memory_kinds.names_in(kind).items():
             value = (data or {}).get(field_name)
             if not value:
                 continue
@@ -1483,7 +1480,7 @@ class Database:
         # review.
         everywhere = channel_id == "*"
         found = []
-        for other_kind, field_name in named_by(kind):
+        for other_kind, field_name in memory_kinds.named_by(kind):
             rows = await session.scalars(
                 select(schema.Memory).where(
                     *(
@@ -1526,7 +1523,7 @@ class Database:
         than raising, exactly as the by-key read does: one bad row must not
         stop the rest of the table from being read.
         """
-        schema_type = MEMORY_DATA[MemoryKind(kind)]
+        schema_type = memory_kinds.data_of(kind)
         if schema_type is None:
             raise ValueError(f"a {kind} is prose — it has no structured data")
         async with self._sessions() as session:
@@ -1536,7 +1533,7 @@ class Database:
                     schema.Memory.channel_id.in_([channel_id, "*"]),
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
-                    schema.Memory.kind == MemoryKind(kind),
+                    schema.Memory.kind == memory_kinds.validate_kind(kind),
                 )
                 .order_by(schema.Memory.channel_id.desc())
             )
@@ -1563,7 +1560,7 @@ class Database:
                     schema.Memory.channel_id.in_([channel_id, "*"]),
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
-                    schema.Memory.kind == MemoryKind.PERSON,
+                    schema.Memory.kind == memory_kinds.PERSON,
                     schema.Memory.key == discord_id,
                 ).limit(1)
             )
@@ -1597,7 +1594,7 @@ class Database:
         found in the case's text. An empty `when` matches nothing — a
         runbook code cannot pick is one nobody asked for.
         """
-        domain = [MemoryKind.FACT, MemoryKind.CONSTRAINT, MemoryKind.DECISION]
+        domain = [memory_kinds.FACT, memory_kinds.CONSTRAINT, memory_kinds.DECISION]
         async with self._sessions() as session:
             rows = list(
                 await session.scalars(
@@ -1607,7 +1604,7 @@ class Database:
                         schema.Memory.deleted_at.is_(None),
                         schema.Memory.status == MemoryStatus.ACTIVE,
                         schema.Memory.kind.in_(
-                            [*domain, MemoryKind.RUNBOOK, MemoryKind.FINDING]
+                            [*domain, memory_kinds.RUNBOOK, memory_kinds.FINDING]
                         ),
                     )
                     .order_by(schema.Memory.created_at)
@@ -1617,12 +1614,12 @@ class Database:
         known = sorted((r for r in rows if r.kind in domain), key=admin_first)
         runbooks = [
             r for r in rows
-            if r.kind == MemoryKind.RUNBOOK
+            if r.kind == memory_kinds.RUNBOOK
             and _runbook_matches(r.data, service, error_code, path, text)
         ]
         findings = [
             r for r in reversed(rows)
-            if r.kind == MemoryKind.FINDING and service is not None
+            if r.kind == memory_kinds.FINDING and service is not None
             and (
                 r.key == f"{service}:{error_code}"
                 if error_code
@@ -1636,14 +1633,14 @@ class Database:
         state: FridayState,
         text: str,
         *,
-        kind: str = MemoryKind.VOICE,
+        kind: str = memory_kinds.VOICE,
         origin: str = MemoryOrigin.MODEL,
         key: str | None = None,
         data: dict[str, Any] | None = None,
     ) -> Memory | None:
         """Write a new memory, or refuse if the channel is already full.
 
-        `kind` defaults to `MemoryKind.VOICE` because the only wired producer
+        `kind` defaults to `voice` because the only wired producer
         today is the responder (`friday/tools/memory.py`), which writes
         nothing else — unlike `memory_search`'s `kind`, a default here names
         the one thing every caller before this ticket already meant, rather
@@ -1674,14 +1671,14 @@ class Database:
 
         **The same door checks a structured kind** (board
         `read-it-the-way-the-operator-does`, ticket 09): `data` is validated
-        against the kind's schema (`MEMORY_DATA`) with the `fits` the harness
+        against the kind's `data` schema with the `fits` the harness
         uses on a model's answer, so a wrong-typed field is refused with the
         field named; the natural key is read off the validated data; and the
         origin must be one `writers_for(kind)` allows. Each refusal is a
         `MemoryRefused`. The instruction-shape guard reads `text` only —
         a structured payload is not a sentence.
         """
-        if MemoryOrigin(origin) not in writers_for(kind):
+        if MemoryOrigin(origin) not in memory_kinds.writers_for(kind):
             raise MemoryRefused(f"{kind} is not a kind {origin} may write")
         check_not_instruction_shaped(text)
         stored, key = _checked_data(kind, data, key)
@@ -1948,7 +1945,7 @@ class Database:
     # exclude a pending row — the guarantee D20 asks to hold structurally.
 
     async def propose_memory(
-        self, state: FridayState, text: str, *, kind: str = MemoryKind.VOICE
+        self, state: FridayState, text: str, *, kind: str = memory_kinds.VOICE
     ) -> MemoryCandidate:
         """Stage a memory for the operator's mark rather than writing it.
 
@@ -3554,12 +3551,12 @@ def _checked_data(
     it — or `MemoryRefused` naming what did not fit. What is stored is the
     validated instance turned back into plain JSON, so an unknown key the
     checker dropped is not kept either."""
-    schema_type = MEMORY_DATA[MemoryKind(kind)]
+    schema_type = memory_kinds.data_of(kind)
     if schema_type is None:
         if data:
             raise MemoryRefused(f"a {kind} is prose — it carries no data")
         return None, None
-    if data is None and kind == MemoryKind.DECISION:
+    if data is None and kind == memory_kinds.DECISION:
         return None, None
     if not isinstance(data, dict):
         raise MemoryRefused(f"a {kind} needs its data as an object")
@@ -3567,7 +3564,7 @@ def _checked_data(
     if unfit is not None:
         raise MemoryRefused(f"{kind} data does not fit: {unfit.why}")
     stored = asdict(fitted)
-    return stored, natural_key(kind, stored, key)
+    return stored, memory_kinds.natural_key(kind, stored, key)
 
 
 async def _flush_keyed(session, kind: str, key: str | None) -> None:

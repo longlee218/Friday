@@ -53,19 +53,16 @@ from friday.domain.conversation import ConversationId
 from friday.domain.memory_guard import InstructionShaped
 from friday.store.db import Database
 from friday.domain.models import (
-    MEMORY_DATA,
     FridayState,
     InboundEvent,
     Memory,
     MemoryKeyTaken,
-    MemoryKind,
-    natural_key,
     MemoryOrigin,
     MemoryRefused,
     Outbound,
     Task,
-    writers_for,
 )
+from friday.memory import registry as mem_registry
 from friday.outbox import FAILED
 from friday.ops.redact import scrub
 from friday.domain.states import TaskState
@@ -524,7 +521,7 @@ def build_api(
         choice". The first six rows ever typed were entered into exactly that
         empty state.
         """
-        forms = [_kind_form(k) for k in MemoryKind if ADMIN in writers_for(k)]
+        forms = [_kind_form(k) for k in mem_registry.specs() if ADMIN in mem_registry.writers_for(k)]
         wanted = {
             field["names"]
             for form in forms for field in form["fields"] if field["names"]
@@ -550,8 +547,8 @@ def build_api(
         409 for a key an active row already holds or a full room.
         """
         kind = body.get("kind")
-        if kind not in {k.value for k in MemoryKind}:
-            raise HTTPException(422, f"kind must be one of {', '.join(MemoryKind)}")
+        if kind not in mem_registry.kinds():
+            raise HTTPException(422, f"kind must be one of {', '.join(mem_registry.specs())}")
         text = body.get("text") or ""
         if not isinstance(text, str):
             raise HTTPException(422, "text must be a string")
@@ -793,17 +790,17 @@ async def _row_keys(db: Database, channel_id: str, kind: str) -> list[str]:
     offers and what a lookup will find cannot be two different lists.
     """
     rows = await db.structured_memories(channel_id, kind=kind)
-    found = {natural_key(kind, asdict(row), None) for row in rows}
+    found = {mem_registry.natural_key(kind, asdict(row), None) for row in rows}
     return sorted(key for key in found if key)
 
 
-def _kind_form(kind: MemoryKind) -> dict:
+def _kind_form(kind: str) -> dict:
     """One kind's form: prose, a key the operator names, and its fields."""
-    shape = MEMORY_DATA[kind]
+    shape = mem_registry.data_of(kind)
     return {
-        "kind": kind.value,
+        "kind": kind,
         "prose": shape is None,
-        "names_key": kind is MemoryKind.RUNBOOK,
+        "names_key": kind == mem_registry.RUNBOOK,
         "fields": _form_fields(shape) if shape is not None else [],
     }
 

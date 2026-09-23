@@ -441,6 +441,11 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
 
 def main() -> int:
     load_dotenv()
+    # The api_issue graph reads memory (environment/route/service rows) through
+    # the store, which reads the kind registry (ticket 12); fill it before a run.
+    from friday.memory.registry import register_all_memory_kinds
+
+    register_all_memory_kinds()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "task_id", type=int, nargs="?",

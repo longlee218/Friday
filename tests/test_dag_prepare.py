@@ -695,12 +695,12 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
     else in the prompt writes.
     """
     from friday.dag.prepare import prepare_node
-    from friday.domain.models import FridayState, MemoryKind, MemoryOrigin
+    from friday.domain.models import FridayState, MemoryOrigin
     from tests.test_extraction import _install
 
     await db.memory_add(
         FridayState(channel_id="watched", agent="operator"),
-        "test.apero chạy trên dev", kind=MemoryKind.FACT,
+        "test.apero chạy trên dev", kind="fact",
         origin=MemoryOrigin.ADMIN,
     )
 
@@ -763,7 +763,7 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     `did the new fact reach a model? False`.
     """
     from friday.dag.prepare import prepare_node
-    from friday.domain.models import FridayState, MemoryKind, MemoryOrigin
+    from friday.domain.models import FridayState, MemoryOrigin
     from tests.test_extraction import _install
 
     asked: list[str] = []
@@ -788,7 +788,7 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     # form — a row, live on the next read, with no reload to forget.
     await db.memory_add(
         FridayState(channel_id="watched", agent="operator"),
-        "test.apero chạy trên dev", kind=MemoryKind.FACT,
+        "test.apero chạy trên dev", kind="fact",
         origin=MemoryOrigin.ADMIN,
     )
 

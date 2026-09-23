@@ -14,7 +14,7 @@ went — board `read-it-the-way-the-operator-does`, ticket 10 — and the
 operator's hand writes rows through the same one now.)
 
 **Narrower than "any imperative sentence".** `never deploy on fridays` is a
-domain constraint about the team's own practice, and `MemoryKind.CONSTRAINT`
+domain constraint about the team's own practice, and the `constraint` kind
 exists to hold exactly that shape — "what must not happen here, and what
 always has to" (`friday/memory/channel_context.py`'s own summary job).
 Refusing every directive-shaped line would refuse the one kind meant to carry

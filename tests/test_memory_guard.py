@@ -33,7 +33,7 @@ REFUSED = (
 
 ACCEPTED = (
     "test.apero is staging",
-    # `MemoryKind.CONSTRAINT` exists to hold exactly this shape — a domain
+    # `"constraint"` exists to hold exactly this shape — a domain
     # rule about the team's own practice, not an instruction to this system.
     "never deploy on fridays",
     "they always send a curl",

@@ -811,11 +811,11 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
     """Written down is a `person` row keyed on their Discord id — a name in a
     channel file's `people:` map until the files went (board
     `read-it-the-way-the-operator-does`, ticket 10)."""
-    from friday.domain.models import FridayState, MemoryKind, MemoryOrigin
+    from friday.domain.models import FridayState, MemoryOrigin
 
     await db.memory_add(
         FridayState(channel_id="watched", agent="operator"), "",
-        kind=MemoryKind.PERSON, origin=MemoryOrigin.ADMIN,
+        kind="person", origin=MemoryOrigin.ADMIN,
         data={"discord_id": "dana", "name": "Dana", "role": "qa", "team": "orders"},
     )
     responder = StubResponder("ok")
