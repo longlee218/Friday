@@ -30,7 +30,8 @@ from typing import Any, Literal
 from friday.dag.api_issue.code import code_of, codes_of
 from friday.dag.api_issue.logs import dossier_of, histogram_of
 from friday.dag.api_issue.prompt import build_input, numbered
-from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
+from friday.dag.api_issue.deps import ApiIssueDeps
+from friday.sdk.workflow import DAGState, Node, envelope
 
 __all__ = [
     "Diagnosis",
@@ -247,7 +248,7 @@ def _judged(answer: Any, index: dict, not_checked: tuple, deps: Any) -> Any:
     )
 
 
-async def _reading(state: DAGState, deps: DAGDeps, make_harness: Any) -> Any:
+async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> Any:
     """v3.3: the model fetches its own evidence.
 
     The same answer shape and the same gates — what changes is where the
@@ -269,7 +270,7 @@ async def _reading(state: DAGState, deps: DAGDeps, make_harness: Any) -> Any:
         evidence=evidence,
         placement=placement,
         project=project,
-        log_sources=deps.extra.get("log_sources", {}),
+        log_sources=deps.log_sources,
         reported_at=_reported_at(deps.task),
         release_tag=str(state.get("resolve", {}).get("release_tag") or ""),
     )
@@ -329,7 +330,7 @@ def diagnose_node(
     so where somebody reads it.
     """
 
-    async def _diagnose(state: DAGState, deps: DAGDeps) -> Any:
+    async def _diagnose(state: DAGState, deps: ApiIssueDeps) -> Any:
         if make_harness is not None:
             return await _reading(state, deps, make_harness)
         if harness is None:
@@ -379,5 +380,5 @@ def diagnose_node(
         return _judged(answer, index, not_checked, deps)
 
     return Node(
-        "diagnose", _diagnose, agent=agent, timeout_seconds=timeout_seconds
+        "diagnose", _diagnose, agent=agent, timeout_seconds=timeout_seconds  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py
     )

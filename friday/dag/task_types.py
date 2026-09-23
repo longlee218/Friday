@@ -8,9 +8,10 @@ no change to the core.
 
 `register_all` builds each type's graph at boot from a `BootContext` (config plus
 the composition root's `record`/`spent`/`servers`). The graph is stored behind a
-`Deps`-taking factory it currently ignores (ticket 13 makes it real). `api_issue`
-owns everything specific to it — its investigation graph, its diagnose harness,
-its log/release sources — so none of that lives in the router any more.
+`Deps`-taking factory it currently ignores; its **run handles are a typed `Deps`
+factory** (ticket 13, `spec.deps`), built per run. `api_issue` owns everything
+specific to it — its investigation graph, its diagnose harness, its log/release
+sources, its typed `Deps` — so none of that lives in the router any more.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from friday.domain.models import (
     DocQuestionParams,
 )
 from friday.sdk.plugin import TaskTypeSpec
-from friday.sdk.workflow import DAG
+from friday.sdk.workflow import DAG, Deps
 
 __all__ = ["BootContext", "register_all"]
 
@@ -47,8 +48,8 @@ class BootContext:
 
 def _graph_of(dag: DAG):
     """Store a built graph behind the `Deps`-taking factory `TaskTypeSpec.graph`
-    expects. Ticket 11 builds at boot and ignores the `Deps`; ticket 13's typed
-    per-run `Deps` factory replaces this."""
+    expects. The graph's shape is fixed at boot, so the factory ignores the
+    `Deps`; the run's live handles are the typed `Deps` `spec.deps` builds."""
     return lambda _deps: dag
 
 
@@ -80,9 +81,10 @@ def _register_simple(ctx: BootContext, *, name: str, params: type) -> None:
 
 def _register_api_issue(ctx: BootContext) -> None:
     """The one type with an investigation past node 0 (ticket 00), and the only
-    one that reaches outside the process — so it owns its diagnose harness and
-    its log/release sources, and the run handles they need travel in
-    `DEPS_EXTRA`. None of this names `api_issue` in the router any more."""
+    one that reaches outside the process — so it owns its diagnose harness, its
+    log/release sources, and its typed `Deps` factory. The run handles they need
+    are built per run by that factory, not stored globally. None of this names
+    `api_issue` in the router any more."""
     from friday.dag.api_issue import (
         TASK_TYPE,
         build_api_issue_dag,
@@ -90,6 +92,7 @@ def _register_api_issue(ctx: BootContext) -> None:
         build_log_sources,
         build_release_source,
     )
+    from friday.dag.api_issue.deps import ApiIssueDeps
     from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
 
     settings = getattr(ctx.config, "api_issue", None)
@@ -113,21 +116,32 @@ def _register_api_issue(ctx: BootContext) -> None:
         reports_dir=(None if settings is None else Path(settings.reports_dir)),
     )
 
-    # Two identities, and which one a row carries decides who reads it: `sender`
-    # posts into the reporter's channel as the watched account; `approver`
-    # direct-messages the operator. The graph queues rows for both mid-run,
-    # before any action reaches the pool.
-    extra: dict[str, Any] = {"sender": DEFAULT_SENDER, "approver": DEFAULT_APPROVER}
+    # The run handles the investigation needs, built once at boot and captured
+    # by the per-run deps factory below. `sender` posts into the reporter's
+    # channel as the watched account; `approver` direct-messages the operator —
+    # two identities, and which one a row carries decides who reads it. The
+    # graph queues rows for both mid-run, before any action reaches the pool.
     sources = build_log_sources(ctx.config, dict(ctx.servers))
-    if sources:
-        extra["log_sources"] = sources
     release = build_release_source(ctx.config, dict(ctx.servers))
-    if release is not None:
-        extra["release_source"] = release
+
+    def deps(base: Deps) -> Deps:
+        """Enrich the kernel-built base `Deps` (task, store, servers, resolved
+        from the run's scope key) with `api_issue`'s own handles — the typed
+        per-run `Deps` §5.2 asks for."""
+        return ApiIssueDeps(
+            task=base.task,
+            db=base.db,
+            servers=base.servers,
+            extra=base.extra,
+            answers=base.answers,
+            sender=DEFAULT_SENDER,
+            approver=DEFAULT_APPROVER,
+            log_sources=sources,
+            release_source=release,
+        )
 
     clock = getattr(settings, "timeout_seconds", None)
     registry.register_task_type(
-        TaskTypeSpec(name=TASK_TYPE, params=ApiIssueParams, graph=_graph_of(dag)),
-        deps_extra=extra,
+        TaskTypeSpec(name=TASK_TYPE, params=ApiIssueParams, graph=_graph_of(dag), deps=deps),
         budget=None if clock is None else float(clock),
     )

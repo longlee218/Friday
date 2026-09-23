@@ -436,15 +436,15 @@ async def test_the_model_is_given_the_reads_and_told_where_things_live(db):
     """`Gather` gathers metadata under v3.3 — where the service runs, which
     clone holds its code — and nothing is read in advance."""
     from friday.dag.api_issue.diagnose import Diagnosis, diagnose_node
-    from friday.dag.engine import DAGDeps
+    from friday.dag.api_issue.deps import ApiIssueDeps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="x", confidence="likely", conclusive=False, refs=[])
     node = diagnose_node(make_harness=lambda *, tools: Answering(answer, tools))
 
-    await node.run(_state(), DAGDeps(
+    await node.run(_state(), ApiIssueDeps(
         task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
-        db=db, extra={},
+        db=db, sender="", approver="",
     ))
 
     assert set(Answering.seen["tools"]) == {"read_log", "read_code", "what_code_means"}
@@ -463,16 +463,17 @@ async def test_an_answer_written_without_reading_anything_is_refused(db):
     pipeline the node checked there was a dossier; here nothing was fetched
     at all."""
     from friday.dag.api_issue.diagnose import Diagnosis, diagnose_node
-    from friday.dag.engine import DAGDeps, status_of
+    from friday.dag.engine import status_of
+    from friday.dag.api_issue.deps import ApiIssueDeps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="chắc là do cache", confidence="likely",
                        conclusive=False, refs=[])
     node = diagnose_node(make_harness=lambda *, tools: Answering(answer, tools))
 
-    result = await node.run(_state(), DAGDeps(
+    result = await node.run(_state(), ApiIssueDeps(
         task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
-        db=db, extra={},
+        db=db, sender="", approver="",
     ))
 
     assert status_of(result) == "empty"
@@ -512,7 +513,7 @@ async def test_what_a_tool_could_not_check_reaches_the_envelope(db):
     out is a fact about the read, and a model asked to remember it
     reproduces it unreliably."""
     from friday.dag.api_issue.diagnose import Diagnosis, diagnose_node
-    from friday.dag.engine import DAGDeps
+    from friday.dag.api_issue.deps import ApiIssueDeps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="x", confidence="likely", conclusive=False,
@@ -528,9 +529,9 @@ async def test_what_a_tool_could_not_check_reaches_the_envelope(db):
     source = Log([], oldest=AT + timedelta(hours=16))
     node = diagnose_node(make_harness=lambda *, tools: Reads(answer, tools))
 
-    result = await node.run(_state(), DAGDeps(
+    result = await node.run(_state(), ApiIssueDeps(
         task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
-        db=db, extra={"log_sources": {"kubectl": source}},
+        db=db, sender="", approver="", log_sources={"kubectl": source},
     ))
 
     assert any("reach back" in line for line in result["not_checked"])

@@ -24,7 +24,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
+from friday.dag.api_issue.deps import ApiIssueDeps
+from friday.sdk.workflow import DAGState, Node, envelope
 from friday.outbox import Kind
 
 __all__ = ["acknowledge_node"]
@@ -52,8 +53,8 @@ def acknowledge_node(*, timeout_seconds: float | None = None) -> Node:
     out.
     """
 
-    async def _acknowledge(state: DAGState, deps: DAGDeps) -> Any:
-        sender: str = deps.extra.get("sender", "")
+    async def _acknowledge(state: DAGState, deps: ApiIssueDeps) -> Any:
+        sender: str = deps.sender
         if not sender:
             # Nothing here is worth failing an investigation over, and a run
             # that says why it stayed quiet is better than one that is quiet
@@ -82,4 +83,7 @@ def acknowledge_node(*, timeout_seconds: float | None = None) -> Node:
         log.info("task %s: acknowledged", deps.task.id)
         return envelope("ok", "", said=SAYS)
 
-    return Node("acknowledge", _acknowledge, timeout_seconds=timeout_seconds)
+    # The adapter hands every api_issue node an `ApiIssueDeps`; `Node.run` is
+    # typed `[Deps]` (not generic over the subtype), so the narrower parameter is
+    # a known, safe variance gap.
+    return Node("acknowledge", _acknowledge, timeout_seconds=timeout_seconds)  # type: ignore[arg-type]

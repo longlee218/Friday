@@ -12,30 +12,30 @@ value layer never reaches up into it: `friday.domain.actions.make_decided` takes
 the `params` mapping as an argument, and the store takes the decision names as a
 query argument — so nothing under this module has to import it.
 
-`DEPS_EXTRA`/`SERVERS` are the per-run handles the DBOS adapter rebuilds a run's
-`Deps` from — a live source cannot cross a step boundary, so it is looked up by
-task type here. They are ticket-13-transitional: the typed per-run `Deps` factory
-replaces them next.
+`SERVERS` holds the tool servers a run opened, by name; the DBOS adapter reads
+them (a live source cannot cross a step boundary) into the base `Deps` it rebuilds
+inside the run. A task type's own extra handles are no longer a global dict — the
+type's `deps` factory (ticket 13) builds them per run, read here through `deps_of`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from friday.kernel.registry import Registry
-from friday.sdk.workflow import DAG
+from friday.sdk.workflow import DAG, Deps
 from friday.sdk.plugin import TaskTypeSpec
 
 __all__ = [
     "BUDGETS",
-    "DEPS_EXTRA",
     "SERVERS",
     "TASK_TYPES",
     "clear",
     "dag_of",
     "decision_params",
     "decisions",
+    "deps_of",
     "register_task_type",
     "specs",
 ]
@@ -43,11 +43,6 @@ __all__ = [
 #: The registry itself — a kernel `Registry` (the `PluginAPI` shape), so a task
 #: type's registration is `api.task_type(spec)` and nothing here names a type.
 TASK_TYPES = Registry()
-
-#: Per-task-type run handles the adapter rebuilds `Deps` from (sources, the
-#: sender/approver identities). Keyed by task type; populated by the type's own
-#: `register()`, so the router names no type.
-DEPS_EXTRA: dict[str, dict[str, Any]] = {}
 
 #: Tool servers available to every graph, by name.
 SERVERS: dict[str, Any] = {}
@@ -61,15 +56,12 @@ BUDGETS: dict[str, float] = {}
 def register_task_type(
     spec: TaskTypeSpec,
     *,
-    deps_extra: Mapping[str, Any] | None = None,
     budget: float | None = None,
 ) -> None:
-    """Add one task type: its spec, the run handles its graph needs, and the
-    per-task budget it declares. A duplicate name refuses (the `Registry`
-    guard)."""
+    """Add one task type: its spec and the per-task budget it declares. A
+    duplicate name refuses (the `Registry` guard). A type's live handles are on
+    the spec now (`spec.deps`), built per run, not stored here."""
     TASK_TYPES.task_type(spec)
-    if deps_extra:
-        DEPS_EXTRA[spec.name] = dict(deps_extra)
     if budget is not None:
         BUDGETS[spec.name] = budget
 
@@ -79,7 +71,6 @@ def clear() -> None:
     tests that register their own set."""
     global TASK_TYPES
     TASK_TYPES = Registry()
-    DEPS_EXTRA.clear()
     SERVERS.clear()
     BUDGETS.clear()
 
@@ -104,10 +95,18 @@ def decisions() -> tuple[str, ...]:
 
 
 def dag_of(task_type: str) -> DAG:
-    """The built graph for a task type. Its `graph` factory takes a `Deps`;
-    ticket 11 builds the graph at boot and ignores it, ticket 13 will not."""
+    """The built graph for a task type. Its `graph` factory takes a `Deps` it
+    currently ignores (the graph is built at boot); the run's typed `Deps` are
+    built by `deps_of` instead."""
     spec = TASK_TYPES.task_types()[task_type]
     assert spec.graph is not None, f"task type {task_type!r} registered no graph"
     return spec.graph(None)
+
+
+def deps_of(task_type: str) -> Callable[[Deps], Deps] | None:
+    """The task type's per-run deps factory, or `None` when its base `Deps` is
+    enough. The adapter applies it to the base `Deps` it builds per run."""
+    spec = TASK_TYPES.task_types().get(task_type)
+    return spec.deps if spec is not None else None
 
 

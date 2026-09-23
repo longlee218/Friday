@@ -38,7 +38,7 @@ class TaskTypeSpec:
     `params` is the parameter dataclass whose docstring is the type's
     description to triage. `extractor` builds node 0 (the parameter extractor)
     for a run; `graph` builds the rest, or `None` for the one-node simple graph
-    every type but `api_issue` uses. `deps` is the per-run dependency type
+    every type but `api_issue` uses. `deps` is the per-run **deps factory**
     (ticket 13). `needs` names the sources, kinds and agents the type uses, so
     the kernel can refuse a boot that cannot satisfy them.
     """
@@ -51,7 +51,13 @@ class TaskTypeSpec:
     #: a contracts-only module would invert the dependency the kernel owns.
     extractor: Callable[[Deps], Any] | None = None
     graph: Callable[[Deps], DAG] | None = None
-    deps: type | None = None
+    #: The per-run deps factory (ticket 13, was a `type` in the ticket-10
+    #: skeleton). Given the kernel-built base `Deps` — which already carries the
+    #: task, the store and the tool servers resolved from the run's serializable
+    #: scope key — it returns the type's own typed `Deps`, so the type's live
+    #: handles are built per run and a boot check can confirm every field can be
+    #: satisfied (DESIGN-v2 §5.2). `None` for a type whose base `Deps` is enough.
+    deps: Callable[[Deps], Deps] | None = None
     needs: frozenset[str] = field(default_factory=frozenset)
 
 

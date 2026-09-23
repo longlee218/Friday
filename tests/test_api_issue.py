@@ -29,7 +29,8 @@ from friday.dag.api_issue.diagnose import (
 from friday.dag.api_issue.logs import find_request_log_node
 from friday.dag.api_issue.report import render, report_node
 from friday.dag.api_issue.resolve import resolve_node
-from friday.dag.engine import DAGDeps, DAGState, status_of
+from friday.dag.api_issue.deps import ApiIssueDeps
+from friday.dag.engine import DAGState, status_of
 from friday.domain.actions import Ask, HandOver, Reply
 from friday.domain.conversation import ConversationId
 from friday.domain.models import ApiIssueParams, FridayState, MemoryOrigin
@@ -48,8 +49,12 @@ PROD_CURL = 'curl "https://api-reelme-v2.aperogroup.ai/v1/pod/orders/init"'
 REPORTED_AT = datetime(2026, 9, 20, 4, 40, 46, tzinfo=timezone.utc)
 
 
-def deps_for(db, *, task_id: int = 1, extra: dict | None = None) -> DAGDeps:
-    return DAGDeps(
+def deps_for(db, *, task_id: int = 1, extra: dict | None = None) -> ApiIssueDeps:
+    """The typed `Deps` an `api_issue` node is run with (ticket 13). Call sites
+    still pass the handles as an `extra` dict; this maps them onto the typed
+    fields, so a node's `deps.log_sources`/`deps.sender` see the same values."""
+    extra = extra or {}
+    return ApiIssueDeps(
         task=SimpleNamespace(
             id=task_id,
             conversation=ConversationId("fake", "watched"),
@@ -57,7 +62,10 @@ def deps_for(db, *, task_id: int = 1, extra: dict | None = None) -> DAGDeps:
             created_at=REPORTED_AT,
         ),
         db=db,
-        extra=extra or {},
+        sender=extra.get("sender", ""),
+        approver=extra.get("approver", ""),
+        log_sources=extra.get("log_sources", {}),
+        release_source=extra.get("release_source"),
     )
 
 
@@ -1126,7 +1134,7 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
     # runs from `resolve` with `prepare` pre-seeded.
     final, runs, _ = await _run_on_adapter(
         dag,
-        deps=DAGDeps(task=task, db=db, extra={"log_sources": {"kubectl": source}}),
+        deps=ApiIssueDeps(task=task, db=db, sender="", approver="", log_sources={"kubectl": source}),
         seed={"prepare": ApiIssueParams(**task.params)},
         system_db=tmp_path / "sys.db",
         wfid="test-whole-line",
@@ -3008,3 +3016,30 @@ async def test_the_switch_decides_which_way_diagnose_answers(db):
             assert bool(reached) is reads, f"diagnose_reads={reads}"
     finally:
         api_issue.build_diagnose_harness = original
+
+
+def test_check_deps_refuses_a_deps_factory_that_forgets_a_required_field():
+    """The boot guard (ticket 13, Rule 13): a task type whose deps factory omits
+    a required field — `sender`, whose absence would send a mid-run row as the
+    wrong identity or none — fails at boot, where a config error belongs, not
+    mid-investigation on a task nobody is watching. Delete `check_deps` and
+    nothing catches it until the run."""
+    from friday.config import ConfigError
+    from friday.dag import registry
+    from friday.dag.router import check_deps
+    from friday.sdk.plugin import TaskTypeSpec
+    from friday.sdk.workflow import DAG, Deps, Node
+
+    def forgets_sender(base: Deps) -> Deps:
+        return ApiIssueDeps(task=base.task, db=base.db, approver="x")  # no sender
+
+    dag = DAG(name="bad", nodes=(Node(name="n", run=lambda s, d: None),))
+    registry.clear()
+    registry.register_task_type(
+        TaskTypeSpec(name="bad", params=ApiIssueParams, graph=lambda _d: dag, deps=forgets_sender)
+    )
+    try:
+        with pytest.raises(ConfigError, match="deps factory"):
+            check_deps()
+    finally:
+        registry.clear()

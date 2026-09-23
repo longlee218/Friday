@@ -27,6 +27,7 @@ __all__ = [
     "EDGE_ROUTER",
     "NODE_CLOCK_MARGIN_SECONDS",
     "build_simple_dag",
+    "check_deps",
     "check_graphs",
     "check_node_clocks",
     "dag_for",
@@ -214,6 +215,35 @@ def check_graphs(config: Any) -> None:
     dags = [registry.dag_of(name) for name in registry.specs()]
     check_node_clocks(dags, config.agents)
     check_graph_clocks(dags, registry.BUDGETS)
+    check_deps()
+
+
+def check_deps() -> None:
+    """Refuse a task type whose `deps` factory cannot build its run `Deps`.
+
+    Runs every registered `deps` factory against a base `Deps` at boot and
+    confirms the run `Deps` it returns can be *constructed* — every field
+    satisfied (§5.2). A factory that leaves a required field unset (`sender`,
+    say — a row queued mid-run would then have no identity to send as) fails
+    here rather than mid-investigation on a task nobody is watching, the same
+    reason the node clocks are checked at boot. This is a structural check: it
+    catches a *missing* field, not a wrong or empty value — no realistic factory
+    hardcodes one. A type whose base `Deps` is enough (`spec.deps is None`) has
+    nothing to check.
+    """
+    from friday.sdk.workflow import Deps
+
+    for name in registry.specs():
+        enrich = registry.deps_of(name)
+        if enrich is None:
+            continue
+        try:
+            enrich(Deps())
+        except Exception as exc:  # noqa: BLE001 - re-raised with the type named
+            raise ConfigError(
+                f"task type {name!r}: its deps factory cannot build a run's "
+                f"Deps — {type(exc).__name__}: {exc}"
+            ) from exc
 
 
 def register_dags(
@@ -268,9 +298,8 @@ def register_dags(
     # Register the same graphs on the DBOS adapter (ticket 06), the way the pool
     # runs them past node 0. The adapter rebuilds each run's `Deps` from a
     # serializable scope key inside the workflow — a live source cannot cross a
-    # step boundary — so it reads the task back from the store and the run
-    # handles from the registry's `DEPS_EXTRA`/`SERVERS`, filled by
-    # `register_all` above.
+    # step boundary — so it reads the task back from the store and the task
+    # type's own `deps` factory (ticket 13) enriches it with the type's handles.
     if db is not None:
         _register_on_adapter(db)
 
@@ -284,12 +313,12 @@ def _register_on_adapter(db: Any) -> None:
     async def deps_factory(scope_key: dict[str, Any]) -> Deps:
         task_id = scope_key.get("task_id")
         task = await db.task(task_id) if task_id is not None else None
-        return Deps(
-            task=task,
-            db=db,
-            servers=dict(registry.SERVERS),
-            extra=dict(registry.DEPS_EXTRA.get(scope_key.get("task_type", ""), {})),
-        )
+        # The kernel builds the base `Deps` from the run's serializable scope
+        # key; the task type's own factory (ticket 13) enriches it with its typed
+        # handles. A type with none takes the base as-is.
+        base = Deps(task=task, db=db, servers=dict(registry.SERVERS))
+        enrich = registry.deps_of(scope_key.get("task_type", ""))
+        return enrich(base) if enrich is not None else base
 
     def recorder_factory(scope_key: dict[str, Any]):
         task_id = scope_key.get("task_id")

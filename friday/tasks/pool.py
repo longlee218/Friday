@@ -495,13 +495,12 @@ class Pool:
 
     def _deps_for(self, task: Task) -> DAGDeps:
         """What node 0 is handed. The workflow's own nodes get theirs rebuilt
-        inside the run by the adapter's deps factory; this is node 0's alone."""
-        return DAGDeps(
-            task=task,
-            db=self._db,
-            servers=dict(registry.SERVERS),
-            extra=dict(registry.DEPS_EXTRA.get(task.type, {})),
-        )
+        inside the run by the adapter's deps factory; this is node 0's alone —
+        built the same way: the base `Deps`, enriched by the task type's own
+        deps factory (ticket 13) when it has one."""
+        base = DAGDeps(task=task, db=self._db, servers=dict(registry.SERVERS))
+        enrich = registry.deps_of(task.type)
+        return enrich(base) if enrich is not None else base
 
     def _recorder(self, task: Task):
         """Where a graph's attempts are written: `node_runs`, under this task."""

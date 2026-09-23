@@ -17,7 +17,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
+from friday.dag.api_issue.deps import ApiIssueDeps
+from friday.sdk.workflow import DAGState, Node, envelope
 from friday.sources.code import (
     NOT_OURS,
     at_ref,
@@ -50,7 +51,7 @@ def codes_of(result: Any) -> dict[str, str]:
 def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
     """Build node 3. No model: a frame is a path and a number."""
 
-    async def _read(state: DAGState, deps: DAGDeps) -> Any:
+    async def _read(state: DAGState, deps: ApiIssueDeps) -> Any:
         from friday.dag.api_issue.resolve import resolved
 
         _, project = resolved(state["resolve"])
@@ -110,7 +111,7 @@ def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
         # **Which version is actually running** (ticket 04, the operator's
         # rule: the image tag *is* the release tag). Production only — dev
         # deploys from a branch and has no tag to compare against.
-        release = deps.extra.get("release_source")
+        release = deps.release_source
         placement, _ = resolved(state["resolve"])
         tag = ""
         if release is not None and placement.env == "production":
@@ -198,4 +199,4 @@ def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
             not_checked=not_checked,
         )
 
-    return Node("read_failing_code", _read, timeout_seconds=timeout_seconds)
+    return Node("read_failing_code", _read, timeout_seconds=timeout_seconds)  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py

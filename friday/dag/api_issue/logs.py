@@ -20,7 +20,8 @@ from typing import Any
 
 from friday.dag.api_issue.distil import distil, frames as frames_of
 from friday.dag.api_issue.resolve import path_of, resolved
-from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
+from friday.dag.api_issue.deps import ApiIssueDeps
+from friday.sdk.workflow import DAGState, Node, envelope
 from friday.domain.actions import Ask
 from friday.sources import Lines
 
@@ -277,11 +278,12 @@ def _capped(
 def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
     """Build node 2.
 
-    `deps.extra["log_sources"]` is how the sources arrive — built once by
-    `register_dags` from the configuration, the same way the servers are.
+    `deps.log_sources` is how the sources arrive — built once at boot from the
+    configuration by `api_issue`'s deps factory (ticket 13), the same way the
+    servers are, and handed to this run as a typed field.
     """
 
-    async def _find(state: DAGState, deps: DAGDeps) -> Any:
+    async def _find(state: DAGState, deps: ApiIssueDeps) -> Any:
         placement, _ = resolved(state["resolve"])
         # On the first run, the params `prepare` extracted. On a re-run after an
         # `Ask`, the params the pool re-extracted from the reporter's answer and
@@ -290,7 +292,7 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
         # dossier found without asking — never touches `deps.answers`, so the
         # replay eval is unchanged.
         params = deps.answers[-1] if deps.answers else state["prepare"]
-        sources: dict[str, Any] = deps.extra.get("log_sources", {})
+        sources: dict[str, Any] = deps.log_sources
         wanted = "loki" if placement.env == "production" else "kubectl"
         source = sources.get(wanted)
         if source is None:
@@ -468,4 +470,4 @@ def find_request_log_node(*, timeout_seconds: float | None = None) -> Node:
             not_checked=list(not_checked),
         )
 
-    return Node("find_request_log", _find, timeout_seconds=timeout_seconds)
+    return Node("find_request_log", _find, timeout_seconds=timeout_seconds)  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py

@@ -21,7 +21,8 @@ from typing import Any
 
 from friday.dag.api_issue.diagnose import diagnosis_of
 from friday.dag.api_issue.resolve import resolved
-from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, status_of
+from friday.dag.api_issue.deps import ApiIssueDeps
+from friday.sdk.workflow import DAGState, Node, status_of
 from friday.domain.actions import HandOver, Reply
 from friday.outbox import Kind
 from friday.ops.redact import scrub
@@ -169,7 +170,7 @@ def report_node(
     missing from the directory somebody is watching.
     """
 
-    async def _report(state: DAGState, deps: DAGDeps) -> Any:
+    async def _report(state: DAGState, deps: ApiIssueDeps) -> Any:
         at = datetime.now(timezone.utc)
         directory = reports_dir
         text = render(state, task_id=deps.task.id, at=at)
@@ -217,7 +218,7 @@ def report_node(
         # anything has been approved. Sending it as `sender` — which this did
         # until review caught it — would publish both, unapproved, ahead of
         # the card that asks whether to publish anything at all.
-        approver = deps.extra.get("approver", "")
+        approver = deps.approver
         if approver:
             await deps.db.queue_outbound(
                 task_id=deps.task.id,
@@ -236,4 +237,4 @@ def report_node(
 
         return Reply(brief(diagnosis))
 
-    return Node("report", _report, timeout_seconds=timeout_seconds)
+    return Node("report", _report, timeout_seconds=timeout_seconds)  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py
