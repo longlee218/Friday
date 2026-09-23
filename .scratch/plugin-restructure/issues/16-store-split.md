@@ -12,4 +12,5 @@
 - [ ] Outbox transitions and memory writers move into kernel code
 - [ ] Workflow state is excluded from the split (DBOS owns it)
 - [ ] Test: a `Store` fake that approves on its own is ignored by the outbox (the invariant is not enforced inside the store)
+- [ ] Clean code: remove the dead code, outdated comments and now-unused imports/functions this change leaves behind, and reconcile the modules it touched against the new `sdk`/`kernel`/`plugins` structure — nothing left in the old shape
 - [ ] `uv run pytest -q` passes

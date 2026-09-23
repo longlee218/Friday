@@ -11,4 +11,5 @@
 - [ ] `plugins/docs` registers `doc_question` (one-node graph) through `register()`
 - [ ] It works end-to-end through the S1 message-path seam (message → triage → task → draft → approval)
 - [ ] The diff touches no file under `friday/kernel` (verified)
+- [ ] Clean code: remove the dead code, outdated comments and now-unused imports/functions this change leaves behind, and reconcile the modules it touched against the new `sdk`/`kernel`/`plugins` structure — nothing left in the old shape
 - [ ] `uv run pytest -q` passes

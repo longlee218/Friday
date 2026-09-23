@@ -12,4 +12,5 @@
 - [ ] `DAG_DEPS_EXTRA` is removed
 - [ ] A boot check confirms every `deps` field can be satisfied
 - [ ] Guard deleted once and watched go red
+- [ ] Clean code: remove the dead code, outdated comments and now-unused imports/functions this change leaves behind, and reconcile the modules it touched against the new `sdk`/`kernel`/`plugins` structure — nothing left in the old shape
 - [ ] `uv run pytest -q` passes

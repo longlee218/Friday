@@ -13,5 +13,6 @@
 - [ ] A data migration renames devops kinds to `devops.*` across every column holding a type or kind name (`tasks.type`, triage examples and verdicts, `node_runs`, `model_calls.agent`), each grep-checked before the migration is written; `runbook` rows become `skill` rows
 - [ ] `sources/code.py` container roots / vendored paths become data (config or a memory row), not module constants
 - [ ] Kernel `ast` test passes (no plugin import, no task-type literal)
+- [ ] Clean code: remove the dead code, outdated comments and now-unused imports/functions this change leaves behind, and reconcile the modules it touched against the new `sdk`/`kernel`/`plugins` structure — nothing left in the old shape
 - [ ] `uv run pytest -q` passes
 - [ ] Triage eval re-run and reported (accuracy, confusion matrix, threshold table)
