@@ -218,6 +218,20 @@ def build_api(
             }
         )
 
+    @api.get("/api/workflows")
+    async def workflows() -> list[dict]:
+        """The durable workflows the board shows (ticket 08): running, queued,
+        succeeded and failed, from `DBOSClient.list_workflows` — no Conductor.
+
+        The panel asks once on mount and then refreshes on the `workflow` events
+        the SSE stream carries (one per node that finishes), the same
+        snapshot-then-subscribe shape the Monitor uses. The adapter is the one
+        module that names DBOS; imported here lazily so this API module does not
+        pull the vendor in for every test that builds it."""
+        from friday.kernel.dag import adapter
+
+        return _clean(await adapter.list_workflows())
+
     @api.get("/api/events")
     async def events(request: Request) -> StreamingResponse:
         """Server-sent events. The Monitor screen subscribes here

@@ -92,6 +92,21 @@ async def test_a_linear_graph_runs_every_node_and_returns_the_state(dbos_sqlite)
     assert state["a"]["value"] == 1 and state["b"]["value"] == 2
 
 
+async def test_list_workflows_reports_a_finished_run_as_succeeded(dbos_sqlite):
+    """Ticket 08: the board reads `list_workflows`, mapped out of DBOS's
+    vocabulary. A run driven to completion shows up as `succeeded` — on real
+    DBOS, not a stub — with its id and no DBOS status word leaking through."""
+    dag = DAG(name="one", nodes=(_node("only", envelope("ok", value=1)),))
+    adapter.register_graph(dag, _no_deps)
+
+    await adapter.run("one", {}, workflow_id="wf-done")
+
+    views = await adapter.list_workflows()
+    mine = next(v for v in views if v["id"] == "wf-done")
+    assert mine["status"] == "succeeded"
+    assert mine["status"] not in {"SUCCESS", "PENDING", "ERROR"}
+
+
 async def test_an_edge_condition_routes_the_walk(dbos_sqlite):
     dag = DAG(
         name="branch",

@@ -74,6 +74,21 @@ class CallsRepo:
         values["reason"] = scrub(values.get("reason") or "")
         async with self._sessions.begin() as session:
             session.add(schema.NodeRun(**values))
+        # A per-workflow progress event on the same bus the model/tool calls
+        # use (ticket 08): one node of a graph finished, so the board's workflow
+        # panel refreshes its DBOS snapshot. Sync and non-blocking like the
+        # others, so a slow SSE subscriber cannot stall a node's recording.
+        from friday.kernel.ops.events import get_bus
+        get_bus().publish(
+            type_="workflow",
+            payload={
+                "task_id": values.get("task_id"),
+                "dag_name": values.get("dag_name"),
+                "node": values.get("node"),
+                "status": values.get("status"),
+                "attempt": values.get("attempt"),
+            },
+        )
 
     async def node_runs(self, task_id: int) -> list[dict]:
         """Every recorded attempt at every node of this task's graphs, oldest

@@ -23,7 +23,7 @@ Two ways the test can run:
 2. **Browser mode (CI).** With `@axe-core/playwright` and a
    Chromium binary on PATH, the test builds `web/dist`, serves it
    over the FastAPI app, and runs axe-core against `/`, `/board`,
-   `/rooms`, `/flow/discord/<id>`. A violation with severity
+   `/rooms`, `/workflows`, `/flow/discord/<id>`. A violation with severity
    `serious` or `critical` fails the build.
 
 The split is the audit's "do not invent project rules" rule made
@@ -134,7 +134,7 @@ def test_a11y_gate_runs_when_a_browser_is_available() -> None:
         stderr=subprocess.DEVNULL,
     )
     try:
-        for path in ("/", "/board", "/rooms"):
+        for path in ("/", "/board", "/rooms", "/workflows"):
             _run_axe(f"http://127.0.0.1:{port}{path}", path)
     finally:
         server.terminate()

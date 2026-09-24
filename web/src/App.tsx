@@ -4,6 +4,7 @@ import { BoardScreen } from "./screens/BoardScreen";
 import { FlowScreen } from "./screens/FlowScreen";
 import { MonitorScreen } from "./screens/MonitorScreen";
 import { RoomsScreen } from "./screens/RoomsScreen";
+import { WorkflowsScreen } from "./screens/WorkflowsScreen";
 import {
   ShortcutOverlay,
   ToastProvider,
@@ -50,13 +51,14 @@ const TABS = [
   { path: "/", label: "Monitor" },
   { path: "/board", label: "Board" },
   { path: "/rooms", label: "Rooms" },
+  { path: "/workflows", label: "Workflows" },
 ];
 
 export function App() {
   const [path, go] = useRoute();
   // `/flow/...` is reachable and linkable but is not a tab: it is where a
   // timestamp takes you, not a place to start.
-  const section = ["/board", "/rooms", "/flow"].find((p) =>
+  const section = ["/board", "/rooms", "/workflows", "/flow"].find((p) =>
     p === "/" ? path === "/" : path.startsWith(p),
   ) ?? "/";
 
@@ -74,6 +76,7 @@ export function App() {
       { id: "monitor", label: "Monitor", prefix: { prefix: "g", key: "m" }, run: () => go("/") },
       { id: "board", label: "Board", prefix: { prefix: "g", key: "b" }, run: () => go("/board") },
       { id: "rooms", label: "Rooms", prefix: { prefix: "g", key: "r" }, run: () => go("/rooms") },
+      { id: "workflows", label: "Workflows", prefix: { prefix: "g", key: "w" }, run: () => go("/workflows") },
       { id: "reload", label: "Reload this screen", key: "r", run: () => window.location.reload() },
       // `?`, `/`, `esc` are shell-owned and read by `installKeyboard`
       // directly; the overlay lists them through `overlayRows()`.
@@ -115,6 +118,7 @@ export function App() {
             {section === "/" && <MonitorScreen />}
             {section === "/board" && <BoardScreen onOpenFlow={openFlow} />}
             {section === "/rooms" && <RoomsScreen onOpenFlow={openFlow} />}
+            {section === "/workflows" && <WorkflowsScreen />}
             {section === "/flow" && <FlowScreen path={path} onOpenFlow={openFlow} />}
           </div>
         </main>

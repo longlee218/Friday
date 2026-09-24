@@ -384,3 +384,17 @@ export interface MonitorSnapshot {
     spend_today: number;
   };
 }
+
+/** The four words the board buckets workflows on — Friday's, not DBOS's. The
+ *  adapter maps DBOS's status enum to these before it crosses the wire. */
+export type WorkflowState = "running" | "queued" | "succeeded" | "failed";
+
+/** One durable workflow, as `/api/workflows` reports it (ticket 08). */
+export interface Workflow {
+  id: string;
+  name: string;
+  status: WorkflowState;
+  queue: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}

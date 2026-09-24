@@ -15,6 +15,7 @@ import type {
   Room,
   Spend,
   TaskCalls,
+  Workflow,
 } from "./api-types";
 
 async function get<T>(path: string): Promise<T> {
@@ -55,6 +56,7 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 export const api = {
   board: () => get<Board>("/api/board"),
   monitor: () => get<MonitorSnapshot>("/api/monitor"),
+  workflows: () => get<Workflow[]>("/api/workflows"),
   spend: () => get<Spend>("/api/spend"),
   taskCalls: (id: number) => get<TaskCalls>(`/api/tasks/${id}/calls`),
   conversations: () => get<Room[]>("/api/conversations"),

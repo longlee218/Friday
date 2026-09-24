@@ -19,25 +19,30 @@ export const DEMANDS_ATTENTION = new Set(["needs_human", "review"]);
  *  sits in survives being screenshotted out of its board. */
 export const SETTLED = new Set(["done", "handled_by_operator"]);
 
-/** Map a state name (the same vocabulary the Flow screen uses —
- *  done, failed, retrying, waiting, ok) to a Pill tone. `undefined`
- *  when the state is unknown, so the screen renders the pill with
- *  no decoration rather than inventing one.
+/** Map a state name to a Pill tone. `undefined` when the state is
+ *  unknown, so the screen renders the pill with no decoration
+ *  rather than inventing one.
  *
- *  The Monitor screen reads this for every event and every running
- *  task. The Flow screen has the same map in `flowState.ts`,
- *  separate because the Flow test is a Python mirror and this one
- *  is plain TypeScript. If a third screen needs it, lift to a
- *  single source. */
+ *  Two vocabularies share this map, because they mean the same
+ *  things: the Monitor's event/task states (done, ok, retrying,
+ *  waiting, failed) and the Workflows panel's four words (running,
+ *  queued, succeeded, failed — ticket 08). `succeeded` reads like
+ *  `done` and `running` like `waiting`; a `queued` workflow is
+ *  neither good nor bad, just parked, so it takes the neutral
+ *  default. The Flow screen keeps its own `toneFor` in
+ *  `flowState.ts` — a Python-mirrored contract — separate on
+ *  purpose. */
 export function toneFromState(
   state: string,
 ): "good" | "warn" | "bad" | undefined {
   switch (state) {
     case "done":
     case "ok":
+    case "succeeded":
       return "good";
     case "retrying":
     case "waiting":
+    case "running":
       return "warn";
     case "failed":
       return "bad";

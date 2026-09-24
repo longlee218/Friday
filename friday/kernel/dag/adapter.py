@@ -26,6 +26,7 @@ import time
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from dbos import DBOS, SetWorkflowID
@@ -392,6 +393,59 @@ async def run(dag_name: str, scope_key: ScopeKey, *, workflow_id: str | None = N
 async def answer(workflow_id: str, node: str, value: Any) -> None:
     """Deliver the answer a suspended `Ask` is waiting on."""
     await DBOS.send_async(workflow_id, value, topic=node)
+
+
+#: DBOS's status vocabulary, mapped to the four words the board shows (ticket
+#: 08): running, queued, succeeded, failed. Kept here so DBOS's terms never
+#: cross the seam into the API or the page — the same reason `status` maps its
+#: own three. A status not listed is treated as running (it is in flight).
+_BOARD_STATUS = {
+    "PENDING": "running",
+    "ENQUEUED": "queued",
+    "DELAYED": "queued",
+    "SUCCESS": "succeeded",
+    "ERROR": "failed",
+    "CANCELLED": "failed",
+    "MAX_RECOVERY_ATTEMPTS_EXCEEDED": "failed",
+}
+
+
+def _workflow_view(wf: Any) -> dict[str, Any]:
+    """One DBOS `WorkflowStatus` as the board reads it: the id, the workflow
+    function's name, the state in Friday's four words, the queue it waits on,
+    and the two timestamps as ISO strings (DBOS carries them as epoch ms; the
+    board's `ago`/`shortTime` read ISO, like every other time it renders)."""
+    return {
+        "id": wf.workflow_id,
+        "name": wf.name,
+        "status": _BOARD_STATUS.get(wf.status, "running"),
+        "queue": wf.queue_name,
+        "created_at": _iso_ms(wf.created_at),
+        "updated_at": _iso_ms(wf.updated_at),
+    }
+
+
+def _iso_ms(epoch_ms: int | None) -> str | None:
+    if epoch_ms is None:
+        return None
+    return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).isoformat()
+
+
+async def list_workflows(limit: int = 100) -> list[dict[str, Any]]:
+    """The workflows the board shows (ticket 08), newest first, in Friday's
+    vocabulary. `DBOSClient.list_workflows` is the source — no Conductor.
+
+    Empty when DBOS is not running: a board opened before the first workflow, or
+    a test that never launched it, asks and gets nothing rather than a 500. The
+    input and output are not loaded — the board wants status, not a run's Deps
+    or its (possibly large) result."""
+    try:
+        rows = await DBOS.list_workflows_async(
+            limit=limit, sort_desc=True, load_input=False, load_output=False
+        )
+    except Exception:  # noqa: BLE001 - "not running yet" is an empty list, not an error
+        return []
+    return [_workflow_view(row) for row in rows]
 
 
 async def status(workflow_id: str) -> str | None:

@@ -6,11 +6,11 @@
 
 **Source:** `spec.md` — § Observability (reuse before rewrite).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A FastAPI endpoint returns workflow status from `DBOSClient.list_workflows(...)` + per-workflow progress events
-- [ ] A workflow panel in the React board renders them, fed over SSE like the current Monitor
-- [ ] No DBOS Conductor (the client API + the board cover observability)
-- [ ] The axe and bundle-size gates still pass
-- [ ] Clean code: remove the dead code, outdated comments and now-unused imports/functions this change leaves behind, and reconcile the modules it touched against the new `sdk`/`kernel`/`plugins` structure — nothing left in the old shape
-- [ ] `uv run pytest -q` passes
+- [x] A FastAPI endpoint returns workflow status from `DBOSClient.list_workflows(...)` + per-workflow progress events
+- [x] A workflow panel in the React board renders them, fed over SSE like the current Monitor
+- [x] No DBOS Conductor (the client API + the board cover observability)
+- [x] The axe and bundle-size gates still pass
+- [x] Clean code: remove the dead code, outdated comments and now-unused imports/functions this change leaves behind, and reconcile the modules it touched against the new `sdk`/`kernel`/`plugins` structure — nothing left in the old shape
+- [x] `uv run pytest -q` passes

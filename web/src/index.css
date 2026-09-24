@@ -1103,6 +1103,46 @@ dialog > .body {
   border-radius: 8px;
 }
 
+/* ----- workflows (ticket 08) ----- */
+
+.workflows {
+  display: grid;
+  gap: var(--grid-gap);
+  align-content: start;
+}
+
+.workflow-buckets {
+  display: grid;
+  gap: var(--grid-gap);
+  grid-template-columns: 1fr 1fr;
+}
+
+@media (max-width: 1279px) {
+  .workflow-buckets {
+    grid-template-columns: 1fr;
+  }
+}
+
+.workflow-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.workflow-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  gap: var(--grid-gap);
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.workflow-row:first-child {
+  border-top: none;
+}
+
 /* ----- breadcrumb ----- */
 
 .breadcrumb {
