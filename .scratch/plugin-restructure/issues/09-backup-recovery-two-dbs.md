@@ -6,11 +6,11 @@
 
 **Source:** `spec.md` — § Local operation (§12.1).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] WAL is on for both the application and the DBOS system database
-- [ ] A daily online backup includes both files with a retention count; the restore procedure is a documented command
-- [ ] Startup recovery = DBOS resumes PENDING workflows + Friday's inbox sweep backfills from cursors
-- [ ] Test covers restart recovery of an in-flight workflow
-- [ ] Clean code: remove the dead code, outdated comments and now-unused imports/functions this change leaves behind, and reconcile the modules it touched against the new `sdk`/`kernel`/`plugins` structure — nothing left in the old shape
-- [ ] `uv run pytest -q` passes
+- [x] WAL is on for both the application and the DBOS system database
+- [x] A daily online backup includes both files with a retention count; the restore procedure is a documented command
+- [x] Startup recovery = DBOS resumes PENDING workflows + Friday's inbox sweep backfills from cursors
+- [x] Test covers restart recovery of an in-flight workflow
+- [x] Clean code: remove the dead code, outdated comments and now-unused imports/functions this change leaves behind, and reconcile the modules it touched against the new `sdk`/`kernel`/`plugins` structure — nothing left in the old shape
+- [x] `uv run pytest -q` passes

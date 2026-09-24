@@ -178,3 +178,18 @@ mcp_servers:
         "oauth-secret",
         "discord-user-token",
     }
+
+
+def test_backup_knobs_have_defaults_and_are_read(tmp_path):
+    """Two-file backup (§12.1): where backups go and how many days are kept."""
+    default_path = tmp_path / "default.yaml"
+    default_path.write_text(SAMPLE)
+    default = load_config(default_path)
+    assert default.backup_dir == "data/backups"
+    assert default.keep_backups == 7
+
+    path = tmp_path / "config.yaml"
+    path.write_text(SAMPLE + "\nbackup_dir: /var/backups/friday\nkeep_backups: 3\n")
+    config = load_config(path)
+    assert config.backup_dir == "/var/backups/friday"
+    assert config.keep_backups == 3

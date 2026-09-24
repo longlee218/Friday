@@ -158,6 +158,25 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   every memory. Anything that must survive a restart goes in the DB — except
   gateway session state, which the library owns. **DB access must be
   async** — a blocking call stalls the Discord gateways.
+- **Two SQLite files, one state, one lock** (§12.1, ticket 09): the
+  application db and DBOS's workflow *system* db (`<db>.system.db` beside it).
+  The single-instance lock (ticket 04) covers both — one process owns them.
+  **WAL is on for both** (the app db in `store/db.py`, the system db set by
+  `kernel/dag/adapter.py` `launch` before DBOS opens it), so a board read
+  never blocks a writing workflow.
+- **Startup recovery brings both sides back together.** DBOS resumes any
+  `PENDING` workflow on `launch` (the durable step replays without re-running
+  a completed node); Friday's inbox sweep backfills each channel from its
+  cursor on reconnect and on its timer. Neither is triggered by hand — a
+  restart is just a start.
+- **A daily online backup covers both files** (`kernel/ops/backup.py`, ridden
+  on the heartbeat like model-call trimming): `sqlite3`'s backup API takes a
+  consistent snapshot of each while the process runs, keeping
+  `keep_backups` days under `backup_dir`; both halves of a day are kept or
+  pruned together. **Restore is a stopped-process command** — with the agent
+  down, `uv run python -m friday.kernel.ops.backup restore <YYYYMMDD>` copies
+  that day's two files back over the live paths (it refuses a day missing
+  either half, so a task is never restored without its workflow).
 
 ### Discord identity & ingestion
 

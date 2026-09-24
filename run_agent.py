@@ -23,6 +23,7 @@ from friday.kernel.config import ConfigError, declared_secrets, load_config
 from friday.store.db import Database
 from friday.kernel.inbox import Inbox
 from friday.kernel.ops.api import bind, build_api, check_exposure
+from friday.kernel.ops.backup import Backup, databases
 from friday.kernel.ops.liveness import Heartbeat, Liveness
 from friday.kernel.harness.mcp import build as build_mcp, name_of
 from friday.kernel.ops.redact import (
@@ -391,6 +392,13 @@ async def _run(stack: AsyncExitStack) -> None:
         ),
         interval_seconds=config.heartbeat_seconds,
         keep_model_calls_days=config.keep_model_calls_days,
+        # Both SQLite files backed up together, once a day, on the beat (§12.1,
+        # ticket 09) — the application db and the DBOS system db beside it.
+        backup=Backup(
+            sources=databases(config.database_path),
+            backup_dir=config.backup_dir,
+            keep=config.keep_backups,
+        ),
         extra=inbox.tally,
     )
 

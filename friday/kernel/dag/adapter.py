@@ -343,9 +343,29 @@ def launch(name: str, system_db: str) -> None:
     process)."""
     from dbos import DBOS, DBOSConfig
 
+    # WAL on the workflow database too (§12.1, ticket 09): the application db
+    # sets it in `store/db.py`, and the two are one state — a reader on the
+    # board and a writing workflow must not block each other any more here than
+    # there. WAL is a persistent property of the file, set before DBOS opens
+    # it, so this holds for every connection DBOS then makes.
+    _enable_wal(system_db)
     DBOS.destroy(destroy_registry=False)
     DBOS(config=DBOSConfig(name=name, system_database_url=f"sqlite:///{system_db}"))
     DBOS.launch()
+
+
+def _enable_wal(path: str) -> None:
+    """Put a SQLite file into WAL mode, persistently. Creating the file if it
+    is not there yet — an empty WAL-mode database is what DBOS then migrates."""
+    import sqlite3
+    from pathlib import Path
+
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+    finally:
+        connection.close()
 
 
 def shutdown() -> None:

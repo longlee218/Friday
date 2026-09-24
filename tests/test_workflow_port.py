@@ -384,6 +384,27 @@ def test_the_adapter_is_the_only_module_that_imports_dbos():
     assert set(hits) <= allowed, f"unexpected dbos importer: {set(hits) - allowed}"
 
 
+def test_launch_leaves_the_system_db_in_wal(tmp_path):
+    """§12.1 (ticket 09): the workflow db is WAL, set by the production launch
+    path — not only the `_enable_wal` helper it calls. A board read must not
+    block a writing workflow here any more than on the application db."""
+    import sqlite3
+
+    from friday.kernel.dag import adapter
+
+    sysdb = str(tmp_path / "sys.db")
+    adapter.launch("friday-wal-test", sysdb)
+    try:
+        conn = sqlite3.connect(sysdb)
+        try:
+            (mode,) = conn.execute("PRAGMA journal_mode").fetchone()
+        finally:
+            conn.close()
+    finally:
+        adapter.shutdown()
+    assert mode.lower() == "wal"
+
+
 async def _until(pred, tries: int = 200, delay: float = 0.02) -> None:
     import asyncio
 

@@ -34,6 +34,7 @@ class Heartbeat:
         keep_model_calls_days: float | None = None,
         liveness: "Liveness | None" = None,
         context_rebuilder=None,
+        backup=None,
         extra=None,
     ) -> None:
         self._db = db
@@ -43,6 +44,12 @@ class Heartbeat:
         self._extra = extra
         self._keep_days = keep_model_calls_days
         self._liveness = liveness
+        #: The daily two-file backup (§12.1), asked once per beat whether it is
+        #: due. Rides the beat rather than owning a loop, the same way trimming
+        #: does: it is the only thing already running on a timer, and its own
+        #: date guard makes "at most once a day" true across restarts. `None`
+        #: turns it off (every test that does not set one up).
+        self._backup = backup
         #: Rebuilds rooms' summary rows. Its own condition decides whether
         #: a channel is worth another summary call — see `ContextRebuilder`.
         self._context_rebuilder = context_rebuilder
@@ -84,6 +91,8 @@ class Heartbeat:
             if removed:
                 log.info("trimmed %d model call(s) older than %s days",
                          removed, self._keep_days)
+        if self._backup is not None:
+            await self._backup.run_if_due()
         line = await self.summary()
         log.info("%s", line)
         return line

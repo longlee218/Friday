@@ -336,6 +336,13 @@ class Config:
     #: How long to keep model calls. Prompts are large and nobody reads old
     #: ones; a container that never restarts would fill its volume.
     keep_model_calls_days: float = 14.0
+    #: Where the daily backup writes both SQLite files (§12.1). Under `data/`
+    #: by default (already git-ignored), in its own subdirectory so a backup is
+    #: never mistaken for the live db a restore would overwrite.
+    backup_dir: str = "data/backups"
+    #: How many days of backups to keep. `0` turns the daily backup off — the
+    #: operator's call on a machine already backed up another way.
+    keep_backups: int = 7
 
 
 def declared_secrets(config: Config, *tokens: str | None) -> set[str]:
@@ -418,6 +425,8 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             else int(raw.get("summary_at_hour", 9))
         ),
         keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
+        backup_dir=str(raw.get("backup_dir") or "data/backups"),
+        keep_backups=int(raw.get("keep_backups", 7)),
         plugins=tuple(raw.get("plugins") or ("plugins.devops", "plugins.docs")),
         # Raw, so `friday.kernel.plugin_host` can read each plugin's own block by id
         # and validate it against the plugin's own schema — the core does not
