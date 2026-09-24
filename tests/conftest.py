@@ -10,7 +10,7 @@ from friday.config import IngestConfig
 from friday.store.db import Database
 from friday.agent.harness import Harness
 from friday.inbox import Inbox
-from friday.domain.models import InboundEvent, MentionType
+from friday.kernel.domain.models import InboundEvent, MentionType
 
 
 class FakeProvider:
@@ -113,7 +113,7 @@ def summary_row(channel_id: str = "watched", **fields):
     file's `derived: {summary: ...}` was until board
     `read-it-the-way-the-operator-does`, ticket 10. For a renderer test that
     has no reason to run the summariser to get one."""
-    from friday.domain.models import Memory, RoomSummary
+    from friday.kernel.domain.models import Memory, RoomSummary
 
     now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
     data = {f: fields.get(f, [] if f != "topic" else "") for f in RoomSummary.__dataclass_fields__}

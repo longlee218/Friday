@@ -69,9 +69,10 @@ def _dag(*, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnos
 from plugins.devops.graph.resolve import resolve_node
 from plugins.devops.graph.deps import ApiIssueDeps
 from friday.dag.engine import DAGState, status_of
-from friday.domain.actions import Ask, HandOver, Reply
-from friday.domain.conversation import ConversationId
-from friday.domain.models import FridayState, MemoryOrigin
+from friday.sdk.actions import Ask, HandOver, Reply
+from friday.kernel.domain.conversation import ConversationId
+from friday.sdk.memory import MemoryOrigin
+from friday.kernel.domain.models import FridayState
 from plugins.devops.params import ApiIssueParams
 
 CURL = (

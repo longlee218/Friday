@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 
 from friday.config import message_age_cutoff
 from friday.store.db import Database
-from friday.domain.states import TaskState
-from friday.domain.models import SKIP, InboundEvent, Task
+from friday.kernel.domain.states import TaskState
+from friday.kernel.domain.models import SKIP, InboundEvent, Task
 from friday.triage import Decided, NeedsHuman, Triage, TriageOutcome
 from friday.triage.prefilter import Sensitive
 

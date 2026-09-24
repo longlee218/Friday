@@ -7,8 +7,8 @@ these tests drive the store directly, the same seam `tests/test_memory_store
 
 from __future__ import annotations
 
-from friday.domain.memory_guard import InstructionShaped
-from friday.domain.models import CandidateStatus, FridayState
+from friday.kernel.domain.memory_guard import InstructionShaped
+from friday.kernel.domain.models import CandidateStatus, FridayState
 
 ROOM = FridayState(channel_id="c1", task_id=7, agent="responder", message_id="m1")
 OTHER_ROOM = FridayState(channel_id="c2", task_id=None, agent="responder", message_id="m2")

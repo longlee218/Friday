@@ -356,7 +356,7 @@ def test_the_field_names_an_extractor_may_ask_about_are_a_closed_set():
     field name asks the reporter a question about nothing.
     """
     from friday.agent.harness import _answer_params
-    from friday.domain.models import askable_fields
+    from friday.kernel.domain.models import askable_fields
     from plugins.devops.params import ApiIssueParams
     from friday.extraction.answer import answer_shape
 
@@ -442,7 +442,7 @@ async def test_memory_tools_say_so_when_they_were_wired_without_a_scope():
     message. Asserted on the raise, because that is where the naming lives."""
     import pytest
 
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
     from friday.tools.memory import NotWired, memory_tools
 
     seen = {}
@@ -492,7 +492,7 @@ async def test_memory_add_tells_the_model_the_channel_is_full_rather_than_losing
     in the store because only the store can actually stop a write (see
     `Database.MEMORY_PER_CHANNEL`). Nothing here evicts anything to make room
     — the model is told to correct or remove something on purpose instead."""
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
     from friday.tools.memory import memory_tools
 
     class FullChannel:
@@ -515,7 +515,7 @@ async def test_memory_add_writes_under_the_voice_kind():
     only agent wired to these tools, and everything it writes is voice
     material (D14) — the split between the two memory stores is by who
     writes, not by kind."""
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
     from friday.tools.memory import memory_tools
 
     seen = {}
@@ -540,7 +540,7 @@ async def test_memory_propose_tells_the_model_it_is_waiting_for_a_mark():
     says nothing is decided yet — a model reading "proposed" and stopping
     there would treat a candidate as remembered, which it is not until
     marked."""
-    from friday.domain.models import CandidateStatus, MemoryCandidate, FridayState
+    from friday.kernel.domain.models import CandidateStatus, MemoryCandidate, FridayState
     from friday.tools.memory import memory_tools
     from datetime import datetime, timezone
 
@@ -568,7 +568,7 @@ async def test_memory_propose_reports_an_immediate_resolution():
     """`propose_memory` resolves on the spot when the message it is scoped to
     already carries a verdict — the tool has to say what actually happened,
     not the generic "waiting" answer."""
-    from friday.domain.models import CandidateStatus, MemoryCandidate, FridayState
+    from friday.kernel.domain.models import CandidateStatus, MemoryCandidate, FridayState
     from friday.tools.memory import memory_tools
     from datetime import datetime, timezone
 
@@ -593,14 +593,14 @@ async def test_memory_propose_reports_an_immediate_resolution():
 
 
 async def test_memory_propose_writes_under_the_voice_kind():
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
     from friday.tools.memory import memory_tools
 
     seen = {}
 
     class Store:
         async def propose_memory(self, scope, text, kind):
-            from friday.domain.models import CandidateStatus, MemoryCandidate
+            from friday.kernel.domain.models import CandidateStatus, MemoryCandidate
             from datetime import datetime, timezone
 
             seen["kind"] = kind
@@ -622,7 +622,7 @@ async def test_memory_propose_writes_under_the_voice_kind():
 
 
 async def test_memory_search_reads_only_the_voice_kind():
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
     from friday.tools.memory import memory_tools
 
     seen = {}
@@ -669,7 +669,7 @@ async def test_a_hostile_memory_cannot_close_a_section_in_the_responders_prompt(
     escaped for: a memory persists, so an unescaped one would replay on
     every later search in the room, not just the one call that wrote it.
     """
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
     from friday.tools.memory import memory_tools
 
     class Memory:

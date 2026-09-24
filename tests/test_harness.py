@@ -789,7 +789,7 @@ def test_an_agent_can_declare_both_a_shape_and_its_own_settings():
 async def test_a_run_carrying_state_does_not_have_to_name_its_own_message():
     """D8: the recording sink reads the message and the task off the run's
     state. `node` stays explicit, because it is not a fact about the message."""
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
 
     written: list = []
 
@@ -815,7 +815,7 @@ async def test_a_run_carrying_state_does_not_have_to_name_its_own_message():
 
 async def test_a_caller_that_knows_better_than_its_state_still_wins():
     """A run about a different message than the one the state carries."""
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
 
     written: list = []
 

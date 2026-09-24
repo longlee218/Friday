@@ -442,7 +442,7 @@ send), `sent`, `delivery_unknown` (interrupted mid-send on a channel that
 cannot dedupe: may have gone out, so it waits for the operator, never
 auto-retried), `failed`, `sent_manually` (a person sent it — not abandoned),
 `cancelled` (withdrawn because the operator answered first). One definition,
-in `friday/domain/states.py`.
+in `friday/kernel/domain/states.py`.
 
 ## Outbox
 
@@ -508,16 +508,20 @@ marks a turn `outdated`.
 
 ## SDK
 
-`friday/sdk` — the contracts the rest builds on: Protocols and dataclasses
-only, no I/O, no third-party imports. Holds the workflow port (ticket 06) and,
-since ticket 10, the plugin contracts. It may import `friday.domain` (the value
-layer beneath it) and nothing else of ours.
+`friday/sdk` — the bottom of the stack the rest builds on: Protocols and
+dataclasses, plus the pure dependency-free values and helpers everything shares.
+Holds the workflow port (ticket 06), the plugin contracts (ticket 10), and —
+since ticket 19 folded `friday.domain` away — the workflow actions
+(`Ask`/`Reply`/`HandOver`), the validation DSL, the prompt primitives, `scrub`
+and the memory `Origin`. It imports **nothing of ours**.
 
 ## Kernel
 
 `friday/kernel` — owns the invariants and **names no plugin**. Imports `sdk`
-and nothing higher. Since ticket 10 it holds the **registry**; its other pieces
-move in as their steps land.
+and nothing higher. Since ticket 10 it holds the **registry**, and since ticket
+19 the **domain vocabulary** (`friday/kernel/domain/`: models, states,
+conversation, triage outcomes, the memory-write guard); its other pieces move in
+as their steps land.
 
 ## Plugin, PluginAPI, register(api)
 

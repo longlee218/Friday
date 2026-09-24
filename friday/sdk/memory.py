@@ -17,25 +17,28 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Literal
 
-from friday.domain.models import MemoryOrigin
+__all__ = ["MemoryKindSpec", "MemoryOrigin", "Origin"]
 
-#: Who is answerable for a written row. The canonical value type lives in
-#: `friday.domain` (the value layer beneath the sdk); re-exported here as the
-#: name the spec reads, so a plugin imports it from `friday.sdk` like the rest of
-#: the contract.
-#:
-#: **This is the one interim edge from the sdk into domain that ticket 10 leans
-#: on, and it is owed to a later step.** DESIGN-v2 §9.2 makes `Origin` a native
-#: sdk citizen and §13 moves domain *under* the kernel — reversing this edge —
-#: when the domain-move step lands. Until then domain is the single source of the
-#: origin values, so re-exporting keeps one definition rather than a second that
-#: could drift from it. The dependency rule allows the sdk→domain edge for
-#: exactly this reason (and for the ticket-06 workflow port's `Action` types).
+
+class MemoryOrigin(StrEnum):
+    """Who is answerable for a memory row. `ADMIN` is the operator, through
+    the board's own routes; a model-origin call may not update, supersede or
+    delete an `ADMIN` row, and is told "no such memory" rather than why.
+
+    A native `sdk` citizen (DESIGN-v2 §9.2, §13): the sdk is the bottom of the
+    stack now, so the origin values a `MemoryKindSpec` names live here, and the
+    kernel's models import them from the sdk like everything else."""
+
+    MODEL = "model"
+    ADMIN = "admin"
+
+
+#: The name the spec reads for the same value type, so a plugin can write
+#: `writers=frozenset({Origin.ADMIN})` against the sdk surface.
 Origin = MemoryOrigin
-
-__all__ = ["MemoryKindSpec", "Origin"]
 
 
 @dataclass(frozen=True)

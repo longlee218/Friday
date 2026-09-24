@@ -367,7 +367,7 @@ class Memory(Base):
     #: this with a server default of `"active"` for any pre-existing row.
     status: Mapped[str] = mapped_column(default="active")
     superseded_by: Mapped[str | None] = mapped_column(default=None)
-    #: `friday.domain.models.MemoryOrigin`: `"model"` or `"admin"`. The
+    #: `friday.sdk.memory.MemoryOrigin`: `"model"` or `"admin"`. The
     #: migration backs it with a server default of `"model"`, which is what
     #: every row written before the column existed was.
     origin: Mapped[str] = mapped_column(default="model")
@@ -426,7 +426,7 @@ class MemoryCandidate(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(IsoDateTime, default=None)
     resolved_by: Mapped[str | None] = mapped_column(default=None)
     #: Set only once accepted, and only if the write actually landed — see
-    #: `friday.domain.models.MemoryCandidate`'s own docstring for why it can
+    #: `friday.kernel.domain.models.MemoryCandidate`'s own docstring for why it can
     #: stay `None` on an accepted row.
     memory_id: Mapped[str | None] = mapped_column(default=None)
 

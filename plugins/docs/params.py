@@ -1,6 +1,6 @@
 """`docs.doc_question`'s parameters — the plugin's own, against the sdk.
 
-Moved out of `friday.domain.models` in ticket 15, the same way `api_issue`'s
+Moved out of the core models (now `friday.kernel.domain.models`) in ticket 15, the same way `api_issue`'s
 params moved in ticket 14: a persona owns its own parameter shape, and the core
 `Params` union no longer names it. A plain frozen dataclass whose field metadata
 (`doc`, `ask`) the extractor and the ask-renderer read — no import of anything

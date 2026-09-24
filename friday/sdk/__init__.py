@@ -7,8 +7,8 @@ memory contracts (`plugin.py`, `memory.py`) in ticket 10; the test-double seam
 (`testing/`) in ticket 05.
 
 The dependency rule (`tests/test_dependency_rule.py`) holds this in place: `sdk`
-imports nothing of ours but the `friday.domain` value layer beneath it, `kernel`
-imports `sdk`, and a plugin imports `sdk` only.
+is the bottom of our own code — it imports nothing of ours — `kernel` imports
+`sdk`, and a plugin imports `sdk` only.
 """
 
 from friday.sdk.memory import MemoryKindSpec, Origin

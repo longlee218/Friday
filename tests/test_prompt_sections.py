@@ -693,7 +693,7 @@ def test_no_family_escapes_anything_twice():
         for d in (Path(__file__).resolve().parents[1] / "friday").glob("*/prompt.py")
         # The shared prompt *primitives* (Section, assemble, the escapers) are
         # not an agent family that builds a whole prompt, so they have nothing to
-        # build here (ticket 14): they live in `friday/domain/prompt.py` (the
+        # build here (ticket 14): they live in `friday/sdk/prompt.py` (the
         # value layer) and `friday/sdk/prompt.py` re-exports them.
         if d.parent.name not in {"sdk", "domain"}
     }
@@ -1149,7 +1149,7 @@ def test_a_stored_question_cannot_forge_a_second_numbered_entry():
 def _memory(text: str, kind: str = "fact", origin: str = "model"):
     from datetime import datetime, timezone
 
-    from friday.domain.models import Memory
+    from friday.kernel.domain.models import Memory
 
     now = datetime(2026, 9, 9, tzinfo=timezone.utc)
     return Memory(

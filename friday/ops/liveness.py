@@ -17,7 +17,7 @@ import logging
 from datetime import datetime, timezone
 
 from friday.store.db import Database
-from friday.domain.conversation import ConversationId
+from friday.kernel.domain.conversation import ConversationId
 from friday.outbox import FAILED, QUEUED, Kind
 
 __all__ = ["Heartbeat", "Liveness"]

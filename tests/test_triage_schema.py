@@ -13,8 +13,8 @@ from typing import Literal, get_args, get_type_hints
 
 import pytest
 
-from friday.domain.actions import Decided, make_decided
-from friday.domain.models import AccessRequestParams
+from friday.kernel.domain.triage import Decided, make_decided
+from friday.kernel.domain.models import AccessRequestParams
 from plugins.docs.params import DocQuestionParams
 from plugins.devops.params import ApiIssueParams
 

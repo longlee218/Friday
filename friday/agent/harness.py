@@ -61,7 +61,7 @@ from openai import (
 
 from friday.agent.structured import Unfit, describe, find_json, fits
 from friday.config import AgentConfig
-from friday.domain.models import FridayState
+from friday.kernel.domain.models import FridayState
 from friday.sdk.tools import ToolSpec
 
 __all__ = [

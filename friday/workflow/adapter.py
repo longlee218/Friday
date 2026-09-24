@@ -30,7 +30,7 @@ from typing import Any
 
 from dbos import DBOS, SetWorkflowID
 
-from friday.domain.actions import Ask
+from friday.sdk.actions import Ask
 from friday.ops.redact import scrub
 from friday.sdk.workflow import (
     DAG,

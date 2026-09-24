@@ -225,8 +225,8 @@ def rejected(draft: str, *, asking: str) -> str | None:
     # the untrusted half. Found in review, measured, not reasoned about.
     #
     # Everything the strip leaves is code: `asked_as` phrases from
-    # `friday/domain/models.py` and `_RULES` messages from
-    # `friday/domain/validation.py`, and both builders put every model-written
+    # `friday/kernel/domain/models.py` and `_RULES` messages from
+    # `friday/sdk/validation.py`, and both builders put every model-written
     # word inside the bracket.
     asked = _fold(_REASON.sub("", asking))
     added = [w for w in _WORK if not _says(asked, w) and _says(said, w)]

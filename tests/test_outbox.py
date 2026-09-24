@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_event
-from friday.domain.conversation import ConversationId
+from friday.kernel.domain.conversation import ConversationId
 from friday.outbox import Kind, Outbox, record_decision
 
 WATCHED = ConversationId("fake", "watched")
@@ -363,7 +363,7 @@ async def _replied(db, task, message_id, text, *, to, at=None):
     """
     from datetime import datetime, timezone
 
-    from friday.domain.models import InboundEvent
+    from friday.kernel.domain.models import InboundEvent
 
     await db.record_message(
         InboundEvent(

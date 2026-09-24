@@ -14,7 +14,7 @@ import dataclasses
 
 import pytest
 
-from friday.domain.models import FridayState
+from friday.kernel.domain.models import FridayState
 
 
 def _state(**over) -> FridayState:
@@ -86,7 +86,7 @@ def test_a_state_is_built_from_the_conversation_the_work_is_about():
     pool used to hand the responder `channel_id`, `task_id` and `message_id`
     as three parameters, having taken the channel off a conversation it was
     already holding."""
-    from friday.domain.conversation import ConversationId
+    from friday.kernel.domain.conversation import ConversationId
 
     where = ConversationId(provider="fake", channel_id="c1", thread_id="t1")
 

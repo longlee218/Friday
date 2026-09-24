@@ -157,7 +157,7 @@ async def test_a_responder_given_a_store_can_reach_its_own_memory():
     scoped to the channel this draft is about."""
     from friday.sdk.testing import function_call
 
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
 
     seen = {}
 
@@ -204,7 +204,7 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
     already reaches into `.agent.model_settings` — one specific construction,
     not a production caller `harness.py`'s own rule is about.
     """
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
 
     class Store:
         async def room_summary(self, channel_id):
@@ -277,7 +277,7 @@ def test_a_responder_declares_the_run_state_whether_or_not_it_has_memory(monkeyp
         async def memory_search(self, scope, query, kind, limit):
             return []
 
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
 
     Responder(config=CONFIG, model=ScriptedModel([]), db=Store())
     Responder(config=CONFIG, model=ScriptedModel([]))
@@ -344,7 +344,7 @@ async def test_a_memory_is_attributed_to_the_responder_whoever_handed_the_state_
     """
     from friday.sdk.testing import function_call
 
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
 
     seen = {}
 

@@ -15,8 +15,8 @@ class _Ctx:
         self.deps = deps
 
 
-from friday.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
-from friday.domain.models import FridayState
+from friday.kernel.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
+from friday.kernel.domain.models import FridayState
 
 #: Both tables the ticket asks for, asserted rather than sampled by feel.
 REFUSED = (
@@ -136,7 +136,7 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
 
     class Store:
         async def memory_add(self, scope, text, kind):
-            from friday.domain.memory_guard import check_not_instruction_shaped
+            from friday.kernel.domain.memory_guard import check_not_instruction_shaped
 
             check_not_instruction_shaped(text)
             raise AssertionError("should have refused before reaching the store")
@@ -157,7 +157,7 @@ async def test_the_update_tool_also_tells_the_model_why():
 
     class Store:
         async def memory_update(self, scope, memory_id, text):
-            from friday.domain.memory_guard import check_not_instruction_shaped
+            from friday.kernel.domain.memory_guard import check_not_instruction_shaped
 
             check_not_instruction_shaped(text)
             raise AssertionError("should have refused before reaching the store")

@@ -21,8 +21,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import BoardClient, captured, make_event
-from friday.domain.conversation import ConversationId
-from friday.domain.states import TaskState
+from friday.kernel.domain.conversation import ConversationId
+from friday.kernel.domain.states import TaskState
 from friday.ops.api import build_api, servable
 from friday.outbox import Kind
 

@@ -13,8 +13,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 
-from friday.domain.models import POLICY, Outbound, payload_hash, payload_hash_of
-from friday.domain.states import OutboundState, TaskState
+from friday.kernel.domain.models import POLICY, Outbound, payload_hash, payload_hash_of
+from friday.kernel.domain.states import OutboundState, TaskState
 from friday.sdk.outbox import Kind
 
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN

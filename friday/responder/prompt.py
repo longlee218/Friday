@@ -34,7 +34,7 @@ from friday.agent.instruction_prompt import (
     tone_examples,
     trust_boundary,
 )
-from friday.domain.models import InboundEvent, Params
+from friday.kernel.domain.models import InboundEvent, Params
 
 __all__ = ["build_input", "build_instructions"]
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from conftest import captured, make_event
-from friday.domain.conversation import ConversationId
+from friday.kernel.domain.conversation import ConversationId
 from friday.ops.liveness import Heartbeat
 from friday.outbox import Kind
 
@@ -48,7 +48,7 @@ async def test_a_full_channel_is_named_in_the_beat(db):
     already refuses the write and evicts nothing — this is the operator's
     own visibility into the same condition, not only the model's refusal
     message."""
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
 
     scope = FridayState(channel_id="watched", task_id=None, agent="responder")
     for n in range(db.MEMORY_PER_CHANNEL):
@@ -60,7 +60,7 @@ async def test_a_full_channel_is_named_in_the_beat(db):
 
 
 async def test_a_room_with_headroom_is_not_named_in_the_beat(db):
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
 
     await db.memory_add(
         FridayState(channel_id="watched", task_id=None, agent="responder"),

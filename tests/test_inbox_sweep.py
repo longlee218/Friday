@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from conftest import captured, make_event
-from friday.domain.models import MentionType
+from friday.kernel.domain.models import MentionType
 
 
 async def test_a_sweep_captures_messages_the_live_path_never_delivered(

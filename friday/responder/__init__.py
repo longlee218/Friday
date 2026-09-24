@@ -25,9 +25,9 @@ from dataclasses import dataclass
 from friday.config import AgentConfig
 from friday.responder.prompt import build_input, build_instructions
 from friday.agent.harness import Harness
-from friday.domain.models import FridayState
+from friday.kernel.domain.models import FridayState
 from friday.tools.memory import memory_tools
-from friday.domain.models import Params, InboundEvent
+from friday.kernel.domain.models import Params, InboundEvent
 
 __all__ = ["Draft", "Responder"]
 

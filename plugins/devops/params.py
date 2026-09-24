@@ -1,6 +1,6 @@
 """`devops.api_issue`'s parameters — the plugin's own, against the sdk.
 
-Moved out of `friday.domain.models` in ticket 14: a task type's parameter
+Moved out of the core models (now `friday.kernel.domain.models`) in ticket 14: a task type's parameter
 dataclass ships with the plugin that owns it, and it declares its validation
 rules against `friday.sdk.validation` (the DSL re-exported there) so the plugin
 imports `friday.sdk` alone. The class docstring below reaches a model — triage's

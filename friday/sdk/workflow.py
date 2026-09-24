@@ -25,7 +25,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from friday.domain.actions import Action, Ask, HandOver, Reply
+from friday.sdk.actions import Action, Ask, HandOver, Reply
 from friday.sdk.workflow_state import (
     UNSTORABLE,
     DAGState,

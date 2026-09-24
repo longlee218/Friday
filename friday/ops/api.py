@@ -49,10 +49,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from friday.domain.conversation import ConversationId
-from friday.domain.memory_guard import InstructionShaped
+from friday.kernel.domain.conversation import ConversationId
+from friday.kernel.domain.memory_guard import InstructionShaped
 from friday.store.db import Database
-from friday.domain.models import (
+from friday.kernel.domain.models import (
     FridayState,
     InboundEvent,
     Memory,
@@ -65,7 +65,7 @@ from friday.domain.models import (
 from friday.memory import registry as mem_registry
 from friday.outbox import FAILED
 from friday.ops.redact import scrub
-from friday.domain.states import TaskState
+from friday.kernel.domain.states import TaskState
 
 log = logging.getLogger(__name__)
 

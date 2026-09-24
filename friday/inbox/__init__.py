@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 
 from friday.config import IngestConfig, message_age_cutoff
 from friday.store.db import Database
-from friday.domain.models import InboundEvent, MentionType
+from friday.kernel.domain.models import InboundEvent, MentionType
 
 __all__ = ["Inbox"]
 

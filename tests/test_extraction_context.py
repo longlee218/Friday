@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from friday.domain.models import Memory
+from friday.kernel.domain.models import Memory
 from plugins.devops.params import ApiIssueParams
 from friday.extraction.context import build_full_context
 from tests.test_extraction import _context
@@ -46,7 +46,7 @@ async def test_the_extractor_itself_reads_domain_kind_memories(db):
     (D14) reach the extractor through `db.domain_memories`, the same seam
     `test_the_extractor_itself_reads_what_it_already_asked` proved for
     outstanding questions."""
-    from friday.domain.models import Memory, FridayState
+    from friday.kernel.domain.models import Memory, FridayState
 
     await db.memory_add(
         FridayState(channel_id="watched", task_id=None, agent="responder"),
@@ -70,7 +70,7 @@ async def test_the_extractor_itself_reads_domain_kind_memories(db):
 async def test_voice_kind_memories_do_not_reach_the_extractor(db):
     """`VOICE` is the responder's alone (D14) — however it got written, it
     must not surface in what the extractor is shown."""
-    from friday.domain.models import FridayState
+    from friday.kernel.domain.models import FridayState
 
     scope = FridayState(channel_id="watched", task_id=None, agent="responder")
     await db.memory_add(scope, "test.apero is staging", kind="fact")

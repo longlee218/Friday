@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from friday.domain.models import InboundEvent, MentionType
+from friday.kernel.domain.models import InboundEvent, MentionType
 from friday.text.transform import Attachment, render_attachments, transform
 
 

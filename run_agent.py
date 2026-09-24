@@ -32,7 +32,7 @@ from friday.providers.discord.user import DiscordUserProvider
 from friday.providers.discord.bot import DiscordBot
 from friday.responder import Responder
 from friday.agent.skills import SkillLibrary
-from friday.domain.models import ModelCall
+from friday.kernel.domain.models import ModelCall
 from friday.triage.runner import TriageRunner
 from friday.tasks.pool import Pool
 

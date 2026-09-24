@@ -8,8 +8,8 @@ from friday.triage.context import build_light_context
 from friday.triage.prompt import build_input, build_instructions
 from friday.config import AgentConfig
 from friday.agent.harness import Harness
-from friday.domain.actions import Decided, NeedsHuman, TriageOutcome, make_decided
-from friday.domain.models import FridayState, InboundEvent
+from friday.kernel.domain.triage import Decided, NeedsHuman, TriageOutcome, make_decided
+from friday.kernel.domain.models import FridayState, InboundEvent
 from friday.triage.prefilter import Sensitive
 
 __all__ = ["Decided", "NeedsHuman", "Triage", "TriageOutcome"]

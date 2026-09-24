@@ -14,8 +14,9 @@ from __future__ import annotations
 import pytest
 
 from conftest import BoardClient
-from friday.domain.memory_guard import InstructionShaped
-from friday.domain.models import FridayState, MemoryOrigin, MemoryRefused, ModelMemoryKind
+from friday.kernel.domain.memory_guard import InstructionShaped
+from friday.sdk.memory import MemoryOrigin
+from friday.kernel.domain.models import FridayState, MemoryRefused, ModelMemoryKind
 from friday.memory import registry as memory_kinds
 from friday.ops.api import build_api
 

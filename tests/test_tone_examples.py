@@ -9,7 +9,7 @@ agent trained on its own output amplifies it every round.
 from __future__ import annotations
 
 from conftest import captured, make_event
-from friday.domain.conversation import ConversationId
+from friday.kernel.domain.conversation import ConversationId
 from friday.outbox import Kind
 
 WATCHED = ConversationId("fake", "watched")

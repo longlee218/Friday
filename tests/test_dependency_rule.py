@@ -1,17 +1,18 @@
 """Seam S4 — the dependency rule, and G1 "the kernel names no plugin".
 
-The whole restructure rests on one direction of dependency: `sdk` is contracts
-the rest builds on, `kernel` builds on `sdk`, and a plugin builds on `sdk` only —
+The whole restructure rests on one direction of dependency: `sdk` is the bottom
+of our own code — Protocols plus the pure, dependency-free values and helpers
+everything shares — `kernel` builds on `sdk`, and a plugin builds on `sdk` only —
 never the reverse, never sideways. Stated in prose it rots; read with `ast` it
 cannot, because an import written any way is still an import. Extends the
 `test_sources_are_the_only_door` / `test_composition_root` pattern (spec §
 Testing Decisions, S4).
 
-**`friday.domain` is allowed below `sdk`.** It is the pure value layer — states,
-actions, the memory origin — that the workflow port already leans on, and the
-sdk is contracts *over* those values. DESIGN-v2 §13 folds domain under the
-kernel eventually; until that step, domain is the one thing beneath the sdk, and
-the rule is "sdk imports nothing of ours *but* domain".
+**`sdk` imports nothing of ours.** Ticket 19 folded `friday.domain` away: its
+pure pieces (the actions, the validation DSL, the prompt primitives, `scrub`,
+the memory `Origin`) moved *into* `sdk`, and its models moved *under* `kernel`
+(`friday.kernel.domain`). So there is no value layer beneath the sdk any more —
+the sdk is it.
 """
 
 from __future__ import annotations
@@ -78,16 +79,17 @@ def _under(module: str, *prefixes: str) -> bool:
     return any(module == p or module.startswith(p + ".") for p in prefixes)
 
 
-def test_sdk_imports_nothing_of_ours_but_domain():
-    """`sdk` is the bottom of our own code: it may lean on the `friday.domain`
-    value layer beneath it and on itself, nothing else."""
+def test_sdk_imports_nothing_of_ours():
+    """`sdk` is the bottom of our own code: it imports only itself of ours —
+    nothing above it, and (since ticket 19 folded `friday.domain` away) no value
+    layer beneath it either."""
     offenders = {
         (rel, mod)
         for rel, tree in _modules(ROOT / "friday" / "sdk")
         for mod in _friday_imports(rel, tree)
-        if not _under(mod, "friday.sdk", "friday.domain")
+        if not _under(mod, "friday.sdk")
     }
-    assert offenders == set(), f"sdk reached above the value layer: {sorted(offenders)}"
+    assert offenders == set(), f"sdk reached outside itself: {sorted(offenders)}"
 
 
 def test_kernel_imports_only_sdk():

@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import pytest
 
-from friday.domain.models import Task
+from friday.kernel.domain.models import Task
 from datetime import datetime, timezone
 
 from conftest import ScriptedHarness, make_event
-from friday.domain.conversation import ConversationId
+from friday.kernel.domain.conversation import ConversationId
 from friday.tasks.pool import ASKED, Pool
-from friday.domain.states import TaskState
+from friday.kernel.domain.states import TaskState
 
 
 
@@ -206,7 +206,7 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     out under their name."""
     from friday.dag.engine import DAG, Node
     from friday.dag.router import EDGE_ROUTER, register_dag
-    from friday.domain.actions import Reply
+    from friday.sdk.actions import Reply
 
     async def answers(state, deps):
         return Reply("cache đầy thôi, anh clear rồi nhé")
@@ -277,11 +277,11 @@ async def test_extraction_runs_when_a_message_is_linked(db):
 
     from friday.store import schema
     from friday.config import AgentConfig
-    from friday.domain.conversation import ConversationId
+    from friday.kernel.domain.conversation import ConversationId
     from friday.extraction import _EXTRACTORS, build_extractor
     from friday.extraction.answer import answer_shape
     from friday.agent.harness import Harness
-    from friday.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.models import InboundEvent, MentionType
     from plugins.devops.params import ApiIssueParams
 
     class StubResult:
@@ -377,7 +377,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.models import InboundEvent, MentionType
     from plugins.devops.params import ApiIssueParams
     from friday.extraction import _EXTRACTORS, build_extractor
     from friday.extraction.answer import answer_shape
@@ -463,7 +463,7 @@ async def test_the_responder_is_told_what_this_task_actually_knows(db):
 async def _said(db, message_id, text, *, secs, mention=None, author="u-reporter"):
     from datetime import timedelta
 
-    from friday.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.models import InboundEvent, MentionType
 
     await db.record_message(
         InboundEvent(
@@ -667,7 +667,7 @@ async def _operator_said(db, message_id, text, *, reply_to=None, secs=10, author
     """The watched account typing in the channel. `is_own`, no mention."""
     from datetime import timedelta
 
-    from friday.domain.models import InboundEvent
+    from friday.kernel.domain.models import InboundEvent
 
     await db.record_message(
         InboundEvent(
@@ -690,7 +690,7 @@ async def _operator_said(db, message_id, text, *, reply_to=None, secs=10, author
 async def test_the_operator_answering_closes_the_task_and_withdraws_the_draft(db):
     """A `reply` waits for approval with no expiry. Without this, approving it
     two days later sends an answer that stopped being true when they typed."""
-    from friday.domain.states import OutboundState, TaskState
+    from friday.kernel.domain.states import OutboundState, TaskState
     from friday.outbox import Kind
 
     task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
@@ -749,7 +749,7 @@ async def test_with_several_open_tasks_and_no_reply_nothing_closes(db, workflows
 async def test_a_reply_picks_the_task_out_of_several(db):
     """Their reply names what it answers — the reporter's message, which is
     linked to a task."""
-    from friday.domain.states import TaskState
+    from friday.kernel.domain.states import TaskState
 
     a = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     b = await make_task(db, curl="curl -X GET /pay")
@@ -767,7 +767,7 @@ async def test_a_reply_picks_the_task_out_of_several(db):
 async def test_a_handled_task_can_be_reopened_by_a_person(db):
     """Closing on "they said something in this channel" will sometimes be
     wrong, so it cannot be terminal."""
-    from friday.domain.states import TaskState
+    from friday.kernel.domain.states import TaskState
 
     task = await make_task(db)
     await db.move_task(task.id, TaskState.HANDLED_BY_OPERATOR)
@@ -813,7 +813,8 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
     """Written down is a `person` row keyed on their Discord id — a name in a
     channel file's `people:` map until the files went (board
     `read-it-the-way-the-operator-does`, ticket 10)."""
-    from friday.domain.models import FridayState, MemoryOrigin
+    from friday.sdk.memory import MemoryOrigin
+    from friday.kernel.domain.models import FridayState
 
     await db.memory_add(
         FridayState(channel_id="watched", agent="operator"), "",
@@ -957,7 +958,7 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.models import InboundEvent, MentionType
     from plugins.devops.params import ApiIssueParams
     from friday.extraction import _EXTRACTORS, build_extractor
     from friday.extraction.answer import answer_shape
@@ -1201,7 +1202,7 @@ async def test_a_quick_graph_is_not_held_behind_a_slow_one(db):
     one has — so a pool that awaits them in turn never finishes at all."""
     import asyncio
 
-    from friday.domain.actions import HandOver
+    from friday.sdk.actions import HandOver
 
     finished: list[str] = []
     quick_done = asyncio.Event()
@@ -1230,7 +1231,7 @@ async def test_a_quick_graph_is_not_held_behind_a_slow_one(db):
 async def test_no_more_graphs_run_at_once_than_configured(db):
     import asyncio
 
-    from friday.domain.actions import HandOver
+    from friday.sdk.actions import HandOver
 
     running = 0
     most = 0
@@ -1258,7 +1259,7 @@ async def test_one_task_is_never_acted_on_twice_at_once(db):
     that starts meanwhile reads it as work waiting. It must leave it alone."""
     import asyncio
 
-    from friday.domain.actions import HandOver
+    from friday.sdk.actions import HandOver
 
     entered = 0
     inside = asyncio.Event()
@@ -1292,7 +1293,7 @@ async def test_the_bound_is_the_one_configured(db):
     import asyncio
     from types import SimpleNamespace
 
-    from friday.domain.actions import HandOver
+    from friday.sdk.actions import HandOver
 
     running = 0
     most = 0

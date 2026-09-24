@@ -30,7 +30,7 @@ from friday.extraction import (
 )
 from friday.extraction.answer import answer_shape
 from friday.extraction.context import FullContext
-from friday.domain.validation import Matches
+from friday.sdk.validation import Matches
 
 
 def _context(text="", params_cls=None, *, asked=(), memories=(), known=None):
@@ -328,7 +328,7 @@ def test_an_extractor_cannot_ask_about_a_field_that_does_not_exist():
     reporter where to look.
     """
     from friday.agent.harness import _answer_params
-    from friday.domain.models import AccessRequestParams
+    from friday.kernel.domain.models import AccessRequestParams
     from plugins.docs.params import DocQuestionParams
     from plugins.devops.params import ApiIssueParams
     from friday.extraction.answer import answer_shape
@@ -569,7 +569,7 @@ def _rows(*lines, origin="admin", channel_id="watched", kind="fact"):
     `read-it-the-way-the-operator-does`, ticket 10."""
     from datetime import datetime, timezone
 
-    from friday.domain.models import Memory
+    from friday.kernel.domain.models import Memory
 
     now = datetime(2026, 9, 1, tzinfo=timezone.utc)
     return tuple(
@@ -735,7 +735,7 @@ def test_an_extractor_whose_harness_answers_a_different_shape_is_refused():
     declares a different `answers=` produces the wrong type at runtime, in the
     middle of a task, where the only symptom is fields that never fill in.
     Refusing at wiring time costs a restart."""
-    from friday.domain.models import AccessRequestParams
+    from friday.kernel.domain.models import AccessRequestParams
     from plugins.devops.params import ApiIssueParams
 
     with pytest.raises(ValueError, match="ApiIssueParams"):

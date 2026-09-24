@@ -9,7 +9,7 @@ from typing import Optional
 import pytest
 
 from plugins.devops.params import ApiIssueParams
-from friday.domain.validation import (
+from friday.sdk.validation import (
     InSet,
     Matches,
     NonEmpty,
@@ -187,7 +187,7 @@ def test_a_params_with_no_rules_passes_validation_and_returns_no_problems():
     """`AccessRequestParams` declares no `_RULES`. `ApiIssueParams` used to be
     the example here and no longer can be: it has a cross-field rule, and a
     report with neither a correlationId nor a curl is not usable."""
-    from friday.domain.models import AccessRequestParams
+    from friday.kernel.domain.models import AccessRequestParams
 
     good = AccessRequestParams(project="payments", permission="write", summary="x")
     assert _problems(good) == []
@@ -279,7 +279,7 @@ def test_validate_is_only_invoked_from_one_call_site():
     may import the rule vocabulary to declare what fields are valid; that
     is not a call site, that is data.
 
-    Greps for `validate(` and `friday.domain.validation.validate(`.
+    Greps for `validate(` and `friday.sdk.validation.validate(`.
     """
     hits = subprocess.run(
         [
@@ -289,14 +289,14 @@ def test_validate_is_only_invoked_from_one_call_site():
             '"\\b(friday\\.validation\\.validate|validate)\\s*\\(" '
             'friday/ '
             '--include=*.py '
-            '| grep -v "^friday/domain/validation\\.py:" '
+            '| grep -v "^friday/sdk/validation\\.py:" '
             '| cut -d: -f1 | sort -u',
         ],
         capture_output=True,
         text=True,
     ).stdout.split()
 
-    # Imports of `from friday.domain.validation import ...` are declarations of
+    # Imports of `from friday.sdk.validation import ...` are declarations of
     # rules; that is data, not a call site. The seam guarantees the rule
     # *engine* only runs from one place, which is `friday/dag/prepare.py`.
     allowed = {"friday/dag/prepare.py"}
@@ -311,7 +311,7 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
     Driven through the two calls `prepare_node`'s node runs, in that order,
     rather than through a wrapper only tests used.
     """
-    from friday.domain.validation import Matches
+    from friday.sdk.validation import Matches
     from friday.dag import registry
     from friday.dag.prepare import plan_by_required_parameters, prepare
     from friday.sdk.plugin import TaskTypeSpec
@@ -334,7 +334,7 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
         "strict_test_type", StrictParams(cid="not-a-uuid")
     )
     action = problem or plan_by_required_parameters("strict_test_type", params)
-    from friday.domain.actions import Ask
+    from friday.sdk.actions import Ask
 
     assert isinstance(action, Ask), "a malformed value was accepted"
     assert "uuid" in str(action.text)
@@ -361,8 +361,8 @@ def _asks() -> dict[tuple[str, str], str]:
     were renamed, which is the drift this whole ticket is about.
     """
     from friday.dag import registry
-    from friday.domain.models import askable_fields
-    from friday.domain.validation import asked_as
+    from friday.kernel.domain.models import askable_fields
+    from friday.sdk.validation import asked_as
 
     found: dict[tuple[str, str], str] = {}
     for cls in dict.fromkeys(registry.decision_params().values()):
@@ -430,7 +430,7 @@ def test_one_of_refuses_an_empty_alternative():
     prevent, and it was added without a test beside it."""
     import pytest
 
-    from friday.domain.validation import OneOf
+    from friday.sdk.validation import OneOf
 
     with pytest.raises(ValueError, match="empty alternative"):
         OneOf(fields=("curl", ()), ask="the curl you used")

@@ -14,8 +14,8 @@ import tempfile
 
 import pytest
 
-from friday.domain.actions import Ask
-from friday.domain.conversation import ConversationId
+from friday.sdk.actions import Ask
+from friday.kernel.domain.conversation import ConversationId
 from friday.outbox import Outbox
 from friday.sdk.workflow import DAG, DAGState, Deps, Edge, Node, NodeRun, envelope
 from friday.workflow import adapter
@@ -226,7 +226,7 @@ async def test_handover_is_terminal_not_suspended(dbos_sqlite):
     """`HandOver` does NOT suspend: an `Ask` waits for the reporter, but a
     `HandOver` escalates to the operator out of band, so it flows on as a
     terminal result the pool reads off the state (v1 semantics)."""
-    from friday.domain.actions import HandOver
+    from friday.sdk.actions import HandOver
 
     async def stuck(state, deps):
         RAN.append("stuck")

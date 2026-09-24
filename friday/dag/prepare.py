@@ -22,9 +22,9 @@ from typing import Any, get_args, get_type_hints
 
 from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node
 from friday.agent.harness import Refused
-from friday.domain.actions import Action, Ask, HandOver
-from friday.domain.models import MODEL_AUTHORED, ExtractionMark, Params
-from friday.domain.validation import Problem, asked_as, validate
+from friday.sdk.actions import Action, Ask, HandOver
+from friday.kernel.domain.models import MODEL_AUTHORED, ExtractionMark, Params
+from friday.sdk.validation import Problem, asked_as, validate
 from friday.extraction import (
     Clarify,
     extract as _extract,

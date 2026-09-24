@@ -15,7 +15,7 @@ import os
 import sys
 import time
 
-from friday.domain.actions import Ask
+from friday.sdk.actions import Ask
 from friday.sdk.workflow import DAG, Deps, Edge, Node, envelope
 from friday.workflow import adapter
 

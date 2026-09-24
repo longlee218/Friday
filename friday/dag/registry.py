@@ -6,9 +6,9 @@ task-type -> `Params` catalog), the extractor registry, and the router's
 to `register_task_type` at boot — and the router, the extraction runner and
 triage read the registry instead of naming any type.
 
-The registry lives here, above `friday.domain` (so it can hold graph builders,
+The registry lives here, above `friday.kernel.domain` (so it can hold graph builders,
 which are `sdk`/`dag` types) and below the composition root (which fills it). The
-value layer never reaches up into it: `friday.domain.actions.make_decided` takes
+value layer never reaches up into it: `friday.kernel.domain.triage.make_decided` takes
 the `params` mapping as an argument, and the store takes the decision names as a
 query argument — so nothing under this module has to import it.
 
@@ -94,7 +94,7 @@ def decision_params() -> dict[str, type]:
 def decisions() -> tuple[str, ...]:
     """The closed set triage may conclude — every registered task type plus
     `skip` — the old `DECISIONS` read from the registry."""
-    from friday.domain.models import SKIP
+    from friday.kernel.domain.models import SKIP
 
     return (*TASK_TYPES.task_types(), SKIP)
 

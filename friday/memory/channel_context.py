@@ -22,8 +22,8 @@ from dataclasses import fields as dataclass_fields, replace
 from typing import Any
 
 from friday.config import AgentConfig
-from friday.domain.memory_guard import InstructionShaped
-from friday.domain.models import (
+from friday.kernel.domain.memory_guard import InstructionShaped
+from friday.kernel.domain.models import (
     FridayState,
     MemoryRefused,
     RoomSummary,

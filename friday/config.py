@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-from friday.domain.models import MentionType
+from friday.kernel.domain.models import MentionType
 
 log = logging.getLogger(__name__)
 

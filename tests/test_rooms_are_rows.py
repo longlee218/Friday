@@ -20,7 +20,8 @@ import pytest
 from friday.sdk.testing import ScriptedModel, assistant_message
 
 from friday.config import AgentConfig
-from friday.domain.models import FridayState, MemoryOrigin, MemoryStatus
+from friday.sdk.memory import MemoryOrigin
+from friday.kernel.domain.models import FridayState, MemoryStatus
 from tests.conftest import make_event
 
 ADMIN = MemoryOrigin.ADMIN

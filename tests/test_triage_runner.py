@@ -9,10 +9,10 @@ from __future__ import annotations
 from conftest import captured, make_event
 from datetime import datetime, timedelta, timezone
 
-from friday.domain.conversation import ConversationId
+from friday.kernel.domain.conversation import ConversationId
 from friday.triage import Decided, NeedsHuman
 from friday.triage.runner import TriageRunner
-from friday.domain.states import TaskState
+from friday.kernel.domain.states import TaskState
 
 
 class StubTriage:

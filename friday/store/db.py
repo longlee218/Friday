@@ -42,10 +42,10 @@ from sqlalchemy.pool import StaticPool
 
 from friday.agent.structured import fits
 from friday.store import schema
-from friday.domain.conversation import ConversationId
-from friday.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
-from friday.domain.states import OutboundState
-from friday.domain.models import (
+from friday.kernel.domain.conversation import ConversationId
+from friday.kernel.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
+from friday.kernel.domain.states import OutboundState
+from friday.kernel.domain.models import (
     Artifact,
     CandidateStatus,
     ExtractionMark,
@@ -76,7 +76,7 @@ from friday.domain.models import (
 from friday.memory import registry as memory_kinds
 from friday.text.transform import redact
 from friday.ops.redact import scrub
-from friday.domain.states import OPEN, IllegalTransition, TaskState, may_move
+from friday.kernel.domain.states import OPEN, IllegalTransition, TaskState, may_move
 
 __all__ = ["Database", "estimated_tokens"]
 

@@ -23,7 +23,7 @@ load_dotenv("/Users/longlh/Documents/Longle/friday-agents/.env")
 
 from friday.agent.harness import Harness, ToolContext, tool  # noqa: E402
 from friday.config import load_config  # noqa: E402
-from friday.domain.models import FridayState  # noqa: E402
+from friday.kernel.domain.models import FridayState  # noqa: E402
 
 CFG = load_config("/Users/longlh/Documents/Longle/friday-agents/config.yaml")
 BASE = CFG.agents["extractor"]

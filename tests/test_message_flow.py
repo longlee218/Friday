@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from conftest import make_event
 
-from friday.domain.conversation import ConversationId
-from friday.domain.states import TaskState
+from friday.kernel.domain.conversation import ConversationId
+from friday.kernel.domain.states import TaskState
 
 
 async def _seen(db, message_id="m1", text="the api is down", **kw):

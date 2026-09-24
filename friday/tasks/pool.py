@@ -26,9 +26,9 @@ from friday.dag.router import dag_for
 from friday.sdk.workflow import DAGState, Deps as DAGDeps, NodeRun, status_of
 from friday.store.db import Database
 from friday.workflow import adapter
-from friday.domain.actions import Action, Ask, HandOver, Reply
-from friday.domain.states import TaskState
-from friday.domain.models import FridayState, Task
+from friday.sdk.actions import Action, Ask, HandOver, Reply
+from friday.kernel.domain.states import TaskState
+from friday.kernel.domain.models import FridayState, Task
 from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind
 from friday.responder.check import rejected
 

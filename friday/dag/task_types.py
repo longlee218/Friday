@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from friday.dag import registry
-from friday.domain.models import AccessRequestParams
+from friday.kernel.domain.models import AccessRequestParams
 from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
 from friday.sdk.plugin import TaskTypeSpec
 

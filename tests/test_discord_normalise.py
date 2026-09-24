@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from friday.domain.models import MentionType
+from friday.kernel.domain.models import MentionType
 from friday.providers.discord.normalise import normalise
 
 ME = 100

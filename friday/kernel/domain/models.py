@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from enum import StrEnum
 
-from friday.domain.conversation import ConversationId, resolve
+from friday.kernel.domain.conversation import ConversationId, resolve
+from friday.sdk.memory import MemoryOrigin
 
 
 class MentionType(StrEnum):
@@ -237,7 +238,7 @@ SKIP = "skip"
 #: conclude are no longer written down here (ticket 11). Each task type
 #: registers a `TaskTypeSpec` into `friday.dag.registry`, and the set is read
 #: from there — `friday.dag.registry.decision_params()` for the catalog,
-#: `friday.domain.actions.make_decided` for the classifier's closed set (built
+#: `friday.kernel.domain.triage.make_decided` for the classifier's closed set (built
 #: from the catalog plus `SKIP` at boot). This module stays below the registry,
 #: so the values reach it as arguments, never an import.
 
@@ -290,15 +291,6 @@ class ModelMemoryKind(StrEnum):
     FINDING = "finding"
     DECISION = "decision"
     VOICE = "voice"
-
-
-class MemoryOrigin(StrEnum):
-    """Who is answerable for a memory row. `ADMIN` is the operator, through
-    the board's own routes; a model-origin call may not update, supersede or
-    delete an `ADMIN` row, and is told "no such memory" rather than why."""
-
-    MODEL = "model"
-    ADMIN = "admin"
 
 
 class MemoryRefused(ValueError):
@@ -964,6 +956,6 @@ class ExtractionMark:
     #:
     #: Flattened rather than holding the `Clarify` it came from, because that
     #: type lives in `friday/extraction/` and this one is read by the store —
-    #: `friday/domain/` may not import upward. Reassembled by its one reader.
+    #: `friday/kernel/domain/` may not import upward. Reassembled by its one reader.
     asked_about: tuple[str, ...] = ()
     because: str | None = None

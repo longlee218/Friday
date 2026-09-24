@@ -12,12 +12,12 @@ exactly the state a fresh install is in.
 from __future__ import annotations
 
 from friday.dag.engine import DAGDeps, DAGState
-from friday.domain.models import AccessRequestParams
+from friday.kernel.domain.models import AccessRequestParams
 from plugins.docs.params import DocQuestionParams
 from plugins.devops.params import ApiIssueParams
 from types import SimpleNamespace
 
-from friday.domain.actions import Ask, HandOver
+from friday.sdk.actions import Ask, HandOver
 from friday.dag.prepare import prepare
 
 
@@ -334,7 +334,7 @@ async def test_a_refused_extractor_hands_over_instead_of_asking(monkeypatch):
     """
     import friday.dag.prepare as wf
     from friday.agent.harness import Refused
-    from friday.domain.actions import HandOver
+    from friday.sdk.actions import HandOver
     from plugins.devops.params import ApiIssueParams
     from tests.test_extraction import _context
 
@@ -697,7 +697,8 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
     else in the prompt writes.
     """
     from friday.dag.prepare import prepare_node
-    from friday.domain.models import FridayState, MemoryOrigin
+    from friday.sdk.memory import MemoryOrigin
+    from friday.kernel.domain.models import FridayState
     from tests.test_extraction import _install
 
     await db.memory_add(
@@ -765,7 +766,8 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     `did the new fact reach a model? False`.
     """
     from friday.dag.prepare import prepare_node
-    from friday.domain.models import FridayState, MemoryOrigin
+    from friday.sdk.memory import MemoryOrigin
+    from friday.kernel.domain.models import FridayState
     from tests.test_extraction import _install
 
     asked: list[str] = []

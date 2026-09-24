@@ -17,8 +17,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 from conftest import make_event
-from friday.domain.conversation import ConversationId
-from friday.domain.models import MentionType
+from friday.kernel.domain.conversation import ConversationId
+from friday.kernel.domain.models import MentionType
 
 
 CURL = "curl -X GET /pay -H 'x-request-id: c0rr3l4t10n'"

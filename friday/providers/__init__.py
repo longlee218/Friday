@@ -5,8 +5,8 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from friday.domain.conversation import ConversationId
-from friday.domain.models import InboundEvent, Outbound
+from friday.kernel.domain.conversation import ConversationId
+from friday.kernel.domain.models import InboundEvent, Outbound
 
 __all__ = ["CredentialRejected", "Provider"]
 

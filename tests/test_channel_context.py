@@ -20,10 +20,10 @@ from friday.sdk.testing import (
 
 from friday.memory.channel_context import ContextRebuilder
 from friday.config import AgentConfig
-from friday.domain.conversation import ConversationId
-from friday.domain.models import FridayState
+from friday.kernel.domain.conversation import ConversationId
+from friday.kernel.domain.models import FridayState
 from friday.ops.liveness import Heartbeat
-from friday.domain.states import TaskState
+from friday.kernel.domain.states import TaskState
 from tests.conftest import make_event
 
 SUMMARY_CONFIG = AgentConfig(
@@ -419,7 +419,7 @@ async def _summary(db, channel_id="100"):
     `derived["summary"]` had, without the bookmark beside it. Empty fields
     are left out: the store fills the schema's defaults back in, and the
     renderer skips them, so an empty list and an absent one read alike."""
-    from friday.domain.models import RoomSummary
+    from friday.kernel.domain.models import RoomSummary
 
     row = await db.room_summary(channel_id)
     if row is None:

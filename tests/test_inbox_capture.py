@@ -9,8 +9,8 @@ import pytest
 from conftest import captured, make_event
 from friday.config import IngestConfig
 from friday.inbox import Inbox
-from friday.domain.conversation import ConversationId
-from friday.domain.models import MentionType
+from friday.kernel.domain.conversation import ConversationId
+from friday.kernel.domain.models import MentionType
 
 
 async def test_direct_mention_in_watched_channel_is_captured(inbox, provider):

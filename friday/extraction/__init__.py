@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 from friday.agent.harness import Harness, Refused
 from friday.extraction.answer import Clarify, answer_shape, params_and_clarify
 from friday.extraction.context import FullContext
-from friday.domain.models import MODEL_AUTHORED, Params
+from friday.kernel.domain.models import MODEL_AUTHORED, Params
 from friday.extraction.prompt import build_input, build_instructions
 
 if TYPE_CHECKING:

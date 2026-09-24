@@ -17,8 +17,9 @@ core already routes to (`code`) without naming what the core put there.
 per-kind branch that used to live in `natural_key` moved onto the spec so a pack
 kind ships its key derivation with the plugin. `natural_key` just delegates.
 
-The registry lives above `friday.domain` (it holds `MemoryKindSpec`, an `sdk`
-type, and references domain's `*Data` classes). `friday.domain` never imports it.
+The registry lives above `friday.kernel.domain` (it holds `MemoryKindSpec`, an
+`sdk` type, and references the domain's `*Data` classes). The domain models never
+import it.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from collections.abc import Mapping
 from dataclasses import fields as dataclass_fields
 from typing import Any
 
-from friday.domain.models import (
+from friday.kernel.domain.models import (
     DecisionData,
     FindingData,
     MemoryRefused,

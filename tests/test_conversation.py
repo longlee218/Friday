@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_event
-from friday.domain.conversation import ConversationId, resolve
+from friday.kernel.domain.conversation import ConversationId, resolve
 
 
 def test_a_thread_is_a_different_conversation_from_its_channel():

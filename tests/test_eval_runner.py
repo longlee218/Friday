@@ -15,7 +15,7 @@ from evals.dataset import Example
 from evals.run_triage_eval import _to_prediction, report, run
 from evals.scoring import Prediction
 from friday.config import AgentConfig
-from friday.domain.actions import Decided, NeedsHuman
+from friday.kernel.domain.triage import Decided, NeedsHuman
 
 CONFIG = AgentConfig(
     name="triage",

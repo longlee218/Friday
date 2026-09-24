@@ -5,7 +5,7 @@ text serves every extractor because they differ only in which fields they
 fill; the fields themselves are per call, read off the params class.
 
 **A voice would actively hurt here.** An extractor told to write in Vietnamese
-puts `sản xuất` where `friday/domain/validation.py` wants `production`, the
+puts `sản xuất` where `friday/sdk/validation.py` wants `production`, the
 value fails its rule, and the reporter is asked to confirm what they already
 said. So there is no `soul` in this prompt and there should not be one.
 

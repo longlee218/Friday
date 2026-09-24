@@ -52,8 +52,8 @@ from friday.config import load_config
 from friday.dag.task_types import BootContext
 from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
 from friday.plugin_host import TaskTypeAPI
-from friday.domain.actions import Ask, HandOver, Reply
-from friday.domain.conversation import ConversationId
+from friday.sdk.actions import Ask, HandOver, Reply
+from friday.kernel.domain.conversation import ConversationId
 from friday.sdk.workflow import DAG, Deps as DAGDeps, NodeRun
 from plugins.devops.config import load_devops_config
 from plugins.devops.graph import build_devops_dag, build_log_sources
