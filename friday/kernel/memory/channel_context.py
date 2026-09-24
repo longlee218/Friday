@@ -29,6 +29,7 @@ from friday.kernel.domain.models import (
     RoomSummary,
 )
 from friday.kernel.memory import registry as memory_kinds
+from friday.kernel.memory import write
 from friday.store.db import Database
 from friday.kernel.harness.harness import Harness
 # Imported at load time since ticket 10: it was deferred inside the two
@@ -270,12 +271,12 @@ class ContextRebuilder:
             text = summary.get("topic", "")
             try:
                 if current is None:
-                    written = await self._db.memory_add(
-                        state, text, kind=memory_kinds.SUMMARY, data=data
+                    written = await write.add(
+                        self._db, state, text, kind=memory_kinds.SUMMARY, data=data
                     )
                 else:
-                    written = await self._db.memory_supersede(
-                        state, current.id, text, data=data
+                    written = await write.supersede(
+                        self._db, state, current.id, text, data=data
                     )
             except (InstructionShaped, MemoryRefused) as refused:
                 log.warning(

@@ -418,8 +418,9 @@ room's memory is invisible to another room; `*` is every room. Ids are
 opaque. Memory reaches a model as a **tool result**, or injected into the
 extractor's input labelled by who answers for it — never through an agent's
 instructions. Instruction-shaped text ("send without approval") is refused at
-the one write path. A proposed memory waits in `memory_candidates` for the
-same mark that confirms a classification.
+the one write path — the **kernel's** (`friday/kernel/memory/write.py`, ticket
+16), not the store's, so a dumb store cannot skip it. A proposed memory waits in
+`memory_candidates` for the same mark that confirms a classification.
 
 ## Artifact
 
@@ -524,9 +525,11 @@ states, conversation, triage outcomes, the memory-write guard), the graph home
 (`dag/`, including the DBOS `adapter.py`), the **harness/** (was `agent/`),
 **pool/** (was `tasks/`), and `memory/`, `outbox/`, `triage/`, `extraction/`,
 `responder/`, `inbox/`, `ops/`, `text/`, `tools/`, `providers/`, `config.py`. It
-imports `sdk`, itself, and — until ticket 16 gives the store a `Database` facade
-in the sdk — `friday.store` (the one interim exception `test_dependency_rule`
-names). `friday/` now holds only `sdk/`, `kernel/`, `store/` and `plugins/`.
+imports `sdk`, itself, and the concrete `friday.store` (the one standing
+exception `test_dependency_rule` names — inverting the store behind a `Store`
+Protocol in the sdk is DESIGN-v2 deferred work; ticket 16 split the store into
+repositories and moved its invariants into the kernel but did not build that
+Protocol). `friday/` now holds only `sdk/`, `kernel/`, `store/` and `plugins/`.
 
 ## Plugin, PluginAPI, register(api)
 

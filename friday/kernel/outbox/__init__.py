@@ -178,6 +178,18 @@ class Outbox:
         if row.state not in (QUEUED, DISPATCHING):
             return row.state
 
+        # The approval invariant is the **kernel's**, not the store's. A kind
+        # that speaks in the operator's name goes out only against a real, frozen
+        # approval (`approved_payload_hash`, set when the operator releases it),
+        # and that is verified *here* — the store's `sendable_outbound` filter is
+        # an optimisation that pre-drops the obvious, never the thing trusted to
+        # gate a send. So a store that "approved" a reply on its own — returning
+        # it as sendable with no operator decision behind it — gets it stopped,
+        # not sent (`tests/test_outbox.py`'s self-approving-store guard).
+        if Kind(row.kind).needs_approval and not self._payload_matches(row):
+            await self._give_up(row, "a reply reached delivery without a valid approval")
+            return "not_approved"
+
         interrupted = row.state == DISPATCHING
         sender = self._senders.get(row.sender)
         if sender is None:

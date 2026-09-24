@@ -496,7 +496,7 @@ async def test_memory_add_tells_the_model_the_channel_is_full_rather_than_losing
     from friday.kernel.tools.memory import memory_tools
 
     class FullChannel:
-        async def memory_add(self, scope, text, kind):
+        async def memory_add(self, scope, text, *, kind, origin=None, key=None, data=None):
             return None
 
     _, add, _, _, _ = memory_tools(FullChannel())
@@ -521,7 +521,7 @@ async def test_memory_add_writes_under_the_voice_kind():
     seen = {}
 
     class Store:
-        async def memory_add(self, scope, text, kind):
+        async def memory_add(self, scope, text, *, kind, origin=None, key=None, data=None):
             seen["kind"] = kind
             return None
 

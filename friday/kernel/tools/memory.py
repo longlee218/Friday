@@ -54,6 +54,7 @@ from friday.kernel.harness.harness import ToolContext, tool
 from friday.kernel.harness.instruction_prompt import memory_lines
 from friday.kernel.domain.memory_guard import InstructionShaped
 from friday.kernel.domain.models import CandidateStatus, FridayState, ModelMemoryKind
+from friday.kernel.memory import write
 
 __all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "FridayState", "memory_tools"]
 
@@ -175,7 +176,7 @@ def memory_tools(db):
         state = _state(ctx)
         kept = _bounded(text)
         try:
-            written = await db.memory_add(state, kept, kind=ModelMemoryKind.VOICE)
+            written = await write.add(db, state, kept, kind=ModelMemoryKind.VOICE)
         except InstructionShaped as refused:
             log.info("memory refused for %s: %s", state.agent, refused)
             return str(refused)
@@ -215,7 +216,7 @@ def memory_tools(db):
         """
         state = _state(ctx)
         kept = _bounded(text)
-        proposed = await db.propose_memory(state, kept, kind=ModelMemoryKind.VOICE)
+        proposed = await write.propose(db, state, kept, kind=ModelMemoryKind.VOICE)
         log.info(
             "memory proposed by %s: %r (%s)", state.agent, kept, proposed.status
         )
@@ -250,7 +251,7 @@ def memory_tools(db):
         """
         state = _state(ctx)
         try:
-            updated = await db.memory_update(state, memory_id, _bounded(text))
+            updated = await write.update(db, state, memory_id, _bounded(text))
         except InstructionShaped as refused:
             log.info("memory update refused for %s: %s", state.agent, refused)
             return str(refused)

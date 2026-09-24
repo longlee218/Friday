@@ -63,6 +63,7 @@ from friday.kernel.domain.models import (
     Task,
 )
 from friday.kernel.memory import registry as mem_registry
+from friday.kernel.memory import write
 from friday.kernel.outbox import FAILED
 from friday.kernel.ops.redact import scrub
 from friday.kernel.domain.states import TaskState
@@ -553,8 +554,8 @@ def build_api(
         if not isinstance(text, str):
             raise HTTPException(422, "text must be a string")
         with _refusals():
-            written = await db.memory_add(
-                _operator(channel_id), text, kind=kind, origin=ADMIN,
+            written = await write.add(
+                db, _operator(channel_id), text, kind=kind, origin=ADMIN,
                 key=body.get("key"), data=body.get("data"),
             )
         if written is None:
@@ -575,8 +576,8 @@ def build_api(
         if not isinstance(text, str):
             raise HTTPException(422, "text must be a string")
         with _refusals():
-            updated = await db.memory_update(
-                _operator(channel_id), memory_id, text,
+            updated = await write.update(
+                db, _operator(channel_id), memory_id, text,
                 data=body.get("data"), origin=ADMIN,
             )
         if updated is None:

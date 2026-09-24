@@ -259,16 +259,16 @@ async def test_redaction_runs_once_per_message_never_on_an_artifacts_own_content
     `content`. Counted directly rather than inferred from the absence of a
     second artifact, which mutation testing would not distinguish from
     "never called at all"."""
-    import friday.store.db as db_module
+    import friday.store.repositories.messages as messages_repo
 
     calls = []
-    real_redact = db_module.redact
+    real_redact = messages_repo.redact
 
     def counting(raw, refs):
         calls.append(raw)
         return real_redact(raw, refs)
 
-    monkeypatch.setattr(db_module, "redact", counting)
+    monkeypatch.setattr(messages_repo, "redact", counting)
 
     event = _curl_event(message_id="m1")
     await db.record_message(event)
@@ -290,12 +290,12 @@ async def test_a_split_that_disagrees_on_re_read_degrades_rather_than_crashes(
     artifacts and `redacted_text` left `NULL`, falling back to `text`
     everywhere including the summariser — the same shape of gap a message
     with no code at all already has, not a new failure mode."""
-    import friday.store.db as db_module
+    import friday.store.repositories.messages as messages_repo
 
     def always_disagrees(raw, refs):
         raise ValueError("simulated: the second split found a different count")
 
-    monkeypatch.setattr(db_module, "redact", always_disagrees)
+    monkeypatch.setattr(messages_repo, "redact", always_disagrees)
 
     event = _curl_event(message_id="m1")
     recorded = await db.record_message(event)

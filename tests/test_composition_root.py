@@ -154,14 +154,15 @@ def test_every_agent_is_built_with_somewhere_to_record():
 
 def test_the_sink_is_built_once_and_only_here():
     """One sink, in the composition root, so no module below it decides
-    whether a call is worth keeping. `record_model_call` is the store's write;
-    nothing outside `_run` may reach for it."""
+    whether a call is worth keeping. `record_model_call` is the store's write
+    (in the calls repository since ticket 16); nothing outside `_run` may reach
+    for it."""
     root = pathlib.Path(__file__).resolve().parents[1]
     offenders = {
         str(path.relative_to(root))
         for path in (root / "friday").rglob("*.py")
         if "record_model_call" in path.read_text()
-    } - {"friday/store/db.py"}
+    } - {"friday/store/repositories/calls.py"}
 
     assert offenders == set(), f"a second place decides to record: {offenders}"
 

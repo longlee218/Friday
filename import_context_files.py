@@ -34,6 +34,7 @@ from friday.kernel.domain.memory_guard import InstructionShaped, check_not_instr
 from friday.sdk.memory import MemoryOrigin
 from friday.kernel.domain.models import FridayState, MemoryRefused
 from friday.kernel.memory import registry as memory_kinds
+from friday.kernel.memory import write
 from friday.store.db import Database
 
 _PERSON = ("name", "role", "team")
@@ -76,8 +77,8 @@ async def _write(db: Database, channel_id: str, written: dict[str, Any]) -> list
             # directive would otherwise walk it past — which is what the
             # store checked, value by value, when these were overrides.
             check_not_instruction_shaped(value)
-            written_row = await db.memory_add(
-                state, text, kind=kind, origin=MemoryOrigin.ADMIN, data=data
+            written_row = await write.add(
+                db, state, text, kind=kind, origin=MemoryOrigin.ADMIN, data=data
             )
         except (InstructionShaped, MemoryRefused) as why:
             refused.append(f"{key} — {why}")

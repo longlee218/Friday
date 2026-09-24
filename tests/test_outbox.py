@@ -11,6 +11,8 @@ import pytest
 
 from conftest import make_event
 from friday.kernel.domain.conversation import ConversationId
+from friday.kernel.domain.models import Outbound
+from friday.kernel.domain.states import OutboundState, TaskState
 from friday.kernel.outbox import Kind, Outbox, record_decision
 
 WATCHED = ConversationId("fake", "watched")
@@ -655,3 +657,49 @@ def test_the_two_lists_of_what_needs_approval_cannot_drift():
     from friday.kernel.outbox import Kind
 
     assert {k.value for k in Kind if k.needs_approval} == set(store._NEEDS_APPROVAL)
+
+
+class SelfApprovingStore:
+    """A store that hands the outbox a reply it "approved" itself — no operator
+    decision, no frozen `approved_payload_hash`. Ticket 16: the approval
+    invariant lives in the kernel outbox, not in whatever the store returns, so
+    even a store that self-approves cannot get an unapproved reply sent.
+    """
+
+    def __init__(self, row: Outbound) -> None:
+        self._row = row
+        self.failed: list[tuple[int, str]] = []
+        self.moved: list[tuple[int, TaskState]] = []
+
+    async def sendable_outbound(self, limit: int) -> list[Outbound]:
+        return [self._row]  # "sendable" by the store's own say-so
+
+    async def outbound_row(self, outbound_id: int) -> Outbound:
+        return self._row
+
+    async def fail_outbound(self, outbound_id: int, reason: str) -> None:
+        self.failed.append((outbound_id, reason))
+
+    async def move_task(self, task_id: int, state: TaskState) -> None:
+        self.moved.append((task_id, state))
+
+
+async def test_a_store_that_approves_a_reply_on_its_own_is_ignored():
+    """The invariant is the outbox's, not the store's (ticket 16, box 4). A
+    reply that reaches delivery with no frozen approval behind it is stopped and
+    handed to a human — the channel is never called — however sendable the store
+    claimed it was."""
+    reply = Outbound(
+        id=1, task_id=7, conversation=WATCHED, kind=Kind.REPLY, sender="discord_user",
+        text="the cause is a null tx", reply_to="m1", state=OutboundState.QUEUED,
+        attempts=0, last_error=None, approves=None, approved_payload_hash=None,
+    )
+    store = SelfApprovingStore(reply)
+    sender = Sender()
+
+    attempted = await Outbox(db=store, senders={"discord_user": sender}).run_once()
+
+    assert [r.id for r in attempted] == [1]
+    assert sender.sent == [], "an unapproved reply must never reach the channel"
+    assert store.failed and store.failed[0][0] == 1
+    assert store.moved == [(7, TaskState.NEEDS_HUMAN)]

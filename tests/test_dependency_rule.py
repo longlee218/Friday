@@ -102,20 +102,24 @@ def test_sdk_imports_nothing_of_ours():
     assert offenders == set(), f"sdk reached outside itself: {sorted(offenders)}"
 
 
-#: The one interim exception to "kernel imports only sdk". The store is a
+#: The one standing exception to "kernel imports only sdk". The store is a
 #: top-level sibling of the kernel in DESIGN-v2's tree, and the kernel's write
-#: paths (the pool, the memory writers, the outbox) reach it directly until
-#: **ticket 16** puts it behind a `Database` facade in the sdk — at which point
-#: the kernel imports the facade type from `sdk` and the composition root injects
-#: the concrete store, and this exception is deleted. Expand-contract on the
-#: guard itself: it stays non-vacuous meanwhile — the kernel still may not import
-#: a plugin, and still may not reach any `friday.*` outside sdk/kernel/store.
+#: paths (the pool, the memory writers, the outbox) reach the concrete
+#: `friday.store` directly. Inverting that behind a `Store` **Protocol** in the
+#: sdk — so the kernel codes against a contract and the composition root injects
+#: the store — is DESIGN-v2's *deferred* work (the kernel calls ~70 store
+#: methods, so a faithful Protocol duplicates all of them): ticket 16 splits the
+#: store into repositories and moves the *invariants* out of it into the kernel,
+#: but deliberately does not build that Protocol, so this edge stays. It keeps
+#: the guard non-vacuous meanwhile — the kernel still may not import a plugin,
+#: and still may not reach any `friday.*` outside sdk/kernel/store.
 _KERNEL_INTERIM = ("friday.store",)
 
 
 def test_kernel_imports_only_sdk():
-    """`kernel` builds on `sdk` (and itself, and — until ticket 16 — the store).
-    It must not reach into a plugin or any other application module."""
+    """`kernel` builds on `sdk` (and itself, and the concrete `friday.store`
+    until the deferred Store Protocol lands). It must not reach into a plugin or
+    any other application module."""
     offenders = {
         (rel, mod)
         for rel, tree in _modules(ROOT / "friday" / "kernel")
