@@ -5,7 +5,7 @@
 `friday.sdk.validation`. A graph node that writes a diagnosis or a report may
 carry a provider error quoting an Authorization line, and scrubs it before it is
 stored. The logging filter, the excepthook and the traceback renderer that *use*
-`scrub` stay in `friday/ops/redact.py`, which re-exports it.
+`scrub` stay in `friday/kernel/ops/redact.py`, which re-exports it.
 
 Deliberately broad. A false positive costs a few unreadable characters in a
 log line; a false negative is an account.

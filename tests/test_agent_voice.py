@@ -24,7 +24,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from friday.config import load_config
+from friday.kernel.config import load_config
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -38,7 +38,7 @@ def _shipped():
 def _every_node_built():
     from types import SimpleNamespace
 
-    from friday.config import AgentConfig
+    from friday.kernel.config import AgentConfig
     from plugins.devops.graph.graph import NODES, build_agents
 
     config = SimpleNamespace(
@@ -55,7 +55,7 @@ def _every_node_built():
 
 
 def test_the_responder_speaks_in_that_voice_too():
-    from friday.responder import Responder
+    from friday.kernel.responder import Responder
 
     responder = Responder.build(_shipped())
 
@@ -67,9 +67,9 @@ async def test_triage_and_the_extractors_are_told_nothing_about_voice():
     message. There is no sentence either writes that a voice could improve,
     and every word would be paid for on the highest-volume calls in the
     system to change nothing."""
-    from friday.dag import registry
-    from friday.extraction import register_extractors, registered
-    from friday.triage.runner import TriageRunner
+    from friday.kernel.dag import registry
+    from friday.kernel.extraction import register_extractors, registered
+    from friday.kernel.triage.runner import TriageRunner
 
     config = _shipped()
 
@@ -89,7 +89,7 @@ def test_one_familys_prompt_does_not_wrap_another_familys_rules():
     """One bundle used to wrap every prompt in the same sentence, and triage
     was told how to resolve a precedence conflict between three sections it is
     never passed."""
-    from friday.responder import Responder
+    from friday.kernel.responder import Responder
 
     responder = Responder.build(_shipped())
 

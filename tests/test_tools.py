@@ -6,7 +6,7 @@ grepping `@tool` was wrong twice over: two of them are wrapped by calling
 the ones that did appear were scattered across four modules that each owned
 part of the answer.
 
-So the rule is `friday/tools/` holds them all, and these tests are what make
+So the rule is `friday/kernel/tools/` holds them all, and these tests are what make
 that a rule rather than a tidy-up somebody will undo. A tool declared beside
 its caller is invisible to the next person asking the same question.
 """
@@ -20,10 +20,10 @@ import inspect
 import pkgutil
 from pathlib import Path
 
-import friday.tools
+import friday.kernel.tools
 
 REPO = Path(__file__).resolve().parents[1]
-TOOLS = REPO / "friday" / "tools"
+TOOLS = REPO / "friday" / "kernel" / "tools"
 
 #: The one file outside the package that may hold a tool, and it is *this* file
 #: — matched whole, not by basename. `path.name == "harness.py"` exempted any
@@ -31,7 +31,7 @@ TOOLS = REPO / "friday" / "tools"
 #: off there too, silently and for a file nobody meant to exempt.
 #: `test_the_one_tool_outside_the_package_is_the_answer_tool` pins what lives
 #: here.
-HARNESS = REPO / "friday" / "agent" / "harness.py"
+HARNESS = REPO / "friday" / "kernel" / "harness" / "harness.py"
 
 
 class _Ctx:
@@ -64,15 +64,15 @@ def _factories() -> dict[str, object]:
     build it with — and the alternative, skipping them, is what let two thirds
     of this system's tools go unlisted by the assertion below.
     """
-    from friday.agent.skills import SkillLibrary
-    from friday.tools.describe_skill import describe_skill_tool
-    from friday.tools.fetch_skill import fetch_skill_tool
-    from friday.tools.memory import memory_tools
+    from friday.kernel.harness.skills import SkillLibrary
+    from friday.kernel.tools.describe_skill import describe_skill_tool
+    from friday.kernel.tools.fetch_skill import fetch_skill_tool
+    from friday.kernel.tools.memory import memory_tools
     from friday.sdk.sources import Placement
     from plugins.devops.config import DEFAULT_CONTAINER_ROOTS
     from plugins.devops.investigate import Evidence, investigate_tools
-    from friday.tools.read_skill_file import read_skill_file_tool
-    from friday.tools.search_skills import search_skills_tool
+    from friday.kernel.tools.read_skill_file import read_skill_file_tool
+    from friday.kernel.tools.search_skills import search_skills_tool
 
     library = SkillLibrary(REPO / "skills")
     built = [
@@ -96,7 +96,7 @@ def _factories() -> dict[str, object]:
     # A plugin declares a tool as a neutral `ToolSpec` (`friday.sdk.tools`); the
     # harness binds it to the vendor's `Tool` when it builds the agent. Bind here
     # so the test inspects what the model actually sees (ticket 14).
-    from friday.agent.harness import _bind_tool_spec
+    from friday.kernel.harness.harness import _bind_tool_spec
 
     return {tool.name: tool for tool in (_bind_tool_spec(t) for t in built)}
 
@@ -116,7 +116,7 @@ def _tool_objects() -> dict[str, object]:
     """
     found: dict[str, object] = {}
     for info in pkgutil.iter_modules([str(TOOLS)]):
-        module = importlib.import_module(f"friday.tools.{info.name}")
+        module = importlib.import_module(f"friday.kernel.tools.{info.name}")
         for attr in vars(module).values():
             if hasattr(attr, "name") and hasattr(attr, "function_schema"):
                 found[attr.name] = attr
@@ -245,17 +245,17 @@ def test_no_tool_is_declared_outside_the_tools_package():
         if lines:
             offenders[str(path.relative_to(REPO))] = lines
 
-    assert offenders == {}, f"a tool declared outside friday/tools/: {offenders}"
+    assert offenders == {}, f"a tool declared outside friday/kernel/tools/: {offenders}"
 
 
 def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
     """`remember_tool` was a factory returning a plain async function with a
     tool-shaped docstring — never `@tool`, never `tool(fn)`, so the SDK would
     not have accepted it and the guard above could not see it. It sat in
-    `friday/memory/`, had no callers, and read like a working tool.
+    `friday/kernel/memory/`, had no callers, and read like a working tool.
 
     The check is by *shape*: a factory whose name ends `_tool` belongs in
-    `friday/tools/`, whether or not it ever got decorated. A thing that looks
+    `friday/kernel/tools/`, whether or not it ever got decorated. A thing that looks
     like a tool and is not is worse than either.
 
     **`harness.py` is exempt, and the exemption is named rather than silent** —
@@ -279,7 +279,7 @@ def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
         if named:
             offenders[str(path.relative_to(root.parent))] = named
 
-    assert offenders == {}, f"tool-shaped and not in friday/tools/: {offenders}"
+    assert offenders == {}, f"tool-shaped and not in friday/kernel/tools/: {offenders}"
 
 
 def test_the_answer_is_a_run_s_output_not_a_door_an_agent_chooses():
@@ -300,7 +300,7 @@ def test_the_answer_is_a_run_s_output_not_a_door_an_agent_chooses():
     import ast
     from dataclasses import fields
 
-    source = ast.parse((REPO / "friday" / "agent" / "harness.py").read_text())
+    source = ast.parse((REPO / "friday" / "kernel" / "harness" / "harness.py").read_text())
     tool_shaped = [
         node.name
         for node in ast.walk(source)
@@ -312,7 +312,7 @@ def test_the_answer_is_a_run_s_output_not_a_door_an_agent_chooses():
         f"found {tool_shaped}"
     )
 
-    from friday.agent.harness import ANSWER, _answer_params
+    from friday.kernel.harness.harness import ANSWER, _answer_params
     from plugins.devops.params import ApiIssueParams
 
     assert ANSWER not in _tool_objects(), (
@@ -329,10 +329,10 @@ def test_the_skill_tools_ask_the_model_for_what_their_names_promise():
     factories were checked for their `.name` and their behaviour was covered
     through the library underneath, which would keep passing if a tool asked
     for the wrong thing or stopped asking at all."""
-    from friday.agent.skills import SkillLibrary
-    from friday.tools.describe_skill import describe_skill_tool
-    from friday.tools.read_skill_file import read_skill_file_tool
-    from friday.tools.search_skills import search_skills_tool
+    from friday.kernel.harness.skills import SkillLibrary
+    from friday.kernel.tools.describe_skill import describe_skill_tool
+    from friday.kernel.tools.read_skill_file import read_skill_file_tool
+    from friday.kernel.tools.search_skills import search_skills_tool
 
     library = SkillLibrary(REPO / "skills")
     schema = lambda built: set(_props(built))
@@ -355,10 +355,10 @@ def test_the_field_names_an_extractor_may_ask_about_are_a_closed_set():
     lost it would have cost more than it saved — an extractor that invents a
     field name asks the reporter a question about nothing.
     """
-    from friday.agent.harness import _answer_params
+    from friday.kernel.harness.harness import _answer_params
     from friday.kernel.domain.models import askable_fields
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.answer import answer_shape
+    from friday.kernel.extraction.answer import answer_shape
 
     asked = _answer_params(answer_shape(ApiIssueParams))["properties"]["ask_about"]
 
@@ -373,10 +373,10 @@ def test_a_tool_that_raises_tells_the_model_nothing_it_should_not_see():
 
     The exception is not lost — it is logged, scrubbed. Only the model is told
     less. Asserted on the hook, because that is where the substitution and the
-    recording now live (`friday/agent/llm_log.py`); a full run through it is
+    recording now live (`friday/kernel/harness/llm_log.py`); a full run through it is
     `test_harness.py::test_a_tool_that_failed_is_recorded_as_having_failed`.
     """
-    from friday.agent.llm_log import LogHooks, UNAVAILABLE
+    from friday.kernel.harness.llm_log import LogHooks, UNAVAILABLE
 
     reached: list = []
     hooks = LogHooks([], tools=reached, agent="responder")
@@ -410,8 +410,8 @@ def test_a_deliberate_correction_is_not_turned_into_unavailable():
     """
     import pytest
 
-    from friday.agent.harness import ModelRetry
-    from friday.agent.llm_log import LogHooks
+    from friday.kernel.harness.harness import ModelRetry
+    from friday.kernel.harness.llm_log import LogHooks
 
     hooks = LogHooks([], tools=[], agent="responder")
 
@@ -443,7 +443,7 @@ async def test_memory_tools_say_so_when_they_were_wired_without_a_scope():
     import pytest
 
     from friday.kernel.domain.models import FridayState
-    from friday.tools.memory import NotWired, memory_tools
+    from friday.kernel.tools.memory import NotWired, memory_tools
 
     seen = {}
 
@@ -477,7 +477,7 @@ def test_the_numbers_the_memory_prose_quotes_are_the_ones_it_enforces():
     could not describe different numbers, over an arrangement where the prose
     was static text and the factory took a `limits=` override — so they could
     differ and nothing would notice."""
-    from friday.tools.memory import RESULTS, TEXT_CHARS, memory_tools
+    from friday.kernel.tools.memory import RESULTS, TEXT_CHARS, memory_tools
 
     search, add, _, _, _ = memory_tools(object())
 
@@ -493,7 +493,7 @@ async def test_memory_add_tells_the_model_the_channel_is_full_rather_than_losing
     `Database.MEMORY_PER_CHANNEL`). Nothing here evicts anything to make room
     — the model is told to correct or remove something on purpose instead."""
     from friday.kernel.domain.models import FridayState
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
 
     class FullChannel:
         async def memory_add(self, scope, text, kind):
@@ -516,7 +516,7 @@ async def test_memory_add_writes_under_the_voice_kind():
     material (D14) — the split between the two memory stores is by who
     writes, not by kind."""
     from friday.kernel.domain.models import FridayState
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
 
     seen = {}
 
@@ -541,7 +541,7 @@ async def test_memory_propose_tells_the_model_it_is_waiting_for_a_mark():
     there would treat a candidate as remembered, which it is not until
     marked."""
     from friday.kernel.domain.models import CandidateStatus, MemoryCandidate, FridayState
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
     from datetime import datetime, timezone
 
     class Store:
@@ -569,7 +569,7 @@ async def test_memory_propose_reports_an_immediate_resolution():
     already carries a verdict — the tool has to say what actually happened,
     not the generic "waiting" answer."""
     from friday.kernel.domain.models import CandidateStatus, MemoryCandidate, FridayState
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
     from datetime import datetime, timezone
 
     class Store:
@@ -594,7 +594,7 @@ async def test_memory_propose_reports_an_immediate_resolution():
 
 async def test_memory_propose_writes_under_the_voice_kind():
     from friday.kernel.domain.models import FridayState
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
 
     seen = {}
 
@@ -623,7 +623,7 @@ async def test_memory_propose_writes_under_the_voice_kind():
 
 async def test_memory_search_reads_only_the_voice_kind():
     from friday.kernel.domain.models import FridayState
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
 
     seen = {}
 
@@ -651,7 +651,7 @@ def test_memory_search_does_not_promise_a_ranking_it_does_not_do():
     ones while the model is told it got the best ones — an old, precise
     memory becomes unreachable behind newer vague ones with the prompt
     asserting the opposite."""
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
 
     search, _, _, _, _ = memory_tools(object())
 
@@ -670,7 +670,7 @@ async def test_a_hostile_memory_cannot_close_a_section_in_the_responders_prompt(
     every later search in the room, not just the one call that wrote it.
     """
     from friday.kernel.domain.models import FridayState
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
 
     class Memory:
         id = "a1b2c3"

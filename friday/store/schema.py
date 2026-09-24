@@ -131,7 +131,7 @@ class Verdict(Base):
 
     provider: Mapped[str] = mapped_column(primary_key=True)
     provider_message_id: Mapped[str] = mapped_column(primary_key=True)
-    #: "right" or "wrong". A closed set; see `friday.memory.verdicts.Mark`.
+    #: "right" or "wrong". A closed set; see `friday.kernel.memory.verdicts.Mark`.
     mark: Mapped[str]
     #: Who marked it, as the platform names them.
     marked_by: Mapped[str]
@@ -347,7 +347,7 @@ class Memory(Base):
     text: Mapped[str]
     #: A registered memory kind, stored as its string, the way `Task.state`
     #: stores `TaskState` (a validated string since ticket 12 —
-    #: `friday.memory.registry.validate_kind`). Who reads a row is a function of
+    #: `friday.kernel.memory.registry.validate_kind`). Who reads a row is a function of
     #: this value (`readers_for`), never a second column.
     kind: Mapped[str]
     task_id: Mapped[int | None] = mapped_column(index=True)

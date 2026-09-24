@@ -267,7 +267,7 @@ def _rfc3339(at: datetime) -> str:
 def _text_of(result: Any) -> str:
     """Whatever an MCP tool answered, as text.
 
-    Duck-typed rather than imported: `friday/agent/harness.py` is the one
+    Duck-typed rather than imported: `friday/kernel/harness/harness.py` is the one
     module that imports the SDK, and a second one here would make the SDK's
     result shape load-bearing in a graph node.
     """
@@ -382,9 +382,9 @@ def _rfc3339(at: datetime) -> str:
 def _text_of(result: Any) -> str:
     """Whatever an MCP tool answered, as text.
 
-    Duck-typed rather than imported: `friday/agent/harness.py` is the one
+    Duck-typed rather than imported: `friday/kernel/harness/harness.py` is the one
     module that may import the SDK, and this package may not import
-    `friday/agent/` at all.
+    `friday/kernel/harness/` at all.
     """
     content = getattr(result, "content", result)
     if isinstance(content, str):

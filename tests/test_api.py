@@ -11,9 +11,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from conftest import BoardClient, captured, make_event
-from friday.ops.api import build_api
+from friday.kernel.ops.api import build_api
 from friday.kernel.domain.conversation import ConversationId
-from friday.outbox import Kind
+from friday.kernel.outbox import Kind
 from friday.kernel.domain.states import TaskState
 
 WATCHED = ConversationId("fake", "watched")
@@ -130,7 +130,7 @@ def test_binding_beyond_loopback_is_refused():
     writes the operator's own memory. It has no authentication because it only
     ever answered on loopback — so binding wider does not happen. There is no
     credential that lifts this any more (`BOARD_TOKEN` is gone, ticket 02)."""
-    from friday.ops.api import check_exposure
+    from friday.kernel.ops.api import check_exposure
 
     check_exposure("127.0.0.1")
     check_exposure("localhost")
@@ -146,7 +146,7 @@ def test_a_taken_port_is_reported_in_one_line():
     matters — something else is already on the port — is buried in it."""
     import socket
 
-    from friday.ops.api import bind
+    from friday.kernel.ops.api import bind
 
     held = bind("127.0.0.1", 0)
     port = held.getsockname()[1]
@@ -162,7 +162,7 @@ def test_a_taken_port_is_reported_in_one_line():
 def test_binding_hands_back_a_listening_socket():
     """Bound before the server starts, so the failure happens where it can be
     reported rather than deep inside uvicorn's startup."""
-    from friday.ops.api import bind
+    from friday.kernel.ops.api import bind
 
     sock = bind("127.0.0.1", 0)
     try:
@@ -185,7 +185,7 @@ def test_a_container_may_no_longer_bind_its_own_network_uncredentialed(
     control, and the old branch answered it by trusting a compose file this
     process cannot see.
     """
-    from friday.ops import api
+    from friday.kernel.ops import api
 
     marker = tmp_path / ".dockerenv"
     marker.write_text("")
@@ -201,7 +201,7 @@ def test_loopback_is_the_supported_path():
     no correct path is a guard somebody deletes, and this is that path. (The
     container marker only phrases the refusal; it does not gate loopback, so no
     marker is set here.)"""
-    from friday.ops import api
+    from friday.kernel.ops import api
 
     api.check_exposure("127.0.0.1")
 
@@ -211,7 +211,7 @@ def test_the_refusal_says_what_changed_and_what_to_do(tmp_path, monkeypatch):
     old read-only warning and ignoring it, and somebody finding no supported
     way forward and deleting the check. It no longer offers `BOARD_TOKEN`,
     which is gone."""
-    from friday.ops import api
+    from friday.kernel.ops import api
 
     marker = tmp_path / ".dockerenv"
     marker.write_text("")
@@ -227,7 +227,7 @@ def test_the_refusal_says_what_changed_and_what_to_do(tmp_path, monkeypatch):
 
 
 def test_a_host_still_may_not(tmp_path, monkeypatch):
-    from friday.ops import api
+    from friday.kernel.ops import api
 
     monkeypatch.setattr(api, "_CONTAINER_MARKER", tmp_path / "absent")
 

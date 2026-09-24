@@ -8,7 +8,7 @@ a plugin author codes against: `Node`, `Edge`, `DAG`, the `envelope`, the
 
 **It is a port, not an engine.** Durability — run persistence, per-step
 memoization and resume — belongs to DBOS, reached through the adapter in
-`friday/workflow/adapter.py`, the one module that imports `dbos`. Nothing here
+`friday/kernel/dag/adapter.py`, the one module that imports `dbos`. Nothing here
 imports it, so the contract stays stable while the engine underneath is a
 library (DESIGN-v2 §7). The v1 `DAG.version` source-digest is gone: recovery is
 DBOS's (step name + application version), resuming from the last incomplete

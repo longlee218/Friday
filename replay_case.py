@@ -17,7 +17,7 @@ collecting a case and not.
 
 **`Diagnose` is off unless asked for**, and that is the cheap loop. Question
 1 — did the dossier hold the line the operator calls decisive — is a
-question about `friday/dag/api_issue/distil.py`, a pure function. It can be
+question about `friday/kernel/dag/api_issue/distil.py`, a pure function. It can be
 asked and re-asked for nothing. Only turn the model on once the dossier is
 right, or pay for reasoning over a dossier nobody has checked.
 
@@ -48,10 +48,10 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from friday.config import load_config
-from friday.dag.task_types import BootContext
-from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
-from friday.plugin_host import TaskTypeAPI
+from friday.kernel.config import load_config
+from friday.kernel.dag.task_types import BootContext
+from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
+from friday.kernel.plugin_host import TaskTypeAPI
 from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
 from friday.sdk.workflow import DAG, Deps as DAGDeps, NodeRun
@@ -61,7 +61,7 @@ from plugins.devops.graph.deps import ApiIssueDeps
 from plugins.devops.params import ApiIssueParams
 from plugins.devops.sources.logs import LokiSource, SshKubectlSource
 from friday.store.db import Database
-from friday.workflow import adapter
+from friday.kernel.dag import adapter
 
 
 from dataclasses import replace as _dc_replace
@@ -463,7 +463,7 @@ def main() -> int:
     load_dotenv()
     # The api_issue graph reads memory (environment/route/service rows) through
     # the store, which reads the kind registry (ticket 12); fill it before a run.
-    from friday.memory.registry import register_all_memory_kinds
+    from friday.kernel.memory.registry import register_all_memory_kinds
 
     register_all_memory_kinds()
     parser = argparse.ArgumentParser(description=__doc__)

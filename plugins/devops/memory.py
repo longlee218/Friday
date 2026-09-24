@@ -1,13 +1,13 @@
 """The devops pack kinds — the rows this plugin's graph reads to route a report.
 
-Moved out of the core models (now `friday.kernel.domain.models`) + `friday.memory.registry` in ticket 14: a
+Moved out of the core models (now `friday.kernel.domain.models`) + `friday.kernel.memory.registry` in ticket 14: a
 pack kind ships with the plugin that reads it, namespaced `devops.*`, and it
 carries its own schema, its natural-key derivation (`MemoryKindSpec.key`) and its
 reader routing here rather than in a per-kind branch the kernel would have to
 carry. `person` and `finding` stay core (every install has them); the five
 structured devops kinds are these.
 
-`data` is checked against the schema with `friday.agent.structured.fits` at the
+`data` is checked against the schema with `friday.kernel.harness.structured.fits` at the
 one write path; every field a spec line marks optional (`?`) has a default.
 """
 

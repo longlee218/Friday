@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.config import ConfigError, load_config
+from friday.kernel.config import ConfigError, load_config
 
 SAMPLE = """
 agents:
@@ -146,8 +146,8 @@ def test_max_tokens_reaches_the_model_settings_without_a_knob_for_it():
     *truncated*, which `_UNCLOSED` in the responder exists to survive, while a
     day that hits its budget is a refusal that reaches a person.
     """
-    from friday.agent.harness import Harness
-    from friday.config import AgentConfig
+    from friday.kernel.harness.harness import Harness
+    from friday.kernel.config import AgentConfig
 
     built = Harness(
         config=AgentConfig(
@@ -170,8 +170,8 @@ def test_the_client_retries_nothing_and_waits_no_longer_than_the_run():
     invoice is what this board exists to stop. Retrying belongs to
     `Harness._attempts`, where it is counted and each attempt gets its own row.
     """
-    from friday.agent.harness import _chat_model
-    from friday.config import AgentConfig
+    from friday.kernel.harness.harness import _chat_model
+    from friday.kernel.config import AgentConfig
 
     model = _chat_model(
         AgentConfig(

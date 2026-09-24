@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from conftest import ScriptedHarness, make_event
 from friday.kernel.domain.conversation import ConversationId
-from friday.tasks.pool import ASKED, Pool
+from friday.kernel.pool.pool import ASKED, Pool
 from friday.kernel.domain.states import TaskState
 
 
@@ -107,7 +107,7 @@ class StubResponder:
                     stranger=False, context=(), tone=()):
         self.strangers.append(stranger)
         self.states.append(state)
-        from friday.responder import Draft
+        from friday.kernel.responder import Draft
 
         self.asked.append(asking)
         self.given_params.append(params)
@@ -204,8 +204,8 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     """This is the producer the approval path never had. A workflow that can
     actually answer something says so, and the operator decides whether it goes
     out under their name."""
-    from friday.dag.engine import DAG, Node
-    from friday.dag.router import EDGE_ROUTER, register_dag
+    from friday.sdk.workflow import DAG, Node
+    from friday.kernel.dag.router import EDGE_ROUTER, register_dag
     from friday.sdk.actions import Reply
 
     async def answers(state, deps):
@@ -276,11 +276,11 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     from sqlalchemy import update as sa_update
 
     from friday.store import schema
-    from friday.config import AgentConfig
+    from friday.kernel.config import AgentConfig
     from friday.kernel.domain.conversation import ConversationId
-    from friday.extraction import _EXTRACTORS, build_extractor
-    from friday.extraction.answer import answer_shape
-    from friday.agent.harness import Harness
+    from friday.kernel.extraction import _EXTRACTORS, build_extractor
+    from friday.kernel.extraction.answer import answer_shape
+    from friday.kernel.harness.harness import Harness
     from friday.kernel.domain.models import InboundEvent, MentionType
     from plugins.devops.params import ApiIssueParams
 
@@ -375,12 +375,12 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
     from friday.sdk.testing import ScriptedModel, assistant_message, function_call
     from sqlalchemy import update as sa_update
 
-    from friday.agent.harness import Harness
-    from friday.config import AgentConfig
+    from friday.kernel.harness.harness import Harness
+    from friday.kernel.config import AgentConfig
     from friday.kernel.domain.models import InboundEvent, MentionType
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction import _EXTRACTORS, build_extractor
-    from friday.extraction.answer import answer_shape
+    from friday.kernel.extraction import _EXTRACTORS, build_extractor
+    from friday.kernel.extraction.answer import answer_shape
     from friday.store import schema
 
     ext = build_extractor(
@@ -402,7 +402,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
     _EXTRACTORS["devops.api_issue"] = ext
 
     # Ticket 12: a draft naming no work, so this stays a test of whose
-    # words reach the reporter rather than of `friday.responder.check`.
+    # words reach the reporter rather than of `friday.kernel.responder.check`.
     responder = StubResponder("em đang chạy trên môi trường nào thế?")
 
     try:
@@ -522,7 +522,7 @@ async def test_what_we_posted_is_not_read_back(db):
     """With `capture_own_messages` on, the operator is both the reporter and
     the account, so "same author" would otherwise feed our own questions back
     into the extractor."""
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     task = await make_task(db)
     await _said(db, "m1", "@Lee API lỗi rồi", secs=0, mention=True, author="me")
@@ -691,7 +691,7 @@ async def test_the_operator_answering_closes_the_task_and_withdraws_the_draft(db
     """A `reply` waits for approval with no expiry. Without this, approving it
     two days later sends an answer that stopped being true when they typed."""
     from friday.kernel.domain.states import OutboundState, TaskState
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     await db.queue_outbound(
@@ -715,7 +715,7 @@ async def test_the_operator_answering_closes_the_task_and_withdraws_the_draft(db
 async def test_a_message_this_process_posted_is_not_the_operator_answering(db):
     """Same account, different author. Our own ask must not close the task it
     is asking about."""
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     task = await make_task(db)
     row = await db.queue_outbound(
@@ -834,8 +834,8 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
 async def test_the_stranger_line_reaches_the_prompt_and_only_then(tmp_path):
     from friday.sdk.testing import FunctionModel
 
-    from friday.config import AgentConfig
-    from friday.responder import Responder
+    from friday.kernel.config import AgentConfig
+    from friday.kernel.responder import Responder
 
     prompts: list[str] = []
 
@@ -904,7 +904,7 @@ async def test_nothing_is_added_when_they_said_nothing_since(db):
 
 
 async def test_our_own_question_is_not_what_they_last_said(db):
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     task = await make_task(db)
     await _reporter_said(db, "m1", "API lỗi rồi", secs=0, task_id=task.id)
@@ -956,12 +956,12 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
     from friday.sdk.testing import ScriptedModel, assistant_message
     from sqlalchemy import update as sa_update
 
-    from friday.agent.harness import Harness
-    from friday.config import AgentConfig
+    from friday.kernel.harness.harness import Harness
+    from friday.kernel.config import AgentConfig
     from friday.kernel.domain.models import InboundEvent, MentionType
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction import _EXTRACTORS, build_extractor
-    from friday.extraction.answer import answer_shape
+    from friday.kernel.extraction import _EXTRACTORS, build_extractor
+    from friday.kernel.extraction.answer import answer_shape
     from friday.store import schema
 
     recorded: list = []
@@ -1033,8 +1033,8 @@ def _responder(sink):
     `Pool` to `Harness` is exercised rather than stubbed at the first joint."""
     from friday.sdk.testing import ScriptedModel, assistant_message
 
-    from friday.config import AgentConfig
-    from friday.responder import Responder
+    from friday.kernel.config import AgentConfig
+    from friday.kernel.responder import Responder
 
     return Responder(
         config=AgentConfig(
@@ -1184,8 +1184,8 @@ async def test_a_task_with_no_message_attached_still_uses_its_own_row(db):
 
 
 def _graph(task_type, node):
-    from friday.dag.engine import DAG, Node
-    from friday.dag.router import EDGE_ROUTER, register_dag
+    from friday.sdk.workflow import DAG, Node
+    from friday.kernel.dag.router import EDGE_ROUTER, register_dag
 
     EDGE_ROUTER.pop(task_type, None)
     register_dag(task_type, DAG(name=f"{task_type}-test", nodes=(Node("only", node),)))

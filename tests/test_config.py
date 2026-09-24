@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.config import ConfigError, load_config
+from friday.kernel.config import ConfigError, load_config
 from friday.kernel.domain.models import MentionType
 
 SAMPLE = """
@@ -64,7 +64,7 @@ import pytest
 def test_a_duration_reads_as_what_it_says(written, seconds):
     """`24h` says what it is. `max_message_age_hours: 24` puts the unit in the
     key and the number somewhere else, and the reader has to hold both."""
-    from friday.config import duration
+    from friday.kernel.config import duration
 
     assert duration(written, key="max_message_age") == seconds
 
@@ -75,7 +75,7 @@ def test_a_duration_that_is_not_one_is_refused_at_load(bad):
     threshold reaching the triage runner means either a crash on the first
     message or — worse — a silent zero, which would mark every message
     outdated and read as the agent having stopped working."""
-    from friday.config import ConfigError, duration
+    from friday.kernel.config import ConfigError, duration
 
     with pytest.raises(ConfigError, match="max_message_age"):
         duration(bad, key="max_message_age")
@@ -84,7 +84,7 @@ def test_a_duration_that_is_not_one_is_refused_at_load(bad):
 def test_no_duration_at_all_is_a_real_answer():
     """Absent means no cutoff — the behaviour that exists today. That is the
     shipped default, for the reason `daily_token_budget` has none."""
-    from friday.config import duration
+    from friday.kernel.config import duration
 
     assert duration(None, key="max_message_age") is None
 

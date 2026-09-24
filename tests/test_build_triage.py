@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import pytest
 
-from friday.config import AgentConfig, Config, IngestConfig
-from friday.triage import Triage
-from friday.triage.runner import build_triage
+from friday.kernel.config import AgentConfig, Config, IngestConfig
+from friday.kernel.triage import Triage
+from friday.kernel.triage.runner import build_triage
 
 
 class StubDb:

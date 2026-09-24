@@ -17,7 +17,7 @@ from friday.sdk.validation import (
     Problem,
     validate,
 )
-from friday.dag.prepare import _problems, _question
+from friday.kernel.dag.prepare import _problems, _question
 
 
 # --- the engine --------------------------------------------------------
@@ -275,7 +275,7 @@ def test_question_includes_validation_message_when_it_carries_information():
 def test_validate_is_only_invoked_from_one_call_site():
     """Ticket 30's seam guarantee. The whole point is one call site: the
     engine must not be invoked from anywhere but `_problems` in
-    `friday/dag/prepare.py`. `friday.models` and `friday.extraction`
+    `friday/kernel/dag/prepare.py`. `friday.models` and `friday.kernel.extraction`
     may import the rule vocabulary to declare what fields are valid; that
     is not a call site, that is data.
 
@@ -298,8 +298,8 @@ def test_validate_is_only_invoked_from_one_call_site():
 
     # Imports of `from friday.sdk.validation import ...` are declarations of
     # rules; that is data, not a call site. The seam guarantees the rule
-    # *engine* only runs from one place, which is `friday/dag/prepare.py`.
-    allowed = {"friday/dag/prepare.py"}
+    # *engine* only runs from one place, which is `friday/kernel/dag/prepare.py`.
+    allowed = {"friday/kernel/dag/prepare.py"}
     assert set(hits) <= allowed, f"unexpected caller: {set(hits) - allowed}"
 
 
@@ -312,8 +312,8 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
     rather than through a wrapper only tests used.
     """
     from friday.sdk.validation import Matches
-    from friday.dag import registry
-    from friday.dag.prepare import plan_by_required_parameters, prepare
+    from friday.kernel.dag import registry
+    from friday.kernel.dag.prepare import plan_by_required_parameters, prepare
     from friday.sdk.plugin import TaskTypeSpec
 
     @dataclass
@@ -360,7 +360,7 @@ def _asks() -> dict[tuple[str, str], str]:
     way it does. A copy of the lookup would keep passing if the metadata key
     were renamed, which is the drift this whole ticket is about.
     """
-    from friday.dag import registry
+    from friday.kernel.dag import registry
     from friday.kernel.domain.models import askable_fields
     from friday.sdk.validation import asked_as
 

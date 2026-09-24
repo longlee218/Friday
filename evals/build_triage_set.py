@@ -34,7 +34,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from friday.config import Config, load_config
+from friday.kernel.config import Config, load_config
 from friday.store.db import Database
 
 from evals.dataset import Example, build_frozen_set, unfit, write_jsonl

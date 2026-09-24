@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 from conftest import captured, make_event
 from friday.kernel.domain.conversation import ConversationId
-from friday.ops.liveness import Heartbeat
-from friday.outbox import Kind
+from friday.kernel.ops.liveness import Heartbeat
+from friday.kernel.outbox import Kind
 
 
 async def test_a_quiet_agent_still_says_it_is_alive(db):
@@ -91,8 +91,8 @@ async def test_the_daily_summary_survives_a_restart(db):
     """
     from datetime import datetime, timezone
 
-    from friday.ops.liveness import Liveness
-    from friday.outbox import Kind
+    from friday.kernel.ops.liveness import Liveness
+    from friday.kernel.outbox import Kind
 
     noon = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -114,8 +114,8 @@ async def test_a_new_day_is_summarised_again(db):
     after it was written."""
     from datetime import datetime, timedelta, timezone
 
-    from friday.ops.liveness import Liveness
-    from friday.outbox import Kind
+    from friday.kernel.ops.liveness import Liveness
+    from friday.kernel.outbox import Kind
 
     today_noon = datetime.now(timezone.utc).replace(hour=12)
     liveness = Liveness(db=db, gateway=SimpleNamespace(down_since=None))

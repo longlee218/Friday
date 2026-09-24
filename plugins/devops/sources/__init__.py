@@ -14,7 +14,7 @@ The layering the spec draws, and the reason this package sits beside the graph
 | --- | --- | --- |
 | **Source** | a capability, flat and reusable: a primitive that reads one kind of thing | this package |
 | **Check** | a *formula* over primitives — `FindRequestLog` is "the correlationId's lines, then path plus identifier" | `plugins/devops/graph/` |
-| **Node** | the frame a run is checkpointed, timed and retried in | `friday/dag/` (the shared runner) |
+| **Node** | the frame a run is checkpointed, timed and retried in | `friday/kernel/dag/` (the shared runner) |
 
 A source is read-only by construction rather than by instruction: there is
 no verb here that writes. It also holds no judgement — which window, which
@@ -23,7 +23,7 @@ arguments. That is what lets the same `LogSource` serve a check that decides
 by rule and, later, a Collector tool a model drives (ticket 15: "The
 difference is **who decides what to look for**, never what is called").
 
-**No agent imports.** Nothing here may reach for `friday/agent/`: a source
+**No agent imports.** Nothing here may reach for `friday/kernel/harness/`: a source
 that can call a model is a source that can be talked into reading something
 else.
 """

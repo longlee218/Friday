@@ -14,7 +14,7 @@ from friday.sdk.testing import ScriptedModel, function_call
 from evals.dataset import Example
 from evals.run_triage_eval import _to_prediction, report, run
 from evals.scoring import Prediction
-from friday.config import AgentConfig
+from friday.kernel.config import AgentConfig
 from friday.kernel.domain.triage import Decided, NeedsHuman
 
 CONFIG = AgentConfig(
@@ -112,7 +112,7 @@ def test_report_lays_out_three_or_more_predicted_labels():
 
 
 def _scripted_triage(*steps):
-    from friday.triage import Triage
+    from friday.kernel.triage import Triage
 
     return Triage(config=CONFIG, model=ScriptedModel(list(steps)))
 
@@ -125,7 +125,7 @@ async def test_a_multi_message_row_reaches_triage_as_a_real_turn(tmp_path):
     own criterion named."""
 
     from evals.dataset import write_jsonl
-    from friday.triage import Triage
+    from friday.kernel.triage import Triage
 
     dataset = tmp_path / "triage.jsonl"
     write_jsonl(
@@ -178,7 +178,7 @@ async def test_an_invented_type_is_reported_as_its_own_number(tmp_path):
     from evals.dataset import Example, write_jsonl
     from evals.run_triage_eval import report, run
     from evals.scoring import out_of_set
-    from friday.triage import Triage
+    from friday.kernel.triage import Triage
 
     dataset = tmp_path / "triage.jsonl"
     write_jsonl(dataset, [Example(text="the api is 500ing", expected="devops.api_issue")])
@@ -208,7 +208,7 @@ async def test_a_clean_run_still_reports_the_number_as_zero(tmp_path):
 
     from evals.dataset import Example, write_jsonl
     from evals.run_triage_eval import report, run
-    from friday.triage import Triage
+    from friday.kernel.triage import Triage
 
     dataset = tmp_path / "triage.jsonl"
     write_jsonl(dataset, [Example(text="the api is 500ing", expected="devops.api_issue")])

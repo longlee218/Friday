@@ -13,8 +13,8 @@ import discord_self
 import pytest
 
 from conftest import captured
-from friday.inbox import Inbox
-from friday.providers.discord.user import is_credential_rejected
+from friday.kernel.inbox import Inbox
+from friday.kernel.providers.discord.user import is_credential_rejected
 
 
 def test_a_rejected_login_is_fatal():

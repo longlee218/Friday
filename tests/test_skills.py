@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from friday.agent.skills import Skill, SkillLibrary
-from friday.tools.describe_skill import describe
+from friday.kernel.harness.skills import Skill, SkillLibrary
+from friday.kernel.tools.describe_skill import describe
 
 
 def write(directory, name: str, text: str) -> None:
@@ -250,7 +250,7 @@ def test_the_skills_that_ship_with_the_repo_all_parse():
 
 def test_the_tool_is_bound_to_one_library(tmp_path):
     """What an agent can reach is composition, not something it declares."""
-    from friday.tools.fetch_skill import fetch_skill_tool
+    from friday.kernel.tools.fetch_skill import fetch_skill_tool
 
     write(tmp_path, "trace-a-request", SKILL)
     tool = fetch_skill_tool(SkillLibrary(tmp_path).load())
@@ -272,8 +272,8 @@ def test_the_responder_is_given_the_catalogue_and_the_tool(tmp_path):
     """Loading the library and never handing it to anyone is the failure this
     guards: the ticket's promise is that an agent can *reach* a skill, not
     that the files parse."""
-    from friday.config import AgentConfig
-    from friday.responder import Responder
+    from friday.kernel.config import AgentConfig
+    from friday.kernel.responder import Responder
 
     cfg = AgentConfig(
         name="responder",
@@ -302,9 +302,9 @@ def test_an_empty_library_gives_neither_the_tools_nor_the_sections(tmp_path):
     The two facts agree now, and this is what says so: no tools, no sections,
     for the same reason.
     """
-    from friday.config import AgentConfig
-    from friday.responder import Responder
-    from friday.responder.prompt import build_input
+    from friday.kernel.config import AgentConfig
+    from friday.kernel.responder import Responder
+    from friday.kernel.responder.prompt import build_input
 
     cfg = AgentConfig(
         name="responder",
@@ -329,8 +329,8 @@ def test_an_empty_library_gives_neither_the_tools_nor_the_sections(tmp_path):
 
 
 def test_the_responder_without_skills_carries_no_tool():
-    from friday.config import AgentConfig
-    from friday.responder import Responder
+    from friday.kernel.config import AgentConfig
+    from friday.kernel.responder import Responder
 
     cfg = AgentConfig(
         name="responder",
@@ -346,7 +346,7 @@ def test_the_catalogue_reaches_the_prompt_the_responder_builds(tmp_path):
     """The DeerFlow `<skill>` block puts the catalogue in `<name>`, with
     the description and location close enough that the model can decide
     whether to fetch the body without re-reading the whole prompt."""
-    from friday.agent.instruction_prompt import SkillMeta, skill_system
+    from friday.kernel.harness.instruction_prompt import SkillMeta, skill_system
 
     meta = [
         SkillMeta(
@@ -407,7 +407,7 @@ def test_a_skill_written_for_the_reporter_exists_and_loads():
     instead — not for the agent."""
     from pathlib import Path
 
-    from friday.agent.skills import SkillLibrary
+    from friday.kernel.harness.skills import SkillLibrary
 
     library = SkillLibrary(Path(__file__).resolve().parents[1] / "skills").load()
 
@@ -420,7 +420,7 @@ def test_the_responder_is_told_not_to_invent_a_location():
     """With no skill covering it, the ask is exactly what it is today. The
     guard is a sentence in the instructions; the live provider honoured it in
     every sample, and the test pins the sentence so it does not quietly go."""
-    from friday.responder import INSTRUCTIONS
+    from friday.kernel.responder import INSTRUCTIONS
 
     assert "If no skill covers it, ask plainly and add nothing" in INSTRUCTIONS
 

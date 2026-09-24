@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from conftest import captured, make_event
 from friday.kernel.domain.conversation import ConversationId
-from friday.outbox import Kind
+from friday.kernel.outbox import Kind
 
 WATCHED = ConversationId("fake", "watched")
 

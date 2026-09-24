@@ -24,9 +24,9 @@ from friday.sdk.testing import (
     function_call,
 )
 
-from friday.agent.harness import Harness, ToolContext, tool
-from friday.agent.mcp import name_of
-from friday.config import AgentConfig
+from friday.kernel.harness.harness import Harness, ToolContext, tool
+from friday.kernel.harness.mcp import name_of
+from friday.kernel.config import AgentConfig
 
 CONFIG = AgentConfig(
     name="an-agent", api_key="sk-secret", base_url="https://example.invalid/v1",
@@ -157,8 +157,8 @@ async def test_tracing_is_off():
 async def test_an_agent_can_be_given_servers_it_did_not_have_to_know_about():
     """Which servers an agent gets is composition, not something it declares —
     the same reason its model and base_url are configuration."""
-    from friday.config import MCPServerConfig
-    from friday.agent.mcp import build
+    from friday.kernel.config import MCPServerConfig
+    from friday.kernel.harness.mcp import build
 
     servers = build(
         [MCPServerConfig(name="loki", command="npx")],
@@ -180,7 +180,7 @@ async def test_this_is_the_only_module_that_imports_the_sdk():
     they are not importers."""
     import subprocess
 
-    allowed = {"friday/agent/harness.py", "friday/sdk/testing/__init__.py"}
+    allowed = {"friday/kernel/harness/harness.py", "friday/sdk/testing/__init__.py"}
     hits = subprocess.run(
         ["grep", "-rlE", r"^\s*(from|import)\s+(pydantic_ai|fastmcp|agents)\b", "friday/"],
         capture_output=True, text=True,
@@ -192,7 +192,7 @@ async def test_this_is_the_only_module_that_imports_the_sdk():
 async def test_run_accepts_a_rendered_section():
     """Ticket 27 widens the seam: a bundle's rendered string is the prompt,
     and nothing else about the call changes."""
-    from friday.agent.instruction_prompt import task
+    from friday.kernel.harness.instruction_prompt import task
 
     h = harness([assistant_message("done")])
     result = await h.run(task("classify", None, None).render())
@@ -573,8 +573,8 @@ def test_one_request_may_not_spend_the_whole_run():
     the client and the run were given the same number, so the run-level timer
     always tripped first — and it cancels, which is a `BaseException` the retry
     loop never sees. A share each makes the claim true."""
-    from friday.agent.harness import _chat_model
-    from friday.config import AgentConfig
+    from friday.kernel.harness.harness import _chat_model
+    from friday.kernel.config import AgentConfig
 
     model = _chat_model(
         AgentConfig(
@@ -591,7 +591,7 @@ async def test_what_an_agent_reached_for_is_written_down_too():
     of the four skill tools an agent reaches for is an empirical question, and
     an expensive one the day `mcp_servers` is not empty. Through the same sink
     as the model calls, because a second seam is a second thing to forget."""
-    from friday.agent.harness import tool
+    from friday.kernel.harness.harness import tool
 
     written: list = []
 
@@ -630,7 +630,7 @@ async def test_a_tool_that_failed_is_recorded_as_having_failed():
     result — and record it as failed, using the tool call's own id. The model is
     told less than the log: the real error names a filesystem path, which is
     not the model's to see."""
-    from friday.agent.harness import tool
+    from friday.kernel.harness.harness import tool
 
     written: list = []
 
@@ -677,7 +677,7 @@ class _Library:
 
 
 def _config():
-    from friday.config import AgentConfig
+    from friday.kernel.config import AgentConfig
 
     return AgentConfig(
         name="any", api_key="k", base_url="https://example.invalid/v1", model="m"

@@ -1,7 +1,7 @@
 """The workflow actions a decision about a task comes to.
 
 Every graph a plugin ships ends in one of these, and the pool in
-`friday/tasks/` is what acts on it. They are
+`friday/kernel/pool/` is what acts on it. They are
 vocabulary, not mechanism — the bottom of the stack, part of the `sdk` a plugin
 codes against, so a graph node reaches them by importing `sdk` only. The triage
 *outcome* types (`Decided`/`make_decided`/`NeedsHuman`) are a kernel concern and

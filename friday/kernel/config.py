@@ -1,0 +1,630 @@
+from __future__ import annotations
+
+import logging
+import os
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field, fields
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from friday.kernel.domain.models import MentionType
+
+log = logging.getLogger(__name__)
+
+DEFAULT_PATH = Path("config.yaml")
+
+
+class ConfigError(Exception):
+    """Configuration is missing or cannot be understood."""
+
+
+@dataclass(frozen=True, slots=True)
+class IngestConfig:
+    """Which conversations and which kinds of mention are watched."""
+
+    watched_channels: frozenset[str]
+    mention_types: frozenset[MentionType]
+    # How often the recovery sweep runs. The live connection is the fast path;
+    # this only exists to close gaps it missed.
+    sweep_interval_seconds: float = 300.0
+    # How many prior messages to pull in when a conversation first mentions us.
+    context_messages: int = 20
+    #: How long somebody has to be quiet — not sending, not typing — before
+    #: what they said counts as finished and is read. People send one thought
+    #: in three messages; this is what makes it one input instead of three.
+    turn_seconds: float = 12.0
+
+
+#: How long, written as a number and a unit: `10s`, `10m`, `10h`.
+_DURATION = re.compile(r"^(\d+)([smh])$")
+_IN_SECONDS = {"s": 1, "m": 60, "h": 3600}
+
+
+def duration(written: object, *, key: str) -> int | None:
+    """Seconds, from `10s` / `10m` / `10h`. `None` in, `None` out.
+
+    Refused here rather than where it is used, because the two ways an
+    unparsed threshold can arrive downstream are both worse than a failure to
+    start: a crash on the first message, or a silent zero — and a zero here
+    marks every message outdated, which reads as the agent having quietly
+    stopped working rather than as a typo in a file.
+
+    Strict on purpose. A bare `24` is refused rather than guessed at, because
+    the guess would have to be a unit and every unit is somebody's reasonable
+    assumption; `1.5h` is refused because the format has no fraction and
+    accepting one invites `0.5s`. `-1h` is refused because a negative age is
+    not a shorter cutoff, it is a cutoff in the future.
+
+    This is the only key in this configuration that parses. Every other time
+    here is a float with its unit in its name — `turn_seconds`,
+    `heartbeat_seconds`, `backoff_seconds`. That inconsistency is accepted
+    deliberately: converting the rest is a separate change nobody has asked
+    for, and doing it as a side effect would put six behaviour-carrying
+    numbers through a new parser for tidiness.
+    """
+    if written is None:
+        return None
+    found = _DURATION.match(written) if isinstance(written, str) else None
+    if found is None:
+        raise ConfigError(
+            f"{key}: {written!r} is not a duration. Write a whole number and a "
+            "unit — 10s, 10m, 10h — or leave it out for no limit."
+        )
+    return int(found.group(1)) * _IN_SECONDS[found.group(2)]
+
+
+def message_age_cutoff(config) -> int | None:
+    """How old a turn may be before this system stops acting on it, in
+    seconds. `None` means no cutoff.
+
+    **One number, two readers, and this is the only place that knows where it
+    lives.** Triage marks a turn older than this `outdated` and never sends it
+    to a model; the recovery sweep, meeting a channel with no cursor, uses it
+    as how far back to read (board `work-that-has-gone-cold`, ticket 02, D8).
+    Those are the same policy seen from two sides — "work this old is not
+    worth starting" — and a second key under `ingest:` would be that policy
+    written twice, which is the drift this repo keeps paying for.
+
+    It sits under `agents.triage` because that is where it was born and moving
+    it would be a config migration for every deployment, to no end. Neither
+    reader is told that: `friday/kernel/inbox/` never learns triage exists, and the
+    composition root never reads an agent's knobs — the rule
+    `test_composition_root_reads_no_agent_config` exists to keep.
+
+    Ticket 02's own "How B is wired" section said the composition root would
+    read this and hand it on. That was written without checking, and it is
+    exactly what that guard forbids.
+    """
+    triage = config.agents.get("triage")
+    if triage is None:
+        return None
+    return duration(triage.options.get("max_message_age"), key="max_message_age")
+
+
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+_REQUIRED_AGENT_FIELDS = ("api_key", "base_url", "model")
+
+#: Shorthand for the `base_url` of the OpenAI-compatible providers Friday's
+#: first version runs on. A `provider:` in an agent block fills the `base_url`
+#: from this, so config names the provider instead of pasting a URL — nothing
+#: in `harness.py` changes, because all three speak Chat Completions and the
+#: only thing that varies is where the request goes. An explicit `base_url`
+#: still wins, for a provider not listed here or a custom endpoint.
+PROVIDER_BASE_URLS = {
+    "openai": "https://api.openai.com/v1",
+    "minimax": "https://api.minimax.io/v1",
+    "deepseek": "https://api.deepseek.com",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class AgentConfig:
+    """One step that calls a model, and everything it needs to do so.
+
+    Self-contained on purpose: reading this tells you where the model lives,
+    which key reaches it, and how it should behave, without following a
+    reference somewhere else.
+    """
+
+    name: str
+    api_key: str
+    base_url: str
+    model: str
+    settings: dict[str, Any] = field(default_factory=dict)
+    max_turns: int = 1
+    #: How much room this model has, in tokens. Providers vary, so this
+    #: cannot be hardcoded. It gated the channel summariser's call until
+    #: ticket 06 removed that gate (a room is summarised once it has said
+    #: anything new, capped by `ContextConfig.summary_max_chars` rather than
+    #: triggered by this) — kept as a fact every agent config carries, with
+    #: no reader of its own left in this repo as of that ticket.
+    context_window: int = 128_000
+    #: How many times to call the provider for one run before giving up, and
+    #: how long to wait after the first failure — doubling from there.
+    #:
+    #: Small numbers on purpose. Every attempt lives inside `timeout_seconds`,
+    #: which bounds the whole run rather than each try, so a long backoff
+    #: spends the budget waiting instead of asking. The outbox retries over
+    #: minutes because a send can wait; a task cannot, since the pool works
+    #: only `workflows.concurrency` at once and one run of a harness at a
+    #: time, so a slow run holds the tasks queued behind it.
+    max_attempts: int = 3
+    retry_backoff_seconds: float = 1.0
+    #: What this agent may spend in a day, in tokens in and out. `None` is no
+    #: ceiling, which is the shipped default and deliberate: `docs/DESIGN.md`
+    #: says the first weeks are data collection, so the *measurement* is
+    #: always on — the heartbeat reports it either way — and the ceiling is
+    #: something an operator turns on once they know what a normal day costs.
+    #: Guessing a number for them would make the first busy day look like a
+    #: fault.
+    daily_token_budget: int | None = None
+    #: How long one run of this agent may take before it becomes work for a
+    #: person, in seconds.
+    #:
+    #: A number chosen here rather than inherited. The OpenAI client defaults
+    #: to ten minutes and retries, so an unbounded run could hold the pool for
+    #: half an hour while the heartbeat went on saying "alive" — the pool works
+    #: only `workflows.concurrency` tasks at once and one run of each harness
+    #: at a time, so that is every task behind it, not one. Sixty seconds is
+    #: long for a classification and short enough that a stall surfaces the
+    #: same day.
+    timeout_seconds: float = 60.0
+    #: Step-specific knobs the model layer does not care about, e.g. the
+    #: confidence threshold for triage or the tone-example count for the
+    #: responder.
+    options: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowConfig:
+    #: Let the responder write the ask in the operator's voice. Off by default:
+    #: a drafted message needs approval, and the template does not.
+    use_responder: bool = False
+    #: How many times to ask for the same missing detail before handing the
+    #: task to a person. Asking forever is how a helpful question becomes noise.
+    max_asks: int = 3
+    #: Send the "which environment / correlationId?" question without waiting
+    #: for approval. The only reply allowed out unreviewed: it is the same
+    #: question every time, and a wrong classification costs the reporter one
+    #: unnecessary question. Everything else hands over to a human.
+    auto_ask_for_details: bool = False
+    #: How many tasks the pool works at once. Small on purpose: every graph
+    #: shares one SQLite file and one provider's rate limit, and the point is
+    #: only that a slow graph does not hold every other task behind it.
+    concurrency: int = 2
+
+
+@dataclass(frozen=True, slots=True)
+class MCPServerConfig:
+    """A tool server outside this process.
+
+    Either `command` (started here, spoken to over stdio) or `url` (already
+    running, spoken to over SSE). `allow` names the tools an agent may see —
+    empty means all of them, which is a choice rather than an oversight.
+    """
+
+    name: str
+    command: str = ""
+    args: tuple[str, ...] = ()
+    env: dict = field(default_factory=dict)
+    url: str = ""
+    #: `http` (streamable HTTP, the default for a `url`) or `sse`. The
+    #: server decides which it speaks; an SSE client against an HTTP server
+    #: fails at connect saying nothing about transports.
+    transport: str = "http"
+    #: Sent with every request. For a header a server wants that is not a
+    #: credential; a credential comes from `auth` instead, because a token
+    #: written here is a token somebody has to rewrite when it lapses.
+    headers: dict = field(default_factory=dict)
+    #: How to obtain a credential, or `None` for a server that wants none.
+    #:
+    #: **`{}` and `None` are different answers**, which is why this is not a
+    #: plain dict with a default: `auth: {}` says "this server needs signing
+    #: in to, and everything about how is discovered", and leaving the key
+    #: out says "it needs nothing". Both servers here are the first case, and
+    #: writing their endpoints down would be writing down what one HTTP GET
+    #: already says.
+    #:
+    #: Keys, all optional and all pinning something otherwise discovered:
+    #: `authorize_url`, `token_url`, `registration_url`, `client_id`,
+    #: `scope`, `client_secret`, `resource`.
+    #:
+    #: The operator signs in once with `authorize.py`, which discovers the
+    #: endpoints, registers this machine, and keeps a refresh token; this
+    #: process exchanges that for an access token and never asks anyone
+    #: anything.
+    auth: dict | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OutboxConfig:
+    #: How many times to try one message before handing it to a person.
+    max_attempts: int = 3
+    #: Doubling from here. Retrying a rate-limited send at once is how a rate
+    #: limit becomes a ban.
+    backoff_seconds: float = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class ContextConfig:
+    """What a room's summary and a task's transcript may cost, and where the
+    skills live. A channel's knowledge lived here too, as a directory of YAML
+    files; it is rows in the database now (board
+    `read-it-the-way-the-operator-does`, ticket 10)."""
+
+    #: Where the operator's skills live. One Markdown file per skill; adding
+    #: one is adding a file, with no list to edit.
+    skills_directory: str = "skills"
+    #: A ceiling refuses; it does not trim (ticket 06). A summary cut mid-field
+    #: says something false about the room; the previous one is merely older.
+    #: Measured on the stored, structured form — the same measure the room
+    #: sees, since `channel_derived` renders the summary row's fields as
+    #: written.
+    #:
+    #: Replaces `summary_share`, which gated the *call* on a fraction of the
+    #: model's context window — the layer that made every room's derived
+    #: context stay `{}`, because a summary was never worth its own cost until
+    #: a room had said enough to make the raw transcript expensive. Ticket 06
+    #: removed that gate: a room is summarised once it has said anything new,
+    #: and this caps what the result may be, not whether the call happens.
+    summary_max_chars: int = 6000
+    #: Node 0's own budget, in *estimated* tokens — characters divided by
+    #: four (D5): the configured provider is MiniMax, for which there is no
+    #: tokenizer, and a tokenizer for a different vendor would be
+    #: confidently wrong rather than roughly right. `None` means no
+    #: compaction at all (D7), the same doctrine `AgentConfig.
+    #: daily_token_budget` follows: the measurement runs from the first day
+    #: and the ceiling is something the operator sets once a normal task's
+    #: cost is known. Board `what-the-room-already-knows`, ticket 08.
+    extraction_budget_tokens: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Config:
+    database_path: str
+    ingest: IngestConfig
+    agents: dict[str, AgentConfig] = field(default_factory=dict)
+    workflows: WorkflowConfig = field(default_factory=WorkflowConfig)
+    outbox: OutboxConfig = field(default_factory=OutboxConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
+    mcp_servers: tuple[MCPServerConfig, ...] = ()
+    #: The plugins this build loads, by import path (`friday.kernel.plugin_host` reads
+    #: each package's `PLUGIN`). A plugin owns its own config block, validated
+    #: against its own schema — the core no longer names any of them.
+    plugins: tuple[str, ...] = ("plugins.devops", "plugins.docs")
+    #: The raw config mapping, so `friday.kernel.plugin_host` can read a plugin's own
+    #: block by its id (`plugin_blocks["devops"]`) and hand it to the plugin's
+    #: validator. Kept raw because the core does not know a plugin's schema.
+    plugin_blocks: Mapping[str, Any] = field(default_factory=dict)
+    #: Classifications the operator wrote by hand, as `(message, task type)`.
+    #: Used whether or not anything has been marked in Discord — a fresh
+    #: install has nothing marked, and waiting for the first reaction before
+    #: the classifier sees any example at all is a worse start than none.
+    triage_examples: tuple[tuple[str, str], ...] = ()
+    #: Words that keep a message away from the model. The operator adds to
+    #: this as they notice things, so it is a line in `config.yaml` and a
+    #: restart rather than a commit.
+    sensitive_words: tuple[str, ...] = ()
+    #: How often to say the process is alive and what it is holding. A
+    #: working agent on a quiet day is otherwise indistinguishable from a
+    #: dead one.
+    #: Who is asked to approve a reply. The bot direct-messages them; it
+    #: needs no shared server, verified against the live account.
+    operator_id: int = 0
+    #: The read-only debug view. Loopback by default: it shows every
+    #: captured message and model prompt, and has no authentication.
+    board_host: str = "127.0.0.1"
+    board_port: int = 8086
+    #: Browser origins allowed to read the API — the frontend in development.
+    board_origins: tuple[str, ...] = ()
+    #: Where the `repo_path` picker may look (ticket 19). Empty turns it off:
+    #: a board that browses `/` by default is one nobody meant to switch on.
+    #: The route resolves under this and refuses anything landing outside,
+    #: the same guard a stack frame meets.
+    repo_root: str = ""
+    heartbeat_seconds: float = 60.0
+    #: How long the gateway may be down before the operator is told. Discord
+    #: drops and resumes constantly; alerting on a blip trains you to ignore
+    #: the alert that matters.
+    down_after_seconds: float = 300.0
+    #: Hour of the day for the 'still alive' summary. None to not send one.
+    summary_at_hour: int | None = 9
+    #: How long to keep model calls. Prompts are large and nobody reads old
+    #: ones; a container that never restarts would fill its volume.
+    keep_model_calls_days: float = 14.0
+
+
+def load_config(path: Path | str = DEFAULT_PATH) -> Config:
+    path = Path(path)
+    try:
+        raw = yaml.safe_load(path.read_text()) or {}
+    except FileNotFoundError as exc:
+        raise ConfigError(f"No configuration file at {path}") from exc
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Could not parse {path}: {exc}") from exc
+
+    ingest = raw.get("ingest") or {}
+    return Config(
+        agents=_agents(_expand(raw.get("agents") or {})),
+        workflows=WorkflowConfig(
+            max_asks=int((raw.get("workflows") or {}).get("max_asks", 3)),
+            use_responder=bool(
+                (raw.get("workflows") or {}).get("use_responder", False)
+            ),
+            auto_ask_for_details=bool(
+                (raw.get("workflows") or {}).get("auto_ask_for_details", False)
+            ),
+            concurrency=_slots((raw.get("workflows") or {}).get("concurrency", 2)),
+        ),
+        outbox=OutboxConfig(
+            max_attempts=int((raw.get("outbox") or {}).get("max_attempts", 3)),
+            backoff_seconds=float(
+                (raw.get("outbox") or {}).get("backoff_seconds", 30.0)
+            ),
+        ),
+        context=ContextConfig(
+            skills_directory=str(
+                (raw.get("context") or {}).get("skills_directory", "skills")
+            ),
+            summary_max_chars=int(
+                (raw.get("context") or {}).get("summary_max_chars", 6000)
+            ),
+            extraction_budget_tokens=_positive_or_none(
+                (raw.get("context") or {}).get("extraction_budget_tokens"),
+                "context.extraction_budget_tokens",
+            ),
+        ),
+        operator_id=int(raw.get("operator_id", 0)),
+        # Overridable from the environment, because the container needs a
+        # different answer from the laptop and they share config.yaml.
+        board_host=os.environ.get(
+            "FRIDAY_BOARD_HOST", str(raw.get("board_host", "127.0.0.1"))
+        ),
+        board_port=int(raw.get("board_port", 8086)),
+        board_origins=tuple(raw.get("board_origins") or ()),
+        repo_root=str(raw.get("repo_root") or ""),
+        heartbeat_seconds=float(raw.get("heartbeat_seconds", 60.0)),
+        down_after_seconds=float(raw.get("down_after_seconds", 300.0)),
+        summary_at_hour=(
+            None if raw.get("summary_at_hour", 9) is None
+            else int(raw.get("summary_at_hour", 9))
+        ),
+        keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
+        plugins=tuple(raw.get("plugins") or ("plugins.devops", "plugins.docs")),
+        # Raw, so `friday.kernel.plugin_host` can read each plugin's own block by id
+        # and validate it against the plugin's own schema — the core does not
+        # know a plugin's config shape.
+        plugin_blocks=raw,
+        mcp_servers=_mcp_servers(_expand(raw.get("mcp_servers") or {})),
+        triage_examples=_triage_examples(raw.get("triage_examples") or []),
+        sensitive_words=_sensitive_words(raw.get("sensitive_words") or []),
+        database_path=raw.get("database_path", "./data/friday.db"),
+        ingest=IngestConfig(
+            # Coerced to str: an unquoted id in YAML parses as an int and
+            # would then never match, silently watching nothing.
+            watched_channels=frozenset(
+                str(c) for c in ingest.get("watched_channels") or ()
+            ),
+            mention_types=frozenset(
+                _mention_type(value) for value in ingest.get("mention_types") or ()
+            ),
+            sweep_interval_seconds=float(
+                ingest.get("sweep_interval_seconds", 300.0)
+            ),
+            context_messages=int(ingest.get("context_messages", 20)),
+            turn_seconds=float(ingest.get("turn_seconds", 12.0)),
+        ),
+    )
+
+
+def _expand(value: Any) -> Any:
+    """Replace ${VAR} with the environment, failing loudly when unset.
+
+    An unset variable substituted as an empty string surfaces later as an
+    unexplained 401 from the provider. Naming it here is the whole point.
+    """
+    if isinstance(value, str):
+
+        def replace(match: re.Match[str]) -> str:
+            name = match.group(1)
+            try:
+                return os.environ[name]
+            except KeyError:
+                raise ConfigError(
+                    f"{name} is referenced in the configuration but is not set. "
+                    f"Add it to .env (see .env.example)."
+                ) from None
+
+        return _ENV_REF.sub(replace, value)
+    if isinstance(value, dict):
+        return {k: _expand(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand(v) for v in value]
+    return value
+
+
+def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
+    agents = {}
+    for name, spec in raw.items():
+        spec = dict(spec or {})
+        # `provider: minimax` is shorthand for its `base_url`. An explicit
+        # `base_url` wins — for a custom endpoint, or a provider not listed.
+        provider = spec.pop("provider", None)
+        if provider is not None and not spec.get("base_url"):
+            if provider not in PROVIDER_BASE_URLS:
+                raise ConfigError(
+                    f"Agent {name!r}: provider {provider!r} is not one of "
+                    f"{', '.join(sorted(PROVIDER_BASE_URLS))} — set `base_url` "
+                    f"directly for anything else"
+                )
+            spec["base_url"] = PROVIDER_BASE_URLS[provider]
+        missing = [f for f in _REQUIRED_AGENT_FIELDS if not spec.get(f)]
+        if missing:
+            hint = (
+                " (or a `provider:` shorthand)" if "base_url" in missing else ""
+            )
+            raise ConfigError(
+                f"Agent {name!r} is missing: {', '.join(missing)}{hint}"
+            )
+        agents[name] = AgentConfig(
+            name=name,
+            api_key=spec.pop("api_key"),
+            base_url=spec.pop("base_url"),
+            model=spec.pop("model"),
+            settings=spec.pop("settings", None) or {},
+            max_turns=int(spec.pop("max_turns", 1)),
+            context_window=int(spec.pop("context_window", 128_000)),
+            timeout_seconds=float(spec.pop("timeout_seconds", 60.0)),
+            max_attempts=int(spec.pop("max_attempts", 3)),
+            retry_backoff_seconds=float(spec.pop("retry_backoff_seconds", 1.0)),
+            daily_token_budget=(
+                int(budget)
+                if (budget := spec.pop("daily_token_budget", None)) is not None
+                else None
+            ),
+            options=spec,  # whatever is left is step-specific
+        )
+    return agents
+
+
+def _slots(value: Any) -> int:
+    """Zero slots is a pool that takes every task and never acts on one —
+    refused where the operator is looking, not discovered as a silent stall."""
+    parsed = int(value)
+    if parsed < 1:
+        raise ConfigError(
+            f"workflows.concurrency must be at least 1 — got {parsed}"
+        )
+    return parsed
+
+
+def _positive_or_none(value: Any, name: str) -> int | None:
+    """`None` unset, a positive int given — never anything in between.
+
+    Board `what-the-room-already-knows`, ticket 08, D6: "a budget clause
+    that cannot be evaluated fails loudly; it is never dropped" — the
+    failure shape that emptied five context mechanisms in this repo was a
+    bad value tolerated at run time rather than refused where the operator
+    is looking. Zero and negative are exactly as unevaluable as a budget can
+    be, so they raise here rather than reaching `original_text_for` as a
+    ceiling that refuses every message on every task, silently.
+    """
+    if value is None:
+        return None
+    parsed = int(value)
+    if parsed <= 0:
+        raise ConfigError(
+            f"{name} must be a positive number of estimated tokens, or unset "
+            f"for no compaction — got {parsed}"
+        )
+    return parsed
+
+
+def _mention_type(value: str) -> MentionType:
+    try:
+        return MentionType(value)
+    except ValueError as exc:
+        known = ", ".join(m.value for m in MentionType)
+        raise ConfigError(
+            f"Unknown mention type {value!r}. Known types: {known}"
+        ) from exc
+
+
+def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
+    """A server with neither a command nor a url is half a connection, which is
+    worse than none: it fails at the first tool call, inside an agent run, hours
+    after anyone edited the file."""
+    servers = []
+    for name, spec in raw.items():
+        spec = spec or {}
+        if not spec.get("command") and not spec.get("url"):
+            raise ConfigError(
+                f"mcp server {name!r} needs either a command (stdio) or a url."
+            )
+        if "allow" in spec:
+            raise ConfigError(
+                f"mcp server {name!r}: `allow` is no longer read here. Which "
+                "tools may be called is declared in code, on the class that "
+                "calls them — see `friday.sources.Reads` — so a file cannot "
+                "widen it."
+            )
+        transport = str(spec.get("transport", "http"))
+        if transport not in {"http", "sse"}:
+            raise ConfigError(
+                f"mcp server {name!r}: transport {transport!r} is not one of "
+                "http, sse"
+            )
+        servers.append(
+            MCPServerConfig(
+                name=name,
+                command=spec.get("command", ""),
+                args=tuple(spec.get("args") or ()),
+                env=dict(spec.get("env") or {}),
+                url=spec.get("url", ""),
+                transport=transport,
+                headers=dict(spec.get("headers") or {}),
+                auth=None if spec.get("auth") is None else dict(spec["auth"]),
+            )
+        )
+    return tuple(servers)
+
+
+def _sensitive_words(raw) -> tuple[str, ...]:
+    """A flat list of words and phrases. Refused if it is anything else.
+
+    A string here iterates character by character, and the resulting rule holds
+    every message containing the letter "l" — a failure that looks like the
+    whole system going quiet.
+    """
+    if not isinstance(raw, list):
+        raise ConfigError(
+            f"sensitive_words should be a list of words, got {type(raw).__name__}"
+        )
+    bad = [w for w in raw if not isinstance(w, str)]
+    if bad:
+        raise ConfigError(f"sensitive_words should all be text, got {bad!r}")
+    return tuple(w.strip() for w in raw if w.strip())
+
+
+def _triage_examples(raw) -> tuple[tuple[str, str], ...]:
+    """Hand-written classifications, as `(message, task type)` pairs.
+
+    Written as a list of one-key mappings so the file reads as examples
+    rather than as configuration:
+
+        triage_examples:
+          - "the checkout api is 500ing": devops.api_issue
+          - "can I get access to the payments repo": access_request
+
+    A malformed entry is refused rather than skipped. An example the operator
+    believes they wrote, and which silently is not there, is worse than a
+    startup that says which line is wrong.
+    """
+    if not isinstance(raw, list):
+        # Without this, a string iterates character by character and the error
+        # names `triage_examples[0] ... got 'o'` — the first letter of the
+        # value, which sends the reader looking for a list entry that does not
+        # exist.
+        raise ConfigError(
+            f"triage_examples should be a list of 'message: task_type' pairs, "
+            f"got {type(raw).__name__}"
+        )
+    examples: list[tuple[str, str]] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict) or len(entry) != 1:
+            raise ConfigError(
+                f"triage_examples[{index}] should be one 'message: task_type' "
+                f"pair, got {entry!r}"
+            )
+        (message, kind), = entry.items()
+        if not isinstance(message, str) or not isinstance(kind, str):
+            raise ConfigError(
+                f"triage_examples[{index}]: both the message and the task "
+                f"type must be text, got {entry!r}"
+            )
+        examples.append((message, kind))
+    return tuple(examples)

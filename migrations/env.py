@@ -12,7 +12,7 @@ from alembic import context
 from dotenv import load_dotenv
 
 from friday.store import schema
-from friday.config import load_config
+from friday.kernel.config import load_config
 
 # config.yaml interpolates secrets from .env, so they have to be present
 # before it can be read — even though a migration needs none of them.

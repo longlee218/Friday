@@ -99,7 +99,7 @@ def test_migrating_does_not_switch_the_applications_logging_off(tmp_path):
     try:
         run_agent.migrate()
 
-        assert logging.getLogger("friday.inbox").isEnabledFor(logging.DEBUG)
+        assert logging.getLogger("friday.kernel.inbox").isEnabledFor(logging.DEBUG)
     finally:
         os.environ.pop("FRIDAY_DB", None)
         logging.basicConfig(level=before[0], force=True)

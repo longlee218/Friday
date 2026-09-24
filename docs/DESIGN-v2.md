@@ -181,7 +181,7 @@ review cheap — but it is never cited as the reason something is safe.
 
 v1 marks a row sent *after* the channel call, and says why: a crash in
 between may post twice, and the other order loses an approved reply
-silently (`friday/outbox/__init__.py`, `_deliver`). v2 removes the choice:
+silently (`friday/kernel/outbox/__init__.py`, `_deliver`). v2 removes the choice:
 
 ```
 enqueued ─┬─ needs approval ──→ awaiting_approval ─→ approved ─┐
@@ -465,7 +465,7 @@ async def query_logs(ctx: ToolContext[LogsDeps], service: str, since: datetime, 
 
 - **Every tool belongs to a toolset, every toolset to a plugin**,
   including the kernel's own memory and skill tools (`core-memory`,
-  `core-skills`). v1's rule "every tool lives in `friday/tools/`" becomes
+  `core-skills`). v1's rule "every tool lives in `friday/kernel/tools/`" becomes
   "every tool is registered through `PluginAPI.toolset`"; the answer tool
   stays the one exemption.
 - Schema from signature + docstring; `ToolContext` injected, invisible to
@@ -865,7 +865,7 @@ mcp:                                   # the out-of-process tier: the only grant
   joins the redaction list. A stdio MCP child already gets only a short
   safe list from the SDK (`mcp.client.stdio.get_default_environment`);
   the gap is v1 passing a server's `env` from config through verbatim
-  (`friday/agent/mcp.py`). v2 passes that list plus the server's declared
+  (`friday/kernel/harness/mcp.py`). v2 passes that list plus the server's declared
   secrets, nothing else.
 - Kernel knobs (budget, outbox retries, thresholds) stay top-level.
 
@@ -881,7 +881,7 @@ mcp:                                   # the out-of-process tier: the only grant
 | No wildcards on MCP tools; boot logs every server's tool list, and a change is an audit entry | now |
 | The decider of an approval is checked against `operator_id` in kernel code (§3.3) | **now** |
 | Model writes from untrusted runs go to candidates (§9.4) | now |
-| Board protection (§6.10): loopback, exact Host/Origin, startup session secret, `SameSite=Strict`, CSRF on every write; **`BOARD_TOKEN` removed** — today it only lifts the loopback refusal in `check_exposure` (`friday/ops/api.py`) and no route checks it, so setting it and binding `0.0.0.0` opens a board that writes admin memory to the LAN | **now** — the board already writes admin memory |
+| Board protection (§6.10): loopback, exact Host/Origin, startup session secret, `SameSite=Strict`, CSRF on every write; **`BOARD_TOKEN` removed** — today it only lifts the loopback refusal in `check_exposure` (`friday/kernel/ops/api.py`) and no route checks it, so setting it and binding `0.0.0.0` opens a board that writes admin memory to the LAN | **now** — the board already writes admin memory |
 | Board accounts / login | second human principal |
 | `egress` tools + opt-in for private-source runs (§5.3) | first tool that reaches outside the deployment |
 | **A process boundary is not a sandbox.** Before a third-party MCP server may see private data, it runs with: empty environment plus declared secrets, a dedicated working directory, read-only mounts and a filesystem allow-list, an egress host allow-list, timeout, output byte limit, CPU/memory limits, and a tool allow-list the operator wrote (never the server's own annotations) | precondition for the first third-party MCP server touching private data |
@@ -1226,9 +1226,9 @@ be defects in the running system, not only in this document.
 
 | Finding | Evidence in code | Change |
 | --- | --- | --- |
-| Outbox crash window: a send that succeeds before the process dies is resent | `friday/outbox/__init__.py` `_deliver` marks sent after the call and documents the double-post as a chosen trade-off | §3.4 `dispatching` / `delivery_unknown`; §15 step 1 |
+| Outbox crash window: a send that succeeds before the process dies is resent | `friday/kernel/outbox/__init__.py` `_deliver` marks sent after the call and documents the double-post as a chosen trade-off | §3.4 `dispatching` / `delivery_unknown`; §15 step 1 |
 | Approved payload must be immutable | v1 sends stored `text`, but nothing checks it against what was approved | §3.3, §3.4 frozen payload + hash |
-| Board protection cannot wait for a second person | The board already writes `admin` memory rows (`friday/ops/api.py` memory routes) with loopback as its only defence; no Host, Origin or CSRF check | §6.10, §12, §15 step 2 |
+| Board protection cannot wait for a second person | The board already writes `admin` memory rows (`friday/kernel/ops/api.py` memory routes) with loopback as its only defence; no Host, Origin or CSRF check | §6.10, §12, §15 step 2 |
 | No single-instance guarantee; `serve_board.py` is a second writer | No lock in `run_agent.py`; `serve_board.py` documents that it writes | §12.1 |
 | "Requester may not approve" breaks the personal case | The owner asking Friday and approving the draft is the common flow | §9.3 risk-based `self_approval` |
 | Provider policy must cover `personal`, not only `restricted` | — | §9.2 policy per sensitivity, max over the prompt |

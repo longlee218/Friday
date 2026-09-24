@@ -61,7 +61,7 @@ implementation detail.
 
 **How the code is built**
 
-11. **One seam per outside library.** Only `friday/agent/harness.py` imports
+11. **One seam per outside library.** Only `friday/kernel/harness/harness.py` imports
     the agent SDK; a second module reaching for it is the thing to push back
     on. The same rule will hold for every library adopted later.
 12. **Reuse before rewrite** (operator, 2026-09-22): a maintained library that
@@ -100,8 +100,8 @@ suite. Triage scored 100% on `evals/triage.jsonl` on 2026-09-20.
 | --- | --- | --- |
 | Language, packaging | Python 3.13, **uv** | `uv add` only; never hand-edit `pyproject.toml` |
 | Storage | **SQLite** (WAL), **SQLAlchemy 2.0 async**, **Alembic** | the only state store; one process |
-| Models | **Pydantic AI** (`pydantic-ai-slim`) over **Chat Completions**; **MiniMax-M3** at `api.minimax.io` | provider is `base_url`/`api_key`/`model` (or a `provider:` shorthand); one module imports the vendor (`friday/agent/harness.py`) |
-| Workflows | **DBOS** (`dbos` 3.0, in-process) durable workflows on their **own SQLite system DB** beside the app db | the hand-written DAG engine is retired; the port is `friday/sdk/workflow.py`, the adapter `friday/workflow/adapter.py` — the one module that imports `dbos` |
+| Models | **Pydantic AI** (`pydantic-ai-slim`) over **Chat Completions**; **MiniMax-M3** at `api.minimax.io` | provider is `base_url`/`api_key`/`model` (or a `provider:` shorthand); one module imports the vendor (`friday/kernel/harness/harness.py`) |
+| Workflows | **DBOS** (`dbos` 3.0, in-process) durable workflows on their **own SQLite system DB** beside the app db | the hand-written DAG engine is retired; the port is `friday/sdk/workflow.py`, the adapter `friday/kernel/dag/adapter.py` — the one module that imports `dbos` |
 | Chat | **discord.py** (bot: buttons, DMs), **discord-self** (the operator's account: reads and replies) | the self-bot is an accepted risk |
 | Tool servers | **MCP** over streamable HTTP: `devops-generic` (Loki, k8s reads), `db-generic` | the operator's SSO session, refreshed by the process (`authorize.py` once) |
 | Dev logs | `kubectl` on the dev host via `ssh dev` | no kubeconfig on this machine |
@@ -160,9 +160,9 @@ is the premise each board tracks against.
 
 1. **Library-independent defects, first** (DESIGN-v2 §15 step 1). Landed:
    board protection (ticket 02) — `BOARD_TOKEN` removed and every write checks
-   Host/Origin/CSRF (`friday/ops/api.py`); approver identity (ticket 03) — a
+   Host/Origin/CSRF (`friday/kernel/ops/api.py`); approver identity (ticket 03) — a
    decision is checked against `operator_id` in `record_decision`
-   (`friday/outbox/__init__.py`), not trusted from whatever button was pressed.
+   (`friday/kernel/outbox/__init__.py`), not trusted from whatever button was pressed.
    Still to do: a single-instance lock on `run_agent.py` (ticket 04). **The
    outbox double-post fix** folded into the DBOS phase as planned (§15 step 3,
    ADR 0001) and **landed as ticket 07**: each delivery is a DBOS workflow,
@@ -304,7 +304,7 @@ The loop that hosts tasks' graphs — deciding only *when*, and *whether what
 came back may be sent*, never *what* to do. Every pass: stand down for a task
 the operator answered, announce to the operator what nobody can act on, host
 graphs for pending tasks (bounded concurrency), and turn what came back into
-rows. Lives in `friday/tasks/`, apart from the engine.
+rows. Lives in `friday/kernel/pool/`, apart from the engine.
 
 ## Action
 
@@ -517,11 +517,16 @@ and the memory `Origin`. It imports **nothing of ours**.
 
 ## Kernel
 
-`friday/kernel` — owns the invariants and **names no plugin**. Imports `sdk`
-and nothing higher. Since ticket 10 it holds the **registry**, and since ticket
-19 the **domain vocabulary** (`friday/kernel/domain/`: models, states,
-conversation, triage outcomes, the memory-write guard); its other pieces move in
-as their steps land.
+`friday/kernel` — owns the invariants and **names no plugin**. The
+kernel-consolidation (tickets 19–21) folded every application module in here:
+the **registry**/**plugin_host**, the **domain vocabulary** (`domain/`: models,
+states, conversation, triage outcomes, the memory-write guard), the graph home
+(`dag/`, including the DBOS `adapter.py`), the **harness/** (was `agent/`),
+**pool/** (was `tasks/`), and `memory/`, `outbox/`, `triage/`, `extraction/`,
+`responder/`, `inbox/`, `ops/`, `text/`, `tools/`, `providers/`, `config.py`. It
+imports `sdk`, itself, and — until ticket 16 gives the store a `Database` facade
+in the sdk — `friday.store` (the one interim exception `test_dependency_rule`
+names). `friday/` now holds only `sdk/`, `kernel/`, `store/` and `plugins/`.
 
 ## Plugin, PluginAPI, register(api)
 
@@ -541,8 +546,8 @@ to be a rule.
 
 ## Task-type registry
 
-`friday/dag/registry.py` — the one place a task type is known (ticket 11),
-filled by each type's `register()` (`friday/dag/task_types.py`). It replaced the
+`friday/kernel/dag/registry.py` — the one place a task type is known (ticket 11),
+filled by each type's `register()` (`friday/kernel/dag/task_types.py`). It replaced the
 hand-maintained `PARAMS`/`DECISIONS` maps, the extractor map and the router's
 `_graphs`. `decision_params()` is the old `PARAMS`; `decisions()` the old
 `DECISIONS` (types + `skip`). The router reads it and **names no task type**;
@@ -551,7 +556,7 @@ takes the decision set as an argument so `domain` never reaches up.
 
 ## Memory-kind registry
 
-`friday/memory/registry.py` — the one place a memory kind is known (ticket 12),
+`friday/kernel/memory/registry.py` — the one place a memory kind is known (ticket 12),
 filled by `register_all_memory_kinds()`. It replaced the hardcoded `_READERS`/
 `_WRITERS`/`MEMORY_DATA` maps. A kind registers a `MemoryKindSpec` (writers,
 data, cardinality, injected); `MemoryKind` is now a **validated string**

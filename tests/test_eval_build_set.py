@@ -11,7 +11,7 @@ import json
 
 from conftest import make_event
 
-from friday.config import Config, IngestConfig
+from friday.kernel.config import Config, IngestConfig
 
 from evals.build_triage_set import SEED, build_and_write
 

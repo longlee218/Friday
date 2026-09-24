@@ -2,7 +2,7 @@
 
 `observations` staged what a step learned, for a promotion pass to turn into
 `notes` once an approved outcome corroborated it — and nothing has written an
-observation since `remember` was removed from `friday/tools/`, months before
+observation since `remember` was removed from `friday/kernel/tools/`, months before
 this migration. The tier had no producer, so the rebuild of every channel's
 context file that rode its cadence never fired either, silently, the whole
 time.

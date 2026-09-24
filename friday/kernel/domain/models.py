@@ -174,7 +174,7 @@ def payload_hash_of(row: Outbound) -> str:
 
 """What each kind of task carries.
 
-Here rather than in `friday.triage`, which is where they were: a workflow
+Here rather than in `friday.kernel.triage`, which is where they were: a workflow
 reached for the schema of a task's parameters *through the agent that happens
 to fill them in*. The types describe the work, not the thing that recognised
 it — and their annotations are read directly to decide what a task cannot
@@ -236,8 +236,8 @@ SKIP = "skip"
 
 #: The task-type catalog (`task_type -> Params`) and the closed set triage may
 #: conclude are no longer written down here (ticket 11). Each task type
-#: registers a `TaskTypeSpec` into `friday.dag.registry`, and the set is read
-#: from there — `friday.dag.registry.decision_params()` for the catalog,
+#: registers a `TaskTypeSpec` into `friday.kernel.dag.registry`, and the set is read
+#: from there — `friday.kernel.dag.registry.decision_params()` for the catalog,
 #: `friday.kernel.domain.triage.make_decided` for the classifier's closed set (built
 #: from the catalog plus `SKIP` at boot). This module stays below the registry,
 #: so the values reach it as arguments, never an import.
@@ -309,7 +309,7 @@ class MemoryKeyTaken(MemoryRefused):
 
 # ---- one schema per structured kind (spec, "Memory: one store, twelve kinds")
 #
-# `data` is checked against these with `friday.agent.structured.fits` at
+# `data` is checked against these with `friday.kernel.harness.structured.fits` at
 # `Database.memory_add` — the same checker the harness uses on a model's
 # answer, so a wrong-typed field is refused with the field named. Every field
 # a spec line marks optional (`?`) has a default; the rest are required.
@@ -355,7 +355,7 @@ class RoomSummary:
     """What a summariser call may say about a room — the shape, once.
 
     Lives here rather than beside the summariser
-    (`friday/memory/channel_context.py`, which re-exports it) because it is
+    (`friday/kernel/memory/channel_context.py`, which re-exports it) because it is
     also the `summary` kind's schema (`SummaryData` adds the bookmark), and
     the store — which that module imports — has to check a row against it.
 
@@ -446,12 +446,12 @@ class Memory:
     and had no producer for months. This is written and read back by the same
     kind of call, with the floor moved from an approval count to three
     narrower guarantees — scope, visibility, and never reaching a model except
-    as a tool result. See `friday/tools/memory.py`.
+    as a tool result. See `friday/kernel/tools/memory.py`.
 
     `id` is opaque and sparse rather than sequential, so a model that invents
     one fails instead of landing on a neighbouring row.
 
-    `kind` decides who reads this row (`friday.memory.registry.readers_for`,
+    `kind` decides who reads this row (`friday.kernel.memory.registry.readers_for`,
     D14). `status` and
     `superseded_by` are D16's lifecycle: correcting a memory's wording
     (`memory_update`) leaves it `ACTIVE` in place; replacing what it claims
@@ -553,11 +553,11 @@ class Artifact:
     a `curl` — stored whole and pointed at rather than paraphrased (board
     `what-the-room-already-knows`, ticket 07, D8).
 
-    `content` is exactly what `friday.text.transform.transform` lifted out
+    `content` is exactly what `friday.kernel.text.transform.transform` lifted out
     of the message that produced it, untouched since. A build that needs it
     back gets `content` byte for byte; a build that must never see it — the
     summariser — gets `id` and `description` only, through
-    `friday.text.transform.redact`.
+    `friday.kernel.text.transform.redact`.
 
     `id` is opaque and sparse, the same reasoning as `Memory.id`: a model
     that invents one fails rather than landing on somebody else's artifact.
@@ -911,7 +911,7 @@ class ExtractionMark:
 
     **The fingerprint is over the extractor's per-call input** — since board
     `what-the-room-already-knows`'s ticket 15 (D26), that means one thing:
-    `friday.extraction.context.FullContext`, the single value node 0 gathers
+    `friday.kernel.extraction.context.FullContext`, the single value node 0 gathers
     and hands to `build_input`. Every one of its fields moves the digest,
     because `input_fingerprint` hashes what `would_ask` actually renders
     from it, not a reconstruction naming some of them — the reconstruction
@@ -955,7 +955,7 @@ class ExtractionMark:
     #: `dataclasses` and calls it on a params class on the next line.
     #:
     #: Flattened rather than holding the `Clarify` it came from, because that
-    #: type lives in `friday/extraction/` and this one is read by the store —
+    #: type lives in `friday/kernel/extraction/` and this one is read by the store —
     #: `friday/kernel/domain/` may not import upward. Reassembled by its one reader.
     asked_about: tuple[str, ...] = ()
     because: str | None = None

@@ -11,14 +11,14 @@ exactly the state a fresh install is in.
 
 from __future__ import annotations
 
-from friday.dag.engine import DAGDeps, DAGState
+from friday.sdk.workflow import Deps as DAGDeps, DAGState
 from friday.kernel.domain.models import AccessRequestParams
 from plugins.docs.params import DocQuestionParams
 from plugins.devops.params import ApiIssueParams
 from types import SimpleNamespace
 
 from friday.sdk.actions import Ask, HandOver
-from friday.dag.prepare import prepare
+from friday.kernel.dag.prepare import prepare
 
 
 async def _decide(task_type, params):
@@ -34,7 +34,7 @@ async def _decide(task_type, params):
     which is what `context=None` already means (board
     `what-the-room-already-knows`, ticket 15).
     """
-    from friday.dag.prepare import plan_by_required_parameters, prepare
+    from friday.kernel.dag.prepare import plan_by_required_parameters, prepare
 
     params, problem = await prepare(task_type, params)
     return problem or plan_by_required_parameters(task_type, params)
@@ -197,7 +197,7 @@ async def _prepare_with_clarify(params_obj, clarify, *, extracted=None, monkeypa
     """`prepare()` with `extract()` stood in for, so the ordering between
     code's own floor and a model's `Clarify` can be tested without a real
     extractor or model."""
-    import friday.dag.prepare as wf
+    import friday.kernel.dag.prepare as wf
     from tests.test_extraction import _context
 
     async def stub_extract(task_type, context, *, task_id=None, node=None):
@@ -214,7 +214,7 @@ async def test_code_floor_wins_over_a_clarify_that_names_a_different_field(monke
     malformed — code's own rule is what the reporter is challenged with,
     because a value the rules reject cannot be waved through by the model
     having asked about something else instead."""
-    from friday.extraction import Clarify
+    from friday.kernel.extraction import Clarify
 
     bad = params(correlation_id="not-a-uuid")
     clarify = Clarify(fields=("environment",), because="no server named")
@@ -230,7 +230,7 @@ async def test_a_clarify_for_an_already_filled_field_is_not_honoured(monkeypatch
     """The model asked about `curl`, but it is already there — from the
     reporter, or from this same extraction run. Asking again for something
     already answered is not a question this exists to ask."""
-    from friday.extraction import Clarify
+    from friday.kernel.extraction import Clarify
 
     complete = params(curl="curl https://x/y")
     clarify = Clarify(fields=("curl",), because="not sure")
@@ -244,7 +244,7 @@ async def test_a_clarify_becomes_an_ask_once_code_has_nothing_to_say(monkeypatch
     """A report with a curl is traceable — code's own rules find nothing
     wrong — but the extractor read something worth asking about anyway.
     That is the case `ask_clarification` exists for."""
-    from friday.extraction import Clarify
+    from friday.kernel.extraction import Clarify
 
     traceable = params(curl="curl -X GET /pay")
     clarify = Clarify(fields=("environment",), because="curl doesn't say which server")
@@ -278,7 +278,7 @@ def test_a_second_extraction_does_not_reword_the_first():
     first cost nineteen direct messages about one report, each carrying a
     differently worded summary — a reworded value is a *changed* value, so the
     graph discarded its work and the operator was told again."""
-    from friday.dag.prepare import _fill
+    from friday.kernel.dag.prepare import _fill
 
     filled = _fill(
         ApiIssueParams(summary="checkout is 500ing", environment="production"),
@@ -292,7 +292,7 @@ def test_a_second_extraction_does_not_reword_the_first():
 def test_a_later_extraction_fills_what_is_still_blank():
     """Which is exactly what a follow-up supplying the correlationId is, and
     the only way it reaches the task now that triage does not lift it out."""
-    from friday.dag.prepare import _fill
+    from friday.kernel.dag.prepare import _fill
 
     filled = _fill(
         ApiIssueParams(summary="checkout is 500ing"),
@@ -310,7 +310,7 @@ def test_a_later_extraction_fills_what_is_still_blank():
 
 def test_an_empty_string_counts_as_a_blank():
     """A field the model wrote as "" is not a value someone supplied."""
-    from friday.dag.prepare import _fill
+    from friday.kernel.dag.prepare import _fill
 
     assert _fill(
         ApiIssueParams(summary="s", environment=""),
@@ -332,8 +332,8 @@ async def test_a_refused_extractor_hands_over_instead_of_asking(monkeypatch):
     ask it" is the whole of what decides that. The first is worth a question;
     the second is worth telling the operator their budget stopped a task.
     """
-    import friday.dag.prepare as wf
-    from friday.agent.harness import Refused
+    import friday.kernel.dag.prepare as wf
+    from friday.kernel.harness.harness import Refused
     from friday.sdk.actions import HandOver
     from plugins.devops.params import ApiIssueParams
     from tests.test_extraction import _context
@@ -398,7 +398,7 @@ class _StandsForAnExtractor:
     async def would_ask(self, context):
         from dataclasses import replace
 
-        from friday.extraction.prompt import build_input
+        from friday.kernel.extraction.prompt import build_input
 
         return build_input(replace(context, known=type(context.known)()))
 
@@ -422,7 +422,7 @@ async def test_node_0_pays_once_when_nothing_has_changed(db):
     every pass, which is correct, because it must see a message that arrived
     since the last one. What it must not do is call a model when nothing did.
     """
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from tests.test_extraction import _install
 
     extractor = _CountingExtractor(ApiIssueParams(summary="checkout 500"))
@@ -447,7 +447,7 @@ async def test_a_field_already_filled_drops_out_of_the_next_passs_schema(db):
     `environment` is filled, the next pass does not pay to be told about it
     again, even though a new message keeps the fingerprint from replaying a
     stale mark."""
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from tests.test_extraction import _install
     from tests.test_pool import _said
 
@@ -455,7 +455,7 @@ async def test_a_field_already_filled_drops_out_of_the_next_passs_schema(db):
 
     class _RecordsWhatItWasShown(_StandsForAnExtractor):
         async def would_ask(self, context):
-            from friday.extraction.prompt import build_input
+            from friday.kernel.extraction.prompt import build_input
 
             return build_input(context)
 
@@ -485,7 +485,7 @@ async def test_a_new_message_is_paid_for(db):
     """The reason node 0 re-runs at all. A reporter who sends the curl three
     seconds later must be read, so a changed transcript has to reach the
     model even though the parameters have not moved."""
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from tests.test_extraction import _install
     from tests.test_pool import _said
 
@@ -508,8 +508,8 @@ async def test_a_question_the_extractor_raised_survives_the_skipped_call(db):
     optional, so validation has nothing to say about it. Skipping the call
     without remembering what it asked would turn that `Ask` into "everything
     needed is here" on the very next pass, and hand the task over instead."""
-    from friday.dag.prepare import prepare_node
-    from friday.extraction import Clarify
+    from friday.kernel.dag.prepare import prepare_node
+    from friday.kernel.extraction import Clarify
     from tests.test_extraction import _install
 
     # A curl, so `_problems` is empty and the extractor's own question is
@@ -553,7 +553,7 @@ async def test_the_fingerprint_is_the_prompt_so_every_input_counts():
 
     Three things must move it: the reporter's words, the field schema, and the
     room."""
-    from friday.extraction import input_fingerprint, registered
+    from friday.kernel.extraction import input_fingerprint, registered
     from tests.test_extraction import _context, _install, _rows
 
     _install("fp_probe", _StandsForAnExtractor())
@@ -585,12 +585,12 @@ async def test_known_moves_the_fingerprint_too():
     schema, which is a real change to the prompt — the fingerprint has to
     move with it, or a stale mark from before the field was filled would
     replay an answer built against a wider schema."""
-    from friday.extraction import input_fingerprint, registered
+    from friday.kernel.extraction import input_fingerprint, registered
     from tests.test_extraction import _context, _install
 
     class _UsesKnown(_StandsForAnExtractor):
         async def would_ask(self, context):
-            from friday.extraction.prompt import build_input
+            from friday.kernel.extraction.prompt import build_input
 
             return build_input(context)
 
@@ -617,7 +617,7 @@ async def test_a_parameter_change_the_extractor_cannot_see_is_not_paid_for(db):
     field schema and what the reporter wrote. Parameters never reach it, so a
     parameter that moved is not a reason to pay for the same answer again. The
     fill is replayed from the mark, so the outcome is the same either way."""
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from tests.test_extraction import _install
 
     extractor = _CountingExtractor(ApiIssueParams(summary="checkout 500"))
@@ -652,7 +652,7 @@ async def test_a_call_that_produced_nothing_is_not_remembered_as_an_answer(db):
     again, against this repo's own "a hiccup is retried here and nowhere else".
 
     Found by review, not by the tests written with the feature."""
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from tests.test_extraction import _install
 
     class _Failing(_StandsForAnExtractor):
@@ -696,7 +696,7 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
     `dev` and the marker is the Vietnamese phrase around it, which nothing
     else in the prompt writes.
     """
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from friday.sdk.memory import MemoryOrigin
     from friday.kernel.domain.models import FridayState
     from tests.test_extraction import _install
@@ -765,7 +765,7 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     Reproduced with a probe before it was fixed: two passes, one model call,
     `did the new fact reach a model? False`.
     """
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from friday.sdk.memory import MemoryOrigin
     from friday.kernel.domain.models import FridayState
     from tests.test_extraction import _install
@@ -811,7 +811,7 @@ async def test_prepare_node_truncates_the_build_to_the_configured_budget(db):
     `original_text_for` through `deps.db`, not a rebuilt query — the same
     seam `test_a_room_fact_reaches_the_extractor_and_settles_the_field`
     already proves for the room."""
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from tests.test_extraction import _install
     from tests.test_pool import _said
 
@@ -838,7 +838,7 @@ async def test_an_unconfigured_budget_reaches_prepare_node_as_no_compaction(db):
     """`budget_tokens=None`, the default `prepare_node` and `build_simple_dag`
     both carry unless `config.yaml` sets one — the exact behaviour every
     install had before this ticket."""
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from tests.test_extraction import _install
     from tests.test_pool import _said
 
@@ -864,7 +864,7 @@ async def test_two_ineffective_compactions_stop_a_third_from_being_attempted(db)
     """D6: a single message larger than the budget is not something dropping
     older messages can fix. Two such passes and node 0 stops trying — the
     third pass reads the full text, exactly as an unset budget would."""
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from tests.test_extraction import _install
 
     class _AlwaysFillsSomething(_StandsForAnExtractor):
@@ -907,7 +907,7 @@ async def test_node_0_puts_the_artifact_back_rather_than_storing_a_retyping(db):
     from dataclasses import replace as _replace
 
     from conftest import make_event
-    from friday.dag.prepare import prepare_node
+    from friday.kernel.dag.prepare import prepare_node
     from tests.test_extraction import _install
     from tests.test_pool import make_task
 

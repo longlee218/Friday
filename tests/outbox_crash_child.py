@@ -19,9 +19,9 @@ import asyncio
 import os
 import sys
 
-from friday.outbox import Outbox
+from friday.kernel.outbox import Outbox
 from friday.store.db import Database
-from friday.workflow import adapter
+from friday.kernel.dag import adapter
 
 
 class Crashing:

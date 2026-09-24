@@ -76,7 +76,7 @@ def asked_as(params: Any, subject: str) -> str:
     Here rather than in the node that renders the question, and that placement
     is the point. `validate` above produces the `Problem`s whose `field` this
     resolves, off the same `type(params)._RULES` — a resolver living in
-    `friday/dag/` made a second module walk that dict, and read it off the
+    `friday/kernel/dag/` made a second module walk that dict, and read it off the
     *instance* where this one reads the class. One module owns the rules; it
     owns how to speak about what they report.
 

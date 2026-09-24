@@ -86,7 +86,7 @@ def _tag_of(answered: str) -> str:
 
 def _text_of(result: Any) -> str:
     """Whatever an MCP tool answered, as text. Duck-typed rather than
-    imported: this package may not import `friday/agent/`."""
+    imported: this package may not import `friday/kernel/harness/`."""
     content = getattr(result, "content", result)
     if isinstance(content, str):
         return content

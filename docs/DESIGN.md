@@ -16,14 +16,14 @@ Project state (what is running, which boards are open) lives in
 ## Environment
 
 Python **3.13** (`.python-version`), managed with **uv**. The agent runtime is
-**`pydantic-ai-slim[openai,mcp]`** (pinned): `friday/agent/harness.py` is the
+**`pydantic-ai-slim[openai,mcp]`** (pinned): `friday/kernel/harness/harness.py` is the
 only module allowed to import it, and `mcp.py` and `llm_log.py` take its names
 through the harness. It replaced `openai-agents` in ticket 05 — a stability
 policy instead of a 0.x line, and structured output, typed run context and hook
 capabilities as the framework's main paths rather than a hand-built tool, an
 identity trick and a per-run mutation of a shared agent.
 
-`web/` is React + Vite, built to static files that `friday/ops/api.py`
+`web/` is React + Vite, built to static files that `friday/kernel/ops/api.py`
 serves from the same process — one container, no Node at runtime.
 `web/dist/` is never committed. There are deliberately no JavaScript tests
 and no linter. Two guards compensate: `tests/test_web_hooks.py` (a narrow
@@ -68,35 +68,43 @@ only and reached with `ssh -N -L 8086:127.0.0.1:8086 <host>`.
 
 ## Layout
 
+Since the kernel-consolidation (tickets 19–21), `friday/` holds only four
+things: `sdk/` (the bottom of the stack — contracts plus the pure shared
+values), `kernel/` (everything application-side — the invariants and all the
+machinery that enforces them), `store/` (persistence, a top-level sibling until
+ticket 16 gives it a `Database` facade in the sdk), and `plugins/`'s mount is at
+the repo root. Every module below that is not `sdk`/`store` lives under
+`kernel/`; the rows keep their old one-word names for familiarity.
+
 | Path | Contents |
 | --- | --- |
 | `run_agent.py` | Composition root — the only place adapters are constructed and asyncio tasks started. Reads no agent's knobs; runs `check_graphs` straight after `load_config` |
 | `serve_board.py` | The board alone, against the live database, without connecting to Discord |
 | `import_context_files.py` | One-off: import a second install's old per-channel YAML files as `origin=admin` memory rows |
 | `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, `workflows.concurrency`, MCP servers, `sensitive_words` |
-| `friday/config.py` | Loads `config.yaml` and resolves `${VAR}`. Outside the packages because it is read before any of them |
-| **`friday/kernel/domain/`** | The vocabulary the kernel is written in, folded under it in **ticket 19**: `models.py` (every dataclass, the memory-kind data shapes and `RoomSummary`), `conversation.py`, `states.py` (`TaskState`/`OutboundState` transitions), `triage.py` (`Decided`/`NeedsHuman`/`make_decided` — what triage concludes), `memory_guard.py` (refuses instruction-shaped memory text). The pure, plugin-facing pieces that used to sit beside these — the workflow actions (`Ask`/`Reply`/`HandOver`), the validation DSL, the prompt primitives, `scrub`, the memory `Origin` — are the bottom of the stack now and live in `friday/sdk/`. Since ticket 12 it holds no memory-kind *catalog* — `MemoryKind` is a validated string, and the kinds register themselves (see `friday/memory/registry.py`) |
+| `friday/kernel/config.py` | Loads `config.yaml` and resolves `${VAR}`. Folded into the kernel in ticket 21; imports only the kernel domain, so it is safe to load early |
+| **`friday/kernel/domain/`** | The vocabulary the kernel is written in, folded under it in **ticket 19**: `models.py` (every dataclass, the memory-kind data shapes and `RoomSummary`), `conversation.py`, `states.py` (`TaskState`/`OutboundState` transitions), `triage.py` (`Decided`/`NeedsHuman`/`make_decided` — what triage concludes), `memory_guard.py` (refuses instruction-shaped memory text). The pure, plugin-facing pieces that used to sit beside these — the workflow actions (`Ask`/`Reply`/`HandOver`), the validation DSL, the prompt primitives, `scrub`, the memory `Origin` — are the bottom of the stack now and live in `friday/sdk/`. Since ticket 12 it holds no memory-kind *catalog* — `MemoryKind` is a validated string, and the kinds register themselves (see `friday/kernel/memory/registry.py`) |
 | **`friday/store/`** | `schema.py` the mapped classes, `db.py` the only store, converting at the edge — nothing above it knows SQLAlchemy exists |
-| **`friday/agent/`** | What it takes to call a model, nothing about what to call it for: `harness.py` (only module that may import the SDK), `structured.py` (declared-shape answers), `instruction_prompt.py`, `skills.py`, `mcp.py` (servers from configuration, stdio/SSE/streamable-HTTP), `auth.py` (Friday's own Keycloak client, per request), `llm_log.py` |
-| **`friday/memory/`** | `registry.py` (ticket 12) — the one memory-kind registry: a kind registers a `MemoryKindSpec` (writers, data, cardinality, injected, and a per-kind `key` deriver); `writers_for`/`data_of`/`cardinality_of`/`injected_of`/`natural_key` read it, and **readers are inverted** — each reader declares the kinds it needs (`register_reader`, which merges), so `readers_for`/`domain_kinds` derive from that and a kind names no reader (DESIGN-v2 §9.2). Registers the **core** kinds only — `fact`, `constraint`, `decision`, `voice`, `summary`, `finding`, `person`, and `skill` (which replaced `runbook` in ticket 14, procedures being skills not a kind, §6.3); the **pack** kinds (`devops.*`) ship with their plugin and register through `register(api)`. `channel_context.py` — the summariser: one active `summary` row per watched channel. `verdicts.py` — the operator marking a classification right. Every memory is a row in `memories` |
-| **`friday/ops/`** | Alive and safe, deciding nothing: `liveness.py`, `redact.py`, `api.py` (the board's API, including the operator's memory routes) |
-| **`friday/text/`** | `transform.py` splits code out before cleaning prose; `param_hygiene.py` cleans one value |
-| `friday/inbox/` | `stream()`, `sweep_once()`, `tally()`. Gateway, backfill, cursors and dedup are implementation |
-| `friday/providers/` | `Provider` protocol; `providers/discord/` holds `user.py`, `bot.py`, `normalise.py`. `__init__.py` stays empty on purpose |
-| `friday/triage/` | Classification only, plus its sensitive-word prefilter and the untriaged-message loop. `context.py` gathers what a mention is shown; `prompt.py` renders it. The answer is a `Decided` (`type: str`, `confidence`); the **closed set the model is held to is built at boot from the registry** by `friday.kernel.domain.triage.make_decided` (ticket 11) — a `Literal` over the registered task types plus `skip`, validated exactly as the old static one, only the set is now the registry's, not a hand-maintained `DECISIONS` |
-| `friday/extraction/` | Everything a task knows, lifted out of the reporter's own words. One extractor per task type, each owning its prompt and `Params` schema; one `extractor` config block serves all of them. `context.py` is node 0's gather function: transcript, domain memories (this room and `'*'`), outstanding questions and `known`, one call, one frozen `FullContext` |
+| **`friday/kernel/harness/`** | What it takes to call a model, nothing about what to call it for: `harness.py` (only module that may import the SDK), `structured.py` (declared-shape answers), `instruction_prompt.py`, `skills.py`, `mcp.py` (servers from configuration, stdio/SSE/streamable-HTTP), `auth.py` (Friday's own Keycloak client, per request), `llm_log.py` |
+| **`friday/kernel/memory/`** | `registry.py` (ticket 12) — the one memory-kind registry: a kind registers a `MemoryKindSpec` (writers, data, cardinality, injected, and a per-kind `key` deriver); `writers_for`/`data_of`/`cardinality_of`/`injected_of`/`natural_key` read it, and **readers are inverted** — each reader declares the kinds it needs (`register_reader`, which merges), so `readers_for`/`domain_kinds` derive from that and a kind names no reader (DESIGN-v2 §9.2). Registers the **core** kinds only — `fact`, `constraint`, `decision`, `voice`, `summary`, `finding`, `person`, and `skill` (which replaced `runbook` in ticket 14, procedures being skills not a kind, §6.3); the **pack** kinds (`devops.*`) ship with their plugin and register through `register(api)`. `channel_context.py` — the summariser: one active `summary` row per watched channel. `verdicts.py` — the operator marking a classification right. Every memory is a row in `memories` |
+| **`friday/kernel/ops/`** | Alive and safe, deciding nothing: `liveness.py`, `redact.py`, `api.py` (the board's API, including the operator's memory routes) |
+| **`friday/kernel/text/`** | `transform.py` splits code out before cleaning prose; `param_hygiene.py` cleans one value |
+| `friday/kernel/inbox/` | `stream()`, `sweep_once()`, `tally()`. Gateway, backfill, cursors and dedup are implementation |
+| `friday/kernel/providers/` | `Provider` protocol; `providers/discord/` holds `user.py`, `bot.py`, `normalise.py`. `__init__.py` stays empty on purpose |
+| `friday/kernel/triage/` | Classification only, plus its sensitive-word prefilter and the untriaged-message loop. `context.py` gathers what a mention is shown; `prompt.py` renders it. The answer is a `Decided` (`type: str`, `confidence`); the **closed set the model is held to is built at boot from the registry** by `friday.kernel.domain.triage.make_decided` (ticket 11) — a `Literal` over the registered task types plus `skip`, validated exactly as the old static one, only the set is now the registry's, not a hand-maintained `DECISIONS` |
+| `friday/kernel/extraction/` | Everything a task knows, lifted out of the reporter's own words. One extractor per task type, each owning its prompt and `Params` schema; one `extractor` config block serves all of them. `context.py` is node 0's gather function: transcript, domain memories (this room and `'*'`), outstanding questions and `known`, one call, one frozen `FullContext` |
 | **`plugins/devops/sources/`** | Where facts come from, and the only place that reaches an outside read surface: `logs.py` (`LokiSource`, `SshKubectlSource`), `code.py` (a stack frame mapped into the operator's clone, and the window around it), `release.py`, `db.py`. Read-only by construction — no verb here writes — and holds no judgement: which window, which service, which frame all arrive as arguments. Implements the sdk source ports and **imports `friday.sdk` only** (ticket 14). `tests/test_sources_are_the_only_door.py` is the guard, and it reads `friday/` and `plugins/` both |
 | `friday/sdk/` | **Contracts only** — Protocols and dataclasses, no I/O, no third-party imports — what the kernel builds on and a plugin codes against. `workflow.py` is the workflow **port** (`DAG`, `Node`, `Edge`, `Deps`, `DAGState`, `envelope`, `Ask`/`Reply`/`HandOver`, `NODE_CLOCK_MARGIN_SECONDS`; no `dbos`, no `DAG.version` — recovery is DBOS's, ticket 06). `plugin.py` holds `Plugin`, `PluginAPI`, `TaskTypeSpec`; `memory.py` holds `MemoryKindSpec` (with a per-kind `key` deriver), `Origin`. **Ticket 14** added the ports a real plugin codes against: `sources.py` (`LogSource`, `CodeSource`, `Placement`, `Lines`, `Reads`), `tools.py` (`tool`/`ToolSpec`/`ToolContext`, a neutral tool the harness binds to the vendor's), `model.py` (`Model` — the `run_structured`/`last_error` surface a plugin's model node calls), `outbox.py` (`Kind`). **Ticket 19** made the sdk the true bottom of the stack: the pure logic a plugin needs lives here outright, no longer re-exported from a value layer — `actions.py` (`Ask`/`Reply`/`HandOver`, which `workflow.py` re-exports as node vocabulary), `prompt.py` (the prompt-assembly primitives), `redact.py` (`scrub`), `validation.py` (the params rule DSL) — and `memory.py` **defines** `Origin`/`MemoryOrigin`. It imports **nothing of ours** |
-| `friday/kernel/` | Owns the invariants and **names no plugin** (ticket 10 skeleton). `registry.py` is the `PluginAPI` a plugin's `register(api)` fills — it collects `TaskTypeSpec`/`MemoryKindSpec`s and refuses a duplicate id. `domain/` holds the domain vocabulary folded under the kernel in ticket 19 (models, states, conversation, triage outcomes, the memory-write guard). Imports `friday.sdk` and nothing higher. `tests/test_dependency_rule.py` is the guard: sdk imports nothing of ours, kernel imports only sdk, a plugin imports sdk only, and the kernel carries no plugin import or task-type/pack-kind literal — **non-vacuous since ticket 14**, when `plugins/devops/` became the first real plugin |
-| `friday/plugin_host.py` | Loads the plugins named in `config.plugins` (default `plugins.devops`) and validates each one's config block against its `Plugin.config`. Two lifecycle-specific `PluginAPI` impls, so one `register(api)` serves both registration passes: `TaskTypeAPI` (in `register_all`) assembles and registers a plugin's task-type graph from the boot caps and ignores its memory kinds; `MemoryKindAPI` (in `register_all_memory_kinds`) registers its memory kinds and readers and ignores its task type. Under `friday/` (not the kernel), so it may import both the plugins and the app layer that builds a plugin's `Harness` |
-| `friday/workflow/` | `adapter.py` — the **DBOS adapter** beneath the port, the one module that imports `dbos`. A graph is a `@DBOS.workflow` walk, each node a memoized `@DBOS.step`; DBOS owns run persistence, step memoization and resume. The kernel chain (clock, retry, redaction, the `node_runs` record) is ported into `_invoke`, not delegated. An ast guard keeps `dbos` here |
-| `friday/dag/` | `prepare.py` builds the entry node (node 0) every graph shares. **`registry.py` is the one task-type registry** (ticket 11): a task type registers a `TaskTypeSpec` (params, graph, needs, run-deps, budget) — the map that used to be `PARAMS` + the extractor map + the router's `_graphs` — and the built DAG is stored beside it. `task_types.py` registers the one in-core simple type (`access_request`) and loads the plugins — its `BootContext` is the **caps** a plugin's graph builder reaches through (`prepare_node`, `make_harness`, and `simple_dag` for a persona whose whole graph is node 0); `router.py` is now generic — it reads the registry, builds `EDGE_ROUTER`, checks the clocks and (ticket 13) checks that every type's `deps` factory can build its run `Deps`, and **names no task type**. The `api_issue` investigation graph, its sources and its typed per-run `Deps` moved out to `plugins/devops/` in ticket 14; `engine.py`/`state.py` are thin re-export shims over the port (the hand-written `DAGRunner` was retired onto DBOS) |
+| `friday/kernel/` | Owns the invariants and **names no plugin**. The kernel-consolidation (tickets 19–21) folded every application module in here: `registry.py`/`plugin_host.py` (the `PluginAPI` a plugin's `register(api)` fills, and the loader that runs it), `domain/` (models, states, conversation, triage outcomes, the memory-write guard — ticket 19), `dag/` (the graph home: port callers, node 0, the registry, the router, and the DBOS `adapter.py`), `harness/` (was `agent/`), `pool/` (was `tasks/`), `memory/`, `outbox/`, `triage/`, `extraction/`, `responder/`, `inbox/`, `ops/`, `text/`, `tools/`, `providers/`, `config.py`. Imports `friday.sdk`, itself, and — **until ticket 16** puts the store behind a `Database` facade in the sdk — `friday.store` (the one interim exception the guard names). `tests/test_dependency_rule.py` is the guard: sdk imports nothing of ours, kernel imports only sdk (+ the store, interim), a plugin imports sdk only, and the kernel carries no plugin import or task-type/pack-kind literal (the in-core `access_request` excepted) — **non-vacuous since ticket 14**, when `plugins/devops/` became the first real plugin |
+| `friday/kernel/plugin_host.py` | Loads the plugins named in `config.plugins` (default `plugins.devops`) and validates each one's config block against its `Plugin.config`. Two lifecycle-specific `PluginAPI` impls, so one `register(api)` serves both registration passes: `TaskTypeAPI` (in `register_all`) assembles and registers a plugin's task-type graph from the boot caps and ignores its memory kinds; `MemoryKindAPI` (in `register_all_memory_kinds`) registers its memory kinds and readers and ignores its task type. Folded into the kernel in ticket 21: it names no plugin statically (it loads them by name with `importlib`) and reaches the harness through the kernel, so both guards hold |
+| `friday/kernel/dag/` | `adapter.py` — the **DBOS adapter** beneath the port, the one module that imports `dbos`. A graph is a `@DBOS.workflow` walk, each node a memoized `@DBOS.step`; DBOS owns run persistence, step memoization and resume. The kernel chain (clock, retry, redaction, the `node_runs` record) is ported into `_invoke`, not delegated. An ast guard keeps `dbos` here |
+| `friday/kernel/dag/` | `prepare.py` builds the entry node (node 0) every graph shares. **`registry.py` is the one task-type registry** (ticket 11): a task type registers a `TaskTypeSpec` (params, graph, needs, run-deps, budget) — the map that used to be `PARAMS` + the extractor map + the router's `_graphs` — and the built DAG is stored beside it. `task_types.py` registers the one in-core simple type (`access_request`) and loads the plugins — its `BootContext` is the **caps** a plugin's graph builder reaches through (`prepare_node`, `make_harness`, and `simple_dag` for a persona whose whole graph is node 0); `router.py` is now generic — it reads the registry, builds `EDGE_ROUTER`, checks the clocks and (ticket 13) checks that every type's `deps` factory can build its run `Deps`, and **names no task type**. The `api_issue` investigation graph, its sources and its typed per-run `Deps` moved out to `plugins/devops/` in ticket 14. `adapter.py` is the **DBOS adapter** (the one module that imports `dbos`), folded in here when `dag/` and `workflow/` merged (ticket 20); the old `engine.py`/`state.py` re-export shims were deleted then, and the graph vocabulary is imported from `friday.sdk.workflow`/`friday.sdk.workflow_state` directly (the hand-written `DAGRunner` was retired onto DBOS) |
 | **`plugins/devops/`** | The first real plugin (ticket 14), and the proof the split holds: **imports `friday.sdk` only**. `__init__.py` exposes `PLUGIN` + `register(api)`, which contributes the `devops.api_issue` task type, its pack kinds (`devops.service`/`.route`/`.environment`/`.project`/`.dependency`, in `memory.py`) and their reader routing. `params.py` (`ApiIssueParams`), `config.py` (`DevopsConfig`, incl. the container-root policy as data — box 4), `graph/` (the six-node investigation graph, its diagnose prompt and `ApiIssueDeps`), `sources/` (`LokiSource`/`SshKubectlSource`/`ReleaseSource`/`DbSource` and the code reader, implementing the sdk ports), `investigate.py` (the diagnose read tools). The heavy handles it cannot import — the diagnose `Harness`, node 0's `prepare_node` — are injected by the composition root through the boot caps |
 | **`plugins/docs/`** | The second persona (ticket 15), and the proof G2 holds — a new persona is a new plugin added with **zero kernel diff**. `docs.doc_question` has no investigation past node 0, so the plugin is `__init__.py` (`PLUGIN` + `register`) and `params.py` (`DocQuestionParams`) alone; its whole graph is the shared simple node-0, built through `api.caps.simple_dag` so it too imports `friday.sdk` only. Configured plugins are listed in `config.plugins` (default `plugins.devops`, `plugins.docs`) |
-| `friday/tasks/` | The pool: runs node 0 itself each pass, then starts or resumes each task's durable DBOS workflow (`task-<id>`) and polls it to its next boundary — the outcome, or the `Ask` it suspended on. A workflow waiting on the reporter suspends and never blocks other tasks. Decides nothing about what a graph decides |
-| `friday/tools/` | Every tool an agent may call, one module per subject: skills (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), memory (`memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder). `tests/test_tools.py` asserts the full list and forbids declaring a tool anywhere else (one exemption, below) |
-| `friday/responder/` | Drafts a reply in the operator's voice |
-| `friday/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
+| `friday/kernel/pool/` | The pool: runs node 0 itself each pass, then starts or resumes each task's durable DBOS workflow (`task-<id>`) and polls it to its next boundary — the outcome, or the `Ask` it suspended on. A workflow waiting on the reporter suspends and never blocks other tasks. Decides nothing about what a graph decides |
+| `friday/kernel/tools/` | Every tool an agent may call, one module per subject: skills (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), memory (`memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder). `tests/test_tools.py` asserts the full list and forbids declaring a tool anywhere else (one exemption, below) |
+| `friday/kernel/responder/` | Drafts a reply in the operator's voice |
+| `friday/kernel/outbox/` | Nothing is sent by a caller: it is a row, and one loop delivers it |
 | `web/` | The operator monitor, on `:8086`. React + Vite SPA served by `ops/api.py`. Live feed via SSE (`/api/events`), drill-down to a Flow screen, breadcrumbs; the Rooms memory dialog writes, corrects and removes the operator's rows. Palette and motion tokens live in `web/src/index.css` under `:root` — no component may hardcode a hex literal or inline `style={{}}` (`tests/test_web_tokens.py`). Shortcuts in `web/src/keyboard.ts` (`?` opens the overlay) |
 | `migrations/` | Alembic revisions |
 | `tests/` | Driven through two seams: a fake `Provider` and a scripted model transport |
@@ -108,10 +116,10 @@ Packaging: **explicit `__init__.py`**, not namespace packages — importing
 any submodule runs the parent's `__init__.py` first, so only re-exports
 belong there. There is no `procedures/`, `permissions/` or `hooks/`
 package — build one when a second caller needs it, not before. A node is a
-function inside the graph that owns it (`friday/dag/`), not a `nodes/`
+function inside the graph that owns it (`friday/kernel/dag/`), not a `nodes/`
 package.
 
-**Every tool lives in `friday/tools/`.** `tests/test_tools.py` asserts the
+**Every tool lives in `friday/kernel/tools/`.** `tests/test_tools.py` asserts the
 tool list — built from the registered factories, not `vars(module)`, so a
 tool living in a closure is still caught — and forbids declaring one
 anywhere else. The answer an `Harness(answers=...)` agent gives is **not** a
@@ -185,7 +193,7 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   which the configured provider accepts and silently ignores — validated
   in-process (`fits`). One correction, and it is the turn budget. A refusal
   never quotes the failing value back.
-- **`friday/agent/harness.py` is the only module that may import the agent
+- **`friday/kernel/harness/harness.py` is the only module that may import the agent
   SDK** (`pydantic_ai`, `fastmcp`), the one exception being
   `friday/sdk/testing/` (the test-double seam). `tests/test_harness.py`
   enforces this.
@@ -320,7 +328,7 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   So `uv run authorize.py <server>` runs the sign-in once, interactively, and
   what is kept is a **refresh token** at mode 0600 under `data/credentials/`,
   outside the database because the database is copied, rendered and rewritten
-  by migrations. `friday/agent/auth.py`'s `SsoTokens` is an httpx auth
+  by migrations. `friday/kernel/harness/auth.py`'s `SsoTokens` is an httpx auth
   handler rather than a header, so the token is decided per request and a
   refresh needs no reconnection; the rotated refresh token is written back
   every exchange, and a 401 is retried exactly once.
@@ -357,7 +365,7 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   card names the row it approves (`outbox.approves`); a card from before
   that change records nothing and says so.
 - **`auto_ask_for_details`** is the only path with no human in it;
-  `friday/responder/check.py` is its floor. It is off in this repo's
+  `friday/kernel/responder/check.py` is its floor. It is off in this repo's
   `config.yaml`.
 - **SSE events come from the store rows the system already writes.**
   `record_model_call`/`record_tool_call` publish on the in-process
@@ -375,7 +383,7 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   carries its own docstring, the type's description in the enum.
 - **The unit is a turn, not a message**, computed when read, never stored.
 - **Triage sees the turn plus the room's summary row**, gathered by
-  `friday/triage/context.py`'s `build_light_context` into
+  `friday/kernel/triage/context.py`'s `build_light_context` into
   `LightContext(turn, summary)` from `Database.room_summary`. Domain memory,
   task parameters and artifacts do not reach triage.
 
@@ -384,8 +392,8 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
 - **Only the responder carries a voice**, in its `instructions`, never the
   per-call input. `Reply` is built in exactly one place.
 - **Three prompt families, one module each, no shared text** —
-  `friday.triage.prompt`, `friday.extraction.prompt`,
-  `friday.responder.prompt`; shared mechanism is `assemble(*sections)` and
+  `friday.kernel.triage.prompt`, `friday.kernel.extraction.prompt`,
+  `friday.kernel.responder.prompt`; shared mechanism is `assemble(*sections)` and
   the escaping at a section's boundary, both `ast`-tested. A section
   describing a tool renders only if the agent has it; `trust_boundary` is
   claimed only by agents whose input wraps something. The responder reads
@@ -438,7 +446,7 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
 - **Structured config in `config.yaml`**, version-controlled; `.env` holds
   secrets only. `data/`, `*.db*` and `.env` are never committed.
 - **The Discord user token must never reach logs, tracebacks or the task
-  DB.** `friday/ops/redact.py` scrubs on the way out, including from
+  DB.** `friday/kernel/ops/redact.py` scrubs on the way out, including from
   `sys.excepthook` and `threading.excepthook`; a node's exception text is
   scrubbed in `DAGRunner._invoke` and again where `node_runs.reason` and
   `dag_state.paused_question` are written.
@@ -667,7 +675,7 @@ is not enforced on the wire either, and what makes the tool path safe is that
 the arguments are validated *in this process* and a malformed call handed back
 for one correction.
 
-That is the mechanism in `friday/agent/structured.py` and
+That is the mechanism in `friday/kernel/harness/structured.py` and
 `Harness.run_structured`: the shape is a dataclass carried by a Pydantic AI
 `ToolOutput` whose function receives the model's raw arguments and validates
 them with `fits` (not the framework's own pydantic validation, whose retry
@@ -700,7 +708,7 @@ skip(confidence)
 
 > **Reversed.** Every one of these took the parameters above until triage was
 > cut back to classifying. Lifting values out of a message is a different job
-> with a different failure mode; it belongs to `friday/extraction/`, one
+> with a different failure mode; it belongs to `friday/kernel/extraction/`, one
 > extractor per task type. A test now fails if a triage tool asks for anything
 > but `confidence`, so the schemas written above are the ones the code forbids.
 
@@ -902,7 +910,7 @@ approved tasks agreeing. Removal is the agent's own, through `memory_delete`;
 the board is read-only by design (`allow_methods=["GET"]`), so there is no
 route for the operator to remove one directly. An earlier draft of this
 sentence said "see and remove", which overstated the second half. See
-`friday/tools/memory.py` for the shape and § Memory under Load-bearing
+`friday/kernel/tools/memory.py` for the shape and § Memory under Load-bearing
 constraints for what is wired.
 
 ## Orchestration
@@ -956,7 +964,7 @@ over the same rows.
   `Outbox.deliver_once`, written to be safe to re-run; the loop polls
   `sendable_outbound` and hands each row to the durable step through
   `adapter.deliver_outbound`. In-process (tests) the same `deliver_once` runs
-  directly, no engine. `friday/workflow/adapter.py` is still the one module that
+  directly, no engine. `friday/kernel/dag/adapter.py` is still the one module that
   names DBOS.
 - **A crash mid-send no longer double-posts or silently loses a reply.**
   `dispatching` is written before the channel call, so a send interrupted
@@ -990,7 +998,7 @@ invisible and the task would wait forever for a decision nobody was asked for.
 **Superseded 2026-09-06** by `.scratch/a-window-on-the-whole-path/`. What this
 section described — FastAPI, server-rendered HTML, HTMX polling — was deleted
 in that board's ticket 01, and what replaces it is a React SPA in `web/`
-reading the JSON API in `friday/ops/api.py`. The original text follows, with
+reading the JSON API in `friday/kernel/ops/api.py`. The original text follows, with
 what changed marked.
 
 > FastAPI, server-rendered HTML, HTMX polling. **Read-only** — it displays, and

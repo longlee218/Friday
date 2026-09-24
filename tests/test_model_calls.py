@@ -12,8 +12,8 @@ from dataclasses import asdict
 from friday.sdk.testing import ScriptedModel, function_call
 
 from conftest import captured, make_event
-from friday.config import AgentConfig
-from friday.triage import Triage
+from friday.kernel.config import AgentConfig
+from friday.kernel.triage import Triage
 
 CONFIG = AgentConfig(
     name="triage", api_key="sk-secret", base_url="https://example.invalid/v1",
@@ -85,7 +85,7 @@ async def test_a_decision_can_be_traced_back_to_the_call_that_made_it(
 ):
     """The point of storing them: from the message, to the decision, to the
     prompt and the tool call behind it."""
-    from friday.triage.runner import TriageRunner
+    from friday.kernel.triage.runner import TriageRunner
 
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
@@ -106,7 +106,7 @@ async def test_a_decision_can_be_traced_back_to_the_call_that_made_it(
 async def test_a_credential_never_reaches_storage(inbox, provider, db):
     """The Discord user token is unscoped account access. A stored prompt is a
     place it must never turn up, and the realistic leak is an exception."""
-    from friday.triage.runner import TriageRunner
+    from friday.kernel.triage.runner import TriageRunner
 
     def _leak(messages, info):
         raise RuntimeError("401 from Bearer sk-abcdefghijklmnopqrstuvwxyz012345")

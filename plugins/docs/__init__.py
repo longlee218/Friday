@@ -5,7 +5,7 @@ plugin, added with **zero kernel diff**. `doc_question` has no investigation pas
 node 0, so this plugin is about as small as a plugin gets: `params.py` and this
 file. Its whole graph is the shared node-0 (extract, then ask for what is missing
 or hand over), which it builds through `api.caps.simple_dag` rather than importing
-`friday.dag` — so, like `plugins/devops`, it imports `friday.sdk` only.
+`friday.kernel.dag` — so, like `plugins/devops`, it imports `friday.sdk` only.
 
 A small plugin may be `__init__.py` and `params.py` alone (DESIGN-v2 §4.1); this
 is that shape.

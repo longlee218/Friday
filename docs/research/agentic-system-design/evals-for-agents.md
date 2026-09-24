@@ -115,7 +115,7 @@ Collector agent's tool-selection, the post's Claude-for-Chrome example is a clos
 analogue to Friday's own `fetch_skill`/`search_skills`/`describe_skill`/
 `read_skill_file` split — an eval there should check whether the agent reached for
 the *right* tool given what it already knew, exactly the kind of thing
-`friday/tools/` currently logs (tool calls travel the same recording sink as model
+`friday/kernel/tools/` currently logs (tool calls travel the same recording sink as model
 calls) but never scores.
 
 **Out-of-set vs. genuine outage — recognized pattern or Friday invention?** The post

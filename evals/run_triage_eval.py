@@ -8,7 +8,7 @@ prompt change, before deciding whether `confidence_threshold` should move:
     uv run python -m evals.run_triage_eval
     FRIDAY_DB=/path/to/db uv run python -m evals.run_triage_eval   # a different db
 
-Builds a real `friday.triage.Triage` through `friday.triage.runner.build_triage`
+Builds a real `friday.kernel.triage.Triage` through `friday.kernel.triage.runner.build_triage`
 — the same function `TriageRunner.build` calls, not a second copy of it — so
 a difference this run reports is a difference the live classifier would
 actually produce, not an artifact of a second copy of the prompt or its
@@ -27,12 +27,12 @@ from dotenv import load_dotenv
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 
-from friday.config import Config, load_config
+from friday.kernel.config import Config, load_config
 from friday.kernel.domain.triage import Decided, TriageOutcome
 from friday.kernel.domain.models import InboundEvent, MentionType
 from friday.store.db import Database
-from friday.triage import Triage
-from friday.triage.runner import build_triage
+from friday.kernel.triage import Triage
+from friday.kernel.triage.runner import build_triage
 
 from evals import outputs_or_raise
 from evals.dataset import Example, load_jsonl
@@ -161,7 +161,7 @@ async def _build_triage(config: Config) -> Triage:
     # triage's closed set is built from it, so it must be populated before the
     # classifier is assembled. No servers/db needed — the eval scores triage,
     # which reads only the registered task types, not their graphs' sources.
-    from friday.dag.router import register_dags
+    from friday.kernel.dag.router import register_dags
 
     register_dags(config, servers={})
 

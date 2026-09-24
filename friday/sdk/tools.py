@@ -1,6 +1,6 @@
 """The tool seam: how a plugin declares a tool without naming the harness.
 
-A tool declaration is what pulls the agent SDK in — `friday/agent/harness.py`
+A tool declaration is what pulls the agent SDK in — `friday/kernel/harness/harness.py`
 is the one module that imports it. So a plugin declares a tool as a neutral
 `ToolSpec` value (the function plus its options), and the harness turns each one
 into the vendor's `Tool` when it builds the agent. The plugin names only this

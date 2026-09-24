@@ -23,8 +23,8 @@ from fastapi.testclient import TestClient
 from conftest import BoardClient, captured, make_event
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.states import TaskState
-from friday.ops.api import build_api, servable
-from friday.outbox import Kind
+from friday.kernel.ops.api import build_api, servable
+from friday.kernel.outbox import Kind
 
 WATCHED = ConversationId("fake", "watched")
 TYPES = pathlib.Path(__file__).resolve().parents[1] / "web" / "src" / "api-types.ts"
@@ -147,7 +147,7 @@ def _built(tmp_path):
 def test_the_api_serves_alone_when_nobody_has_built_the_page(db, tmp_path, monkeypatch):
     """A fresh checkout has no `web/dist`, and so does every test run. The API
     has to be usable without it — that is what `serve_board.py` is."""
-    from friday.ops import api as api_module
+    from friday.kernel.ops import api as api_module
 
     monkeypatch.setattr(api_module, "PAGE", tmp_path / "absent")
     client = TestClient(build_api(db=db, provider_status=lambda: "x"))
@@ -157,7 +157,7 @@ def test_the_api_serves_alone_when_nobody_has_built_the_page(db, tmp_path, monke
 
 
 def test_a_built_page_is_served_under_the_api(db, tmp_path, monkeypatch):
-    from friday.ops import api as api_module
+    from friday.kernel.ops import api as api_module
 
     monkeypatch.setattr(api_module, "PAGE", _built(tmp_path))
     client = TestClient(build_api(db=db, provider_status=lambda: "x"))
@@ -169,7 +169,7 @@ def test_a_built_page_is_served_under_the_api(db, tmp_path, monkeypatch):
 def test_a_route_the_browser_owns_falls_back_to_the_page(db, tmp_path, monkeypatch):
     """`/flow/discord/123` is the SPA's own route, not a file. Answering 404
     would break every link and every refresh."""
-    from friday.ops import api as api_module
+    from friday.kernel.ops import api as api_module
 
     monkeypatch.setattr(api_module, "PAGE", _built(tmp_path))
     client = TestClient(build_api(db=db, provider_status=lambda: "x"))
@@ -180,7 +180,7 @@ def test_a_route_the_browser_owns_falls_back_to_the_page(db, tmp_path, monkeypat
 def test_the_api_still_wins_over_the_page(db, tmp_path, monkeypatch):
     """The catch-all is mounted last, so `/api/...` matches first. Reversed,
     the page would swallow its own data source."""
-    from friday.ops import api as api_module
+    from friday.kernel.ops import api as api_module
 
     monkeypatch.setattr(api_module, "PAGE", _built(tmp_path))
     client = TestClient(build_api(db=db, provider_status=lambda: "x"))

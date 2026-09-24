@@ -8,7 +8,7 @@ that still hold one.
 Data only; no schema changes, so autogenerate has nothing to say about it and
 `tests/test_migrations.py` stays green either way.
 
-**What it rewrites**, using the same `friday.ops.redact.scrub` the live path
+**What it rewrites**, using the same `friday.kernel.ops.redact.scrub` the live path
 now uses, so one pattern covers both and they cannot drift:
 
 - `artifacts.content` — the verbatim span, which every later reader copies.
@@ -40,7 +40,7 @@ import json
 from alembic import op
 import sqlalchemy as sa
 
-from friday.ops.redact import scrub
+from friday.kernel.ops.redact import scrub
 
 
 # revision identifiers, used by Alembic.

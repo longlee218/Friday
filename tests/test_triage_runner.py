@@ -10,8 +10,8 @@ from conftest import captured, make_event
 from datetime import datetime, timedelta, timezone
 
 from friday.kernel.domain.conversation import ConversationId
-from friday.triage import Decided, NeedsHuman
-from friday.triage.runner import TriageRunner
+from friday.kernel.triage import Decided, NeedsHuman
+from friday.kernel.triage.runner import TriageRunner
 from friday.kernel.domain.states import TaskState
 
 
@@ -277,7 +277,7 @@ async def test_a_follow_up_without_the_details_asks_again(inbox, provider, db):
 
 async def _we_asked(db, task_id: int, *, sent_as: str) -> None:
     """The question we sent about a task, and the id it became."""
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     row = await db.queue_outbound(
         task_id=task_id,
@@ -369,7 +369,7 @@ async def test_an_unprompted_message_is_still_checked_by_type(inbox, provider, d
 async def test_a_reply_to_a_message_of_ours_that_had_no_task(inbox, provider, db):
     """The daily summary and an outage alert belong to no task. Replying to one
     falls back to the ordinary path rather than erroring."""
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     row = await db.queue_outbound(
         task_id=None,
@@ -512,7 +512,7 @@ async def test_what_this_process_posted_is_not_part_of_their_turn(inbox, provide
     """In the channel the operator tests in, the account is both sides."""
     from datetime import timedelta
 
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     t0 = datetime.now(timezone.utc) - timedelta(seconds=60)
     row = await db.queue_outbound(
@@ -547,7 +547,7 @@ async def _one_of_ours_in_the_queue(db, *, text="Alive. 79 messages held."):
     anything the bot wrote. A DM bypasses the channel whitelist, so it lands
     in the queue as work.
     """
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     task = await db.create_task(
         conversation=ConversationId("fake", "watched"),
@@ -616,9 +616,9 @@ async def test_a_mention_is_never_lost_to_a_spent_budget(db, provider, inbox):
 
     from friday.sdk.testing import FunctionModel
 
-    from friday.config import AgentConfig
-    from friday.triage import Triage
-    from friday.triage.runner import NEEDS_HUMAN, TriageRunner
+    from friday.kernel.config import AgentConfig
+    from friday.kernel.triage import Triage
+    from friday.kernel.triage.runner import NEEDS_HUMAN, TriageRunner
 
     def _never(messages, info):
         raise AssertionError("the provider was called despite the ceiling")
@@ -661,9 +661,9 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(db, provider, inbo
 
     from friday.sdk.testing import FunctionModel
 
-    from friday.config import AgentConfig
-    from friday.triage import Triage
-    from friday.triage.runner import NEEDS_HUMAN, TriageRunner
+    from friday.kernel.config import AgentConfig
+    from friday.kernel.triage import Triage
+    from friday.kernel.triage.runner import NEEDS_HUMAN, TriageRunner
     from tests.test_harness import _rate_limited
 
     def _busy(messages, info):
@@ -785,7 +785,7 @@ async def test_a_late_answer_to_our_own_question_is_never_outdated(db):
     three days late is still the answer. Without this the reporter replies,
     nothing hears it, and the task waits forever for something it has already
     been told — the failure this system shipped once and wrote a ticket about."""
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     reported = make_event(message_id="1", text="the api is down")
     await db.record_message(reported)

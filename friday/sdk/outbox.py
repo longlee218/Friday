@@ -3,7 +3,7 @@
 `Kind` is what decides whether a queued message needs approval. A plugin graph
 that queues a mid-run row (an acknowledgement to the reporter, a finding to the
 operator) names the `Kind` it queues as, so the contract lives in the sdk while
-the delivery loop that reads it stays in `friday/outbox/`, which re-exports this.
+the delivery loop that reads it stays in `friday/kernel/outbox/`, which re-exports this.
 """
 
 from __future__ import annotations

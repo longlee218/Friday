@@ -40,7 +40,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.pool import StaticPool
 
-from friday.agent.structured import fits
+from friday.kernel.harness.structured import fits
 from friday.store import schema
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
@@ -73,9 +73,9 @@ from friday.kernel.domain.models import (
 # The memory-kind machinery moved out of `domain` into its registry (ticket 12):
 # the kind is a validated string now, and the store reaches up to the registry
 # for a kind's writers, data schema, natural key and reader routing.
-from friday.memory import registry as memory_kinds
-from friday.text.transform import redact
-from friday.ops.redact import scrub
+from friday.kernel.memory import registry as memory_kinds
+from friday.kernel.text.transform import redact
+from friday.kernel.ops.redact import scrub
 from friday.kernel.domain.states import OPEN, IllegalTransition, TaskState, may_move
 
 __all__ = ["Database", "estimated_tokens"]
@@ -89,7 +89,7 @@ def estimated_tokens(text: str) -> int:
 
     The configured provider is MiniMax, for which there is no tokenizer; a
     tokenizer for a different vendor would be confidently wrong rather than
-    roughly right. Exported so `friday/dag/prepare.py` measures a budget's
+    roughly right. Exported so `friday/kernel/dag/prepare.py` measures a budget's
     outcome with the exact same arithmetic this module used to enforce it —
     one formula, not two that could drift.
     """
@@ -115,13 +115,13 @@ OUTBOUND_FAILED = OutboundState.FAILED
 OUTBOUND_SENT_MANUALLY = OutboundState.SENT_MANUALLY
 
 #: Kinds the outbox refuses to select without an approval on the row. Kept as
-#: data here because it is a `WHERE` clause; `friday.outbox.Kind` is where the
+#: data here because it is a `WHERE` clause; `friday.kernel.outbox.Kind` is where the
 #: reasoning lives.
 _NEEDS_APPROVAL = ("reply",)
 
 #: The one kind that is a question to a reporter. Data here for the same
 #: reason `_NEEDS_APPROVAL` is: it is a `WHERE` clause, and importing
-#: `friday.outbox.Kind` would put the store below a module that reads it.
+#: `friday.kernel.outbox.Kind` would put the store below a module that reads it.
 _ASK = "ask_for_details"
 
 
@@ -234,7 +234,7 @@ class Database:
         `event.code`, never from an artifact's own `content`).
 
         `event.text` already carries this message's code back in place —
-        `friday.providers.discord.normalise` calls `transform` once and
+        `friday.kernel.providers.discord.normalise` calls `transform` once and
         restores it — so redacting it here re-splits already-restored text
         rather than the original raw message. That re-split agrees with the
         first one for every case this ticket's own tests exercise, but it is
@@ -797,7 +797,7 @@ class Database:
         correctness fix rather than a tidiness one. The first version read the
         two keys separately and appended, on the assumption that no call
         carries both — and nothing enforces that: `_About` in
-        `friday/agent/harness.py` holds `message_id` and `task_id`
+        `friday/kernel/harness/harness.py` holds `message_id` and `task_id`
         independently, and `Harness.run`'s docstring invites both ("a caller
         supplies whichever it knows"). Only triage passes one today, so the
         assumption held by coincidence of the current call sites. The first
@@ -867,7 +867,7 @@ class Database:
         # serialises it as JSON. The store does not wait for the
         # bus — `publish` is sync and never blocks — so a slow
         # subscriber cannot stall a model call.
-        from friday.ops.events import get_bus
+        from friday.kernel.ops.events import get_bus
         task_id = values.get("task_id")
         message_id: str | None = None
         if task_id is not None:
@@ -891,7 +891,7 @@ class Database:
         values.setdefault("created_at", _now())
         async with self._sessions.begin() as session:
             session.add(schema.ToolCall(**values))
-        from friday.ops.events import get_bus
+        from friday.kernel.ops.events import get_bus
         task_id = values.get("task_id")
         message_id: str | None = None
         if task_id is not None:
@@ -1262,7 +1262,7 @@ class Database:
     # would not survive a second caller.
 
     #: How many memories one channel may hold. Enforced here rather than in
-    #: `friday/tools/memory.py`, which is the whole point: a store method is
+    #: `friday/kernel/tools/memory.py`, which is the whole point: a store method is
     #: the only place that can actually stop a write, and a tool that merely
     #: checked would not survive a second caller reaching the store directly.
     #:
@@ -1277,7 +1277,7 @@ class Database:
     MEMORY_PER_CHANNEL = 200
 
     #: How long one memory's text may be, in characters. Same reasoning as
-    #: `MEMORY_PER_CHANNEL`, for the same reason: `friday/tools/memory.py`
+    #: `MEMORY_PER_CHANNEL`, for the same reason: `friday/kernel/tools/memory.py`
     #: already cuts to this length before writing, and a tool that merely
     #: checked would not survive a second caller reaching `memory_add` or
     #: `memory_update` directly. Cut, not refused, matching the tool's own
@@ -1292,7 +1292,7 @@ class Database:
         not ranked by how well it matches, only by when it was written.
 
         `kind` is required, the same reasoning `limit` already got: the only
-        caller (`friday/tools/memory.py`, scoped to the responder) always
+        caller (`friday/kernel/tools/memory.py`, scoped to the responder) always
         knows which kind it means — `voice` — and a default here
         would let a second caller agree with that by coincidence rather than
         by saying so. Only `ACTIVE` rows match (D16): a superseded or deleted
@@ -1641,13 +1641,13 @@ class Database:
         """Write a new memory, or refuse if the channel is already full.
 
         `kind` defaults to `voice` because the only wired producer
-        today is the responder (`friday/tools/memory.py`), which writes
+        today is the responder (`friday/kernel/tools/memory.py`), which writes
         nothing else — unlike `memory_search`'s `kind`, a default here names
         the one thing every caller before this ticket already meant, rather
         than standing in for a caller that forgot to say.
 
         `None` means the channel is at `MEMORY_PER_CHANNEL` — the caller
-        (`friday/tools/memory.py`) turns that into a message the model can
+        (`friday/kernel/tools/memory.py`) turns that into a message the model can
         act on, the same way it turns a wrong-scope id into one. The count
         only considers active memories: a superseded or deleted row already
         freed its slot, the same rule `test_deleting_a_memory_frees_its_slot`
@@ -3044,7 +3044,7 @@ class Database:
         through a model and the model copied it out by hand. The stored
         request then fails a signature nobody broke. So a field that is a
         whole verbatim span — `curl` — asks for the id, and
-        `friday.dag.prepare.resolve_artifacts` puts the content back; a field
+        `friday.kernel.dag.prepare.resolve_artifacts` puts the content back; a field
         that is a *value inside* one — `correlation_id` — is still read from
         the text, which is a copy short enough to be right.
         """
@@ -3190,7 +3190,7 @@ class Database:
         load and the layering holds.
         """
         if decisions is None:
-            from friday.dag import registry
+            from friday.kernel.dag import registry
 
             decisions = registry.decisions()
         async with self._sessions() as session:

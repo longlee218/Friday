@@ -17,7 +17,7 @@ import time
 
 from friday.sdk.actions import Ask
 from friday.sdk.workflow import DAG, Deps, Edge, Node, envelope
-from friday.workflow import adapter
+from friday.kernel.dag import adapter
 
 CRASH_DAG = "crash-box8"
 

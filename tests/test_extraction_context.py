@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 from friday.kernel.domain.models import Memory
 from plugins.devops.params import ApiIssueParams
-from friday.extraction.context import build_full_context
+from friday.kernel.extraction.context import build_full_context
 from tests.test_extraction import _context
 from tests.test_outbox import _asked, _opened_by
 from tests.test_pool import make_task
@@ -104,21 +104,21 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
     """The refactor's own guard (board `what-the-room-already-knows`, ticket
     15): `build_input(context)` renders exactly what the five-argument
     formula it replaced would have, for the same content — assembled here
-    from the same section builders `friday.extraction.prompt` uses
+    from the same section builders `friday.kernel.extraction.prompt` uses
     internally, so a rendering change that silently drifts from that
     formula turns this test red rather than only a prompt-cache regression
     nobody notices."""
     from dataclasses import fields as dataclass_fields
 
-    from friday.agent.instruction_prompt import (
+    from friday.kernel.harness.instruction_prompt import (
         assemble,
         memory,
         outstanding_questions,
         room_facts,
         user_input,
     )
-    from friday.agent.structured import describe
-    from friday.extraction.prompt import build_input
+    from friday.kernel.harness.structured import describe
+    from friday.kernel.extraction.prompt import build_input
 
     known = ApiIssueParams(environment="production")
     now = datetime.now(UTC)
@@ -175,7 +175,7 @@ async def test_the_debug_log_never_carries_content(db, caplog):
     secret = "correlationId là abcdef01-2345-6789-abcd-ef0123456789, mật khẩu 12345"
     await _asked(db, task, secret, sent_message_id="out-1")
 
-    with caplog.at_level(logging.DEBUG, logger="friday.extraction.context"):
+    with caplog.at_level(logging.DEBUG, logger="friday.kernel.extraction.context"):
         await build_full_context(
             db, channel_id=None, task_id=task.id, known=ApiIssueParams()
         )

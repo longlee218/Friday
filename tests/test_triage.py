@@ -7,7 +7,7 @@ model's judgement, which only a live run can speak to.
 **Triage classifies and stops.** Which tool it called is the whole answer; the
 only thing it adds is how certain it is. Lifting values out of the message is a
 different job with a different failure mode and it belongs to whoever needs
-those values — see `friday/extraction.py`. These tests hold that line, because
+those values — see `friday/kernel/extraction.py`. These tests hold that line, because
 the tool schema is the only thing stopping a model from being asked to do both.
 """
 
@@ -22,9 +22,9 @@ from friday.sdk.testing import (
 )
 
 from conftest import make_event, summary_row
-from friday.config import AgentConfig
-from friday.triage import Decided, NeedsHuman, Triage
-from friday.triage.prefilter import Sensitive
+from friday.kernel.config import AgentConfig
+from friday.kernel.triage import Decided, NeedsHuman, Triage
+from friday.kernel.triage.prefilter import Sensitive
 
 CONFIG = AgentConfig(
     name="triage",
@@ -360,8 +360,8 @@ def test_triage_carries_no_skill_catalogue_and_cannot_be_given_one():
     eval correct by construction rather than by remembering."""
     import inspect
 
-    from friday.triage import INSTRUCTIONS, Triage
-    from friday.triage.runner import build_triage
+    from friday.kernel.triage import INSTRUCTIONS, Triage
+    from friday.kernel.triage.runner import build_triage
 
     # Asserted on what the `Harness` is actually handed, not on the module
     # constant: `INSTRUCTIONS` is `build_instructions()` with no examples, and
@@ -402,8 +402,8 @@ def test_build_input_carries_the_turn_and_no_room_by_default():
     """No summary, no `<channel_derived>` section at all — a room nobody has
     summarised must not cost the classifier a byte, the same property
     ticket 01 proved for the extractor."""
-    from friday.triage.context import LightContext
-    from friday.triage.prompt import build_input
+    from friday.kernel.triage.context import LightContext
+    from friday.kernel.triage.prompt import build_input
 
     said = build_input(LightContext(turn=[make_event(text="api lỗi")], summary=None))
 
@@ -414,8 +414,8 @@ def test_build_input_carries_the_turn_and_no_room_by_default():
 def test_build_input_carries_the_rooms_summary_when_there_is_one():
     """The row ticket 06's summariser writes, read directly — the same
     section the responder reads, not a new one invented for triage."""
-    from friday.triage.context import LightContext
-    from friday.triage.prompt import build_input
+    from friday.kernel.triage.context import LightContext
+    from friday.kernel.triage.prompt import build_input
 
     said = build_input(LightContext(
         turn=[make_event(text="api lỗi")], summary=summary_row(topic="the reelme api"),
@@ -432,8 +432,8 @@ async def test_build_input_does_not_carry_the_operators_rows(db):
     triage the summary and nothing else."""
     from friday.sdk.memory import MemoryOrigin
     from friday.kernel.domain.models import FridayState
-    from friday.triage.context import build_light_context
-    from friday.triage.prompt import build_input
+    from friday.kernel.triage.context import build_light_context
+    from friday.kernel.triage.prompt import build_input
 
     for channel in ("watched", "*"):
         await db.memory_add(
@@ -452,8 +452,8 @@ def test_build_input_renders_a_real_turn_as_multiple_lines():
     """The point of the whole redesign: a burst of messages is shown as
     itself, not pre-flattened into one string with no clock on any line but
     the first."""
-    from friday.triage.context import LightContext
-    from friday.triage.prompt import build_input
+    from friday.kernel.triage.context import LightContext
+    from friday.kernel.triage.prompt import build_input
 
     turn = [
         make_event(message_id="1", text="api lỗi rồi anh ơi"),
@@ -523,7 +523,7 @@ async def test_decide_renders_the_given_turn_not_just_the_one_event():
 
 
 def test_light_context_holds_exactly_the_turn_and_the_summary():
-    from friday.triage.context import LightContext
+    from friday.kernel.triage.context import LightContext
 
     turn = [make_event(text="api lỗi")]
     row = summary_row()
@@ -535,7 +535,7 @@ def test_light_context_holds_exactly_the_turn_and_the_summary():
 
 
 async def test_build_light_context_is_the_only_place_that_resolves_a_room():
-    from friday.triage.context import build_light_context
+    from friday.kernel.triage.context import build_light_context
 
     class _Summaries:
         async def room_summary(self, channel_id):
@@ -560,7 +560,7 @@ async def test_build_light_context_is_the_only_place_that_resolves_a_room():
 async def test_build_light_context_with_no_store_carries_no_room():
     """A bare test with nothing to resolve from — the same behaviour a room
     nobody has summarised already gets."""
-    from friday.triage.context import build_light_context
+    from friday.kernel.triage.context import build_light_context
 
     turn = [make_event(text="api lỗi")]
 
@@ -575,9 +575,9 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
     changes nothing about what a classifier is shown. Built the old way —
     the exact two section calls `build_input` always made — and the new way,
     and compared for equality, not "contains the same words"."""
-    from friday.agent.instruction_prompt import assemble, channel_derived, conversation
-    from friday.triage.context import LightContext
-    from friday.triage.prompt import build_input
+    from friday.kernel.harness.instruction_prompt import assemble, channel_derived, conversation
+    from friday.kernel.triage.context import LightContext
+    from friday.kernel.triage.prompt import build_input
 
     turn = [
         make_event(message_id="1", text="api lỗi rồi anh ơi"),
@@ -595,7 +595,7 @@ async def test_decide_gathers_context_through_the_one_builder(monkeypatch):
     """`Triage.decide` no longer resolves a room itself — it calls
     `build_light_context` exactly once and renders from what it returns.
     Reverting to an inline lookup would leave this spy unreached."""
-    import friday.triage as triage_module
+    import friday.kernel.triage as triage_module
 
     calls = []
     real = triage_module.build_light_context
@@ -621,7 +621,7 @@ async def test_build_light_context_logs_counts_and_sizes_never_content(caplog):
     `model_calls` already records."""
     import logging
 
-    from friday.triage.context import build_light_context
+    from friday.kernel.triage.context import build_light_context
 
     class _Summaries:
         async def room_summary(self, channel_id):
@@ -629,7 +629,7 @@ async def test_build_light_context_logs_counts_and_sizes_never_content(caplog):
 
     turn = [make_event(text="the reporter's own secret words")]
 
-    with caplog.at_level(logging.DEBUG, logger="friday.triage.context"):
+    with caplog.at_level(logging.DEBUG, logger="friday.kernel.triage.context"):
         await build_light_context(_Summaries(), channel_id="watched", turn=turn)
 
     (record,) = caplog.records
@@ -658,8 +658,8 @@ async def test_the_summary_section_does_not_care_how_much_the_room_has_said(db):
     schedule, strictly less often than every message.
     """
     from friday.kernel.domain.models import FridayState
-    from friday.triage.context import build_light_context
-    from friday.triage.prompt import build_input
+    from friday.kernel.triage.context import build_light_context
+    from friday.kernel.triage.prompt import build_input
 
     await db.memory_add(
         FridayState(channel_id="watched", agent="summary"), "the reelme wrapper api",
@@ -692,8 +692,8 @@ def test_two_turns_against_the_same_room_share_everything_but_the_turn():
     never a running list. What survives between two calls is the summary
     section byte-for-byte, not a growing shared prefix — the property is
     stronger, not merely relocated."""
-    from friday.triage.context import LightContext
-    from friday.triage.prompt import build_input
+    from friday.kernel.triage.context import LightContext
+    from friday.kernel.triage.prompt import build_input
 
     room = summary_row(topic="the reelme wrapper api")
 
@@ -722,8 +722,8 @@ def test_the_shared_prefix_between_two_triage_calls_is_almost_the_whole_prompt()
     and checked the ratio against a hand-rolled prompt stand-in; this one
     holds the summary fixed — what the DAG's own rebuild schedule guarantees
     in production — and varies only the turn."""
-    from friday.triage.context import LightContext
-    from friday.triage.prompt import build_input
+    from friday.kernel.triage.context import LightContext
+    from friday.kernel.triage.prompt import build_input
 
     instructions = Triage(config=CONFIG)._run.instructions
     room = summary_row(
@@ -845,8 +845,8 @@ def test_every_decision_the_model_may_name_carries_its_own_description():
     This replaces `test_create_task_describes_every_type_from_its_own_params_class`,
     which asserted the same thing about `classify`'s enum.
     """
-    from friday.agent.harness import _answer_params
-    from friday.dag import registry
+    from friday.kernel.harness.harness import _answer_params
+    from friday.kernel.dag import registry
     from friday.kernel.domain.triage import make_decided
 
     # The closed set now lives on the boot-built schema (ticket 11), not on the
@@ -871,7 +871,7 @@ def test_triage_is_never_asked_for_anything_but_a_type_and_a_confidence():
     Adding one back would put two producers on one field again — and the merge
     that reconciled them cost nineteen direct messages about one report before
     it was removed. Lifting values out of the message is
-    `friday/extraction/`'s job, with its own failure mode.
+    `friday/kernel/extraction/`'s job, with its own failure mode.
 
     **Asserted over the agent this really builds**, not over a tool list
     imported by name: triage's tools used to be a module constant a test could
@@ -970,7 +970,7 @@ def test_both_of_the_fields_triage_answers_are_required():
     """Asserted on the schema as well as through the run, because this is the
     guard and a guard that only holds by accident of another test's scripting
     is not one."""
-    from friday.agent.harness import _answer_params
+    from friday.kernel.harness.harness import _answer_params
 
     schema = _answer_params(Decided)
 
@@ -1019,7 +1019,7 @@ def test_the_prompt_describes_the_one_tool_that_exists():
     rather than on a constant, so rewording any one of the pieces cannot lose
     it.
     """
-    from friday.triage.prompt import build_instructions
+    from friday.kernel.triage.prompt import build_instructions
 
     built = build_instructions()
 

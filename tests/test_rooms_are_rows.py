@@ -19,7 +19,7 @@ import json
 import pytest
 from friday.sdk.testing import ScriptedModel, assistant_message
 
-from friday.config import AgentConfig
+from friday.kernel.config import AgentConfig
 from friday.sdk.memory import MemoryOrigin
 from friday.kernel.domain.models import FridayState, MemoryStatus
 from tests.conftest import make_event
@@ -37,7 +37,7 @@ def _answer(topic: str, **more) -> ScriptedModel:
 
 
 def _summariser(db, model, channels=("100",)):
-    from friday.memory.channel_context import ContextRebuilder
+    from friday.kernel.memory.channel_context import ContextRebuilder
 
     return ContextRebuilder(
         db=db, channels=channels, summary_config=SUMMARY_CONFIG, model=model
@@ -86,7 +86,7 @@ async def test_the_bookmark_is_on_the_row_and_never_rendered(db):
     """`state` was kept out of `derived` because everything in `derived` is
     rendered. On the row it is `data` beside the four fields, and the
     renderer reads those four by name and nothing else."""
-    from friday.agent.instruction_prompt import channel_derived
+    from friday.kernel.harness.instruction_prompt import channel_derived
 
     await _said(db, "m-first-7731")
     await _said(db, "m-last-7732")
@@ -127,9 +127,9 @@ async def test_only_the_channels_it_is_given_are_summarised(db):
 
 
 async def test_a_room_with_no_rows_costs_triage_not_a_byte(db):
-    from friday.agent.instruction_prompt import assemble, conversation
-    from friday.triage.context import build_light_context
-    from friday.triage.prompt import build_input
+    from friday.kernel.harness.instruction_prompt import assemble, conversation
+    from friday.kernel.triage.context import build_light_context
+    from friday.kernel.triage.prompt import build_input
 
     turn = [make_event(text="api lỗi")]
     context = await build_light_context(db, channel_id="watched", turn=turn)
@@ -144,8 +144,8 @@ async def test_triage_is_shown_the_summary_and_not_the_operators_facts(db):
     await _said(db, "m1", channel_id="watched")
     await _summariser(db, _answer("the reelme api"), channels=("watched",)).rebuild_all()
 
-    from friday.triage.context import build_light_context
-    from friday.triage.prompt import build_input
+    from friday.kernel.triage.context import build_light_context
+    from friday.kernel.triage.prompt import build_input
 
     said = build_input(await build_light_context(
         db, channel_id="watched", turn=[make_event(text="api lỗi")],
@@ -161,8 +161,8 @@ async def test_triage_is_shown_the_summary_and_not_the_operators_facts(db):
 async def test_the_extractor_reads_operator_rows_here_and_everywhere_labelled(db):
     """`room_facts`' three defences carry over: plain, flattened, and
     labelled by provenance — `origin` now, where it was a layer's name."""
-    from friday.extraction.context import build_full_context
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.context import build_full_context
+    from friday.kernel.extraction.prompt import build_input
     from plugins.devops.params import ApiIssueParams
 
     await _operator_wrote(db, "watched", "test.apero is\nthe staging host")
@@ -193,8 +193,8 @@ async def test_the_extractor_reads_operator_rows_here_and_everywhere_labelled(db
 
 
 async def test_a_room_with_no_rows_leaves_the_extractors_prompt_as_it_was(db):
-    from friday.extraction.context import FullContext, build_full_context
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.context import FullContext, build_full_context
+    from friday.kernel.extraction.prompt import build_input
     from plugins.devops.params import ApiIssueParams
 
     gathered = await build_full_context(
@@ -213,7 +213,7 @@ async def test_a_room_with_no_rows_leaves_the_extractors_prompt_as_it_was(db):
 
 async def test_the_responder_is_shown_the_summary_and_not_the_facts(db):
     from friday.sdk.testing import FunctionModel
-    from friday.responder import Responder
+    from friday.kernel.responder import Responder
 
     prompts: list[str] = []
 
@@ -266,7 +266,7 @@ def test_the_context_routes_are_gone(db):
     missing route looks like here."""
     import inspect
 
-    from friday.ops.api import build_api
+    from friday.kernel.ops.api import build_api
 
     assert "context_store" not in inspect.signature(build_api).parameters
     paths = {
@@ -280,7 +280,7 @@ def test_the_context_routes_are_gone(db):
 
 
 def test_there_is_no_context_directory_to_configure():
-    from friday.config import ContextConfig
+    from friday.kernel.config import ContextConfig
 
     assert "directory" not in {f for f in ContextConfig.__dataclass_fields__}
 

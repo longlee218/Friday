@@ -1,13 +1,13 @@
 """Prompt-assembly primitives: the seam a plugin builds its instructions with.
 
-The pure core of `friday/agent/instruction_prompt.py` — the `Section` shape, the
+The pure core of `friday/kernel/harness/instruction_prompt.py` — the `Section` shape, the
 one joiner, the identity/style builders, and the trust-boundary machinery —
 with no dependency on the memory rows, skills or conversation types the app-layer
 sections render. Pure and dependency-free (html and the stdlib only), so it lives
 in `friday.sdk`, the bottom of the stack, alongside the validation DSL: a plugin
 composes an agent's system prompt from these importing `sdk` only.
 
-`friday/agent/instruction_prompt.py` re-exports every name below and keeps the
+`friday/kernel/harness/instruction_prompt.py` re-exports every name below and keeps the
 domain-aware sections (`task`, `conversation`, `memory`, `skill_system`, …) that
 reach into `Memory`, `InboundEvent` and `Skill`. Escaping lives at this seam:
 every value a section carries is escaped for element-text position, so a string

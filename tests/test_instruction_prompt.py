@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from friday.agent.instruction_prompt import (
+from friday.kernel.harness.instruction_prompt import (
     Section,
     _escape,
     _render_yaml,
@@ -146,7 +146,7 @@ def test_skills_section_uses_deerflow_xml_blocks():
     be read as order. The SDK already describes the four skill tools via
     function-calling schema, so this section is an index, not a manual.
     """
-    from friday.agent.instruction_prompt import SkillMeta
+    from friday.kernel.harness.instruction_prompt import SkillMeta
 
     meta = [
         SkillMeta(
@@ -287,7 +287,7 @@ def test_triage_assembles_nothing_inline():
     piece of shared shape in a shape-per-family system."""
     import inspect
 
-    src = inspect.getsource(__import__("friday.triage", fromlist=["Triage"]).Triage.decide)
+    src = inspect.getsource(__import__("friday.kernel.triage", fromlist=["Triage"]).Triage.decide)
     assert "build_input(" in src
     assert "ContextBundle" not in src
 
@@ -298,7 +298,7 @@ def test_responder_assembles_nothing_inline():
     import inspect
 
     src = inspect.getsource(
-        __import__("friday.responder", fromlist=["Responder"]).Responder.draft
+        __import__("friday.kernel.responder", fromlist=["Responder"]).Responder.draft
     )
     assert "build_input(" in src
     assert "ContextBundle" not in src
@@ -312,8 +312,8 @@ def test_each_familys_assembly_lives_in_its_prompt_module():
     escaping those builders call is still the one seam (its own grep test)."""
     import importlib
 
-    for module in ("friday.triage.prompt", "friday.responder.prompt",
-                   "friday.extraction.prompt"):
+    for module in ("friday.kernel.triage.prompt", "friday.kernel.responder.prompt",
+                   "friday.kernel.extraction.prompt"):
         m = importlib.import_module(module)
         assert hasattr(m, "build_input") or hasattr(m, "build_instructions")
 
@@ -336,7 +336,7 @@ def test_tone_section_is_separate_from_conversation():
         created_at=datetime(2026, 8, 30, tzinfo=timezone.utc),
         mention_type=MentionType.DIRECT,
     )
-    from friday.agent.instruction_prompt import tone_examples
+    from friday.kernel.harness.instruction_prompt import tone_examples
 
     out = tone_examples([event]).render()
     assert "<tone>" in out
@@ -381,7 +381,7 @@ def test_two_responder_inputs_differing_late_share_a_byte_identical_prefix():
     byte for byte — which is the provider's prompt-cache hit. Reordering the
     sections because another order reads better is a silent cost on every
     call; this is the test that makes it loud."""
-    from friday.responder.prompt import build_input
+    from friday.kernel.responder.prompt import build_input
 
     fixed = dict(
         now=datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc),

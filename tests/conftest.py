@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from friday.config import IngestConfig
+from friday.kernel.config import IngestConfig
 from friday.store.db import Database
-from friday.agent.harness import Harness
-from friday.inbox import Inbox
+from friday.kernel.harness.harness import Harness
+from friday.kernel.inbox import Inbox
 from friday.kernel.domain.models import InboundEvent, MentionType
 
 
@@ -172,7 +172,7 @@ class BoardClient(TestClient):
         super().__init__(app, **kw)
 
     def request(self, method, url, *args, **kw):
-        from friday.ops.api import CSRF_COOKIE, CSRF_HEADER, _WRITE_METHODS
+        from friday.kernel.ops.api import CSRF_COOKIE, CSRF_HEADER, _WRITE_METHODS
 
         if method.upper() in _WRITE_METHODS:
             if CSRF_COOKIE not in self.cookies:
@@ -199,9 +199,9 @@ def workflow_graphs():
     """
     from types import SimpleNamespace
 
-    from friday.dag import registry
-    from friday.dag.router import EDGE_ROUTER, register_dags
-    from friday.memory import registry as memory_kinds
+    from friday.kernel.dag import registry
+    from friday.kernel.dag.router import EDGE_ROUTER, register_dags
+    from friday.kernel.memory import registry as memory_kinds
 
     # Memory kinds register themselves too (ticket 12): the store reads the
     # registry for a kind's writers/schema/natural key, so every test needs it
@@ -236,8 +236,8 @@ async def workflows(db):
     import tempfile
     from types import SimpleNamespace
 
-    from friday.dag.router import register_dags
-    from friday.workflow import adapter
+    from friday.kernel.dag.router import register_dags
+    from friday.kernel.dag import adapter
 
     tmp = tempfile.mkdtemp()
     adapter.launch("friday-test", f"{tmp}/system.db")
@@ -275,7 +275,7 @@ class ScriptedHarness(Harness):
         # instance attribute set here would shadow it, and the test asserting
         # that a refusal is told apart from a failure would silently stop
         # testing anything.
-        from friday.config import AgentConfig
+        from friday.kernel.config import AgentConfig
 
         for name, default in (
             ("tool_turns", 0), ("last_error", None), ("refusal", None),

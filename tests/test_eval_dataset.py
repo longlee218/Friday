@@ -11,7 +11,7 @@ import json
 
 from pathlib import Path
 
-from friday.dag import registry
+from friday.kernel.dag import registry
 
 from evals.dataset import Example, build_frozen_set, load_jsonl, write_jsonl
 

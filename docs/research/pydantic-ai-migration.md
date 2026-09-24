@@ -54,7 +54,7 @@ are new, `httpx2` sits beside the `httpx` that `openai` uses. Never the
 full `pydantic-ai` package (it pulls every provider, Logfire, CLI, evals).
 
 The standing rule survives: one module imports the vendor
-(`friday/agent/harness.py`), everything else takes names through it.
+(`friday/kernel/harness/harness.py`), everything else takes names through it.
 
 ## Why it is worth doing
 
@@ -94,7 +94,7 @@ Pydantic AI integrates both (`DBOSDurability`, `TemporalDurability`).
 **DBOS** runs in-process as a library with its state in SQLite or
 Postgres; **Temporal** needs a server and a worker beside Friday. Friday
 runs on one machine, one process, SQLite, so DBOS is the choice and
-would replace the hand-written DAG engine (`friday/dag/`): workflows and
+would replace the hand-written DAG engine (`friday/kernel/dag/`): workflows and
 steps for graphs and nodes, a queue for the pool's concurrency, `recv`
 with a timeout for `Ask`/`HandOver` waits, scheduled workflows for the
 summariser and liveness. Friday keeps the envelope, the `node_runs` rows

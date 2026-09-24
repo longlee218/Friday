@@ -47,7 +47,7 @@ class _StubCaps:
         self._harness = diagnose_harness
 
     def prepare_node(self, *a, **k):
-        from friday.dag.prepare import prepare_node
+        from friday.kernel.dag.prepare import prepare_node
         return prepare_node(*a, **k)
 
     def make_harness(self, *, agent, instructions, answers=None, tools=None):
@@ -68,7 +68,7 @@ def _dag(*, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnos
 
 from plugins.devops.graph.resolve import resolve_node
 from plugins.devops.graph.deps import ApiIssueDeps
-from friday.dag.engine import DAGState, status_of
+from friday.sdk.workflow import DAGState, status_of
 from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
 from friday.sdk.memory import MemoryOrigin
@@ -881,7 +881,7 @@ async def test_the_reporter_is_told_it_is_being_worked_on(db):
     from conftest import make_event
 
     from plugins.devops.graph.acknowledge import SAYS, acknowledge_node
-    from friday.outbox import DEFAULT_SENDER, Kind
+    from friday.kernel.outbox import DEFAULT_SENDER, Kind
 
     await db.record_message(make_event(message_id="m1"))
     result = await acknowledge_node().run(
@@ -905,7 +905,7 @@ async def test_the_acknowledgement_does_not_wait_for_approval(db):
     log line and names no fault — and one that waits for a person arrives
     after the reply it was meant to precede."""
     from plugins.devops.graph.acknowledge import acknowledge_node
-    from friday.outbox import DEFAULT_SENDER, Kind
+    from friday.kernel.outbox import DEFAULT_SENDER, Kind
 
     await acknowledge_node().run(
         prepared(), deps_for(db, extra={"sender": DEFAULT_SENDER})
@@ -920,7 +920,7 @@ async def test_a_resumed_graph_does_not_acknowledge_twice(db):
     question. A second "đang xử lý" three minutes after the first reads as a
     stuck robot."""
     from plugins.devops.graph.acknowledge import acknowledge_node
-    from friday.outbox import DEFAULT_SENDER
+    from friday.kernel.outbox import DEFAULT_SENDER
 
     deps = deps_for(db, extra={"sender": DEFAULT_SENDER})
     await acknowledge_node().run(prepared(), deps)
@@ -980,7 +980,7 @@ def _diagnosed() -> DAGState:
 async def test_the_operator_is_told_where_the_whole_report_is(db, tmp_path):
     """The approval card carries what the *reporter* would see. This is the
     reading done before deciding whether they should see it."""
-    from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind
+    from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind
 
     state = _diagnosed()
 
@@ -1004,7 +1004,7 @@ async def test_with_nothing_concluded_the_reporter_is_offered_nothing(db, tmp_pa
     """A brief with no cause costs the operator an approval and tells the
     reporter that what they asked about is still unanswered — which the
     silence already said."""
-    from friday.outbox import DEFAULT_APPROVER, Kind
+    from friday.kernel.outbox import DEFAULT_APPROVER, Kind
 
     state = prepared().with_result(
         "diagnose", {"status": "skipped", "reason": "no diagnose agent"}
@@ -1055,8 +1055,8 @@ def test_the_pool_and_the_graph_send_as_the_same_two_identities():
     """
     import inspect
 
-    from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
-    from friday.tasks.pool import Pool
+    from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
+    from friday.kernel.pool.pool import Pool
 
     taken = inspect.signature(Pool.__init__).parameters
 
@@ -1125,7 +1125,7 @@ async def test_a_complete_report_is_investigated_rather_than_handed_back(db, wor
     no investigation past this point". Now the same task reaches `Resolve`,
     and what it hands over with is a missing *row*, which somebody can fix.
     """
-    from friday.tasks.pool import Pool
+    from friday.kernel.pool.pool import Pool
     from tests.test_pool import make_task
 
     await write_environment_rows(db)
@@ -1330,7 +1330,7 @@ def test_a_node_that_ended_the_run_does_not_read_as_one_that_passed_it_on():
     no envelope. So a `resolve` that handed over — ending the whole run —
     printed exactly like a `resolve` that succeeded, and the first real use
     of this tool was ten minutes of reading the wrong thing."""
-    from friday.dag.engine import NodeRun
+    from friday.sdk.workflow import NodeRun
     from replay_case import answers
 
     run = NodeRun(
@@ -1348,7 +1348,7 @@ def test_a_node_that_ended_the_run_does_not_read_as_one_that_passed_it_on():
 def test_a_node_that_failed_is_named_as_a_seam_that_broke():
     """Question 4. `empty` and `skipped` are nodes doing their job with
     nothing to work on; `error` and `timed_out` are the seams."""
-    from friday.dag.engine import NodeRun
+    from friday.sdk.workflow import NodeRun
     from replay_case import answers
 
     def run(node, status, reason=""):
@@ -2421,8 +2421,8 @@ def test_a_graph_that_can_outlast_its_budget_is_refused_at_boot():
     watching."""
     import pytest as _pytest
 
-    from friday.config import ConfigError
-    from friday.dag.router import check_graph_clocks
+    from friday.kernel.config import ConfigError
+    from friday.kernel.dag.router import check_graph_clocks
 
     dag = _dag()
     total = sum(n.timeout_seconds or 0.0 for n in dag.nodes)
@@ -2436,8 +2436,8 @@ def test_a_node_with_no_clock_is_refused_however_large_the_budget():
     """The sum of a list with a hole in it is not a bound."""
     import pytest as _pytest
 
-    from friday.config import ConfigError
-    from friday.dag.engine import DAG, Node
+    from friday.kernel.config import ConfigError
+    from friday.sdk.workflow import DAG, Node
 
     async def _nothing(state, deps):
         return None
@@ -2453,7 +2453,7 @@ def test_a_node_with_no_clock_is_refused_however_large_the_budget():
 
 
 def check_graph_clocks_for(dag):
-    from friday.dag.router import check_graph_clocks
+    from friday.kernel.dag.router import check_graph_clocks
 
     return check_graph_clocks([dag], {dag.name: 10_000.0})
 
@@ -2461,12 +2461,12 @@ def check_graph_clocks_for(dag):
 def test_a_graph_with_no_budget_is_not_checked():
     """The honest default for a one-node graph: its single node's clock is
     the bound, and inventing a budget for it would be inventing a number."""
-    from friday.dag.engine import DAG, Node
+    from friday.sdk.workflow import DAG, Node
 
     async def _nothing(state, deps):
         return None
 
-    from friday.dag.router import check_graph_clocks
+    from friday.kernel.dag.router import check_graph_clocks
 
     check_graph_clocks(
         [DAG(name="doc_question", nodes=(Node("a", _nothing),), edges=())], {}
@@ -2495,8 +2495,8 @@ def test_the_boot_actually_checks_the_graph_clocks(monkeypatch):
     has — and removing the call from it left the whole suite green."""
     import pytest as _pytest
 
-    from friday.config import ConfigError
-    from friday.dag import router
+    from friday.kernel.config import ConfigError
+    from friday.kernel.dag import router
 
     def over_budget(*_a, **_k):
         raise ConfigError("clocks do not add up")
@@ -2511,7 +2511,7 @@ def test_the_boot_actually_checks_the_graph_clocks(monkeypatch):
 
 
 def load_config_for_test():
-    from friday.config import load_config
+    from friday.kernel.config import load_config
 
     return load_config()
 
@@ -3043,9 +3043,9 @@ def test_check_deps_refuses_a_deps_factory_that_forgets_a_required_field():
     wrong identity or none — fails at boot, where a config error belongs, not
     mid-investigation on a task nobody is watching. Delete `check_deps` and
     nothing catches it until the run."""
-    from friday.config import ConfigError
-    from friday.dag import registry
-    from friday.dag.router import check_deps
+    from friday.kernel.config import ConfigError
+    from friday.kernel.dag import registry
+    from friday.kernel.dag.router import check_deps
     from friday.sdk.plugin import TaskTypeSpec
     from friday.sdk.workflow import DAG, Deps, Node
 

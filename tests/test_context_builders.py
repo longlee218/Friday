@@ -7,8 +7,8 @@ never constructs a `Section`, and never joins anything. This is that rule's
 guard — the same shape `test_prompt_sections.py` already holds prompt
 modules to, one level stricter.
 
-Ticket 14 gives this file its first entry (`friday/triage/context.py`);
-ticket 15 adds the second (`friday/extraction/context.py`). The list is
+Ticket 14 gives this file its first entry (`friday/kernel/triage/context.py`);
+ticket 15 adds the second (`friday/kernel/extraction/context.py`). The list is
 written out, not derived from a glob or from the family names — the lesson
 CLAUDE.md records from ticket 15 of the first board: a module name derived
 from its family let a family-enumerating test silently stop checking when
@@ -26,8 +26,8 @@ def _context_modules() -> list[Path]:
     """Every module that gathers a family's context. Written out by hand."""
     root = Path(__file__).resolve().parents[1] / "friday"
     return [
-        root / "triage" / "context.py",
-        root / "extraction" / "context.py",
+        root / "kernel" / "triage" / "context.py",
+        root / "kernel" / "extraction" / "context.py",
     ]
 
 
@@ -43,12 +43,12 @@ def test_every_gather_module_reads_and_never_renders():
 
         imports_seam = any(
             isinstance(node, ast.ImportFrom)
-            and node.module == "friday.agent.instruction_prompt"
+            and node.module == "friday.kernel.harness.instruction_prompt"
             for node in ast.walk(tree)
         )
         if imports_seam:
             offenders.setdefault(path.name, []).append(
-                "imports from friday.agent.instruction_prompt"
+                "imports from friday.kernel.harness.instruction_prompt"
             )
 
         calls = {

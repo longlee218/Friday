@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from friday.kernel.domain.models import MentionType
-from friday.providers.discord.normalise import normalise
+from friday.kernel.providers.discord.normalise import normalise
 
 ME = 100
 MY_ROLES = frozenset({200, 201})

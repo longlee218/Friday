@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.responder.check import rejected
+from friday.kernel.responder.check import rejected
 
 TEMPLATE = "Could you tell me the correlationId, or the curl you used?"
 
@@ -215,7 +215,7 @@ def test_which_questions_this_rule_binds_is_derived_not_counted():
     `tests/test_validation.py::test_the_questions_this_system_can_ask_are_written_down`;
     this asserts only which of them this rule binds.
     """
-    from friday.responder.check import _KEPT
+    from friday.kernel.responder.check import _KEPT
     from tests.test_validation import _asks
 
     asks = _asks()

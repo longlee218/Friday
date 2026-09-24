@@ -1,6 +1,6 @@
 """The devops plugin's own config block, validated against its own schema.
 
-Moved out of `friday.config.ApiIssueConfig` in ticket 14: a plugin owns its
+Moved out of `friday.kernel.config.ApiIssueConfig` in ticket 14: a plugin owns its
 configuration and validates it, so the core config no longer names `api_issue`.
 The composition root hands the plugin the raw `devops:` block from `config.yaml`
 and this turns it into a `DevopsConfig` (or refuses it, naming the bad key).
@@ -30,7 +30,7 @@ DEFAULT_NOT_OURS = ("node_modules", "/internal/", "node:internal")
 
 class ConfigError(Exception):
     """The `devops:` block is missing a setting's meaning or names one that
-    does not exist. Its own class rather than `friday.config.ConfigError`,
+    does not exist. Its own class rather than `friday.kernel.config.ConfigError`,
     because a plugin does not import the core config — the host catches this and
     reports it the same way it reports its own."""
 

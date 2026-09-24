@@ -16,9 +16,9 @@ import pytest
 
 from friday.sdk.actions import Ask
 from friday.kernel.domain.conversation import ConversationId
-from friday.outbox import Outbox
+from friday.kernel.outbox import Outbox
 from friday.sdk.workflow import DAG, DAGState, Deps, Edge, Node, NodeRun, envelope
-from friday.workflow import adapter
+from friday.kernel.dag import adapter
 
 WATCHED = ConversationId("fake", "watched")
 
@@ -308,7 +308,7 @@ async def test_a_send_interrupted_mid_call_is_delivery_unknown_after_restart(dbo
     from dbos import DBOS
 
     from friday.store.db import Database
-    from friday.workflow import adapter
+    from friday.kernel.dag import adapter
 
     tmp = tempfile.mkdtemp()
     app_db = f"{tmp}/app.db"
@@ -375,7 +375,7 @@ def test_the_adapter_is_the_only_module_that_imports_dbos():
     Replacing the engine stays a rewrite of one module only while that holds."""
     import subprocess
 
-    allowed = {"friday/workflow/adapter.py"}
+    allowed = {"friday/kernel/dag/adapter.py"}
     hits = subprocess.run(
         ["grep", "-rlE", r"^\s*(from|import)\s+dbos\b", "friday/"],
         capture_output=True, text=True,

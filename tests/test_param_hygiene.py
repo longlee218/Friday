@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.text.param_hygiene import clean
+from friday.kernel.text.param_hygiene import clean
 
 
 @pytest.mark.parametrize("value", ["null", "NULL", "none", "None", "N/A", "n/a", "", "   "])

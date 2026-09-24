@@ -12,8 +12,8 @@ from friday.sdk.testing import FunctionModel
 from friday.sdk.testing import ScriptedModel, assistant_message
 
 from conftest import make_event
-from friday.config import AgentConfig
-from friday.responder import Draft, Responder
+from friday.kernel.config import AgentConfig
+from friday.kernel.responder import Draft, Responder
 
 CONFIG = AgentConfig(
     name="responder", api_key="k", base_url="https://example.invalid/v1",
@@ -144,7 +144,7 @@ async def test_it_is_told_not_to_address_anyone_by_mention():
     """The outbox already hangs the message under the one it answers, so a
     mention is redundant — and the tone examples are full of them whenever the
     operator has been testing by tagging themselves."""
-    from friday.responder import INSTRUCTIONS
+    from friday.kernel.responder import INSTRUCTIONS
 
     assert "mention" in INSTRUCTIONS.lower()
 
@@ -259,7 +259,7 @@ def test_a_responder_declares_the_run_state_whether_or_not_it_has_memory(monkeyp
     constructed with, confirmed separately. What this pins is structural: a
     reader asking what a run carries finds the answer on the construction.
     """
-    import friday.responder as responder_module
+    import friday.kernel.responder as responder_module
 
     given: list = []
 
@@ -299,8 +299,8 @@ def test_the_skill_catalogue_is_in_the_instructions_not_the_per_call_input():
     same argument that puts triage's few-shot examples in instructions rather
     than sending them again on every classification.
     """
-    from friday.agent.instruction_prompt import SkillMeta
-    from friday.responder.prompt import build_input, build_instructions
+    from friday.kernel.harness.instruction_prompt import SkillMeta
+    from friday.kernel.responder.prompt import build_input, build_instructions
 
     meta = [
         SkillMeta(
@@ -326,7 +326,7 @@ def test_the_skill_catalogue_is_in_the_instructions_not_the_per_call_input():
 def test_a_responder_with_no_skills_says_nothing_about_them():
     """`available=False` renders nothing, which is the rule: an agent told
     about a tool it does not have goes looking for it."""
-    from friday.responder.prompt import build_instructions
+    from friday.kernel.responder.prompt import build_instructions
 
     assert "fetch_skill" not in build_instructions()
 

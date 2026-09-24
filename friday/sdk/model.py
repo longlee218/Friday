@@ -7,7 +7,7 @@ shape) and injects it; the node types it against this `Model` port and touches
 only `run_structured` and `last_error`, which is the whole surface a structured
 answer needs.
 
-`friday/agent/harness.py`'s `Harness` satisfies this structurally, so nothing
+`friday/kernel/harness/harness.py`'s `Harness` satisfies this structurally, so nothing
 implements it explicitly — the port exists so a plugin node names a contract
 rather than the concrete class above the sdk line.
 """

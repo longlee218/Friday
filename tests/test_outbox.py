@@ -11,7 +11,7 @@ import pytest
 
 from conftest import make_event
 from friday.kernel.domain.conversation import ConversationId
-from friday.outbox import Kind, Outbox, record_decision
+from friday.kernel.outbox import Kind, Outbox, record_decision
 
 WATCHED = ConversationId("fake", "watched")
 
@@ -652,6 +652,6 @@ def test_the_two_lists_of_what_needs_approval_cannot_drift():
     """
     import friday.store.db as store
 
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     assert {k.value for k in Kind if k.needs_approval} == set(store._NEEDS_APPROVAL)

@@ -29,11 +29,11 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
-from friday.config import load_config
+from friday.kernel.config import load_config
 from friday.kernel.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
 from friday.sdk.memory import MemoryOrigin
 from friday.kernel.domain.models import FridayState, MemoryRefused
-from friday.memory import registry as memory_kinds
+from friday.kernel.memory import registry as memory_kinds
 from friday.store.db import Database
 
 _PERSON = ("name", "role", "team")

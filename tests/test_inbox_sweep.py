@@ -94,7 +94,7 @@ async def test_a_reconnect_triggers_a_sweep_without_waiting_for_the_timer(
     import asyncio
     import dataclasses
 
-    from friday.inbox import Inbox
+    from friday.kernel.inbox import Inbox
 
     provider.keep_open = True
     provider.emit_history("watched", make_event(message_id="100"))
@@ -120,7 +120,7 @@ async def test_the_sweep_also_runs_on_a_timer(provider, db, config):
     import asyncio
     import dataclasses
 
-    from friday.inbox import Inbox
+    from friday.kernel.inbox import Inbox
 
     provider.keep_open = True
     provider.emit_history("watched", make_event(message_id="100"))
@@ -143,7 +143,7 @@ async def test_the_sweep_also_runs_on_a_timer(provider, db, config):
 
 
 def _cold(provider, db, config, *, lookback):
-    from friday.inbox import Inbox
+    from friday.kernel.inbox import Inbox
 
     return Inbox(
         provider=provider, db=db, config=config, cold_start_lookback=lookback
@@ -197,7 +197,7 @@ async def test_a_cold_cursor_says_so_in_the_log(provider, db, config, caplog):
     has to say which channel and how far back."""
     import logging
 
-    with caplog.at_level(logging.INFO, logger="friday.inbox"):
+    with caplog.at_level(logging.INFO, logger="friday.kernel.inbox"):
         await _cold(provider, db, config, lookback=24 * 3600).sweep_once()
 
     said = "\n".join(r.getMessage() for r in caplog.records)
@@ -213,7 +213,7 @@ async def test_a_cold_cursor_is_reported_once_not_every_sweep(provider, db, conf
     import logging
 
     inbox = _cold(provider, db, config, lookback=24 * 3600)
-    with caplog_at(logging, "friday.inbox") as records:
+    with caplog_at(logging, "friday.kernel.inbox") as records:
         await inbox.sweep_once()
         await inbox.sweep_once()
         await inbox.sweep_once()

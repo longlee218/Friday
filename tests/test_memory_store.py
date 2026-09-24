@@ -4,7 +4,7 @@ Four `Database` methods, all scope-filtered by channel: `remember` staged a
 guess for a promotion pass that never ran long enough to matter (nothing wrote
 one for months); this is an agent writing directly and reading back what it
 wrote, with the floor moved from an approval count to three narrower
-guarantees — see `friday/tools/memory.py`'s module docstring for the argument.
+guarantees — see `friday/kernel/tools/memory.py`'s module docstring for the argument.
 
 These tests drive the store directly, without the tool layer: `FridayState` is
 the only shape a caller needs, and every one of the properties below has to
@@ -17,7 +17,7 @@ from __future__ import annotations
 import pytest
 
 from friday.kernel.domain.models import FridayState
-from friday.memory import registry as memory_kinds
+from friday.kernel.memory import registry as memory_kinds
 
 ROOM = FridayState(channel_id="c1", task_id=7, agent="responder")
 OTHER_ROOM = FridayState(channel_id="c2", task_id=None, agent="responder")
@@ -253,14 +253,14 @@ async def test_deleting_a_memory_frees_its_slot_at_the_cap(db):
 
 
 async def test_the_store_enforces_the_same_text_length_the_tool_advertises(db):
-    """`friday/tools/memory.py`'s `TEXT_CHARS` is what `memory_add` cuts to
+    """`friday/kernel/tools/memory.py`'s `TEXT_CHARS` is what `memory_add` cuts to
     and what its docstring quotes to the model — but the store is what a
     second caller would actually reach, the same argument
     `MEMORY_PER_CHANNEL`'s own comment already makes for the count. A store
     that did not also cut would let a caller who skips the tool write
     anything, however long."""
     from friday.store.db import Database
-    from friday.tools.memory import TEXT_CHARS
+    from friday.kernel.tools.memory import TEXT_CHARS
 
     assert Database.TEXT_CHARS == TEXT_CHARS, (
         "the tool's advertised limit and the store's enforced one must be "

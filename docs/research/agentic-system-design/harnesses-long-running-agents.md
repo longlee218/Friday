@@ -77,7 +77,7 @@ task chunking) went stale.
 ## Relevance to Friday
 
 **What the source validates directly:** the handoff-artifact pattern is the
-same shape as Friday's DAG checkpointing. `friday/dag/engine.py` checkpoints
+same shape as Friday's DAG checkpointing. `friday/sdk/workflow.py` checkpoints
 after every node and discards state when task parameters change — this is
 exactly "a structured handoff that carries the previous agent's state and the
 next steps," just automated (a DB row) instead of a file an agent writes by

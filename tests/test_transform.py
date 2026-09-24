@@ -8,7 +8,7 @@ looking for.
 
 from __future__ import annotations
 
-from friday.text.transform import Attachment, redact, render_attachments, transform
+from friday.kernel.text.transform import Attachment, redact, render_attachments, transform
 
 
 # --- code survives exactly ---------------------------------------------------
@@ -127,8 +127,8 @@ def test_the_configured_list_is_reachable_and_not_empty():
     import os
     from pathlib import Path
 
-    from friday.config import load_config
-    from friday.triage.prefilter import Sensitive
+    from friday.kernel.config import load_config
+    from friday.kernel.triage.prefilter import Sensitive
 
     for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY"):
         os.environ.setdefault(key, "test-key")
@@ -143,7 +143,7 @@ def test_a_string_where_a_list_belongs_is_refused():
     whole system going quiet."""
     import pytest
 
-    from friday.config import ConfigError, _sensitive_words
+    from friday.kernel.config import ConfigError, _sensitive_words
 
     with pytest.raises(ConfigError, match="list of words"):
         _sensitive_words("lương")
@@ -180,7 +180,7 @@ def test_the_provider_actually_calls_the_transform():
     covered and its one call site was not — which is the only part that
     decides whether any of it runs.
     """
-    from friday.providers.discord.normalise import normalise
+    from friday.kernel.providers.discord.normalise import normalise
 
     event = normalise(
         _discord_message("API lỗi nè 😭😭   anh xem giúp em với  "),
@@ -192,7 +192,7 @@ def test_the_provider_actually_calls_the_transform():
 
 
 def test_the_provider_carries_the_code_it_found():
-    from friday.providers.discord.normalise import normalise
+    from friday.kernel.providers.discord.normalise import normalise
 
     event = normalise(
         _discord_message("lỗi rồi\n```\ncurl -X GET /pay\n```"),
@@ -206,7 +206,7 @@ def test_the_provider_carries_the_code_it_found():
 
 def test_the_provider_names_the_attachments():
     """They were dropped here, at this exact call, and nowhere else."""
-    from friday.providers.discord.normalise import normalise
+    from friday.kernel.providers.discord.normalise import normalise
 
     event = normalise(
         _discord_message("cái này nè", files=[("error.png", "image/png")]),

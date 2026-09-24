@@ -86,10 +86,10 @@ corpus in the prompt with caching may beat building a RAG pipeline at all.
 Mostly, it doesn't apply, and it's worth saying so plainly rather than
 stretching for a fit. Friday has no document corpus, no vector search, and no
 embeddings anywhere in the codebase. What it calls "memory"
-(`friday/memory/`) is a SQLite table of short structured rows in five kinds
+(`friday/kernel/memory/`) is a SQLite table of short structured rows in five kinds
 (fact/constraint/finding/decision/voice), retrieved by exact filters —
 channel, task, agent, source-message identity carried on the read-only
-`FridayState` — through `friday/tools/memory.py`'s `memory_search`/
+`FridayState` — through `friday/kernel/tools/memory.py`'s `memory_search`/
 `memory_add`/etc. That's the opposite of what Contextual Retrieval solves: it
 assumes a corpus large enough that similarity search beats reading everything,
 and Friday's per-channel memory is capped at 200 rows (`D18`) specifically

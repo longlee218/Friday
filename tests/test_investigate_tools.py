@@ -50,7 +50,7 @@ def built(source=None, project=None, tag=""):
     )
     # Plugin tools are neutral `ToolSpec`s; the harness binds each to the
     # vendor's `Tool`. Bind here so the test sees what the model sees (ticket 14).
-    from friday.agent.harness import _bind_tool_spec
+    from friday.kernel.harness.harness import _bind_tool_spec
 
     return evidence, {t.name: t for t in (_bind_tool_spec(x) for x in tools)}
 
@@ -405,7 +405,7 @@ def test_a_clone_missing_the_running_tag_says_so_where_the_node_sees_it(tmp_path
 
 def _state(db_rows_written=True):
     """A run that has resolved a placement and read nothing."""
-    from friday.dag.engine import DAGState
+    from friday.sdk.workflow import DAGState
     from plugins.devops.params import ApiIssueParams
 
     return (
@@ -433,7 +433,7 @@ class Answering:
         # Plugin tools arrive as neutral `ToolSpec`s; the real harness binds
         # each to the vendor's `Tool` in its constructor, so this stand-in does
         # too — then `.name` reads the same here as it does in production.
-        from friday.agent.harness import _bind_tool_spec
+        from friday.kernel.harness.harness import _bind_tool_spec
 
         self._tools = [_bind_tool_spec(t) for t in tools or ()]
         Answering.seen = {"tools": [t.name for t in self._tools]}
@@ -474,7 +474,7 @@ async def test_an_answer_written_without_reading_anything_is_refused(db):
     pipeline the node checked there was a dossier; here nothing was fetched
     at all."""
     from plugins.devops.graph.diagnose import Diagnosis, diagnose_node
-    from friday.dag.engine import status_of
+    from friday.sdk.workflow import status_of
     from plugins.devops.graph.deps import ApiIssueDeps
     from types import SimpleNamespace
 

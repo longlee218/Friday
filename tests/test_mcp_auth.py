@@ -7,7 +7,7 @@ one**. `devops-generic` and `db-generic` authorise a person and offer no
 service account, so Friday carries the operator's session instead — which
 says plainly whose reads these are.
 
-What that costs is written in `friday/agent/auth.py` and not hidden: Friday
+What that costs is written in `friday/kernel/harness/auth.py` and not hidden: Friday
 reads as the operator, and Keycloak's log will say so. The guards that
 remain are the ones that were always doing the work — what a reader declares
 it may call, what the server filter allows, and what the database grants.
@@ -23,7 +23,7 @@ import stat
 
 import pytest
 
-from friday.agent.auth import NotAuthorised, SsoTokens, TokenStore
+from friday.kernel.harness.auth import NotAuthorised, SsoTokens, TokenStore
 
 
 class FakeToken:
@@ -260,7 +260,7 @@ def test_an_empty_auth_block_survives_being_read_out_of_the_file(tmp_path):
 
     Through the file rather than through the dataclass, because the loader
     is where they would be collapsed."""
-    from friday.config import load_config
+    from friday.kernel.config import load_config
 
     path = tmp_path / "config.yaml"
     path.write_text(
@@ -279,8 +279,8 @@ def test_an_empty_auth_block_survives_being_read_out_of_the_file(tmp_path):
 
 
 def test_a_server_with_no_auth_key_is_not_signed_in_to(tmp_path):
-    from friday.agent.mcp import _auth
-    from friday.config import MCPServerConfig
+    from friday.kernel.harness.mcp import _auth
+    from friday.kernel.config import MCPServerConfig
 
     assert _auth(MCPServerConfig(name="plain", url="https://x/mcp")) is None
     assert _auth(MCPServerConfig(name="signed", url="https://x/mcp", auth={})) is not None
@@ -289,8 +289,8 @@ def test_a_server_with_no_auth_key_is_not_signed_in_to(tmp_path):
 def test_nothing_in_the_auth_block_is_required(tmp_path):
     """What is missing at boot is the sign-in, never the configuration to go
     and do it — the sign-in writes the endpoint and the client id itself."""
-    from friday.agent.mcp import _auth
-    from friday.config import MCPServerConfig
+    from friday.kernel.harness.mcp import _auth
+    from friday.kernel.config import MCPServerConfig
 
     built = _auth(MCPServerConfig(name="devops-generic", url="https://x/mcp", auth={}))
 

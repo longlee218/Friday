@@ -69,5 +69,5 @@ class MemoryKindSpec:
     injected: bool = False
     #: `(data, given) -> key`, where `data` is the row's validated payload and
     #: `given` an operator-supplied name (only `skill` uses `given`). Read by
-    #: `friday.memory.registry.natural_key`.
+    #: `friday.kernel.memory.registry.natural_key`.
     key: Callable[[dict | None, str | None], str | None] | None = None

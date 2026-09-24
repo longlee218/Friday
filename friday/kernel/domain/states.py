@@ -86,7 +86,7 @@ def may_move(current: TaskState | str, target: TaskState | str) -> bool:
 class OutboundState(StrEnum):
     """Where an outbound row is in its life.
 
-    Here rather than in `friday/outbox/` or `friday/store/db.py`, because it
+    Here rather than in `friday/kernel/outbox/` or `friday/store/db.py`, because it
     was in both: the outbox held `QUEUED/SENT/FAILED/SENT_MANUALLY` for its
     readers and the store held `OUTBOUND_*` for its `WHERE` clauses, four
     strings written twice. Two of the outbox's four had no reader left, which

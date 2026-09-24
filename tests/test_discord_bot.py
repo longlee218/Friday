@@ -14,8 +14,8 @@ from types import SimpleNamespace
 
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.models import Outbound
-from friday.outbox import Kind
-from friday.providers.discord.bot import DiscordBot
+from friday.kernel.outbox import Kind
+from friday.kernel.providers.discord.bot import DiscordBot
 
 OPERATOR = 482447107983147039
 
@@ -192,7 +192,7 @@ async def test_telling_the_operator_about_a_row_that_belongs_to_no_task(caplog):
         kind=Kind.ALERT, sender="discord_bot", text="Alive. 27 messages held.",
     )
 
-    with caplog.at_level(logging.INFO, logger="friday.providers.discord.bot"):
+    with caplog.at_level(logging.INFO, logger="friday.kernel.providers.discord.bot"):
         assert await bot.send(alert) == "555"
 
     (line,) = [r.getMessage() for r in caplog.records]
@@ -230,7 +230,7 @@ class Pressed:
 
 
 async def press(bot: DiscordBot, custom_id: str) -> Pressed:
-    from friday.providers.discord.bot import _Buttons
+    from friday.kernel.providers.discord.bot import _Buttons
 
     interaction = Pressed(custom_id)
     await _Buttons(12, bot.handle).children[0].callback(interaction)
@@ -275,7 +275,7 @@ async def test_a_card_from_before_the_move_says_nothing_was_recorded(caplog):
         on_decision=lambda **kw: None,
     )
 
-    with caplog.at_level(logging.WARNING, logger="friday.providers.discord.bot"):
+    with caplog.at_level(logging.WARNING, logger="friday.kernel.providers.discord.bot"):
         pressed = await press(bot, "friday:approve:42")
 
     (edit,) = pressed.edits

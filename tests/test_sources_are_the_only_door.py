@@ -119,7 +119,7 @@ def test_a_source_may_not_reach_for_an_agent():
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
-                ("friday.agent", "friday.dag", "friday.tasks")
+                ("friday.kernel.harness", "friday.kernel.dag", "friday.kernel.pool")
             ):
                 reached.setdefault(name, []).append(node.module)
 

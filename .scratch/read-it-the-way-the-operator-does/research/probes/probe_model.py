@@ -21,8 +21,8 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv("/Users/longlh/Documents/Longle/friday-agents/.env")
 
-from friday.agent.harness import Harness, ToolContext, tool  # noqa: E402
-from friday.config import load_config  # noqa: E402
+from friday.kernel.harness.harness import Harness, ToolContext, tool  # noqa: E402
+from friday.kernel.config import load_config  # noqa: E402
 from friday.kernel.domain.models import FridayState  # noqa: E402
 
 CFG = load_config("/Users/longlh/Documents/Longle/friday-agents/config.yaml")

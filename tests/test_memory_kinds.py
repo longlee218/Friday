@@ -17,8 +17,8 @@ from conftest import BoardClient
 from friday.kernel.domain.memory_guard import InstructionShaped
 from friday.sdk.memory import MemoryOrigin
 from friday.kernel.domain.models import FridayState, MemoryRefused, ModelMemoryKind
-from friday.memory import registry as memory_kinds
-from friday.ops.api import build_api
+from friday.kernel.memory import registry as memory_kinds
+from friday.kernel.ops.api import build_api
 
 ROOM = FridayState(channel_id="c1", agent="responder")
 OPERATOR = FridayState(channel_id="c1", agent="operator")
@@ -188,7 +188,7 @@ def test_the_memory_tools_offer_a_model_no_kind_outside_its_five():
     kinds it must not write — as a parameter, an enum member, a const or a
     default. Descriptions are prose ("a preference the person has told you")
     and are not an offer."""
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
 
     def offered(node):
         if isinstance(node, dict):

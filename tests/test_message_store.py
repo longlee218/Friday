@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from conftest import FakeProvider, captured, make_event
 from friday.kernel.domain.conversation import ConversationId
-from friday.config import IngestConfig
-from friday.inbox import Inbox
+from friday.kernel.config import IngestConfig
+from friday.kernel.inbox import Inbox
 from friday.kernel.domain.models import MentionType
 from friday.kernel.domain.states import TaskState
 

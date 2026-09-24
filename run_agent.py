@@ -17,24 +17,24 @@ from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
 
-from friday.memory.channel_context import ContextRebuilder
-from friday.config import ConfigError, load_config
+from friday.kernel.memory.channel_context import ContextRebuilder
+from friday.kernel.config import ConfigError, load_config
 from friday.store.db import Database
-from friday.inbox import Inbox
-from friday.ops.api import bind, build_api, check_exposure
-from friday.ops.liveness import Heartbeat, Liveness
-from friday.agent.mcp import build as build_mcp, name_of
-from friday.ops.redact import Redacting, install_excepthook
-from friday.outbox import Outbox, record_decision
-from friday.ops.single_instance import single_instance_lock
-from friday.providers import CredentialRejected
-from friday.providers.discord.user import DiscordUserProvider
-from friday.providers.discord.bot import DiscordBot
-from friday.responder import Responder
-from friday.agent.skills import SkillLibrary
+from friday.kernel.inbox import Inbox
+from friday.kernel.ops.api import bind, build_api, check_exposure
+from friday.kernel.ops.liveness import Heartbeat, Liveness
+from friday.kernel.harness.mcp import build as build_mcp, name_of
+from friday.kernel.ops.redact import Redacting, install_excepthook
+from friday.kernel.outbox import Outbox, record_decision
+from friday.kernel.ops.single_instance import single_instance_lock
+from friday.kernel.providers import CredentialRejected
+from friday.kernel.providers.discord.user import DiscordUserProvider
+from friday.kernel.providers.discord.bot import DiscordBot
+from friday.kernel.responder import Responder
+from friday.kernel.harness.skills import SkillLibrary
 from friday.kernel.domain.models import ModelCall
-from friday.triage.runner import TriageRunner
-from friday.tasks.pool import Pool
+from friday.kernel.triage.runner import TriageRunner
+from friday.kernel.pool.pool import Pool
 
 log = logging.getLogger("friday")
 
@@ -95,13 +95,13 @@ async def _run(stack: AsyncExitStack) -> None:
     config = load_config()
     # Part of loading it: a graph node whose clock would cut its model's run
     # short is a configuration error, refused before anything is opened.
-    from friday.dag.router import check_graphs
+    from friday.kernel.dag.router import check_graphs
 
     check_graphs(config)
     # Memory kinds register themselves into their registry (ticket 12), which the
     # store reads for a kind's writers, schema, natural key and reader routing.
     # Filled before anything opens the database or writes a memory.
-    from friday.memory.registry import register_all_memory_kinds
+    from friday.kernel.memory.registry import register_all_memory_kinds
 
     register_all_memory_kinds(config)
     Path(config.database_path).parent.mkdir(parents=True, exist_ok=True)
@@ -228,8 +228,8 @@ async def _run(stack: AsyncExitStack) -> None:
     # Register the workflow's extraction agents. Composition root does not
     # know about each one — it asks the extractor module to wire itself
     # from config. Adding a new extractor is a change in
-    # `friday/extraction/`, not here.
-    from friday.extraction import register_extractors
+    # `friday/kernel/extraction/`, not here.
+    from friday.kernel.extraction import register_extractors
 
     register_extractors(
         config,
@@ -242,7 +242,7 @@ async def _run(stack: AsyncExitStack) -> None:
     # the same reason: which task types have a graph is the graph module's
     # business, not this one's. Registration is explicit rather than a side
     # effect of importing, so a test can choose the path it exercises.
-    from friday.dag.router import register_dags
+    from friday.kernel.dag.router import register_dags
 
     register_dags(
         config,
@@ -258,7 +258,7 @@ async def _run(stack: AsyncExitStack) -> None:
         db=db,
     )
 
-    from friday.workflow import adapter
+    from friday.kernel.dag import adapter
 
     # The outbox and its senders are built *before* DBOS launches, for the same
     # reason the graphs are registered before it (ticket 07): launch recovers

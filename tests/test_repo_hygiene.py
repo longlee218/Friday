@@ -129,7 +129,7 @@ def test_doc_paths_resolve_to_existing_files() -> None:
     # **The directory prefix has to be followed by a separator**, and that is
     # the whole of what this pattern got wrong for a while: without it,
     # `friday` matched the *dotted module* names this file writes on purpose
-    # (`friday.triage.prompt`), and `docs` matched the first four letters of
+    # (`friday.kernel.triage.prompt`), and `docs` matched the first four letters of
     # `docstring_style`. Six false positives, none of them a path, and a red
     # suite that told every later change the repo was broken.
     import re
@@ -158,7 +158,7 @@ def test_doc_paths_resolve_to_existing_files() -> None:
 
 
 def test_only_config_knows_where_the_message_age_cutoff_lives() -> None:
-    """`friday/config.py`'s `message_age_cutoff` says it is "the only place
+    """`friday/kernel/config.py`'s `message_age_cutoff` says it is "the only place
     that knows where it lives", and until this test that was a sentence
     rather than a fact.
 
@@ -183,7 +183,7 @@ def test_only_config_knows_where_the_message_age_cutoff_lives() -> None:
             if isinstance(node, ast.Constant) and node.value == "max_message_age":
                 offenders.append(f"{path.relative_to(ROOT)}:{node.lineno}")
     assert not offenders, (
-        "the cutoff's config key is named outside friday/config.py: "
+        "the cutoff's config key is named outside friday/kernel/config.py: "
         f"{offenders}. Call `message_age_cutoff(config)` instead — see its "
         "docstring."
     )

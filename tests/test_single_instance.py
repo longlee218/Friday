@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.ops.single_instance import single_instance_lock
+from friday.kernel.ops.single_instance import single_instance_lock
 
 
 def test_a_second_agent_refuses_to_start(tmp_path):

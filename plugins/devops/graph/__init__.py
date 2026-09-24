@@ -9,7 +9,7 @@ imports `friday.sdk` only, so this builder never reaches for the kernel's
 `prepare_node` or the `Harness` class: it asks `caps.prepare_node(...)` for
 node 0 and `caps.make_harness(...)` for the model behind `Diagnose`. `caps` also
 carries the tool servers a run opened and the `sender`/`approver` identities a
-queued row uses. Ticket 14 lifted this package out of `friday/dag/api_issue/`
+queued row uses. Ticket 14 lifted this package out of `friday/kernel/dag/api_issue/`
 into `plugins/devops/` unchanged in shape, only in where it reaches for things.
 """
 

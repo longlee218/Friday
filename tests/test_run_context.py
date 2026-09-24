@@ -86,7 +86,7 @@ def test_nothing_writes_into_the_run_context():
     Matched on the *shape* of the assignment rather than on the name `ctx`,
     since the parameter can be called anything — which makes it deliberately
     broad: any store through an attribute named `context` fires, including one
-    that has nothing to do with a run (`friday/dag/prepare.py` calls a
+    that has nothing to do with a run (`friday/kernel/dag/prepare.py` calls a
     `FullContext` `context`). That is the right way round for this particular
     guard, because a false positive here is a rename or a conversation and a
     false negative is the side channel coming back. The message says what it
@@ -130,7 +130,7 @@ def _walks_through_context(node: ast.expr) -> bool:
 #: **What this misses, and why it is not chased.** A local alias
 #: (`state = ctx.context` then `state.decided = x`) is invisible to it, and so
 #: are `setattr` and mutation by method call. Two reviews found the alias
-#: independently, and it is the likeliest of the three — `friday/tools/memory.py`
+#: independently, and it is the likeliest of the three — `friday/kernel/tools/memory.py`
 #: already opens with `state = getattr(ctx, "context", None)`, so it is the
 #: shape a tool author has in front of them.
 #:

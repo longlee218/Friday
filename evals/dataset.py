@@ -127,7 +127,7 @@ def unfit(examples: Sequence[Example]) -> list[str]:
     decision with no row at all, a set that never shows the classifier a turn,
     and a row that counts twice.
     """
-    from friday.dag import registry
+    from friday.kernel.dag import registry
 
     problems = []
 

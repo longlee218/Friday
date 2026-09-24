@@ -3,7 +3,7 @@
     uv run authorize.py devops-generic
 
 Opens the operator's browser at Keycloak, waits for the redirect, exchanges
-the code, and writes the **refresh token** where `friday.agent.auth` will
+the code, and writes the **refresh token** where `friday.kernel.harness.auth` will
 find it. Everything after that is `run_agent.py` refreshing on its own.
 
 **A command rather than a startup step.** The sign-in needs a person and a
@@ -33,8 +33,8 @@ from typing import Any
 import httpx2
 from dotenv import load_dotenv
 
-from friday.agent.auth import TokenStore
-from friday.config import load_config
+from friday.kernel.harness.auth import TokenStore
+from friday.kernel.config import load_config
 
 
 def pkce() -> tuple[str, str]:

@@ -1,7 +1,7 @@
 """What `Diagnose` is told, and what it is shown.
 
-Beside the node rather than in `friday/agent/`, because a graph owns its own
-prompts (`friday/dag/__init__.py`). Assembled from the same sections every
+Beside the node rather than in `friday/kernel/harness/`, because a graph owns its own
+prompts (`friday/kernel/dag/__init__.py`). Assembled from the same sections every
 other agent's prompt is, so a change to how an agent is addressed reaches
 this one too — a prompt written by hand here is the fourth unwrapped prompt
 this repository has had to go back and wrap.

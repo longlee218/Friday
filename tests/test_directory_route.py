@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from friday.ops.api import build_api
+from friday.kernel.ops.api import build_api
 
 
 def board(db, root=None) -> TestClient:

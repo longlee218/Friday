@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from friday.ops.redact import scrub, scrubbed_traceback
+from friday.kernel.ops.redact import scrub, scrubbed_traceback
 
 SECRET = "sk-abcdefghijklmnopqrstuvwxyz01"
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,7 +47,7 @@ def test_a_crash_does_not_print_the_token(tmp_path):
     through a logging filter, so the filter alone does not cover this."""
     script = tmp_path / "crash.py"
     script.write_text(
-        "from friday.ops.redact import install_excepthook\n"
+        "from friday.kernel.ops.redact import install_excepthook\n"
         "install_excepthook()\n"
         f"raise RuntimeError('crashed with Bearer {SECRET}')\n"
     )
@@ -72,7 +72,7 @@ def test_a_crash_in_a_thread_is_scrubbed_too(tmp_path):
     script = tmp_path / "thread_crash.py"
     script.write_text(
         "import threading\n"
-        "from friday.ops.redact import install_excepthook\n"
+        "from friday.kernel.ops.redact import install_excepthook\n"
         "install_excepthook()\n"
         f"t = threading.Thread(target=lambda: 1 / 0 if False else (_ for _ in ()).throw(RuntimeError('Bearer {SECRET}')))\n"
         "t.start(); t.join()\n"
@@ -101,7 +101,7 @@ def _rendered(emit) -> str:
     import io
     import logging
 
-    from friday.ops.redact import Redacting
+    from friday.kernel.ops.redact import Redacting
 
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)

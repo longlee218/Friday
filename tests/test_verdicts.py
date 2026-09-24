@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import make_event
 
-from friday.memory.verdicts import Mark, mark_for
+from friday.kernel.memory.verdicts import Mark, mark_for
 
 
 # --- what a reaction means --------------------------------------------------
@@ -178,7 +178,7 @@ class FakeClient:
 
 
 def _provider():
-    from friday.providers.discord.user import DiscordUserProvider
+    from friday.kernel.providers.discord.user import DiscordUserProvider
 
     return DiscordUserProvider("token", client=FakeClient())
 
@@ -267,7 +267,7 @@ async def test_nothing_happens_when_nobody_is_listening():
 def test_no_examples_means_no_examples():
     """A fresh install has nothing marked, and stays that way until somebody
     reacts. The instructions must not grow an empty heading."""
-    from friday.triage.prompt import build_instructions
+    from friday.kernel.triage.prompt import build_instructions
 
     # No examples means no examples section at all — not an empty tag for the
     # model to read as "there were examples, and none of them". Hardcoding a
@@ -282,7 +282,7 @@ def test_examples_are_rendered_with_what_they_turned_out_to_be():
     helper was a wrapper that only delegated to `few_shot`, and a test against
     it proved the wrapper worked rather than that the examples reach the
     model."""
-    from friday.triage.prompt import build_instructions
+    from friday.kernel.triage.prompt import build_instructions
 
     built = build_instructions([("checkout is 500ing", "devops.api_issue")])
 
@@ -299,7 +299,7 @@ async def test_removing_an_old_reaction_does_not_delete_the_newer_mark(db):
     up by removing the ✅. Discord does not remove the old one for you. A
     clear-on-any-removal would throw away the ❌ that is still on the message
     and leave the classification unmarked while it visibly is not."""
-    from friday.memory.verdicts import Mark
+    from friday.kernel.memory.verdicts import Mark
 
     async def marked(*, provider_message_id, mark, by, taking_back):
         current = await db.verdict_for(

@@ -19,17 +19,17 @@ import asyncio
 import pytest
 
 from conftest import ScriptedHarness
-from friday.agent.harness import Harness, Refused
+from friday.kernel.harness.harness import Harness, Refused
 from dataclasses import dataclass, field
 from typing import Optional
 
-from friday.extraction import (
+from friday.kernel.extraction import (
     build_extractor,
     extract,
     registered,
 )
-from friday.extraction.answer import answer_shape
-from friday.extraction.context import FullContext
+from friday.kernel.extraction.answer import answer_shape
+from friday.kernel.extraction.context import FullContext
 from friday.sdk.validation import Matches
 
 
@@ -50,7 +50,7 @@ def _context(text="", params_cls=None, *, asked=(), memories=(), known=None):
 #: it was asked for — which is the guessing this change removes: an answer
 #: that is not the declared shape earns one correction turn now, not an
 #: interpretation. What remains of the old `_json_object` is
-#: `friday/agent/structured.py`'s `find_json`, covered by
+#: `friday/kernel/harness/structured.py`'s `find_json`, covered by
 #: `tests/test_structured.py`, because a fenced reply after a `<think>` block
 #: is what the provider actually returns and reading that is not guesswork.
 
@@ -112,7 +112,7 @@ def test_registering_twice_replaces_rather_than_raises():
         _install("replaced_test_31", ext)
         assert registered()["replaced_test_31"] is ext
     finally:
-        from friday.extraction import _EXTRACTORS
+        from friday.kernel.extraction import _EXTRACTORS
 
         _EXTRACTORS.pop("replaced_test_31", None)
 
@@ -242,9 +242,9 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
     """
     from friday.sdk.testing import ScriptedModel, function_call
 
-    from friday.config import AgentConfig
+    from friday.kernel.config import AgentConfig
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.answer import Clarify, answer_shape
+    from friday.kernel.extraction.answer import Clarify, answer_shape
 
     ext = build_extractor(
         params_cls=ApiIssueParams,
@@ -286,9 +286,9 @@ async def test_asking_about_nothing_is_not_a_request_with_no_fields_in_it():
     a request either — the fields are what a question gets built from."""
     from friday.sdk.testing import ScriptedModel, function_call
 
-    from friday.config import AgentConfig
+    from friday.kernel.config import AgentConfig
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.answer import answer_shape
+    from friday.kernel.extraction.answer import answer_shape
 
     ext = build_extractor(
         params_cls=ApiIssueParams,
@@ -327,11 +327,11 @@ def test_an_extractor_cannot_ask_about_a_field_that_does_not_exist():
     messages this system has ever sent asking for one had to teach the
     reporter where to look.
     """
-    from friday.agent.harness import _answer_params
+    from friday.kernel.harness.harness import _answer_params
     from friday.kernel.domain.models import AccessRequestParams
     from plugins.docs.params import DocQuestionParams
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.answer import answer_shape
+    from friday.kernel.extraction.answer import answer_shape
 
     for params_cls, askable in (
         (ApiIssueParams, {"environment", "response", "endpoint", "identifier", "curl"}),
@@ -349,9 +349,9 @@ async def test_a_field_the_type_does_not_have_is_refused_rather_than_asked_about
     what makes this safe is that the arguments are validated in this process,
     and an invented name costs the model its correction turn rather than
     costing the reporter a question about nothing."""
-    from friday.agent.structured import fits
+    from friday.kernel.harness.structured import fits
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.answer import answer_shape
+    from friday.kernel.extraction.answer import answer_shape
 
     value, problem = fits({"ask_about": ["deployment_colour"]}, answer_shape(ApiIssueParams))
 
@@ -378,8 +378,8 @@ def test_one_extractor_block_serves_every_classifiable_type():
     """
     import os
 
-    from friday.config import load_config
-    from friday.dag import registry
+    from friday.kernel.config import load_config
+    from friday.kernel.dag import registry
 
     for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY"):
         os.environ.setdefault(key, "test-key")
@@ -401,9 +401,9 @@ def test_register_extractors_covers_every_registered_task_type():
     import os
     from pathlib import Path
 
-    from friday.config import load_config
-    from friday.dag import registry
-    from friday.extraction import register_extractors, registered
+    from friday.kernel.config import load_config
+    from friday.kernel.dag import registry
+    from friday.kernel.extraction import register_extractors, registered
 
     for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY", "EXTRACTOR_API_KEY"):
         os.environ.setdefault(key, "test-key")
@@ -422,7 +422,7 @@ def test_the_string_null_is_treated_as_absent():
     often enough that an unnormalised value is mistaken for a real one, and a
     workflow that believes it has a correlationId never asks for the one it
     needs. The check used to live in triage, which no longer produces values."""
-    from friday.extraction import _hygiene
+    from friday.kernel.extraction import _hygiene
     from plugins.devops.params import ApiIssueParams
 
     cleaned = _hygiene(
@@ -437,7 +437,7 @@ def test_the_string_null_is_treated_as_absent():
 
 
 def test_values_are_trimmed():
-    from friday.extraction import _hygiene
+    from friday.kernel.extraction import _hygiene
     from plugins.docs.params import DocQuestionParams
 
     assert _hygiene(DocQuestionParams("  is it optional?  ")).question == (
@@ -454,7 +454,7 @@ def _install(task_type, ext):
     and could not: the composition root may run twice in one process, and the
     second run has to replace the first rather than raise.
     """
-    from friday.extraction import _EXTRACTORS
+    from friday.kernel.extraction import _EXTRACTORS
 
     _EXTRACTORS[task_type] = ext
 
@@ -467,7 +467,7 @@ def test_every_extraction_field_tells_the_model_what_it_means():
     and were deleted with them instead of moved here."""
     from dataclasses import fields as dataclass_fields
 
-    from friday.dag import registry
+    from friday.kernel.dag import registry
 
     undocumented = [
         f"{cls.__name__}.{f.name}"
@@ -481,7 +481,7 @@ def test_every_extraction_field_tells_the_model_what_it_means():
 
 def test_the_doc_reaches_the_extractors_prompt():
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     prompt = build_input(_context("API lỗi", ApiIssueParams))
 
@@ -494,7 +494,7 @@ def test_the_doc_reaches_the_extractors_prompt():
 
 def test_a_field_already_known_drops_out_of_the_schema():
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     known = ApiIssueParams(environment="production")
 
@@ -511,7 +511,7 @@ def test_a_freshly_constructed_known_shows_every_field():
     now. A room with no rows already gets the same guarantee for
     `room_facts`."""
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     prompt = build_input(_context("API lỗi", ApiIssueParams))
 
@@ -524,7 +524,7 @@ def test_an_empty_string_field_is_not_treated_as_known():
     applies here too: a field the model once wrote `""` for is still blank
     and still worth asking the schema to name."""
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     known = ApiIssueParams(environment="")
 
@@ -539,7 +539,7 @@ async def test_a_model_that_could_not_answer_is_not_a_refusal():
     the reporter about; a call we declined to make is not."""
     from dataclasses import dataclass as _dataclass
 
-    from friday.extraction import build_extractor
+    from friday.kernel.extraction import build_extractor
 
     class Refuses(ScriptedHarness):
         tool_turns = 0
@@ -586,7 +586,7 @@ def test_a_room_with_no_rows_leaves_the_prompt_exactly_as_it_was():
     written anything about, and "not much" is not the same as "not at all":
     every extractor in every unconfigured install shares this prefix."""
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     said = build_input(_context("API lỗi", ApiIssueParams, memories=()))
 
@@ -602,7 +602,7 @@ def test_the_rooms_facts_reach_the_input_and_not_the_instructions():
     every conversation, so a room's facts could not live there even if the
     authority question did not settle it."""
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input, build_instructions
+    from friday.kernel.extraction.prompt import build_input, build_instructions
 
     said = build_input(
         _context("API lỗi", ApiIssueParams, memories=_rows("test.apero: staging"))
@@ -617,7 +617,7 @@ def test_the_rooms_facts_arrive_through_the_memory_section():
     """Criterion: "through the existing memory section builder's channel
     slot, which gains its first caller since it was written"."""
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     said = build_input(
         _context("API lỗi", ApiIssueParams, memories=_rows("register: thân mật"))
@@ -633,7 +633,7 @@ def test_the_field_schema_comes_before_the_room():
     across every call that agent makes and the room is not. Putting the room
     first would break the shared prefix for every conversation but one."""
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     said = build_input(
         _context("API lỗi", ApiIssueParams, memories=_rows("register: thân mật"))
@@ -649,7 +649,7 @@ def test_what_the_operator_wrote_is_labelled_apart_from_what_a_model_did():
     everywhere, under one label and first, a model's under another, and
     nothing dropped — a mutation that lost one kind of row stays red."""
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     said = build_input(
         _context(
@@ -676,7 +676,7 @@ def test_outstanding_questions_reach_the_conversation_slot_not_the_channel():
     — this room, and this exchange. Ticket 01 filled the channel slot with the
     room's facts; a question this task already asked is about the exchange."""
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     said = build_input(
         _context("API lỗi", ApiIssueParams, asked=("em gửi anh curl với",))
@@ -691,7 +691,7 @@ def test_a_task_that_asked_nothing_renders_no_such_content():
     """Absent contributes nothing, not an empty heading — and the prompt of a
     task nobody has asked anything stays what it was."""
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     assert build_input(_context("API lỗi", ApiIssueParams, asked=())) == build_input(
         _context("API lỗi", ApiIssueParams)
@@ -702,7 +702,7 @@ def test_the_room_and_the_outstanding_questions_are_both_labelled():
     """Both slots at once, each still saying which is which — the property
     `memory()` was written for and the reason it is one section."""
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.prompt import build_input
+    from friday.kernel.extraction.prompt import build_input
 
     said = build_input(
         _context(
@@ -758,10 +758,10 @@ async def test_a_skill_fetch_and_a_correction_both_fit_in_one_extraction():
     """
     from friday.sdk.testing import ScriptedModel, function_call
 
-    from friday.agent.skills import SkillLibrary
-    from friday.config import AgentConfig
+    from friday.kernel.harness.skills import SkillLibrary
+    from friday.kernel.config import AgentConfig
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction.answer import answer_shape
+    from friday.kernel.extraction.answer import answer_shape
     from pathlib import Path
 
     library = SkillLibrary(Path(__file__).resolve().parents[1] / "skills").load()

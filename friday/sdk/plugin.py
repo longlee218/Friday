@@ -48,7 +48,7 @@ class TaskTypeSpec:
     name: str
     params: type
     #: Builds node 0's parameter extractor for a run. Its return is the
-    #: `Extractor` in `friday.extraction`, typed `Any` here because the sdk
+    #: `Extractor` in `friday.kernel.extraction`, typed `Any` here because the sdk
     #: holds the contract, not the runner — importing the extraction stack into
     #: a contracts-only module would invert the dependency the kernel owns.
     extractor: Callable[[Deps], Any] | None = None

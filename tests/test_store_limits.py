@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from conftest import captured, make_event
 from friday.kernel.domain.conversation import ConversationId
-from friday.outbox import Kind
+from friday.kernel.outbox import Kind
 from friday.kernel.domain.states import TaskState
 
 WATCHED = ConversationId("fake", "watched")

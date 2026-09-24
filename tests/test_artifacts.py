@@ -1,7 +1,7 @@
 """Board `what-the-room-already-knows`, ticket 07 — verbatim material
 becomes an artifact the build points at (D8).
 
-`friday.text.transform.transform` has always split code out of a message's
+`friday.kernel.text.transform.transform` has always split code out of a message's
 prose; what it lifted out was reinserted into `text` and then forgotten —
 `InboundEvent.code` reached `record_message` and stopped there, a producer
 with no consumer. This is the consumer: each span becomes its own
@@ -200,8 +200,8 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
     end-to-end tests through."""
     from conftest import ScriptedHarness
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction import build_extractor
-    from friday.extraction.answer import answer_shape
+    from friday.kernel.extraction import build_extractor
+    from friday.kernel.extraction.answer import answer_shape
     from tests.test_extraction import _context
 
     conversation = ConversationId("fake", "watched")
@@ -363,9 +363,9 @@ async def test_a_named_artifact_becomes_the_parameter_byte_for_byte(db):
     """The end this ticket exists for: what the model names, code copies."""
     from conftest import ScriptedHarness
     from plugins.devops.params import ApiIssueParams
-    from friday.extraction import build_extractor
-    from friday.extraction.answer import answer_shape
-    from friday.dag.prepare import resolve_artifacts
+    from friday.kernel.extraction import build_extractor
+    from friday.kernel.extraction.answer import answer_shape
+    from friday.kernel.dag.prepare import resolve_artifacts
     from tests.test_extraction import _context
 
     conversation = ConversationId("fake", "watched")
@@ -404,7 +404,7 @@ async def test_a_parameter_that_names_no_artifact_is_left_alone(db):
     """A reporter who typed their curl inline rather than in a fence has no
     artifact, and what the model copied is all there is."""
     from plugins.devops.params import ApiIssueParams
-    from friday.dag.prepare import resolve_artifacts
+    from friday.kernel.dag.prepare import resolve_artifacts
 
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
@@ -456,7 +456,7 @@ async def test_an_artifact_never_stores_the_reporters_token(db):
 async def test_the_token_reaches_neither_the_prompt_nor_the_parameters(db):
     """The two places finding C names that `scrub` did not cover: the prompt
     sent to the provider, and the task's stored parameters."""
-    from friday.dag.prepare import resolve_artifacts
+    from friday.kernel.dag.prepare import resolve_artifacts
     from plugins.devops.params import ApiIssueParams
 
     conversation = ConversationId("fake", "watched")

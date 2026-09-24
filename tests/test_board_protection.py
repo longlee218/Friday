@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from friday.ops.api import build_api
+from friday.kernel.ops.api import build_api
 
 A_FACT = {"kind": "fact", "text": "the office is in district one"}
 
@@ -54,7 +54,7 @@ def test_the_session_secret_is_minted_per_process(db):
     """"Minted at startup" means each process gets its own random secret, not a
     fixed value baked into the code — two separately built apps hand out two
     different tokens."""
-    from friday.ops.api import build_api
+    from friday.kernel.ops.api import build_api
 
     one = TestClient(build_api(db=db, provider_status=lambda: "x"), base_url="http://127.0.0.1")
     two = TestClient(build_api(db=db, provider_status=lambda: "x"), base_url="http://127.0.0.1")

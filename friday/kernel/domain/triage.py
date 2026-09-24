@@ -28,7 +28,7 @@ __all__ = ["Decided", "NeedsHuman", "TriageOutcome", "make_decided"]
 #: a fourth thing to write down — and `skip`'s line is written here because it
 #: is the one decision with no class behind it.
 #:
-#: This text was in `friday/tools/classify.py`, split across a tool docstring
+#: This text was in `friday/kernel/tools/classify.py`, split across a tool docstring
 #: and a second tool that existed only to say `skip`. It is one string now, on
 #: the field it describes, the way every extraction field's `doc` already is.
 def _means(name: str, params_cls: type) -> str:
@@ -85,7 +85,7 @@ class Decided:
     stops. Lifting values out of the message is a different job with a
     different failure mode, it belongs to whoever needs those values, and
     doing both there meant two producers for one set of fields and a merge to
-    reconcile them. See `friday/extraction/`.
+    reconcile them. See `friday/kernel/extraction/`.
 
     **The value type carries a bare `type: str`** (ticket 11). The *closed set*
     the model is held to is not baked in here — it is every registered task type
@@ -168,8 +168,8 @@ class NeedsHuman:
     out_of_set: bool = False
 
 
-#: What a classification comes to. Here rather than in `friday/triage/`
-#: because the tool that produces it lives in `friday/tools/`, and a tool
+#: What a classification comes to. Here rather than in `friday/kernel/triage/`
+#: because the tool that produces it lives in `friday/kernel/tools/`, and a tool
 #: importing the module that imports it is the cycle ticket 01 took out of
 #: `Ask`/`Reply`/`HandOver` for exactly this reason.
 TriageOutcome = Decided | NeedsHuman

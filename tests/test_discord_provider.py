@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from friday.kernel.domain.conversation import ConversationId
-from friday.providers import Provider
-from friday.providers.discord.user import DiscordUserProvider
+from friday.kernel.providers import Provider
+from friday.kernel.providers.discord.user import DiscordUserProvider
 
 
 def test_the_message_handler_is_bound_where_dispatch_will_find_it():
@@ -234,7 +234,7 @@ def test_the_unofficial_library_stays_in_one_module():
     """
     import subprocess
 
-    allowed = {"friday/providers/discord/user.py"}
+    allowed = {"friday/kernel/providers/discord/user.py"}
     hits = subprocess.run(
         ["grep", "-rlE", r"^\s*(from discord_self|import discord_self)\b", "friday/"],
         capture_output=True, text=True,

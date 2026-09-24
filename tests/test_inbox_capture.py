@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 import pytest
 
 from conftest import captured, make_event
-from friday.config import IngestConfig
-from friday.inbox import Inbox
+from friday.kernel.config import IngestConfig
+from friday.kernel.inbox import Inbox
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.models import MentionType
 
@@ -134,7 +134,7 @@ async def test_an_unwatched_channel_is_reported_as_the_reason_for_dropping(
 
     provider.emit(make_event(message_id="m1", channel_id="elsewhere"))
 
-    with caplog.at_level(logging.DEBUG, logger="friday.inbox"):
+    with caplog.at_level(logging.DEBUG, logger="friday.kernel.inbox"):
         await captured(inbox)
 
     assert "channel elsewhere is not watched" in caplog.text
@@ -200,7 +200,7 @@ async def test_an_unknown_channel_has_no_cursor(db):
 
 async def test_cursors_survive_a_restart(tmp_path, provider, config):
     from friday.store.db import Database
-    from friday.inbox import Inbox
+    from friday.kernel.inbox import Inbox
 
     path = str(tmp_path / "friday.db")
     first = await Database.connect(path, create=True)
@@ -320,7 +320,7 @@ async def test_a_reply_to_something_we_posted_is_in_scope(provider, db, config):
     ever and the cap on re-asking never fired, because no follow-up ever
     arrived. Found by the operator, in a real thread, on the third message.
     """
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     row = await db.queue_outbound(
         task_id=None,
@@ -371,7 +371,7 @@ async def test_a_reply_we_accepted_actually_reaches_the_queue(db, provider, conf
     away. The message was accepted, stored as work, and never queued: the
     agent asked, the reporter answered, and the answer sat in the table.
     """
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     row = await db.queue_outbound(
         task_id=None,
@@ -422,7 +422,7 @@ async def test_a_message_this_process_posted_is_never_work_whichever_identity_se
     so the echo cannot beat the outbox's write. Ticket 37 removed its only
     caller and left it dead.
     """
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     task = await db.create_task(
         conversation=ConversationId("fake", "watched"),
@@ -458,7 +458,7 @@ async def test_our_own_message_is_recognised_before_the_outbox_records_its_id(
     """The race `we_sent` was written to close: the outbox posts, the gateway
     delivers our own message back, and only then does the outbox record the id
     it got. In that window the id says nothing, so the text has to answer."""
-    from friday.outbox import Kind
+    from friday.kernel.outbox import Kind
 
     task = await db.create_task(
         conversation=ConversationId("fake", "watched"),

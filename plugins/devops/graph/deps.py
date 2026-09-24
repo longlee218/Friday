@@ -33,7 +33,7 @@ __all__ = ["ApiIssueDeps"]
 
 @dataclass(frozen=True, slots=True)
 class ApiIssueDeps(Deps):
-    #: The two identities a mid-run row is queued as (`friday.outbox`): `sender`
+    #: The two identities a mid-run row is queued as (`friday.kernel.outbox`): `sender`
     #: posts into the reporter's channel as the watched account; `approver`
     #: direct-messages the operator. Required — see the module docstring.
     sender: str = field(kw_only=True)

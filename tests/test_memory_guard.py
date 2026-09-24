@@ -132,7 +132,7 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
     reach `harness._tool_failed`'s generic swallow — a model told "that tool
     is unavailable" learns nothing about why, and would only try again."""
 
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
 
     class Store:
         async def memory_add(self, scope, text, kind):
@@ -153,7 +153,7 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
 
 
 async def test_the_update_tool_also_tells_the_model_why():
-    from friday.tools.memory import memory_tools
+    from friday.kernel.tools.memory import memory_tools
 
     class Store:
         async def memory_update(self, scope, memory_id, text):
@@ -180,7 +180,7 @@ async def test_the_api_route_answers_422_with_the_reason(db):
     now (ticket 10)."""
     from conftest import BoardClient
 
-    from friday.ops.api import build_api
+    from friday.kernel.ops.api import build_api
 
     client = BoardClient(
         build_api(db=db, provider_status=lambda: "connected", origins=["http://x"])

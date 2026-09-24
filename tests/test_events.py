@@ -11,8 +11,8 @@ import asyncio
 
 import pytest
 
-from friday.ops import events as events_module
-from friday.ops.events import EventBus
+from friday.kernel.ops import events as events_module
+from friday.kernel.ops.events import EventBus
 
 
 @pytest.fixture(autouse=True)
@@ -95,7 +95,7 @@ async def test_bus_singleton_returns_same_instance() -> None:
     """The module-level `get_bus` is the seam between `Database`
     writers and the SSE endpoint. Two calls must return the same
     bus, otherwise a writer publishes into the void."""
-    from friday.ops.events import get_bus
+    from friday.kernel.ops.events import get_bus
 
     assert get_bus() is get_bus()
 
@@ -112,7 +112,7 @@ async def test_slow_subscriber_does_not_block_others() -> None:
     # `put_nowait` so the slow queue fills without going through
     # the bus at all — the bus would have also dropped the events
     # into the fast subscriber.
-    from friday.ops.events import REPLAY_LIMIT
+    from friday.kernel.ops.events import REPLAY_LIMIT
     filler = bus.publish("x", {})
     for _ in range(REPLAY_LIMIT):
         try:

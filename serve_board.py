@@ -26,10 +26,10 @@ import asyncio
 import uvicorn
 from dotenv import load_dotenv
 
-from friday.ops.api import bind, build_api, check_exposure
-from friday.config import load_config
+from friday.kernel.ops.api import bind, build_api, check_exposure
+from friday.kernel.config import load_config
 from friday.store.db import Database
-from friday.triage.runner import TriageRunner
+from friday.kernel.triage.runner import TriageRunner
 
 
 async def main() -> None:
@@ -37,7 +37,7 @@ async def main() -> None:
     config = load_config()
     # The board's memory form reads the kind registry (ticket 12); fill it so a
     # board served on its own offers the same kinds the agent's does.
-    from friday.memory.registry import register_all_memory_kinds
+    from friday.kernel.memory.registry import register_all_memory_kinds
 
     register_all_memory_kinds()
     check_exposure(config.board_host)

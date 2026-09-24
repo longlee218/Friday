@@ -28,17 +28,27 @@ ROOT = Path(__file__).resolve().parent.parent
 #: not carry.
 CORE_KINDS = {"fact", "constraint", "decision", "voice", "summary", "finding", "person", "skill"}
 
+#: The in-core task types — registered by the kernel itself (`kernel/dag/
+#: task_types.py`'s `register_all`), not shipped by a plugin. `access_request` is
+#: the one simple type the kernel owns, so its name legitimately appears in the
+#: kernel; only a *plugin's* task type is a literal the kernel must not carry.
+#: The parallel of `CORE_KINDS` for task types, and it keeps the guard
+#: non-vacuous — `devops.api_issue`/`docs.doc_question` stay forbidden.
+CORE_TASK_TYPES = {"access_request"}
+
 
 def _forbidden_literals() -> set[str]:
-    """The literals G1 forbids inside `friday/kernel`: a task type's name or a
-    pack kind's name hardcoded there is the core knowing a plugin by name. Both
+    """The literals G1 forbids inside `friday/kernel`: a *plugin's* task type or
+    pack kind name hardcoded there is the core knowing a plugin by name. Both
     come from their registries (the autouse fixture fills them), not a
-    hand-maintained catalog — the point of tickets 11 and 12."""
-    from friday.dag import registry
-    from friday.memory import registry as memory_registry
+    hand-maintained catalog — the point of tickets 11 and 12 — minus the ids the
+    kernel legitimately owns (`CORE_KINDS`, `CORE_TASK_TYPES`)."""
+    from friday.kernel.dag import registry
+    from friday.kernel.memory import registry as memory_registry
 
     pack_kinds = set(memory_registry.kinds()) - CORE_KINDS
-    return set(registry.decision_params()) | pack_kinds
+    plugin_task_types = set(registry.decision_params()) - CORE_TASK_TYPES
+    return plugin_task_types | pack_kinds
 
 
 def _modules(base: Path) -> list[tuple[str, ast.Module]]:
@@ -92,16 +102,27 @@ def test_sdk_imports_nothing_of_ours():
     assert offenders == set(), f"sdk reached outside itself: {sorted(offenders)}"
 
 
+#: The one interim exception to "kernel imports only sdk". The store is a
+#: top-level sibling of the kernel in DESIGN-v2's tree, and the kernel's write
+#: paths (the pool, the memory writers, the outbox) reach it directly until
+#: **ticket 16** puts it behind a `Database` facade in the sdk — at which point
+#: the kernel imports the facade type from `sdk` and the composition root injects
+#: the concrete store, and this exception is deleted. Expand-contract on the
+#: guard itself: it stays non-vacuous meanwhile — the kernel still may not import
+#: a plugin, and still may not reach any `friday.*` outside sdk/kernel/store.
+_KERNEL_INTERIM = ("friday.store",)
+
+
 def test_kernel_imports_only_sdk():
-    """`kernel` builds on `sdk` (and itself). It must not reach into a plugin or
-    the application modules that are being pulled out from under it."""
+    """`kernel` builds on `sdk` (and itself, and — until ticket 16 — the store).
+    It must not reach into a plugin or any other application module."""
     offenders = {
         (rel, mod)
         for rel, tree in _modules(ROOT / "friday" / "kernel")
         for mod in _friday_imports(rel, tree)
-        if not _under(mod, "friday.sdk", "friday.kernel")
+        if not _under(mod, "friday.sdk", "friday.kernel", *_KERNEL_INTERIM)
     }
-    assert offenders == set(), f"kernel imported something other than sdk: {sorted(offenders)}"
+    assert offenders == set(), f"kernel imported something other than sdk (or the store): {sorted(offenders)}"
 
 
 def test_a_plugin_imports_sdk_only():
