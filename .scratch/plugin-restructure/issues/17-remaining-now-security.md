@@ -2,7 +2,7 @@
 
 **What to build:** The security controls DESIGN-v2 §12 marks "now" are in place — the approval card tells the whole truth, the audit log records who did what, secrets are redacted by value, and MCP children get only what they were given.
 
-**Blocked by:** 14.
+**Blocked by:** 14, 21 (the kernel-consolidation track 19→20→21 lands first, so these controls are added to the consolidated `kernel/` rather than the old scattered layout).
 
 **Status:** ready-for-agent
 

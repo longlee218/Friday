@@ -2,7 +2,7 @@
 
 **What to build:** Kernel invariants leave `db.py` — the store becomes a set of repositories behind the `Database` facade, and the outbox and memory-write invariants live in kernel code, not inside the store.
 
-**Blocked by:** 07, 14.
+**Blocked by:** 07, 14, 21 (the kernel-consolidation track 19→20→21 lands first — the store facade and the memory write path settle into `kernel/` before this splits `db.py`).
 
 **Source:** `spec.md` — Migration order, step 9 (store split, workflow state excluded).
 
