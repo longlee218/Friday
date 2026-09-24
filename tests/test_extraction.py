@@ -328,7 +328,8 @@ def test_an_extractor_cannot_ask_about_a_field_that_does_not_exist():
     reporter where to look.
     """
     from friday.agent.harness import _answer_params
-    from friday.domain.models import AccessRequestParams, DocQuestionParams
+    from friday.domain.models import AccessRequestParams
+    from plugins.docs.params import DocQuestionParams
     from plugins.devops.params import ApiIssueParams
     from friday.extraction.answer import answer_shape
 
@@ -437,7 +438,7 @@ def test_the_string_null_is_treated_as_absent():
 
 def test_values_are_trimmed():
     from friday.extraction import _hygiene
-    from friday.domain.models import DocQuestionParams
+    from plugins.docs.params import DocQuestionParams
 
     assert _hygiene(DocQuestionParams("  is it optional?  ")).question == (
         "is it optional?"

@@ -110,10 +110,10 @@ async def test_a_permission_request_becomes_an_access_request():
 
 async def test_a_question_about_docs_becomes_a_doc_question():
     triage = triage_with([
-        function_call("answer", {"type": "doc_question", "confidence": 0.8}, call_id="1")
+        function_call("answer", {"type": "docs.doc_question", "confidence": 0.8}, call_id="1")
     ])
 
-    assert (await decide(triage)).type == "doc_question"
+    assert (await decide(triage)).type == "docs.doc_question"
 
 
 async def test_social_talk_becomes_a_skip():

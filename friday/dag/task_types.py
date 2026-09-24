@@ -1,10 +1,11 @@
 """Every task type, registered — the in-core simple ones here, the rest by plugin.
 
 Ticket 11 gave each task type a `TaskTypeSpec` and had `register_all` fill the
-registry at boot; ticket 14 lifts the one real investigation type
-(`devops.api_issue`) out to `plugins/devops/` and leaves only the two simple
-types (`access_request`, `doc_question`) here. `register_all` registers those and
-then loads every configured plugin, handing each a `TaskTypeAPI` built from the
+registry at boot; ticket 14 lifted the one real investigation type
+(`devops.api_issue`) out to `plugins/devops/`, and ticket 15 lifted the
+`doc_question` persona out to `plugins/docs/`, leaving only `access_request`
+here. `register_all` registers it and then loads every configured plugin,
+handing each a `TaskTypeAPI` built from the
 `BootContext` — which is also the **caps** a plugin's graph builder reaches for:
 its `prepare_node` (node 0, so a plugin imports none of the kernel's graph
 machinery), its `make_harness` (a model node), the run's tool servers, and the
@@ -17,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from friday.dag import registry
-from friday.domain.models import AccessRequestParams, DocQuestionParams
+from friday.domain.models import AccessRequestParams
 from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
 from friday.sdk.plugin import TaskTypeSpec
 
@@ -52,6 +53,22 @@ class BootContext:
         from friday.dag.prepare import prepare_node
 
         return prepare_node(*args, **kwargs)
+
+    def simple_dag(self, name: str, params: type) -> Any:
+        """The one-node graph a type with no investigation past node 0 uses —
+        prepare, then ask for what is missing or hand over (D1). Exposed here so
+        a *simple* plugin (a second persona like `docs`, its whole graph node 0)
+        builds it without importing `friday.dag.router`, the same way an
+        investigation plugin reaches `prepare_node`/`make_harness`. Reads the
+        shared `extractor` agent and node-0 budget off the config it carries."""
+        from friday.dag.router import build_simple_dag
+
+        return build_simple_dag(
+            name,
+            params,
+            budget_tokens=self.config.context.extraction_budget_tokens,
+            extractor=self.config.agents.get("extractor"),
+        )
 
     def make_harness(
         self,
@@ -90,7 +107,6 @@ def register_all(ctx: BootContext) -> None:
     registry.clear()
     registry.SERVERS.update(ctx.servers)
     _register_simple(ctx, name="access_request", params=AccessRequestParams)
-    _register_simple(ctx, name="doc_question", params=DocQuestionParams)
     for plugin, cfg in configured_plugins(ctx.config):
         plugin.register(TaskTypeAPI(caps=ctx, config=cfg))
 

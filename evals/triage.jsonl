@@ -6,10 +6,10 @@
 {"text": "need read access to the analytics dashboard for the new hire", "expected": "access_request"}
 {"text": "xin quyền truy cập vào kho staging cho dự án mới", "expected": "access_request"}
 {"text": "could you add me to the #incidents channel", "expected": "access_request"}
-{"text": "where's the spec for the refund flow", "expected": "doc_question"}
-{"text": "do we have docs on how retries are configured for the outbox", "expected": "doc_question"}
-{"text": "tài liệu về luồng duyệt task ở đâu vậy", "expected": "doc_question"}
-{"text": "is there a runbook for rotating the discord token", "expected": "doc_question"}
+{"text": "where's the spec for the refund flow", "expected": "docs.doc_question"}
+{"text": "do we have docs on how retries are configured for the outbox", "expected": "docs.doc_question"}
+{"text": "tài liệu về luồng duyệt task ở đâu vậy", "expected": "docs.doc_question"}
+{"text": "is there a runbook for rotating the discord token", "expected": "docs.doc_question"}
 {"text": "anyone want lunch", "expected": "skip"}
 {"text": "happy friday everyone", "expected": "skip"}
 {"text": "lol nice one", "expected": "skip"}

@@ -14,13 +14,14 @@ from typing import Literal, get_args, get_type_hints
 import pytest
 
 from friday.domain.actions import Decided, make_decided
-from friday.domain.models import AccessRequestParams, DocQuestionParams
+from friday.domain.models import AccessRequestParams
+from plugins.docs.params import DocQuestionParams
 from plugins.devops.params import ApiIssueParams
 
 CATALOG = {
     "devops.api_issue": ApiIssueParams,
     "access_request": AccessRequestParams,
-    "doc_question": DocQuestionParams,
+    "docs.doc_question": DocQuestionParams,
 }
 
 
@@ -35,7 +36,7 @@ def test_decided_is_a_plain_value_type():
 def test_make_decided_closes_the_type_to_the_registry_plus_skip():
     cls = make_decided(CATALOG)
     allowed = set(get_args(get_type_hints(cls)["type"]))
-    assert allowed == {"devops.api_issue", "access_request", "doc_question", "skip"}
+    assert allowed == {"devops.api_issue", "access_request", "docs.doc_question", "skip"}
 
 
 def test_make_decided_carries_each_types_own_description():

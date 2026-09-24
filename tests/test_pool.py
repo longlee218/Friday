@@ -1192,7 +1192,7 @@ def _graph(task_type, node):
 
 async def _doc_task(db):
     return await db.create_task(conversation=ConversationId("fake", "watched"),
-                                type="doc_question", state="pending",
+                                type="docs.doc_question", state="pending",
                                 confidence=0.9, params={"question": "?"})
 
 
@@ -1217,7 +1217,7 @@ async def test_a_quick_graph_is_not_held_behind_a_slow_one(db):
         return HandOver("quick")
 
     _graph("devops.api_issue", slow)
-    _graph("doc_question", quick)
+    _graph("docs.doc_question", quick)
     await make_task(db)
     await _doc_task(db)
 

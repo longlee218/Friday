@@ -523,8 +523,8 @@ triage_examples:
   # Findings offered rather than asked — still ours to act on.
   - "nguyên nhân là do request thiếu selling_region nên catalog trả rỗng a nhé": devops.api_issue
   # What a term means, and where a document lives: the answer is writing.
-  - "correlationId là cái gì a nhỉ, e ko biết": doc_question
-  - "a ơi tài liệu mô tả webhook của Midas nằm ở repo nào v": doc_question
+  - "correlationId là cái gì a nhỉ, e ko biết": docs.doc_question
+  - "a ơi tài liệu mô tả webhook của Midas nằm ở repo nào v": docs.doc_question
   # Being let in — asked outright, and told as a complaint.
   - "cho em xin quyền vào repo BE-Midas với ạ": access_request
   - "e không mở được Grafana của dev, a add quyền giúp e với": access_request

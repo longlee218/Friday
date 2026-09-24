@@ -348,7 +348,7 @@ async def test_a_state_recorded_as_a_decision_never_becomes_an_example(db):
     assert await db.confirmed_classifications() == []
 
 
-@pytest.mark.parametrize("kind", ["devops.api_issue", "access_request", "doc_question", "skip"])
+@pytest.mark.parametrize("kind", ["devops.api_issue", "access_request", "docs.doc_question", "skip"])
 async def test_every_type_the_classifier_can_produce_can_become_an_example(db, kind):
     """Including `skip`. The hardest thing a classifier learns is when *not*
     to open a task, and a negative example is the only thing that teaches it."""

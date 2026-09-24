@@ -216,37 +216,17 @@ class AccessRequestParams:
     )
 
 
-@dataclass(frozen=True, slots=True)
-class DocQuestionParams:
-    """Someone asks where something is written down, or what a document,
-    spec or runbook says: the answer is a pointer to writing, or a line out
-    of it. They have not run anything and are reporting no behaviour. If
-    they tried something and it did not do what they expected, or they ask
-    what an endpoint is for and how its rules work, that is api_issue."""
-
-    question: str = field(
-        default="",
-        metadata={
-            "doc": "What they want to know, kept close to their own phrasing "
-            "— rewording a question changes it.",
-            "ask": "what you would like to know",
-        },
-    )
-    doc_ref: str | None = field(
-        default=None,
-        metadata={
-            "doc": "The document, spec or page they referred to, if they "
-            "named one. null if none.",
-            "ask": "which document you mean",
-        },
-    )
-
-
 #: Note there is no `SkipParams`. A skip opens no task, so it has no
 #: parameters to carry — triage says `skip` and the message is recorded as
 #: having been looked at. There was one, holding a `reason`, until triage
 #: stopped producing anything but a type and a confidence.
-Params = AccessRequestParams | DocQuestionParams
+#:
+#: One member now: `ApiIssueParams` moved to `plugins/devops` (ticket 14) and
+#: `DocQuestionParams` to `plugins/docs` (ticket 15). A plugin's params are not
+#: in this alias but are structurally `Params` — every consumer (extraction,
+#: validation, the prompt renderer) works off the dataclass fields, not the
+#: union — so this names only what the core still owns (`access_request`).
+Params = AccessRequestParams
 
 #: The one decision that opens no work. Everything a task type names is work;
 #: this names the absence of one, and it is not a task type — so it lives here,

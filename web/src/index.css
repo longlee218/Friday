@@ -895,9 +895,9 @@ details > summary:hover {
   background: currentColor;
 }
 
-.tag.api_issue { --tag: var(--type-api); }
+.tag.devops-api_issue { --tag: var(--type-api); }
 .tag.access_request { --tag: var(--type-access); }
-.tag.doc_question { --tag: var(--type-doc); }
+.tag.docs-doc_question { --tag: var(--type-doc); }
 .tag.unknown, .tag.skip { --tag: var(--type-other); }
 
 /* ----- column accent ----- */

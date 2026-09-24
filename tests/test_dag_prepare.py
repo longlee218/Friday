@@ -12,7 +12,8 @@ exactly the state a fresh install is in.
 from __future__ import annotations
 
 from friday.dag.engine import DAGDeps, DAGState
-from friday.domain.models import AccessRequestParams, DocQuestionParams
+from friday.domain.models import AccessRequestParams
+from plugins.docs.params import DocQuestionParams
 from plugins.devops.params import ApiIssueParams
 from types import SimpleNamespace
 

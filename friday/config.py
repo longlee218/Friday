@@ -295,7 +295,7 @@ class Config:
     #: The plugins this build loads, by import path (`friday.plugin_host` reads
     #: each package's `PLUGIN`). A plugin owns its own config block, validated
     #: against its own schema — the core no longer names any of them.
-    plugins: tuple[str, ...] = ("plugins.devops",)
+    plugins: tuple[str, ...] = ("plugins.devops", "plugins.docs")
     #: The raw config mapping, so `friday.plugin_host` can read a plugin's own
     #: block by its id (`plugin_blocks["devops"]`) and hand it to the plugin's
     #: validator. Kept raw because the core does not know a plugin's schema.
@@ -394,7 +394,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             else int(raw.get("summary_at_hour", 9))
         ),
         keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
-        plugins=tuple(raw.get("plugins") or ("plugins.devops",)),
+        plugins=tuple(raw.get("plugins") or ("plugins.devops", "plugins.docs")),
         # Raw, so `friday.plugin_host` can read each plugin's own block by id
         # and validate it against the plugin's own schema — the core does not
         # know a plugin's config shape.

@@ -5,8 +5,11 @@
  *
  *  Style lives in `index.css` under `.tag` and the type-specific overrides. */
 export function Tag({ type }: { type: string }) {
-  const known = ["api_issue", "access_request", "doc_question", "skip"];
-  return (
-    <span className={`tag ${known.includes(type) ? type : "unknown"}`}>{type}</span>
-  );
+  // Plugin task types are namespaced with a dot (`devops.api_issue`,
+  // `docs.doc_question`; tickets 14/15). A dot is not a valid class-name
+  // fragment, so the styled class swaps it for a dash while the label still
+  // shows the full type. An unknown type falls back to grey.
+  const known = ["devops.api_issue", "access_request", "docs.doc_question", "skip"];
+  const cls = known.includes(type) ? type.replace(/\./g, "-") : "unknown";
+  return <span className={`tag ${cls}`}>{type}</span>;
 }
