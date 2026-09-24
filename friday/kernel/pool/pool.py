@@ -29,7 +29,8 @@ from friday.kernel.dag import adapter
 from friday.sdk.actions import Action, Ask, HandOver, Reply
 from friday.kernel.domain.states import TaskState
 from friday.kernel.domain.models import FridayState, Task
-from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind
+from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind, card
+from friday.kernel.ops.redact import scrub
 from friday.kernel.responder.check import rejected
 
 __all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "REVIEW", "Pool"]
@@ -298,13 +299,20 @@ class Pool:
         leaving an answer waiting for a decision nobody was asked for. The card
         names the reply it asks about: approval belongs to that row, not to
         the task, so a reply queued later waits for its own card.
+
+        **Redaction runs on the draft** (§12): the reply is `scrub`bed before it
+        is queued, so a secret in a drafted answer never leaves even if the
+        operator approves it. The card then shows those exact scrubbed bytes and
+        flags that a redaction happened — the operator approves what will go out,
+        with the truth about it (`outbox.card`).
         """
+        redacted = scrub(text)
         reply = await self._db.queue_outbound(
             task_id=task.id,
             conversation=task.conversation,
             kind=Kind.REPLY,
             sender=self._sender,
-            text=text,
+            text=redacted,
             reply_to=await self._db.last_mention_in(task.conversation),
         )
         await self._db.queue_outbound(
@@ -312,10 +320,10 @@ class Pool:
             conversation=task.conversation,
             kind=Kind.APPROVAL_CARD,
             sender=self._approver,
-            text=text,
+            text=card.render(text, destination=task.conversation, reply_id=reply.id),
             approves=reply.id,
         )
-        log.info("task %d: proposed an answer — %r", task.id, text)
+        log.info("task %d: proposed an answer — %r", task.id, redacted)
         # Waiting on the operator, not on the reporter. Different people,
         # different columns, different thing to chase.
         return await self._move(task, REVIEW)

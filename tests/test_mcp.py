@@ -8,6 +8,8 @@ is supposed to have.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from friday.kernel.config import ConfigError, MCPServerConfig, load_config
@@ -95,6 +97,41 @@ def test_a_server_offers_only_what_some_reader_declared():
     )
 
     assert server.filter_func is not None
+
+
+def test_a_child_gets_only_the_declared_env_not_the_parents(monkeypatch):
+    """An MCP child is a process boundary, and §12 wants that boundary to carry
+    only what it was given: the SDK's safe base env plus the server's declared
+    secrets, nothing else. `build` passes exactly the declared `env` to the
+    transport — it never copies this process's environment — so a Discord token
+    or an API key sitting in `os.environ` does not cross into the child.
+
+    The SDK adds the safe base env (`HOME`, `PATH`, …) on top when it spawns; a
+    secret is never in that set, which is the half this test does not have to
+    prove because `get_default_environment` names the keys it inherits.
+    """
+    monkeypatch.setenv("DISCORD_USER_TOKEN", "a-real-secret-should-not-leak")
+
+    (server,) = build(
+        [MCPServerConfig(name="loki", command="npx", args=(), env={"LOKI_TOKEN": "x"})],
+        allowed=frozenset({"loki_query_range"}),
+    )
+
+    env = server.wrapped.client.transport.env
+    assert env == {"LOKI_TOKEN": "x"}
+    assert "DISCORD_USER_TOKEN" not in env
+
+
+def test_the_sdk_safe_env_carries_no_secret():
+    """What the child actually runs with is `get_default_environment()` merged
+    with the declared env. The safe set is a fixed allow-list of innocuous keys,
+    so pinning it here is what makes "nothing else" a checked claim rather than
+    a trusted one."""
+    from mcp.client.stdio import DEFAULT_INHERITED_ENV_VARS, get_default_environment
+
+    assert "DISCORD_USER_TOKEN" not in DEFAULT_INHERITED_ENV_VARS
+    assert "OPENAI_API_KEY" not in DEFAULT_INHERITED_ENV_VARS
+    assert set(get_default_environment()) <= set(DEFAULT_INHERITED_ENV_VARS)
 
 
 def test_there_is_always_a_filter_now_and_that_is_the_reversal():

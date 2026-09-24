@@ -110,12 +110,12 @@ class DiscordBot:
         if decision not in ("approve", "reject") or self._on_decision is None:
             log.warning("ignored a press on %r by %s: nothing takes it", custom_id, by)
             return False
-        # The operator-identity check lives downstream (`record_decision`). A
-        # decision it refuses is silent to the presser here — the card still
-        # reads "answered". That is safe because these buttons live in the
-        # operator's own DM, so no one else can press them; surfacing a refusal
-        # on the card, and auditing it, is ticket 17 (the approval card tells
-        # the whole truth).
+        # The operator-identity check lives downstream (`record_decision`),
+        # which now also writes a refused decision to the audit log (ticket 17).
+        # A decision it refuses is still silent to the presser here — the card
+        # reads "answered" — which is safe because these buttons live in the
+        # operator's own DM, so no one else can press them; the audit entry is
+        # where a refusal is recorded, not the card.
         result = self._on_decision(
             outbound_id=int(outbound_id),
             approved=decision == "approve",
@@ -139,12 +139,14 @@ class DiscordBot:
 
 def _asking(row: Outbound) -> str:
     """Plain text rather than an embed: the thing being approved is a chat
-    message, and it should be read as it will be sent."""
-    return (
-        f"**Reply to {row.conversation}?**\n"
-        f"> {row.text}\n"
-        f"_task {row.task_id} · reply {row.approves} · goes out as you_"
-    )
+    message, and it should be read as it will be sent.
+
+    The card body is built in the kernel (`friday.kernel.outbox.card`) and carried
+    verbatim in `row.text`: the exact bytes, the destination and audience, what
+    each link and mention resolves to, and whether a secret was redacted. The
+    truth about a draft is policy, not a Discord concern — this adapter adds only
+    the buttons, which are the one part a user account cannot send."""
+    return row.text
 
 
 def _stuck(row: Outbound, board_url: str | None) -> str:

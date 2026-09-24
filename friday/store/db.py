@@ -21,6 +21,7 @@ stalls ingestion.
 from __future__ import annotations
 
 from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store.repositories.audit import AuditRepo
 from friday.store.repositories.calls import CallsRepo
 from friday.store.repositories.memory import MemoryRepo
 from friday.store.repositories.messages import MessagesRepo
@@ -58,6 +59,7 @@ class Database(
     OutboxRepo,
     TasksRepo,
     VerdictsRepo,
+    AuditRepo,
 ):
     #: Caps and cooldowns the repositories read as `self.X` — on the facade so
     #: they resolve through the MRO for every mixin, and so the docstrings that

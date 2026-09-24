@@ -17,14 +17,19 @@ from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
 
+from friday.kernel.audit import AuditLog
 from friday.kernel.memory.channel_context import ContextRebuilder
-from friday.kernel.config import ConfigError, load_config
+from friday.kernel.config import ConfigError, declared_secrets, load_config
 from friday.store.db import Database
 from friday.kernel.inbox import Inbox
 from friday.kernel.ops.api import bind, build_api, check_exposure
 from friday.kernel.ops.liveness import Heartbeat, Liveness
 from friday.kernel.harness.mcp import build as build_mcp, name_of
-from friday.kernel.ops.redact import Redacting, install_excepthook
+from friday.kernel.ops.redact import (
+    Redacting,
+    install_excepthook,
+    register_secret_values,
+)
 from friday.kernel.outbox import Outbox, record_decision
 from friday.kernel.ops.single_instance import single_instance_lock
 from friday.kernel.providers import CredentialRejected
@@ -112,12 +117,36 @@ async def _run(stack: AsyncExitStack) -> None:
             "DISCORD_USER_TOKEN is not set. Put it in .env (see .env.example) "
             "or export it before running."
         )
+    bot_token = os.environ.get("DISCORD_BOT_TOKEN")
+
+    # Redact the exact secrets this deployment holds, by value, from anything
+    # written down (§12, §3.2): the agent API keys, each MCP server's declared
+    # env and any auth client secret, and the two Discord tokens. Registered
+    # here, as early as every secret is in hand and before anything below logs
+    # or audits — so `scrub` catches a key that matches no known pattern from the
+    # first boot line, which the pattern list alone would miss.
+    register_secret_values(declared_secrets(config, token, bot_token))
+
     # One agent at a time (ticket 04; see `single_instance` for why). The OS
     # releases the lock when this process exits, so `stack` closing it is for a
     # clean shutdown, not crash recovery — there is no stale lock file to sweep.
     lock = single_instance_lock(config.database_path)
     stack.callback(lock.close)
     db = await Database.connect(config.database_path)
+
+    # The append-only record of the security-relevant things that happen (§12):
+    # who approved which bytes, what was loaded and at what tier, an MCP server's
+    # tool grant, a refused decision. The kernel appends through this and never
+    # updates or deletes.
+    audit = AuditLog(db)
+    from friday.kernel.plugin_host import configured_plugins
+
+    for plugin, _cfg in configured_plugins(config):
+        # Every configured plugin is first-party, in this repo, loaded in-process
+        # via `register(api)` — the "contribution" tier (§3.1). A third-party
+        # tier is deferred until the first plugin outside this repo (§16); when
+        # it arrives, the tier is decided here, at the one place that loads them.
+        await audit.plugin_loaded(plugin_id=plugin.id, tier="contribution")
 
     async def record_call(entry) -> None:
         """Where everything this process asks of a model is written down.
@@ -222,6 +251,13 @@ async def _run(stack: AsyncExitStack) -> None:
             )
             continue
         servers.append(server)
+        # The allow-list this server was built with, recorded when it changes
+        # (§12). It is `DECLARED` — the one code-declared set of tools any reader
+        # in `friday/sources/` calls, applied to every server (`build(...,
+        # allowed=DECLARED)`) so a file cannot widen it. Recorded per server, so
+        # a new server gets its own grant line and a change to `DECLARED`
+        # re-records each. A no-wildcard grant, written down at boot.
+        await audit.mcp_grant(server=name_of(server), tools=sorted(DECLARED))
     if servers:
         log.info("mcp: %s", ", ".join(name_of(s) for s in servers))
 
@@ -283,9 +319,9 @@ async def _run(stack: AsyncExitStack) -> None:
             by=by,
             by_id=by_id,
             operator_id=config.operator_id,
+            audit=audit,
         )
 
-    bot_token = os.environ.get("DISCORD_BOT_TOKEN")
     bot = (
         DiscordBot(
             bot_token,

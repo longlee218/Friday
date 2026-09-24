@@ -24,6 +24,40 @@ def test_the_shapes_a_credential_comes_in():
     assert "REDACTED" in scrub("token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9abcdef")
 
 
+def test_a_declared_secret_is_redacted_by_value():
+    """A configured key that matches no known pattern (§12, §3.2): the
+    composition root registers the exact values it holds, and `scrub` redacts
+    them wherever they turn up — a shape-based list alone would miss it."""
+    from friday.sdk.redact import (
+        clear_secret_values,
+        matches_secret_value,
+        register_secret_values,
+    )
+
+    odd = "not-shaped-like-anything-XYZ42"
+    try:
+        register_secret_values([odd])
+        assert scrub(f"connecting with {odd} now") == "connecting with [REDACTED] now"
+        assert matches_secret_value(f"...{odd}...")
+    finally:
+        clear_secret_values()
+    # Once cleared, nothing knows about it again — a test must not leak a value
+    # into the next.
+    assert scrub(odd) == odd
+
+
+def test_blank_and_single_characters_are_not_treated_as_secrets():
+    """An empty or one-character 'secret' would blank out ordinary prose. The
+    registry drops them rather than turning every 'a' into [REDACTED]."""
+    from friday.sdk.redact import clear_secret_values, register_secret_values
+
+    try:
+        register_secret_values(["", " ", "a", "ok"])
+        assert scrub("a cat sat") == "a cat sat"
+    finally:
+        clear_secret_values()
+
+
 def test_a_correlation_id_is_not_a_credential():
     """It is a required task parameter. Redacting one would break the workflow
     built to ask for it."""

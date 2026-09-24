@@ -18,9 +18,22 @@ import sys
 import threading
 import traceback
 
-from friday.sdk.redact import scrub
+from friday.sdk.redact import (
+    matches_secret_pattern,
+    matches_secret_value,
+    register_secret_values,
+    scrub,
+)
 
-__all__ = ["Redacting", "install_excepthook", "scrub", "scrubbed_traceback"]
+__all__ = [
+    "Redacting",
+    "install_excepthook",
+    "matches_secret_pattern",
+    "matches_secret_value",
+    "register_secret_values",
+    "scrub",
+    "scrubbed_traceback",
+]
 
 
 class Redacting(logging.Filter):

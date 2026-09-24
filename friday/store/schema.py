@@ -16,7 +16,7 @@ from sqlalchemy import JSON, Index, String, TypeDecorator
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["Base", "Conversation", "Cursor", "DagState", "Memory", "MemoryCandidate", "Message", "ModelCall", "NodeRun", "Outbound", "Task", "ToolCall", "Verdict"]
+__all__ = ["AuditEntry", "Base", "Conversation", "Cursor", "DagState", "Memory", "MemoryCandidate", "Message", "ModelCall", "NodeRun", "Outbound", "Task", "ToolCall", "Verdict"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -531,5 +531,30 @@ class ToolCall(Base):
     task_id: Mapped[int | None] = mapped_column(index=True)
     node: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
+
+
+class AuditEntry(Base):
+    """The append-only audit log (DESIGN-v2 §12).
+
+    Application-level append-only: the kernel only inserts here — no update, no
+    delete — so the log is a record of what happened, not a mutable view of the
+    present. The database file itself is not tamper-proof, and a hash chain for
+    that is deferred (§16, its trigger is a second principal or an auditor); this
+    is the row store the chain would later cover.
+    """
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    #: What happened, indexed because the readers ask by kind ("every approval",
+    #: "the last grant for this server").
+    event: Mapped[str] = mapped_column(index=True)
+    #: Who did it — an operator name, or null for the system itself.
+    actor: Mapped[str | None]
+    #: The specifics: an approval's outbound id and payload hash, a grant's tool
+    #: list, a plugin's tier. JSON so a new event kind carries its own fields
+    #: without a column per kind.
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
 
 

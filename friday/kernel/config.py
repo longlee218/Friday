@@ -338,6 +338,30 @@ class Config:
     keep_model_calls_days: float = 14.0
 
 
+def declared_secrets(config: Config, *tokens: str | None) -> set[str]:
+    """Every secret this deployment was configured with, for value-based
+    redaction (DESIGN-v2 §12).
+
+    The agent API keys, each MCP server's declared env values and any auth
+    client secret, plus whatever tokens the caller holds (the Discord user and
+    bot tokens, read from the environment by the composition root). Here rather
+    than in the composition root because reading `config.agents` is this module's
+    job, not the root's (`test_composition_root_reads_no_agent_config`). Blank
+    and one-character values are dropped by `register_secret_values`.
+    """
+    secrets: set[str] = {t for t in tokens if t}
+    for agent in config.agents.values():
+        if agent.api_key:
+            secrets.add(agent.api_key)
+    for server in config.mcp_servers:
+        secrets.update(str(v) for v in server.env.values())
+        if server.auth:
+            client_secret = server.auth.get("client_secret")
+            if client_secret:
+                secrets.add(str(client_secret))
+    return secrets
+
+
 def load_config(path: Path | str = DEFAULT_PATH) -> Config:
     path = Path(path)
     try:

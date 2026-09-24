@@ -133,6 +133,25 @@ class Outbound:
 POLICY = "policy"
 
 
+@dataclass(frozen=True, slots=True)
+class AuditEntry:
+    """One line of the append-only audit log (DESIGN-v2 §12).
+
+    A fact that happened, never edited: who approved which bytes, a plugin
+    loaded with its trust tier, an MCP server's tool grant, a refused decision.
+    `event` is the kind, `actor` is who (or `None` for the system), and `detail`
+    carries the specifics the reader needs — the outbound id and payload hash of
+    an approval, the tool list of a grant. The kernel only ever appends these
+    (`friday.kernel.audit`); nothing updates or deletes a row.
+    """
+
+    id: int
+    at: datetime
+    event: str
+    actor: str | None
+    detail: dict[str, Any]
+
+
 def payload_hash(
     *,
     kind: str,

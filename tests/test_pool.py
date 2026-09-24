@@ -236,6 +236,37 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     assert acted[0].state == "review"
 
 
+async def test_a_drafted_reply_is_redacted_and_the_card_tells_the_truth(db):
+    """Redaction runs on the draft (§12): a secret a workflow puts in an answer
+    is scrubbed before the reply is queued, so it never leaves even if approved.
+    The card shows those exact scrubbed bytes and flags that a redaction
+    happened — the operator approves what will go out, told the truth about it."""
+    from friday.sdk.workflow import DAG, Node
+    from friday.kernel.dag.router import EDGE_ROUTER, register_dag
+    from friday.sdk.actions import Reply
+
+    async def leaks(state, deps):
+        return Reply("cleared it — key was sk-abcdefghijklmnopqrstuvwxyz01")
+
+    EDGE_ROUTER.pop("devops.api_issue", None)
+    register_dag("devops.api_issue", DAG(name="leaks", nodes=(Node("answer", leaks),)))
+
+    await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    try:
+        await Pool(db=db, auto_ask=True).run_once()
+    finally:
+        EDGE_ROUTER.pop("devops.api_issue", None)
+
+    reply, card = await db.outbound()
+    # What will actually be sent no longer carries the secret.
+    assert "sk-abcdefghijklmnopqrstuvwxyz01" not in reply.text
+    assert "[REDACTED]" in reply.text
+    # The card shows those same bytes and says a credential was redacted.
+    assert "[REDACTED]" in card.text
+    assert "shaped like a credential" in card.text
+    assert f"reply {reply.id}" in card.text
+
+
 async def test_announcing_costs_the_same_whether_there_are_five_tasks_or_one(db, workflows):
     """It ran a count per task, every two seconds, for something that almost
     never has anything to do — twenty-one queries to usually find nothing.

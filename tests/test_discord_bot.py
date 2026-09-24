@@ -56,15 +56,26 @@ async def test_the_card_goes_to_the_operator_as_a_direct_message():
     assert len(recipient.sent) == 1
 
 
-async def test_the_card_shows_the_reply_and_where_it_would_go():
+async def test_the_card_is_transported_verbatim():
+    """The card body is built in the kernel (`outbox.card`) — the exact bytes,
+    the destination, the audience, the secret flags — and carried in `row.text`.
+    This adapter shows it unchanged and adds only the buttons a user account
+    cannot send; it does not compose or edit the truth about a draft."""
+    from friday.kernel.domain.conversation import ConversationId
+    from friday.kernel.outbox import card as card_renderer
+
+    body = card_renderer.render(
+        "cho anh xin cái correlationId",
+        destination=ConversationId("discord", "999"),
+        reply_id=12,
+    )
     recipient = Recipient()
     bot = DiscordBot("token", operator_id=OPERATOR, client=stub_client(recipient))
 
-    await bot.send(card(text="cho anh xin cái correlationId"))
+    await bot.send(card(text=body))
 
-    rendered = str(recipient.sent[0])
-    assert "cho anh xin cái correlationId" in rendered
-    assert "999" in rendered
+    assert recipient.sent[0]["content"] == body
+    assert "999" in body and "reply 12" in body
 
 
 async def test_the_buttons_carry_the_row_they_approve():
@@ -79,15 +90,6 @@ async def test_the_buttons_carry_the_row_they_approve():
 
     ids = [c.custom_id for c in recipient.sent[0]["view"].children]
     assert ids == ["friday:approve:row:12", "friday:reject:row:12"]
-
-
-async def test_the_card_names_the_row_it_asks_about():
-    recipient = Recipient()
-    bot = DiscordBot("token", operator_id=OPERATOR, client=stub_client(recipient))
-
-    await bot.send(card(task_id=42, approves=12))
-
-    assert "reply 12" in recipient.sent[0]["content"]
 
 
 async def test_approving_reports_the_row_and_who_decided():

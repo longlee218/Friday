@@ -43,6 +43,7 @@ from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.states import OutboundState
 from friday.kernel.domain.models import (
     Artifact,
+    AuditEntry,
     CandidateStatus,
     ExtractionMark,
     Memory,
@@ -402,6 +403,16 @@ def _outbound(row: schema.Outbound) -> Outbound:
     )
 
 
+def _audit(row: schema.AuditEntry) -> AuditEntry:
+    return AuditEntry(
+        id=row.id,
+        at=row.at,
+        event=row.event,
+        actor=row.actor,
+        detail=dict(row.detail or {}),
+    )
+
+
 def _task(row: schema.Task) -> Task:
     return Task(
         id=row.id,
@@ -485,8 +496,10 @@ __all__ = [
     'Task',
     'TaskState',
     'ToolCall',
+    'AuditEntry',
     '_ARTIFACT_REF',
     '_ASK',
+    '_audit',
     '_NEEDS_APPROVAL',
     '_NEWEST_FIRST',
     '_OLDEST_FIRST',

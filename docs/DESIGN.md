@@ -368,6 +368,19 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   before every send, so a store cannot make an unapproved reply sendable on
   its own. An approval card names the row it approves (`outbox.approves`); a
   card from before that change records nothing and says so.
+- **The approval card tells the whole truth** (`friday/kernel/outbox/card.py`,
+  DESIGN-v2 §12): built in the kernel — not the Discord adapter, which only
+  transports it — it shows the exact bytes that would go out, the destination
+  and audience (a reply is public), what any link or mention actually resolves
+  to underneath its display text, and flags a secret found by pattern or by
+  value. **Redaction runs on the draft**: `pool._propose` scrubs the reply
+  before it is queued, so a secret never leaves even if the card is approved,
+  and the card shows those same scrubbed bytes.
+- **An append-only audit log** (`friday/kernel/audit.py`, table `audit_log`)
+  records who approved which bytes, a decision refused because the decider was
+  not the operator, plugin loads with their trust tier, and each MCP server's
+  tool grant (on change). The kernel only appends — the store has no update or
+  delete for the table; a hash chain over the rows is deferred (§16).
 - **`auto_ask_for_details`** is the only path with no human in it;
   `friday/kernel/responder/check.py` is its floor. It is off in this repo's
   `config.yaml`.
@@ -453,7 +466,13 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   DB.** `friday/kernel/ops/redact.py` scrubs on the way out, including from
   `sys.excepthook` and `threading.excepthook`; a node's exception text is
   scrubbed in `DAGRunner._invoke` and again where `node_runs.reason` and
-  `dag_state.paused_question` are written.
+  `dag_state.paused_question` are written. Redaction is **by pattern and by
+  value** (`friday/sdk/redact.py`, DESIGN-v2 §12): the composition root
+  registers the exact secrets the deployment holds — agent API keys, an MCP
+  server's declared env and auth secret, the Discord tokens
+  (`config.declared_secrets`) — so a key matching no known shape is still
+  scrubbed. Value-based redaction of declared secrets is the enforced control;
+  the pattern list is the convention that catches the rest.
 - **A rule worth stating is worth a test.** Most constraints above are
   enforced by a `grep`/`ast` test, because the ones only written down
   drifted.

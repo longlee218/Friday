@@ -42,6 +42,7 @@ async def record_decision(
     by: str,
     by_id: int,
     operator_id: int,
+    audit=None,
 ) -> bool:
     """Apply an approval decision to one outbox row, and say whether it stuck.
 
@@ -55,6 +56,9 @@ async def record_decision(
     standing between it and the channel — the outbox selects on it. Rejecting
     sends the reply's task back to a human. The row, not the task: a reply the
     task queues later waits for its own card.
+
+    Every outcome is audited when an `AuditLog` is passed (§12): who approved
+    which bytes, and a decision refused because the decider was not the operator.
     """
     if by_id != operator_id:
         log.warning(
@@ -62,11 +66,26 @@ async def record_decision(
             "(id %s) may release a reply that speaks in their name",
             outbound_id, by, by_id, operator_id,
         )
+        if audit is not None:
+            await audit.refused_decision(
+                outbound_id=outbound_id, by=by, by_id=by_id,
+                reason="not the operator",
+            )
         return False
     if approved:
         await db.approve_outbound(outbound_id, by=by)
         log.info("reply %d approved by %s", outbound_id, by)
+        if audit is not None:
+            row = await db.outbound_row(outbound_id)
+            await audit.approval(
+                outbound_id=outbound_id, by=by, approved=True,
+                payload_hash=row.approved_payload_hash if row else None,
+            )
         return True
+    if audit is not None:
+        await audit.approval(
+            outbound_id=outbound_id, by=by, approved=False, payload_hash=None
+        )
     row = await db.outbound_row(outbound_id)
     if row is None or row.task_id is None:
         log.warning("reply %d rejected by %s, but it has no task", outbound_id, by)

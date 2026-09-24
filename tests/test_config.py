@@ -142,3 +142,39 @@ def test_a_pool_that_could_run_nothing_is_refused_at_load(tmp_path, bad):
 
     with pytest.raises(ConfigError, match="concurrency"):
         load_config(path)
+
+
+def test_declared_secrets_gathers_keys_env_and_tokens(tmp_path):
+    """Value-based redaction (§12) needs the exact secrets this deployment
+    holds: the agent API keys, an MCP server's declared env and auth secret,
+    and the tokens the composition root read from the environment."""
+    from friday.kernel.config import declared_secrets
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        SAMPLE
+        + """
+agents:
+  triage:
+    api_key: sk-agent-key
+    base_url: https://api.example.invalid/v1
+    model: some-model
+mcp_servers:
+  loki:
+    command: npx
+    env:
+      LOKI_TOKEN: loki-secret
+    auth:
+      client_secret: oauth-secret
+"""
+    )
+    config = load_config(path)
+
+    secrets = declared_secrets(config, "discord-user-token", None)
+
+    assert secrets == {
+        "sk-agent-key",
+        "loki-secret",
+        "oauth-secret",
+        "discord-user-token",
+    }
