@@ -137,7 +137,7 @@ async def test_the_form_says_which_field_is_picked_from_the_filesystem(db, tmp_p
     client = board(db, _repos(tmp_path))
 
     kinds = client.get("/api/channels/c1/memory-kinds").json()
-    (project,) = [k for k in kinds if k["kind"] == "project"]
+    (project,) = [k for k in kinds if k["kind"] == "devops.project"]
     (repo_path,) = [f for f in project["fields"] if f["name"] == "repo_path"]
 
     assert repo_path["picks"] == "directory"

@@ -19,13 +19,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from friday.dag.api_issue.diagnose import diagnosis_of
-from friday.dag.api_issue.resolve import resolved
-from friday.dag.api_issue.deps import ApiIssueDeps
-from friday.sdk.workflow import DAGState, Node, status_of
-from friday.domain.actions import HandOver, Reply
-from friday.outbox import Kind
-from friday.ops.redact import scrub
+from plugins.devops.graph.diagnose import diagnosis_of
+from plugins.devops.graph.resolve import resolved
+from plugins.devops.graph.deps import ApiIssueDeps
+from friday.sdk.workflow import DAGState, HandOver, Node, Reply, status_of
+from friday.sdk.outbox import Kind
+from friday.sdk.redact import scrub
 
 __all__ = ["render", "report_node"]
 
@@ -165,7 +164,7 @@ def report_node(
     is the one output that answers.
 
     `reports_dir` is required rather than defaulted, because there was a
-    default here *and* one on `ApiIssueConfig.reports_dir`, spelled
+    default here *and* one on `DevopsConfig.reports_dir`, spelled
     differently — two answers to one question, which is how a report goes
     missing from the directory somebody is watching.
     """

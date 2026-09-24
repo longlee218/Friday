@@ -15,6 +15,7 @@ trigger, each with a test, so no inert field pretends to be a rule.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -49,6 +50,13 @@ class MemoryKindSpec:
     or accumulates (`append`). `injected` is whether the kind is rendered into a
     prompt section (behind the trust boundary) rather than read only through a
     tool or by code.
+
+    `key` derives a structured kind's natural key from its `(data, given)` — the
+    one row a `one-per-key` kind holds. It moved onto the spec in ticket 14 so a
+    plugin ships its kinds' key derivation with the plugin, rather than the
+    kernel carrying a per-kind branch that names `devops.service` (DESIGN-v2 §9.2,
+    the trigger the memory registry anticipated). `None` for a prose kind, or a
+    kind whose row carries no natural key.
     """
 
     name: str
@@ -56,3 +64,7 @@ class MemoryKindSpec:
     writers: frozenset[Origin] = field(default_factory=lambda: frozenset({Origin.ADMIN}))
     cardinality: Literal["one-per-key", "append"] = "one-per-key"
     injected: bool = False
+    #: `(data, given) -> key`, where `data` is the row's validated payload and
+    #: `given` an operator-supplied name (only `skill` uses `given`). Read by
+    #: `friday.memory.registry.natural_key`.
+    key: Callable[[dict | None, str | None], str | None] | None = None

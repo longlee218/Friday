@@ -1,40 +1,33 @@
-"""Where facts come from, and nothing about what they are wanted for.
+"""The source ports: read-surface contracts a plugin's sources implement.
 
-**One package touches the outside world's read surfaces** — Loki, `kubectl`,
-the operator's clone — and nothing else does (board
-`read-it-the-way-the-operator-does`, ticket 15;
-`tests/test_sources_are_the_only_door.py` is the guard that says so). A node
-that shells out itself is a node that has to be read to know what it can
-reach.
+Contracts only — dataclasses and Protocols, no I/O, no third-party imports.
+A *source* is a capability that reads one kind of thing (log lines, a file at a
+frame); the concrete readers (`LokiSource`, `SshKubectlSource`, a repo clone)
+live in the plugin that ships them and implement these ports, so the kernel and
+the workflow port name the shape without depending on the reader (DESIGN-v2 §4,
+§6.4).
 
-The layering the spec draws, and the reason this package is not inside
-`friday/dag/api_issue/`:
-
-| Layer | What it is | Here |
-| --- | --- | --- |
-| **Source** | a capability, flat and reusable: a primitive that reads one kind of thing | this package |
-| **Check** | a *formula* over primitives — `FindRequestLog` is "the correlationId's lines, then path plus identifier" | the graph's own modules |
-| **Node** | the frame a run is checkpointed, timed and retried in | `friday/dag/` |
-
-A source is read-only by construction rather than by instruction: there is
-no verb here that writes. It also holds no judgement — which window, which
-identifiers, which service is somebody else's decision, arriving as
-arguments. That is what lets the same `LogSource` serve a check that decides
-by rule and, later, a Collector tool a model drives (ticket 15: "The
-difference is **who decides what to look for**, never what is called").
-
-**No agent imports.** Nothing here may reach for `friday/agent/`: a source
-that can call a model is a source that can be talked into reading something
-else.
+Moved here from `friday/sources/__init__.py` in ticket 14: the ports are what a
+plugin codes against, so they belong in `sdk`; the doors that actually shell out
+move into `plugins/devops/sources/`. A source is read-only by construction —
+there is no verb here that writes — and holds no judgement: which window, which
+identifiers, which service arrive as arguments.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Protocol
 
-__all__ = ["DECLARED", "Lines", "LogSource", "Placement", "Reads", "declared"]
+__all__ = [
+    "CodeSource",
+    "Lines",
+    "LogSource",
+    "Placement",
+    "Reads",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,9 +75,9 @@ class Placement:
     calls it would make the capability depend on the workflow, which is the
     direction this package exists to prevent.
 
-    Flattened out of `ServiceData`'s two halves on purpose — every reader
-    wants one place, and a reader that has to remember which half to read is
-    one that one day reads the other.
+    Flattened out of a service's two halves on purpose — every reader wants
+    one place, and a reader that has to remember which half to read is one that
+    one day reads the other.
     """
 
     env: str
@@ -172,22 +165,41 @@ class LogSource(Protocol):
     ) -> Lines: ...
 
 
-def declared() -> frozenset[str]:
-    """Every tool any reader in this package says it calls.
+class CodeSource(Protocol):
+    """The operator's clone, read the way a diagnosis needs it.
 
-    What a tool server is filtered down to before anything is handed it, so
-    a server offering forty tools offers the four that have a caller. Read
-    off the classes rather than listed here: a list beside the classes is a
-    list that disagrees with them.
+    A frame names a file inside a container (`/app/src/orders.ts:80`) and the
+    repository is a clone on the operator's machine; a `CodeSource` maps one to
+    the other and reads a window around the line — nothing else: no checkout, no
+    worktree, no fetch (finding H). **A frame is reporter-influenced text**, so
+    a path that resolves outside the clone is refused, not read.
+
+    The port is the read surface the `read_failing_code` check calls; the
+    concrete reader (a repo clone, its container-root policy loaded from config
+    or a memory row) implements it in the plugin. Every method returns `None`
+    for "not here / cannot read", never an exception into a graph node.
     """
-    from friday.sources.db import DbSource
-    from friday.sources.logs import LokiSource
-    from friday.sources.release import ReleaseSource
 
-    return frozenset().union(
-        *(source.TOOLS for source in (LokiSource, DbSource, ReleaseSource))
-    )
+    def repo_file(self, frame: str) -> Path | None:
+        """The frame's file inside this clone, or `None` if it is not in it —
+        which covers both "not ours" and "trying to leave the clone"."""
+        ...
 
+    def excerpt(self, path: Path, line: int) -> str:
+        """The lines around `line`, numbered, so a diagnosis can cite one."""
+        ...
 
-#: The same set, resolved once for a caller that wants a constant.
-DECLARED = declared()
+    def original(self, compiled: Path, line: int) -> tuple[Path, int] | None:
+        """The source file and line a compiled one came from, via its
+        `.js.map`, or `None` when there is no usable map."""
+        ...
+
+    def at_ref(self, path: Path, ref: str) -> str | None:
+        """The file's text as it is at a git ref (`git show`, never a
+        checkout), or `None` for every way of not having it."""
+        ...
+
+    def meanings(self, codes: tuple[str, ...]) -> dict[str, str]:
+        """What the repo's own error-code doc says each of these codes means —
+        only the codes that turned up; a code the doc does not list is absent."""
+        ...

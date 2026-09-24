@@ -46,7 +46,7 @@ def _triage_agent(**options) -> AgentConfig:
 
 
 async def test_it_builds_a_real_triage_wired_with_confirmed_examples():
-    db = StubDb(confirmed=[("the api is down", "api_issue")])
+    db = StubDb(confirmed=[("the api is down", "devops.api_issue")])
     config = _config(triage=_triage_agent())
 
     triage = await build_triage(config, db=db)

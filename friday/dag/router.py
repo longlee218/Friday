@@ -18,7 +18,7 @@ import logging
 from typing import Any
 
 from friday.config import ConfigError
-from friday.sdk.workflow import DAG
+from friday.sdk.workflow import DAG, NODE_CLOCK_MARGIN_SECONDS
 from friday.dag import registry
 from friday.dag.prepare import plan_by_required_parameters, prepare_node
 from friday.domain.models import Params
@@ -67,13 +67,9 @@ def dag_for(task_type: str) -> DAG | None:
 
 # --- two clocks ---------------------------------------------------------------
 
-#: How much longer a model node's clock must run than its harness's. The
-#: harness bounds a run with `timeout_seconds` and turns its own expiry into a
-#: `last_error` the node can read; the node's clock expiring first cancels the
-#: run instead, and a cancellation is a `BaseException` nothing in the harness
-#: sees (board `read-it-the-way-the-operator-does`, finding E). The margin is
-#: what lets the inner clock fire first; equal clocks are a race.
-NODE_CLOCK_MARGIN_SECONDS = 5.0
+# `NODE_CLOCK_MARGIN_SECONDS` moved to the workflow port (`friday.sdk.workflow`)
+# in ticket 14 so a plugin times its model node against the same margin the
+# kernel checks it with; re-exported above for the callers that read it here.
 
 
 def check_node_clocks(dags: Any, agents: dict[str, Any]) -> None:

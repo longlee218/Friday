@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from friday.sources import Lines, Placement
+from friday.sdk.sources import Lines, Placement
 
 __all__ = ["LokiSource", "SshKubectlSource"]
 

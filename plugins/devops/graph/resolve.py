@@ -32,10 +32,14 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node, envelope
-from friday.domain.actions import HandOver
-from friday.memory import registry as memory_kinds
-from friday.sources import Placement
+from friday.sdk.workflow import Deps as DAGDeps, DAGState, HandOver, Node, envelope
+from friday.sdk.sources import Placement
+from plugins.devops.memory import (
+    DEVOPS_ENVIRONMENT,
+    DEVOPS_PROJECT,
+    DEVOPS_ROUTE,
+    DEVOPS_SERVICE,
+)
 
 __all__ = [
     "domain_of",
@@ -141,7 +145,7 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
             )
 
         known = await deps.db.structured_memories(
-            channel_id, kind=memory_kinds.ENVIRONMENT
+            channel_id, kind=DEVOPS_ENVIRONMENT
         )
         if not known:
             # Nothing has been written down about any domain. Saying
@@ -165,7 +169,7 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
             )
 
         route = await deps.db.structured_memory(
-            channel_id, kind=memory_kinds.ROUTE, key=domain
+            channel_id, kind=DEVOPS_ROUTE, key=domain
         )
         if route is None:
             return HandOver(
@@ -179,7 +183,7 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
             )
 
         service = await deps.db.structured_memory(
-            channel_id, kind=memory_kinds.SERVICE, key=route.service
+            channel_id, kind=DEVOPS_SERVICE, key=route.service
         )
         if service is None:
             return HandOver(
@@ -204,7 +208,7 @@ def resolve_node(*, timeout_seconds: float | None = None) -> Node:
             )
         )
         project = await deps.db.structured_memory(
-            channel_id, kind=memory_kinds.PROJECT, key=service.project
+            channel_id, kind=DEVOPS_PROJECT, key=service.project
         )
         if project is None:
             log.info(

@@ -78,7 +78,7 @@ def _capturing(seen: list) -> FunctionModel:
     def fn(messages, info):
         seen.append(_shown(messages))
         return ModelResponse(
-            parts=[function_call("answer", {"type": "api_issue", "confidence": 0.9})]
+            parts=[function_call("answer", {"type": "devops.api_issue", "confidence": 0.9})]
         )
 
     return FunctionModel(fn, model_name="test-model")
@@ -90,13 +90,13 @@ async def decide(triage, text="the api is wrong", turn=()):
 
 async def test_an_api_problem_becomes_an_api_issue():
     triage = triage_with([
-        function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")
+        function_call("answer", {"type": "devops.api_issue", "confidence": 0.9}, call_id="1")
     ])
 
     outcome = await decide(triage)
 
     assert isinstance(outcome, Decided)
-    assert outcome.type == "api_issue"
+    assert outcome.type == "devops.api_issue"
     assert outcome.confidence == 0.9
 
 
@@ -129,10 +129,10 @@ async def test_a_message_carrying_nothing_still_decides():
     values at all. It must still produce a task — that is what triggers asking
     for the fields, and it is why classifying does not depend on extracting."""
     triage = triage_with([
-        function_call("answer", {"type": "api_issue", "confidence": 0.6}, call_id="1")
+        function_call("answer", {"type": "devops.api_issue", "confidence": 0.6}, call_id="1")
     ])
 
-    assert (await decide(triage)).type == "api_issue"
+    assert (await decide(triage)).type == "devops.api_issue"
 
 
 async def test_answering_without_calling_a_tool_asks_for_a_human():
@@ -264,11 +264,11 @@ async def test_a_word_inside_an_identifier_is_not_the_word(text):
     """A hyphen or a suffix makes it a name. Holding every message about
     `salary-service` would make the list unusable in a codebase that has one."""
     triage = triage_with(
-        [function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")],
+        [function_call("answer", {"type": "devops.api_issue", "confidence": 0.9}, call_id="1")],
     )
     triage._sensitive = WORDS
 
-    assert (await decide(triage, text)).type == "api_issue"
+    assert (await decide(triage, text)).type == "devops.api_issue"
 
 
 async def test_an_empty_list_holds_nothing():
@@ -276,10 +276,10 @@ async def test_an_empty_list_holds_nothing():
     had without the feature, not someone else's guesses about what is sensitive
     in their workplace."""
     triage = triage_with(
-        [function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")],
+        [function_call("answer", {"type": "devops.api_issue", "confidence": 0.9}, call_id="1")],
     )
 
-    assert (await decide(triage, "lương tháng này về chưa")).type == "api_issue"
+    assert (await decide(triage, "lương tháng này về chưa")).type == "devops.api_issue"
 
 
 async def test_a_malformed_classify_call_is_corrected_by_the_model():
@@ -304,9 +304,9 @@ async def test_a_malformed_classify_call_is_corrected_by_the_model():
         config=CONFIG,
         model=ScriptedModel(
             [
-                [function_call("answer", {"type": "api_issue",
+                [function_call("answer", {"type": "devops.api_issue",
                                             "confidence": "high"}, call_id="1")],
-                [function_call("answer", {"type": "api_issue",
+                [function_call("answer", {"type": "devops.api_issue",
                                             "confidence": 0.9}, call_id="2")],
             ]
         ),
@@ -314,7 +314,7 @@ async def test_a_malformed_classify_call_is_corrected_by_the_model():
 
     outcome = await triage.decide(make_event(text="the api is 500ing"))
 
-    assert outcome == Decided(type="api_issue", confidence=0.9)
+    assert outcome == Decided(type="devops.api_issue", confidence=0.9)
 
 
 async def test_a_model_that_cannot_fix_its_own_call_becomes_a_persons_problem():
@@ -329,7 +329,7 @@ async def test_a_model_that_cannot_fix_its_own_call_becomes_a_persons_problem():
     """
     from friday.sdk.testing import ScriptedModel, function_call
 
-    bad = [function_call("answer", {"type": "api_issue",
+    bad = [function_call("answer", {"type": "devops.api_issue",
                                       "confidence": "high"}, call_id="1")]
     triage = Triage(config=CONFIG, model=ScriptedModel([bad, bad, bad]))
 
@@ -606,7 +606,7 @@ async def test_decide_gathers_context_through_the_one_builder(monkeypatch):
     monkeypatch.setattr(triage_module, "build_light_context", spy)
 
     triage = triage_with([
-        function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")
+        function_call("answer", {"type": "devops.api_issue", "confidence": 0.9}, call_id="1")
     ])
     await decide(triage)
 
@@ -761,10 +761,10 @@ async def test_a_classification_is_the_return_value_of_the_call_that_asked():
     from friday.sdk.testing import ScriptedModel, function_call
 
     triage = triage_with(
-        [function_call("answer", {"type": "api_issue", "confidence": 0.9}, call_id="1")]
+        [function_call("answer", {"type": "devops.api_issue", "confidence": 0.9}, call_id="1")]
     )
 
-    assert await decide(triage) == Decided(type="api_issue", confidence=0.9)
+    assert await decide(triage) == Decided(type="devops.api_issue", confidence=0.9)
 
 
 async def test_skip_is_a_member_of_the_same_set_and_is_validated_the_same_way():
@@ -813,10 +813,10 @@ async def test_an_invented_type_earns_the_same_one_correction_as_anything_else()
 
     triage = triage_with(
         [function_call("answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="1")],
-        [function_call("answer", {"type": "api_issue", "confidence": 0.8}, call_id="2")],
+        [function_call("answer", {"type": "devops.api_issue", "confidence": 0.8}, call_id="2")],
     )
 
-    assert await decide(triage) == Decided(type="api_issue", confidence=0.8)
+    assert await decide(triage) == Decided(type="devops.api_issue", confidence=0.8)
 
 
 async def test_a_provider_that_never_answered_is_not_an_invented_type():
@@ -956,7 +956,7 @@ async def test_the_tools_own_former_parameter_name_is_not_a_skip_either():
     """
     from friday.sdk.testing import ScriptedModel, function_call
 
-    stale = {"task_type": "api_issue", "confidence": 0.9}
+    stale = {"task_type": "devops.api_issue", "confidence": 0.9}
     triage = triage_with(
         [function_call("answer", stale, call_id="1")],
         [function_call("answer", stale, call_id="2")],
@@ -989,7 +989,7 @@ async def test_a_malformed_confidence_is_not_reported_as_an_invented_type():
     """
     from friday.sdk.testing import ScriptedModel, function_call
 
-    wrong_shape = {"type": "api_issue", "confidence": "very high"}
+    wrong_shape = {"type": "devops.api_issue", "confidence": "very high"}
     triage = triage_with(
         [function_call("answer", wrong_shape, call_id="1")],
         [function_call("answer", wrong_shape, call_id="2")],
@@ -1058,7 +1058,7 @@ async def test_a_real_type_under_the_deleted_tools_old_key_is_not_invented_eithe
     dropped, but calling it an invented type would be false."""
     from friday.sdk.testing import ScriptedModel, function_call
 
-    stale = {"task_type": "api_issue", "confidence": 0.9}
+    stale = {"task_type": "devops.api_issue", "confidence": 0.9}
     triage = triage_with(
         [function_call("answer", stale, call_id="1")],
         [function_call("answer", stale, call_id="2")],

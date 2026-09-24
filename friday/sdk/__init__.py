@@ -12,12 +12,36 @@ imports `sdk`, and a plugin imports `sdk` only.
 """
 
 from friday.sdk.memory import MemoryKindSpec, Origin
+from friday.sdk.model import Model
+from friday.sdk.outbox import Kind
 from friday.sdk.plugin import Plugin, PluginAPI, TaskTypeSpec
+from friday.sdk.redact import scrub
+from friday.sdk.sources import CodeSource, Lines, LogSource, Placement, Reads
+from friday.sdk.tools import ToolContext, ToolSpec, tool
+from friday.sdk.validation import InSet, Matches, NonEmpty, OneOf, Problem, asked_as, validate
 
 __all__ = [
+    "CodeSource",
+    "InSet",
+    "Kind",
+    "Lines",
+    "LogSource",
+    "Matches",
     "MemoryKindSpec",
+    "Model",
+    "NonEmpty",
+    "OneOf",
     "Origin",
+    "Placement",
     "Plugin",
     "PluginAPI",
+    "Problem",
+    "Reads",
     "TaskTypeSpec",
+    "ToolContext",
+    "ToolSpec",
+    "asked_as",
+    "scrub",
+    "tool",
+    "validate",
 ]

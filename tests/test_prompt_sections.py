@@ -180,7 +180,7 @@ HOSTILE = (
 def test_the_extractor_does_not_take_a_reporters_words_raw():
     """It is the agent most worth aiming an injection at: it decides what a
     task knows, and what it decides is written to the database."""
-    from friday.domain.models import ApiIssueParams
+    from plugins.devops.params import ApiIssueParams
     from friday.extraction.prompt import build_input
     from tests.test_extraction import _context
 
@@ -197,7 +197,7 @@ def test_a_vouched_example_cannot_carry_a_section_into_triage():
     system, where it would sit on every call until somebody unmarked it."""
     from friday.triage.prompt import build_instructions
 
-    built = build_instructions([(HOSTILE, "api_issue")])
+    built = build_instructions([(HOSTILE, "devops.api_issue")])
 
     # Asserted on the escaped form, not on the tag name being absent: triage
     # has a real `<critical_reminder>` section of its own now, and a test that
@@ -413,7 +413,7 @@ async def test_an_empty_extraction_is_not_a_successful_one():
     which is not a `Params` at all and cannot be mistaken for one.
     """
     from conftest import ScriptedHarness
-    from friday.domain.models import ApiIssueParams
+    from plugins.devops.params import ApiIssueParams
     from friday.extraction import build_extractor
     from friday.extraction.answer import answer_shape
     from tests.test_extraction import _context
@@ -625,7 +625,7 @@ def test_extraction_was_never_wrong_and_stays_that_way():
     verbatim because one is matched by machine and the other is pasted into a
     terminal, and a value that went through two escapes no longer refers to
     anything."""
-    from friday.domain.models import ApiIssueParams
+    from plugins.devops.params import ApiIssueParams
     from friday.extraction.prompt import build_input
     from tests.test_extraction import _context
 
@@ -655,7 +655,7 @@ def test_no_family_escapes_anything_twice():
     a fourth prompt module appears, which is the part that would otherwise go
     stale silently.
     """
-    from friday.domain.models import ApiIssueParams
+    from plugins.devops.params import ApiIssueParams
     from friday.extraction.prompt import build_input as extraction_input
     from friday.memory.channel_context import _transcript
     from friday.responder.prompt import build_input as responder_input
@@ -691,6 +691,11 @@ def test_no_family_escapes_anything_twice():
     families = {
         d.parent.name
         for d in (Path(__file__).resolve().parents[1] / "friday").glob("*/prompt.py")
+        # The shared prompt *primitives* (Section, assemble, the escapers) are
+        # not an agent family that builds a whole prompt, so they have nothing to
+        # build here (ticket 14): they live in `friday/domain/prompt.py` (the
+        # value layer) and `friday/sdk/prompt.py` re-exports them.
+        if d.parent.name not in {"sdk", "domain"}
     }
     assert families <= set(built), (
         f"a prompt family nothing here builds: {families - set(built)} — add it"

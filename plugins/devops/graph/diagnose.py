@@ -27,10 +27,10 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from friday.dag.api_issue.code import code_of, codes_of
-from friday.dag.api_issue.logs import dossier_of, histogram_of
-from friday.dag.api_issue.prompt import build_input, numbered
-from friday.dag.api_issue.deps import ApiIssueDeps
+from plugins.devops.graph.code import code_of, codes_of
+from plugins.devops.graph.logs import dossier_of, histogram_of
+from plugins.devops.graph.prompt import build_input, numbered
+from plugins.devops.graph.deps import ApiIssueDeps
 from friday.sdk.workflow import DAGState, Node, envelope
 
 __all__ = [
@@ -257,10 +257,10 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
     checked against what this run was actually shown rather than against a
     dossier built in advance.
     """
-    from friday.dag.api_issue.logs import _reported_at
-    from friday.dag.api_issue.prompt import build_reads_input
-    from friday.dag.api_issue.resolve import resolved
-    from friday.tools.investigate import Evidence, investigate_tools
+    from plugins.devops.graph.logs import _reported_at
+    from plugins.devops.graph.prompt import build_reads_input
+    from plugins.devops.graph.resolve import resolved
+    from plugins.devops.investigate import Evidence, investigate_tools
 
     placement, project = resolved(state["resolve"])
     if project is None:
@@ -273,6 +273,7 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
         log_sources=deps.log_sources,
         reported_at=_reported_at(deps.task),
         release_tag=str(state.get("resolve", {}).get("release_tag") or ""),
+        container_roots=deps.container_roots,
     )
     harness = make_harness(tools=tools)
     if harness is None:

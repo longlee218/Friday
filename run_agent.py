@@ -103,7 +103,7 @@ async def _run(stack: AsyncExitStack) -> None:
     # Filled before anything opens the database or writes a memory.
     from friday.memory.registry import register_all_memory_kinds
 
-    register_all_memory_kinds()
+    register_all_memory_kinds(config)
     Path(config.database_path).parent.mkdir(parents=True, exist_ok=True)
 
     token = os.environ.get("DISCORD_USER_TOKEN")
@@ -204,7 +204,7 @@ async def _run(stack: AsyncExitStack) -> None:
     # Connected here rather than by whoever uses them: a connection has a
     # lifetime, and something has to close it. The stack unwinds with the run.
     # Before the agents, because one of them is handed this list.
-    from friday.sources import DECLARED
+    from plugins.devops.sources import DECLARED
 
     servers = []
     for server in build_mcp(config.mcp_servers, allowed=DECLARED):

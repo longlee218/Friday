@@ -49,14 +49,38 @@ from typing import Any
 from dotenv import load_dotenv
 
 from friday.config import load_config
-from friday.dag.api_issue import build_api_issue_dag, build_diagnose_harness, build_log_sources
+from friday.dag.task_types import BootContext
+from friday.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
+from friday.plugin_host import TaskTypeAPI
 from friday.domain.actions import Ask, HandOver, Reply
 from friday.domain.conversation import ConversationId
-from friday.domain.models import ApiIssueParams
 from friday.sdk.workflow import DAG, Deps as DAGDeps, NodeRun
-from friday.sources.logs import LokiSource, SshKubectlSource
+from plugins.devops.config import load_devops_config
+from plugins.devops.graph import build_devops_dag, build_log_sources
+from plugins.devops.graph.deps import ApiIssueDeps
+from plugins.devops.params import ApiIssueParams
+from plugins.devops.sources.logs import LokiSource, SshKubectlSource
 from friday.store.db import Database
 from friday.workflow import adapter
+
+
+from dataclasses import replace as _dc_replace
+
+
+def _replay_dag(config, *, with_model, reports):
+    """The `devops.api_issue` DAG, built through the plugin against a boot
+    context — the composition root's job, done here for one replayed case. The
+    diagnose model is dropped when `with_model` is false by hiding its agent."""
+    devops_cfg = _dc_replace(
+        load_devops_config((config.plugin_blocks or {}).get("devops")),
+        reports_dir=str(reports),
+    )
+    whole = config if with_model else _dc_replace(
+        config,
+        agents={k: v for k, v in config.agents.items() if k != "devops.diagnose"},
+    )
+    api = TaskTypeAPI(caps=BootContext(config=whole, servers={}), config=devops_cfg)
+    return build_devops_dag(api), devops_cfg
 
 
 async def _run_on_adapter(
@@ -340,14 +364,10 @@ async def run_captured(case: dict, *, with_model: bool, into: Path):
     db = await Database.connect(str(copy_aside(Path(config.database_path), into)))
     try:
         reports = into / "reports"
-        dag = build_api_issue_dag(
-            diagnose=config.agents.get("diagnose") if with_model else None,
-            diagnose_harness=build_diagnose_harness(config) if with_model else None,
-            reports_dir=reports,
-        )
+        dag, _devops_cfg = _replay_dag(config, with_model=with_model, reports=reports)
         params = case_params(case)
         name, source = canned_source(case)
-        deps = DAGDeps(
+        deps = ApiIssueDeps(
             task=SimpleNamespace(
                 id=case["id"],
                 conversation=ConversationId("discord", str(case["channel_id"])),
@@ -355,7 +375,9 @@ async def run_captured(case: dict, *, with_model: bool, into: Path):
                 created_at=datetime.fromisoformat(case["reported_at"]),
             ),
             db=db,
-            extra={"log_sources": {name: source}},
+            sender=DEFAULT_SENDER,
+            approver=DEFAULT_APPROVER,
+            log_sources={name: source},
         )
         final, runs, wall_s = await _run_on_adapter(
             dag,
@@ -404,17 +426,13 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
         if task is None:
             print(f"no task {task_id}", file=sys.stderr)
             return 1
-        if task.type != "api_issue":
-            print(f"task {task_id} is {task.type}, not api_issue", file=sys.stderr)
+        if task.type != "devops.api_issue":
+            print(f"task {task_id} is {task.type}, not devops.api_issue", file=sys.stderr)
             return 1
 
         reports = into / "reports"
-        dag = build_api_issue_dag(
-            diagnose=config.agents.get("diagnose") if with_model else None,
-            diagnose_harness=build_diagnose_harness(config) if with_model else None,
-            reports_dir=reports,
-        )
-        deps = DAGDeps(
+        dag, devops_cfg = _replay_dag(config, with_model=with_model, reports=reports)
+        deps = ApiIssueDeps(
             task=SimpleNamespace(
                 id=task.id,
                 conversation=task.conversation,
@@ -422,7 +440,9 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
                 created_at=task.created_at,
             ),
             db=db,
-            extra={"log_sources": build_log_sources(config, {})},
+            sender=DEFAULT_SENDER,
+            approver=DEFAULT_APPROVER,
+            log_sources=build_log_sources(devops_cfg, {}),
         )
         final, runs, wall_s = await _run_on_adapter(
             dag,

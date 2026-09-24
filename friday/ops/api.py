@@ -800,7 +800,7 @@ def _kind_form(kind: str) -> dict:
     return {
         "kind": kind,
         "prose": shape is None,
-        "names_key": kind == mem_registry.RUNBOOK,
+        "names_key": kind == mem_registry.SKILL,
         "fields": _form_fields(shape) if shape is not None else [],
     }
 

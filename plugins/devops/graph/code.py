@@ -1,6 +1,6 @@
 """Node 3: which frame is worth opening, and what was not opened.
 
-The reading itself is `friday/sources/code.py`; this is the formula over it
+The reading itself is `plugins/devops/sources/code.py`; this is the formula over it
 — drop somebody else's frames, take the first that resolves in the clone,
 and name the rest rather than opening them (the spec's "±15 lines around the
 first frame").
@@ -17,10 +17,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from friday.dag.api_issue.deps import ApiIssueDeps
+from plugins.devops.graph.deps import ApiIssueDeps
 from friday.sdk.workflow import DAGState, Node, envelope
-from friday.sources.code import (
-    NOT_OURS,
+from plugins.devops.sources.code import (
     at_ref,
     meanings,
     numbered,
@@ -52,14 +51,14 @@ def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
     """Build node 3. No model: a frame is a path and a number."""
 
     async def _read(state: DAGState, deps: ApiIssueDeps) -> Any:
-        from friday.dag.api_issue.resolve import resolved
+        from plugins.devops.graph.resolve import resolved
 
         _, project = resolved(state["resolve"])
         found = state["find_request_log"]
         frames = [
             (str(file), line)
             for file, line in (tuple(f) for f in found.get("frames", ()))
-            if not any(part in str(file) for part in NOT_OURS)
+            if not any(part in str(file) for part in deps.not_ours)
         ][:MAX_FRAMES]
 
         if project is None:
@@ -137,7 +136,7 @@ def read_failing_code_node(*, timeout_seconds: float | None = None) -> Node:
                 # reads around that one. The rest are named, not opened.
                 not_checked.append(f"{file}:{line} is further down the stack — not read")
                 continue
-            path = repo_file(file, repo_path)
+            path = repo_file(file, repo_path, container_roots=deps.container_roots)
             if path is None:
                 not_checked.append(f"{file} is not in this clone — not read")
                 continue

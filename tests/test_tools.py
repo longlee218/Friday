@@ -68,8 +68,9 @@ def _factories() -> dict[str, object]:
     from friday.tools.describe_skill import describe_skill_tool
     from friday.tools.fetch_skill import fetch_skill_tool
     from friday.tools.memory import memory_tools
-    from friday.sources import Placement
-    from friday.tools.investigate import Evidence, investigate_tools
+    from friday.sdk.sources import Placement
+    from plugins.devops.config import DEFAULT_CONTAINER_ROOTS
+    from plugins.devops.investigate import Evidence, investigate_tools
     from friday.tools.read_skill_file import read_skill_file_tool
     from friday.tools.search_skills import search_skills_tool
 
@@ -89,9 +90,15 @@ def _factories() -> dict[str, object]:
             project={},
             log_sources={},
             reported_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
+            container_roots=DEFAULT_CONTAINER_ROOTS,
         ),
     ]
-    return {tool.name: tool for tool in built}
+    # A plugin declares a tool as a neutral `ToolSpec` (`friday.sdk.tools`); the
+    # harness binds it to the vendor's `Tool` when it builds the agent. Bind here
+    # so the test inspects what the model actually sees (ticket 14).
+    from friday.agent.harness import _bind_tool_spec
+
+    return {tool.name: tool for tool in (_bind_tool_spec(t) for t in built)}
 
 
 def _tool_objects() -> dict[str, object]:
@@ -306,7 +313,7 @@ def test_the_answer_is_a_run_s_output_not_a_door_an_agent_chooses():
     )
 
     from friday.agent.harness import ANSWER, _answer_params
-    from friday.domain.models import ApiIssueParams
+    from plugins.devops.params import ApiIssueParams
 
     assert ANSWER not in _tool_objects(), (
         "the answer is a run's output, not one of the doors an agent chooses"
@@ -349,7 +356,8 @@ def test_the_field_names_an_extractor_may_ask_about_are_a_closed_set():
     field name asks the reporter a question about nothing.
     """
     from friday.agent.harness import _answer_params
-    from friday.domain.models import ApiIssueParams, askable_fields
+    from friday.domain.models import askable_fields
+    from plugins.devops.params import ApiIssueParams
     from friday.extraction.answer import answer_shape
 
     asked = _answer_params(answer_shape(ApiIssueParams))["properties"]["ask_about"]

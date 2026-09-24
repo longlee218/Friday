@@ -39,6 +39,7 @@ __all__ = [
     "DAGState",
     "Edge",
     "MissingNodeResult",
+    "NODE_CLOCK_MARGIN_SECONDS",
     "Node",
     "NodeFn",
     "NodeRun",
@@ -52,6 +53,16 @@ __all__ = [
     "envelope",
     "status_of",
 ]
+
+
+#: How much longer a model node's clock must run than its harness's. The harness
+#: bounds a run with `timeout_seconds` and turns its own expiry into a
+#: `last_error` the node can read; the node's clock expiring first cancels the
+#: run instead, and a cancellation is a `BaseException` nothing in the harness
+#: sees. The margin lets the inner clock fire first; equal clocks are a race.
+#: Here in the port (not the router) so a plugin that times a model node against
+#: its agent reads the same margin the kernel checks it with.
+NODE_CLOCK_MARGIN_SECONDS = 5.0
 
 
 #: A workflow's input: JSON-serializable, so DBOS can persist it and resume the

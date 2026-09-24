@@ -8,7 +8,7 @@ from typing import Optional
 
 import pytest
 
-from friday.domain.models import ApiIssueParams
+from plugins.devops.params import ApiIssueParams
 from friday.domain.validation import (
     InSet,
     Matches,
@@ -323,7 +323,12 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
 
     # Register a throwaway task type; the autouse fixture clears the registry
     # after the test, so it does not leak.
-    registry.register_task_type(TaskTypeSpec(name="strict_test_type", params=StrictParams))
+    from friday.sdk.workflow import DAG, Node
+
+    registry.register_task_type(
+        TaskTypeSpec(name="strict_test_type", params=StrictParams),
+        dag=DAG(name="strict_test_type", nodes=(Node("prepare", lambda s, d: None),)),
+    )
 
     params, problem = await prepare(
         "strict_test_type", StrictParams(cid="not-a-uuid")

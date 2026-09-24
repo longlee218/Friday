@@ -38,10 +38,10 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
-from friday.agent.harness import tool
-from friday.dag.api_issue.distil import distil
-from friday.sources import Placement
-from friday.sources.code import at_ref, meanings, numbered, original, repo_file
+from friday.sdk.tools import tool
+from plugins.devops.graph.distil import distil
+from friday.sdk.sources import Placement
+from plugins.devops.sources.code import at_ref, meanings, numbered, original, repo_file
 
 __all__ = ["Evidence", "investigate_tools"]
 
@@ -137,6 +137,7 @@ def investigate_tools(
     log_sources: dict[str, Any],
     reported_at: Any,
     release_tag: str = "",
+    container_roots: tuple[str, ...],
 ) -> list[Any]:
     """The tools for one run, closed over where this case lives.
 
@@ -146,7 +147,7 @@ def investigate_tools(
     """
     return [
         _read_log(evidence, placement, log_sources, reported_at),
-        _read_code(evidence, project, release_tag),
+        _read_code(evidence, project, release_tag, container_roots),
         _what_code_means(evidence, project),
     ]
 
@@ -247,7 +248,12 @@ def _read_log(
     return read_log
 
 
-def _read_code(evidence: Evidence, project: dict[str, Any], release_tag: str):
+def _read_code(
+    evidence: Evidence,
+    project: dict[str, Any],
+    release_tag: str,
+    container_roots: tuple[str, ...],
+):
     repo_path = str(project.get("repo_path") or "")
 
     @tool
@@ -272,7 +278,7 @@ def _read_code(evidence: Evidence, project: dict[str, Any], release_tag: str):
         if not repo_path:
             return "No repository is recorded for this service, so no code can be read."
         evidence.reads += 1
-        found = repo_file(file, repo_path)
+        found = repo_file(file, repo_path, container_roots=container_roots)
         if found is None:
             return (
                 f"{file} is not in this clone — it is somebody else's code, "

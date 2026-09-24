@@ -25,22 +25,9 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
-__all__ = [
-    "CONTAINER_ROOTS", "NOT_OURS", "excerpt", "meanings", "original",
-    "repo_file",
-]
+__all__ = ["excerpt", "meanings", "original", "repo_file"]
 
 log = logging.getLogger(__name__)
-
-#: Where a service's source sits inside its image. Stripped from a frame
-#: before it is joined to the clone. Ordered longest-first at use, so
-#: `/usr/src/app` is not half-matched by `/app`.
-CONTAINER_ROOTS = ("/usr/src/app", "/app", "/srv/app")
-
-#: Frames that are somebody else's code. Named here beside the mapping,
-#: applied by whoever is choosing frames: which of them to open is a
-#: judgement, and this package holds none.
-NOT_OURS = ("node_modules", "/internal/", "node:internal")
 
 #: How much of a file to read around a frame — the spec's "±15 lines around
 #: the first frame", which with its header lands inside the `≤ 40 lines` that
@@ -49,16 +36,23 @@ BEFORE = 15
 AFTER = 15
 
 
-def repo_file(frame: str, repo_path: str) -> Path | None:
+def repo_file(
+    frame: str, repo_path: str, *, container_roots: tuple[str, ...]
+) -> Path | None:
     """The frame's file inside this clone, or `None` if it is not in it.
 
     `None` covers both "not ours" (a `node_modules` frame, a path from
     another image) and "trying to leave the clone". The caller cannot tell
     them apart and does not need to: neither is a file this node opens.
+
+    `container_roots` is the image's source-root policy, passed in as data
+    (box 4: `DevopsConfig.container_roots`, carried on the run's `Deps`) rather
+    than read off a module constant here — the one thing on this path shaped by
+    the deployment, so the one thing an operator corrects without a release.
     """
     root = Path(repo_path).expanduser()
     relative = frame
-    for prefix in sorted(CONTAINER_ROOTS, key=len, reverse=True):
+    for prefix in sorted(container_roots, key=len, reverse=True):
         if frame.startswith(prefix + "/"):
             relative = frame[len(prefix) + 1:]
             break

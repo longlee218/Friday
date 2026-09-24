@@ -43,8 +43,14 @@ class Registry:
         #: The plugin's own validated config block, or `None`. Set per plugin by
         #: `apply`; the register methods may read it off `self`.
         self.config = config
+        #: The composition root's boot capabilities (its `prepare_node`,
+        #: `make_harness`, servers, identities), or `None`. Part of the
+        #: `PluginAPI` a graph builder reaches through; this passive registry
+        #: carries none, so it is `None` here.
+        self.caps: Any = None
         self._task_types: dict[str, TaskTypeSpec] = {}
         self._memory_kinds: dict[str, MemoryKindSpec] = {}
+        self._readers: dict[str, frozenset[str]] = {}
 
     def apply(self, plugin: Plugin, config: Any = None) -> None:
         """Run one plugin's `register`, with its config in hand. The one call the
@@ -71,6 +77,11 @@ class Registry:
             )
         self._memory_kinds[spec.name] = spec
 
+    def reader(self, name: str, needs: frozenset[str]) -> None:
+        """Declare that a reader reads these kinds (DESIGN-v2 §9.2). Merges, so a
+        plugin adds its kinds to a reader the core already routes to."""
+        self._readers[name] = self._readers.get(name, frozenset()) | frozenset(needs)
+
     # ── what the kernel reads back ───────────────────────────────────────────
 
     def task_types(self) -> Mapping[str, TaskTypeSpec]:
@@ -78,3 +89,6 @@ class Registry:
 
     def memory_kinds(self) -> Mapping[str, MemoryKindSpec]:
         return dict(self._memory_kinds)
+
+    def readers(self) -> Mapping[str, frozenset[str]]:
+        return dict(self._readers)

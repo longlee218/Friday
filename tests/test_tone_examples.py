@@ -31,7 +31,7 @@ async def test_what_the_agent_sent_is_not_offered_as_an_example(inbox, provider,
     """It arrives back over the gateway as one of ours, because it was sent
     under the same account. Learning from it is learning from ourselves."""
     task = await db.create_task(
-        conversation=WATCHED, type="api_issue", state="pending",
+        conversation=WATCHED, type="devops.api_issue", state="pending",
         confidence=0.9, params={},
     )
     row = await db.queue_outbound(
@@ -69,7 +69,7 @@ async def test_our_words_are_recognised_even_without_an_id(inbox, provider, db):
     did have none. Matching the text is the fallback: the operator echoing the
     agent's own sentence back is not their voice either."""
     task = await db.create_task(
-        conversation=WATCHED, type="api_issue", state="pending",
+        conversation=WATCHED, type="devops.api_issue", state="pending",
         confidence=0.9, params={},
     )
     row = await db.queue_outbound(

@@ -15,7 +15,7 @@ import json
 
 import pytest
 
-from friday.sources.db import DbSource, redacted_name
+from plugins.devops.sources.db import DbSource, redacted_name
 
 #: The shape measured against the live server on 2026-09-21: an object whose
 #: `result` is a JSON *string*, and inside it `{rows, count}`.

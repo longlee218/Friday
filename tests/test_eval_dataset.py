@@ -18,17 +18,17 @@ from evals.dataset import Example, build_frozen_set, load_jsonl, write_jsonl
 
 def test_confirmed_and_seed_both_become_examples():
     frozen = build_frozen_set(
-        confirmed=[("the api is down", "api_issue")],
+        confirmed=[("the api is down", "devops.api_issue")],
         seed=[("anyone want lunch", "skip")],
     )
 
     texts = {e.text: e.expected for e in frozen}
-    assert texts == {"the api is down": "api_issue", "anyone want lunch": "skip"}
+    assert texts == {"the api is down": "devops.api_issue", "anyone want lunch": "skip"}
 
 
 def test_a_row_used_as_a_few_shot_example_is_excluded():
     frozen = build_frozen_set(
-        confirmed=[("the api is down", "api_issue"), ("ok thanks", "skip")],
+        confirmed=[("the api is down", "devops.api_issue"), ("ok thanks", "skip")],
         excluded=[("ok thanks", "skip")],
     )
 
@@ -39,15 +39,15 @@ def test_the_same_text_from_both_sources_is_one_row_not_two():
     """Weight, not correctness: a duplicate would count twice toward
     accuracy without saying it does."""
     frozen = build_frozen_set(
-        confirmed=[("the api is down", "api_issue")],
-        seed=[("the api is down", "api_issue")],
+        confirmed=[("the api is down", "devops.api_issue")],
+        seed=[("the api is down", "devops.api_issue")],
     )
 
     assert len(frozen) == 1
 
 
 def test_write_then_load_round_trips(tmp_path):
-    examples = [Example(text="the api is down", expected="api_issue")]
+    examples = [Example(text="the api is down", expected="devops.api_issue")]
     path = tmp_path / "triage.jsonl"
 
     write_jsonl(path, examples)
@@ -77,7 +77,7 @@ def test_non_ascii_text_is_written_readable_not_escaped(tmp_path):
     escapes would make every Vietnamese example unreadable in review."""
     path = tmp_path / "triage.jsonl"
 
-    write_jsonl(path, [Example(text="token hết hạn rồi", expected="api_issue")])
+    write_jsonl(path, [Example(text="token hết hạn rồi", expected="devops.api_issue")])
 
     assert "hết hạn" in path.read_text()
 
@@ -96,9 +96,9 @@ def test_a_plain_example_writes_no_turn_key_at_all():
     """Sixteen existing rows are single strings and must stay that way on
     disk — a `"turn": []` key on every line would touch every row in a diff
     for a feature only two or three of them use."""
-    path = write_jsonl_to_tmp([Example(text="the api is down", expected="api_issue")])
+    path = write_jsonl_to_tmp([Example(text="the api is down", expected="devops.api_issue")])
     assert json.loads(path.read_text().splitlines()[0]) == {
-        "text": "the api is down", "expected": "api_issue"
+        "text": "the api is down", "expected": "devops.api_issue"
     }
 
 
@@ -108,7 +108,7 @@ def test_a_multi_message_example_round_trips_its_turn(tmp_path):
     single-string rows cannot."""
     example = Example(
         text="whatever the classifier is shown when there is no turn to give",
-        expected="api_issue",
+        expected="devops.api_issue",
         turn=(
             ("api lỗi rồi anh ơi", False),
             ("correlationId nằm trong header x-request-id đó em", True),
@@ -138,7 +138,7 @@ def test_a_seed_row_can_carry_a_turn():
         seed=[
             (
                 "api lỗi rồi anh ơi",
-                "api_issue",
+                "devops.api_issue",
                 (("api lỗi rồi anh ơi", False), ("curl -X GET /pay trả 500", False)),
             ),
         ],
@@ -152,7 +152,7 @@ def test_a_seed_row_can_carry_a_turn():
 
 def test_a_plain_seed_row_still_works_alongside_a_turn_row():
     frozen = build_frozen_set(
-        confirmed=[("the api is down", "api_issue")],
+        confirmed=[("the api is down", "devops.api_issue")],
         seed=[("anyone want lunch", "skip")],
     )
 
@@ -173,18 +173,18 @@ def test_a_real_verdict_beats_a_seed_row_saying_the_same_thing():
     agree on the label in the case that made anyone write both.
     """
     frozen = build_frozen_set(
-        confirmed=[("the api is down", "api_issue")],
+        confirmed=[("the api is down", "devops.api_issue")],
         seed=[("the api is down", "skip")],
     )
 
     (example,) = frozen
-    assert example.expected == "api_issue", "the seed overwrote a real verdict"
+    assert example.expected == "devops.api_issue", "the seed overwrote a real verdict"
 
 
 def test_a_set_missing_a_decision_says_which_one():
     from evals.dataset import unfit
 
-    said = unfit([Example(text="the api is down", expected="api_issue")])
+    said = unfit([Example(text="the api is down", expected="devops.api_issue")])
 
     assert any("skip" in line for line in said)
     assert any("access_request" in line for line in said)
@@ -206,8 +206,8 @@ def test_a_duplicated_text_is_reported_because_it_doubles_its_own_weight():
     from evals.dataset import unfit
 
     twice = [
-        Example(text="the api is down", expected="api_issue"),
-        Example(text="the api is down", expected="api_issue"),
+        Example(text="the api is down", expected="devops.api_issue"),
+        Example(text="the api is down", expected="devops.api_issue"),
     ]
 
     assert any("the api is down" in line for line in unfit(twice))
@@ -222,7 +222,7 @@ def test_a_set_that_covers_everything_is_reported_as_fit():
     covering.append(
         Example(
             text="a burst",
-            expected="api_issue",
+            expected="devops.api_issue",
             turn=(("api lỗi rồi", False), ("correlationId là 3f7a1e22", False)),
         )
     )

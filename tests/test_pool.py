@@ -20,7 +20,7 @@ from friday.domain.states import TaskState
 async def make_task(db, **params):
     return await db.create_task(
         conversation=ConversationId("fake", "watched"),
-        type="api_issue",
+        type="devops.api_issue",
         state="pending",
         confidence=0.9,
         params={"summary": "checkout 500", "environment": None,
@@ -214,8 +214,8 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     # A graph standing in for the real one. This test is about the approval
     # machinery, not about what `api_issue` investigates — it needs a route
     # that produces a `Reply` and nothing more.
-    EDGE_ROUTER.pop("api_issue", None)
-    register_dag("api_issue", DAG(name="answers", nodes=(Node("answer", answers),)))
+    EDGE_ROUTER.pop("devops.api_issue", None)
+    register_dag("devops.api_issue", DAG(name="answers", nodes=(Node("answer", answers),)))
 
     await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     runner = Pool(db=db, auto_ask=True)
@@ -223,7 +223,7 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     try:
         acted = await runner.run_once()
     finally:
-        EDGE_ROUTER.pop("api_issue", None)
+        EDGE_ROUTER.pop("devops.api_issue", None)
 
     reply, card = await db.outbound()
     assert reply.kind == "reply"
@@ -281,7 +281,8 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     from friday.extraction import _EXTRACTORS, build_extractor
     from friday.extraction.answer import answer_shape
     from friday.agent.harness import Harness
-    from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
+    from friday.domain.models import InboundEvent, MentionType
+    from plugins.devops.params import ApiIssueParams
 
     class StubResult:
         # The model has to repeat every field, including ones triage already
@@ -318,7 +319,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
         harness=StubHarness(answers=answer_shape(ApiIssueParams)),  # type: ignore[arg-type]
         name="api_issue_ext",
     )
-    _EXTRACTORS["api_issue"] = ext
+    _EXTRACTORS["devops.api_issue"] = ext
     # Extraction happens inside the graph's own entry node now (ticket 03),
     # the same `prepare` this stub extractor is wired into either way — no
     # need to remove `api_issue`'s registered graph to reach this path any
@@ -360,7 +361,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
         # how a task surfaces to a person.
         assert await db.outbound(), "no outbound produced"
     finally:
-        _EXTRACTORS.pop("api_issue", None)
+        _EXTRACTORS.pop("devops.api_issue", None)
 
 
 async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db):
@@ -376,7 +377,8 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
+    from friday.domain.models import InboundEvent, MentionType
+    from plugins.devops.params import ApiIssueParams
     from friday.extraction import _EXTRACTORS, build_extractor
     from friday.extraction.answer import answer_shape
     from friday.store import schema
@@ -397,7 +399,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
         ),
         name="api_issue_ext",
     )
-    _EXTRACTORS["api_issue"] = ext
+    _EXTRACTORS["devops.api_issue"] = ext
 
     # Ticket 12: a draft naming no work, so this stays a test of whose
     # words reach the reporter rather than of `friday.responder.check`.
@@ -430,7 +432,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
             "the Responder must be told which field to ask about"
         )
     finally:
-        _EXTRACTORS.pop("api_issue", None)
+        _EXTRACTORS.pop("devops.api_issue", None)
 
 
 async def test_the_responder_is_told_what_this_task_actually_knows(db):
@@ -442,7 +444,7 @@ async def test_the_responder_is_told_what_this_task_actually_knows(db):
     rồi, để anh trace thử". False, promising work nobody would do, and sent
     under the operator's name with no approval step.
     """
-    from friday.domain.models import ApiIssueParams
+    from plugins.devops.params import ApiIssueParams
 
     responder = StubResponder("cho anh xin cái correlationId nhé")
     await make_task(db, environment="production")
@@ -494,7 +496,7 @@ async def test_the_extractor_reads_the_rest_of_the_burst(db):
     task = await make_task(db)
     await _said(db, "m1", "@Lee API lỗi rồi a ơi", secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
     )
     await _said(db, "m2", "curl -X POST /pay trả 500, trên production", secs=3)
 
@@ -509,7 +511,7 @@ async def test_somebody_else_talking_is_not_part_of_it(db):
     task = await make_task(db)
     await _said(db, "m1", "@Lee API lỗi rồi", secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
     )
     await _said(db, "m2", "trưa nay ăn gì mọi người", secs=3, author="someone-else")
 
@@ -525,7 +527,7 @@ async def test_what_we_posted_is_not_read_back(db):
     task = await make_task(db)
     await _said(db, "m1", "@Lee API lỗi rồi", secs=0, mention=True, author="me")
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
     )
     row = await db.queue_outbound(
         task_id=task.id,
@@ -547,7 +549,7 @@ async def test_nothing_said_before_the_report_is_dragged_in(db):
     await _said(db, "earlier", "hôm qua deploy xong rồi nhé", secs=-3600)
     await _said(db, "m1", "@Lee API lỗi rồi", secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
     )
 
     assert "hôm qua deploy" not in (await db.original_text_for(task.id) or "")
@@ -562,7 +564,7 @@ async def test_an_unset_budget_changes_nothing(db):
     task = await make_task(db)
     await _said(db, "m1", "@Lee API lỗi rồi a ơi", secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
     )
     await _said(db, "m2", "curl -X POST /pay trả 500, trên production", secs=3)
 
@@ -580,7 +582,7 @@ async def test_the_message_count_cap_still_binds_with_a_generous_budget(db):
     task = await make_task(db)
     await _said(db, "m1", "@Lee API lỗi rồi a ơi", secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
     )
     for n in range(2, 30):
         await _said(db, f"m{n}", f"chi tiết số {n}", secs=n)
@@ -599,7 +601,7 @@ async def test_over_budget_the_oldest_messages_are_dropped_first(db):
     task = await make_task(db)
     await _said(db, "m1", "@Lee " + ("API lỗi rồi. " * 40), secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
     )
     await _said(db, "m2", "correlationId là abcdef01-2345-6789-abcd-ef0123456789", secs=3)
 
@@ -615,7 +617,7 @@ async def test_a_budget_the_transcript_already_fits_changes_nothing(db):
     task = await make_task(db)
     await _said(db, "m1", "@Lee API lỗi rồi", secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
     )
 
     said = await db.original_text_for(task.id, budget_tokens=10_000)
@@ -632,7 +634,7 @@ async def test_the_newest_message_survives_even_alone_over_budget(db):
     huge = "@Lee " + ("API lỗi rồi rất là dài. " * 200)
     await _said(db, "m1", huge, secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
     )
 
     said = await db.original_text_for(task.id, budget_tokens=5)
@@ -752,7 +754,7 @@ async def test_a_reply_picks_the_task_out_of_several(db):
     a = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     b = await make_task(db, curl="curl -X GET /pay")
     await db.record_message(make_event(message_id="report-b", text="curl lỗi"))
-    await db.mark_triaged(make_event(message_id="report-b"), b.id, decision={"type": "api_issue"})
+    await db.mark_triaged(make_event(message_id="report-b"), b.id, decision={"type": "devops.api_issue"})
     await _operator_said(db, "op-1", "cái curl đó thiếu header", reply_to="report-b")
 
     await Pool(db=db, auto_ask=False).run_once()
@@ -781,7 +783,7 @@ async def test_someone_the_operator_never_wrote_to_is_a_stranger(db):
     responder = StubResponder("dạ anh/chị gửi mình correlationId nhé")
     task = await make_task(db)
     await db.record_message(make_event(message_id="m1", author_id="newcomer"))
-    await db.mark_triaged(make_event(message_id="m1", author_id="newcomer"), task.id, decision={"type": "api_issue"})
+    await db.mark_triaged(make_event(message_id="m1", author_id="newcomer"), task.id, decision={"type": "devops.api_issue"})
 
     await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
@@ -794,7 +796,7 @@ async def test_an_exchange_in_either_direction_makes_them_known(db):
     responder = StubResponder("cho anh xin correlationId nhé")
     task = await make_task(db)
     await db.record_message(make_event(message_id="m1", author_id="dana"))
-    await db.mark_triaged(make_event(message_id="m1", author_id="dana"), task.id, decision={"type": "api_issue"})
+    await db.mark_triaged(make_event(message_id="m1", author_id="dana"), task.id, decision={"type": "devops.api_issue"})
     # Long once replied to something dana said.
     await db.record_message(make_event(message_id="old", author_id="dana", text="hi"), context_only=True)
     await db.record_message(
@@ -821,7 +823,7 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
     responder = StubResponder("ok")
     task = await make_task(db)
     await db.record_message(make_event(message_id="m1", author_id="dana"))
-    await db.mark_triaged(make_event(message_id="m1", author_id="dana"), task.id, decision={"type": "api_issue"})
+    await db.mark_triaged(make_event(message_id="m1", author_id="dana"), task.id, decision={"type": "devops.api_issue"})
 
     await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
@@ -870,7 +872,7 @@ async def _reporter_said(db, message_id, text, *, secs, task_id=None, reply_to=N
     )
     await db.record_message(event, context_only=task_id is None)
     if task_id is not None:
-        await db.mark_triaged(event, task_id, decision={"type": "api_issue"})
+        await db.mark_triaged(event, task_id, decision={"type": "devops.api_issue"})
 
 
 async def test_the_operator_is_told_what_the_reporter_asked(db):
@@ -955,7 +957,8 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
 
     from friday.agent.harness import Harness
     from friday.config import AgentConfig
-    from friday.domain.models import ApiIssueParams, InboundEvent, MentionType
+    from friday.domain.models import InboundEvent, MentionType
+    from plugins.devops.params import ApiIssueParams
     from friday.extraction import _EXTRACTORS, build_extractor
     from friday.extraction.answer import answer_shape
     from friday.store import schema
@@ -983,8 +986,8 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
         ),
         name="api_issue_extractor",
     )
-    kept = _EXTRACTORS.get("api_issue")
-    _EXTRACTORS["api_issue"] = ext
+    kept = _EXTRACTORS.get("devops.api_issue")
+    _EXTRACTORS["devops.api_issue"] = ext
 
     try:
         await db.record_message(
@@ -1007,9 +1010,9 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
         await Pool(db=db, auto_ask=True, responder=_responder(sink)).run_once()
     finally:
         if kept is None:
-            _EXTRACTORS.pop("api_issue", None)
+            _EXTRACTORS.pop("devops.api_issue", None)
         else:
-            _EXTRACTORS["api_issue"] = kept
+            _EXTRACTORS["devops.api_issue"] = kept
 
     by_agent = {c.agent: c for c in recorded}
     assert set(by_agent) == {"api_issue_extractor", "responder"}, (
@@ -1099,7 +1102,7 @@ async def _reported(db, task_id, message_id, *, secs, text="@Lee API lỗi rồi
         created_at=datetime.now(timezone.utc) + timedelta(seconds=secs),
     )
     await db.record_message(event)
-    await db.mark_triaged(event, task_id, decision={"type": "api_issue"})
+    await db.mark_triaged(event, task_id, decision={"type": "devops.api_issue"})
 
 
 async def test_an_answer_written_before_the_task_row_existed_still_closes_it(db):
@@ -1213,7 +1216,7 @@ async def test_a_quick_graph_is_not_held_behind_a_slow_one(db):
         quick_done.set()
         return HandOver("quick")
 
-    _graph("api_issue", slow)
+    _graph("devops.api_issue", slow)
     _graph("doc_question", quick)
     await make_task(db)
     await _doc_task(db)
@@ -1240,7 +1243,7 @@ async def test_no_more_graphs_run_at_once_than_configured(db):
         running -= 1
         return HandOver("done")
 
-    _graph("api_issue", counted)
+    _graph("devops.api_issue", counted)
     for _ in range(4):
         await make_task(db)
 
@@ -1268,7 +1271,7 @@ async def test_one_task_is_never_acted_on_twice_at_once(db):
         await release.wait()
         return HandOver("done")
 
-    _graph("api_issue", held)
+    _graph("devops.api_issue", held)
     await make_task(db)
     pool = Pool(db=db, auto_ask=True)
 
@@ -1302,7 +1305,7 @@ async def test_the_bound_is_the_one_configured(db):
         running -= 1
         return HandOver("done")
 
-    _graph("api_issue", counted)
+    _graph("devops.api_issue", counted)
     for _ in range(4):
         await make_task(db)
     config = SimpleNamespace(workflows=SimpleNamespace(

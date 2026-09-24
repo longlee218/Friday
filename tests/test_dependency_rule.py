@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 #: plugin owns them (DESIGN-v2 §9.2). Everything else the memory registry holds
 #: is a pack kind a plugin ships, so its bare name is a literal the kernel must
 #: not carry.
-CORE_KINDS = {"fact", "constraint", "decision", "voice", "summary", "finding", "person"}
+CORE_KINDS = {"fact", "constraint", "decision", "voice", "summary", "finding", "person", "skill"}
 
 
 def _forbidden_literals() -> set[str]:
@@ -103,15 +103,18 @@ def test_kernel_imports_only_sdk():
 
 
 def test_a_plugin_imports_sdk_only():
-    """A plugin codes against `sdk` and nothing else of ours — the reason it is
-    detachable. Vacuous until `plugins/` exists (ticket 14); the guard is in
-    place for when it does."""
-    offenders = {
-        (rel, mod)
-        for rel, tree in _modules(ROOT / "plugins")
-        for mod in _friday_imports(rel, tree)
-        if not _under(mod, "friday.sdk")
-    }
+    """A plugin codes against `sdk` and nothing else *of ours* — the reason it is
+    detachable. Its own package is not "ours": a plugin freely imports its own
+    submodules (`plugins.devops.graph.resolve` from `plugins.devops.graph`). What
+    it may not reach for is the core (anything `friday.*` but `friday.sdk`) or
+    another plugin. Non-vacuous since ticket 14 landed `plugins/devops/`."""
+    offenders = set()
+    for rel, tree in _modules(ROOT / "plugins"):
+        parts = Path(rel).parts  # ("plugins", "devops", …)
+        own = ".".join(parts[:2]) if len(parts) >= 2 else "plugins"
+        for mod in _friday_imports(rel, tree):
+            if not _under(mod, "friday.sdk", own):
+                offenders.add((rel, mod))
     assert offenders == set(), f"a plugin imported more than sdk: {sorted(offenders)}"
 
 

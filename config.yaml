@@ -179,7 +179,7 @@ agents:
   # dossier and a file rather than writing a label, and a truncated run costs
   # the whole investigation. Its node's clock is derived from this number
   # plus five seconds, so raising it here moves the node's with it.
-  diagnose:
+  devops.diagnose:
     timeout_seconds: 150
     api_key: ${TRIAGE_API_KEY}
     base_url: "https://api.minimax.io/v1"
@@ -191,7 +191,7 @@ agents:
 # ── The api_issue graph ────────────────────────────────────────────────────
 # What the investigation reaches outside this process with. Everything here
 # is optional: a node with no source skips and says which one it wanted.
-api_issue:
+devops:
   # The SSH alias `kubectl` runs behind. Measured 2026-09-18: there is no
   # kubeconfig for dev on this machine — `kubectl` runs on the dev host, so
   # this is the only way in. Empty means dev logs are not read at all.
@@ -516,12 +516,12 @@ sensitive_words:
 triage_examples:
   # Addressed to us and vague — still work. This is the pair the classifier
   # used to get wrong: it read "short" as "nothing to do".
-  - "a ơi bị lỗi api rồi": api_issue
-  - "a xem giúp e request này với ạ [image: postman.png]": api_issue
+  - "a ơi bị lỗi api rồi": devops.api_issue
+  - "a xem giúp e request này với ạ [image: postman.png]": devops.api_issue
   # A symptom told as a story, no error code, no curl.
-  - "e mua gói sub lúc 15h mà 30 phút sau vẫn chưa được cộng coin a ạ": api_issue
+  - "e mua gói sub lúc 15h mà 30 phút sau vẫn chưa được cộng coin a ạ": devops.api_issue
   # Findings offered rather than asked — still ours to act on.
-  - "nguyên nhân là do request thiếu selling_region nên catalog trả rỗng a nhé": api_issue
+  - "nguyên nhân là do request thiếu selling_region nên catalog trả rỗng a nhé": devops.api_issue
   # What a term means, and where a document lives: the answer is writing.
   - "correlationId là cái gì a nhỉ, e ko biết": doc_question
   - "a ơi tài liệu mô tả webhook của Midas nằm ở repo nào v": doc_question

@@ -29,6 +29,7 @@ from friday.sdk.plugin import TaskTypeSpec
 
 __all__ = [
     "BUDGETS",
+    "DAGS",
     "SERVERS",
     "TASK_TYPES",
     "clear",
@@ -44,6 +45,12 @@ __all__ = [
 #: type's registration is `api.task_type(spec)` and nothing here names a type.
 TASK_TYPES = Registry()
 
+#: The built `DAG` for each registered type. Built once at registration (node 0
+#: plus the type's investigation, if any) and stored here, rather than rebuilt on
+#: every `dag_of` — a plugin's graph builds a model harness, and building it
+#: twice a boot is waste the store avoids.
+DAGS: dict[str, DAG] = {}
+
 #: Tool servers available to every graph, by name.
 SERVERS: dict[str, Any] = {}
 
@@ -53,17 +60,14 @@ SERVERS: dict[str, Any] = {}
 BUDGETS: dict[str, float] = {}
 
 
-def register_task_type(
-    spec: TaskTypeSpec,
-    *,
-    budget: float | None = None,
-) -> None:
-    """Add one task type: its spec and the per-task budget it declares. A
-    duplicate name refuses (the `Registry` guard). A type's live handles are on
-    the spec now (`spec.deps`), built per run, not stored here."""
+def register_task_type(spec: TaskTypeSpec, *, dag: DAG) -> None:
+    """Add one task type: its spec, its built `DAG`, and the per-task budget it
+    declares (`spec.budget`). A duplicate name refuses (the `Registry` guard). A
+    type's live handles are on the spec (`spec.deps`), built per run, not here."""
     TASK_TYPES.task_type(spec)
-    if budget is not None:
-        BUDGETS[spec.name] = budget
+    DAGS[spec.name] = dag
+    if spec.budget is not None:
+        BUDGETS[spec.name] = spec.budget
 
 
 def clear() -> None:
@@ -71,6 +75,7 @@ def clear() -> None:
     tests that register their own set."""
     global TASK_TYPES
     TASK_TYPES = Registry()
+    DAGS.clear()
     SERVERS.clear()
     BUDGETS.clear()
 
@@ -95,12 +100,9 @@ def decisions() -> tuple[str, ...]:
 
 
 def dag_of(task_type: str) -> DAG:
-    """The built graph for a task type. Its `graph` factory takes a `Deps` it
-    currently ignores (the graph is built at boot); the run's typed `Deps` are
-    built by `deps_of` instead."""
-    spec = TASK_TYPES.task_types()[task_type]
-    assert spec.graph is not None, f"task type {task_type!r} registered no graph"
-    return spec.graph(None)
+    """The built graph for a task type — stored at registration by
+    `register_task_type`. The run's typed `Deps` are built by `deps_of`."""
+    return DAGS[task_type]
 
 
 def deps_of(task_type: str) -> Callable[[Deps], Deps] | None:

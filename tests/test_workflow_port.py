@@ -319,7 +319,7 @@ async def test_a_send_interrupted_mid_call_is_delivery_unknown_after_restart(dbo
     # go of both databases so the child has exclusive access.
     db = await Database.connect(app_db, create=True)
     opened = await db.create_task(
-        conversation=WATCHED, type="api_issue", state="pending",
+        conversation=WATCHED, type="devops.api_issue", state="pending",
         confidence=0.9, params={"summary": "s"},
     )
     row = await db.queue_outbound(

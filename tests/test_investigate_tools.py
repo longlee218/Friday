@@ -15,8 +15,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from friday.sources import Lines, Placement
-from friday.tools.investigate import MAX_READS, Evidence, investigate_tools
+from friday.sdk.sources import Lines, Placement
+from plugins.devops.config import DEFAULT_CONTAINER_ROOTS
+from plugins.devops.investigate import MAX_READS, Evidence, investigate_tools
 
 AT = datetime(2026, 9, 21, 10, 40, tzinfo=timezone.utc)
 
@@ -45,8 +46,13 @@ def built(source=None, project=None, tag=""):
         log_sources={} if source is None else {"kubectl": source},
         release_tag=tag,
         reported_at=AT,
+        container_roots=DEFAULT_CONTAINER_ROOTS,
     )
-    return evidence, {t.name: t for t in tools}
+    # Plugin tools are neutral `ToolSpec`s; the harness binds each to the
+    # vendor's `Tool`. Bind here so the test sees what the model sees (ticket 14).
+    from friday.agent.harness import _bind_tool_spec
+
+    return evidence, {t.name: t for t in (_bind_tool_spec(x) for x in tools)}
 
 
 def call(tool, **kw):
@@ -308,7 +314,7 @@ def test_the_window_reaches_past_the_report():
 def test_a_window_wider_than_anything_is_kept_is_brought_back_to_it():
     """Not distrust: thirty days is what Loki keeps, and a search that says
     it covered a year covered a month."""
-    from friday.tools.investigate import MAX_MINUTES_BACK
+    from plugins.devops.investigate import MAX_MINUTES_BACK
 
     source = Log(["ERROR abc"])
     _, tools = built(source)
@@ -400,7 +406,7 @@ def test_a_clone_missing_the_running_tag_says_so_where_the_node_sees_it(tmp_path
 def _state(db_rows_written=True):
     """A run that has resolved a placement and read nothing."""
     from friday.dag.engine import DAGState
-    from friday.domain.models import ApiIssueParams
+    from plugins.devops.params import ApiIssueParams
 
     return (
         DAGState.empty()
@@ -424,8 +430,13 @@ class Answering:
 
     def __init__(self, answer, tools):
         self.answer = answer
-        self._tools = list(tools or ())
-        Answering.seen = {"tools": [t.name for t in tools or ()]}
+        # Plugin tools arrive as neutral `ToolSpec`s; the real harness binds
+        # each to the vendor's `Tool` in its constructor, so this stand-in does
+        # too — then `.name` reads the same here as it does in production.
+        from friday.agent.harness import _bind_tool_spec
+
+        self._tools = [_bind_tool_spec(t) for t in tools or ()]
+        Answering.seen = {"tools": [t.name for t in self._tools]}
 
     async def run_structured(self, prompt, **_):
         Answering.seen["prompt"] = prompt
@@ -435,8 +446,8 @@ class Answering:
 async def test_the_model_is_given_the_reads_and_told_where_things_live(db):
     """`Gather` gathers metadata under v3.3 — where the service runs, which
     clone holds its code — and nothing is read in advance."""
-    from friday.dag.api_issue.diagnose import Diagnosis, diagnose_node
-    from friday.dag.api_issue.deps import ApiIssueDeps
+    from plugins.devops.graph.diagnose import Diagnosis, diagnose_node
+    from plugins.devops.graph.deps import ApiIssueDeps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="x", confidence="likely", conclusive=False, refs=[])
@@ -462,9 +473,9 @@ async def test_an_answer_written_without_reading_anything_is_refused(db):
     from evidence, which is the whole reason the gates exist. Under the old
     pipeline the node checked there was a dossier; here nothing was fetched
     at all."""
-    from friday.dag.api_issue.diagnose import Diagnosis, diagnose_node
+    from plugins.devops.graph.diagnose import Diagnosis, diagnose_node
     from friday.dag.engine import status_of
-    from friday.dag.api_issue.deps import ApiIssueDeps
+    from plugins.devops.graph.deps import ApiIssueDeps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="chắc là do cache", confidence="likely",
@@ -486,7 +497,7 @@ async def test_both_ways_of_answering_pass_through_the_same_gates(db):
     gate holding on one and not the other would make meaningless."""
     import inspect
 
-    from friday.dag.api_issue import diagnose as module
+    from plugins.devops.graph import diagnose as module
 
     source = inspect.getsource(module)
 
@@ -499,7 +510,7 @@ def test_the_instructions_change_when_the_model_fetches_its_own_evidence():
     """A prompt saying "the lines you were shown" to a model that was shown
     nothing is a prompt it cannot obey. Asserted on the instructions, not on
     the run's input — deleting the reads half left every other test green."""
-    from friday.dag.api_issue.prompt import build_instructions
+    from plugins.devops.graph.prompt import build_instructions
 
     plain, reading = build_instructions(), build_instructions(reads=True)
 
@@ -512,8 +523,8 @@ async def test_what_a_tool_could_not_check_reaches_the_envelope(db):
     """The honest half is the tools' own, not the model's: what a read left
     out is a fact about the read, and a model asked to remember it
     reproduces it unreliably."""
-    from friday.dag.api_issue.diagnose import Diagnosis, diagnose_node
-    from friday.dag.api_issue.deps import ApiIssueDeps
+    from plugins.devops.graph.diagnose import Diagnosis, diagnose_node
+    from plugins.devops.graph.deps import ApiIssueDeps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="x", confidence="likely", conclusive=False,

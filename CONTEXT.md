@@ -343,7 +343,7 @@ first that holds is taken. Deterministic Python.
 
 ## Source, check, node
 
-Three layers. A **source** (`friday/sources/`) reads one kind of thing and
+Three layers. A **source** (`plugins/devops/sources/`) reads one kind of thing and
 decides nothing — the only package that reaches an outside read surface. A
 **check** is a formula over sources (being withdrawn by v3.3 in favour of
 distilling tools). A **node** is the frame a run is checkpointed, timed and

@@ -19,19 +19,24 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-PACKAGE = Path(__file__).resolve().parent.parent / "friday"
+ROOT = Path(__file__).resolve().parent.parent
+#: Both trees a shell-out could hide in: the core, and the plugins. Ticket 14
+#: moved the concrete devops sources out to `plugins/devops/sources/`, so the
+#: guard has to read there too or it would pass by looking at the wrong tree.
+PACKAGES = (ROOT / "friday", ROOT / "plugins")
 
-#: Where the outside world may be reached. `agent/mcp.py` *builds* MCP
-#: servers from configuration and hands them on; it never calls a tool, which
-#: is the line below.
+#: Where the outside world may be reached, as repo-relative posix paths.
+#: `agent/mcp.py` *builds* MCP servers from configuration and hands them on; it
+#: never calls a tool, which is the line below.
 ALLOWED = {
-    "sources/logs.py",
-    "sources/code.py",
-    "sources/db.py",
+    "plugins/devops/sources/logs.py",
+    "plugins/devops/sources/code.py",
+    "plugins/devops/sources/db.py",
     # `Reads` is the narrowing every other call goes through — the one place
     # allowed to hold a server and pass a call on, and the place that refuses
-    # a tool no reader declared.
-    "sources/__init__.py",
+    # a tool no reader declared. It is an sdk port now (ticket 14): the
+    # contract a plugin's sources implement, so it moved into `friday/sdk`.
+    "friday/sdk/sources.py",
 }
 
 #: Starting a process. The whole of how this system reaches `ssh`, `kubectl`
@@ -52,11 +57,14 @@ READS_THROUGH_MCP = {"call_tool"}
 
 def modules() -> list[tuple[str, ast.Module]]:
     found = []
-    for path in sorted(PACKAGE.rglob("*.py")):
-        relative = path.relative_to(PACKAGE).as_posix()
-        if "__pycache__" in relative:
+    for package in PACKAGES:
+        if not package.exists():
             continue
-        found.append((relative, ast.parse(path.read_text())))
+        for path in sorted(package.rglob("*.py")):
+            relative = path.relative_to(ROOT).as_posix()
+            if "__pycache__" in relative:
+                continue
+            found.append((relative, ast.parse(path.read_text())))
     return found
 
 
@@ -107,7 +115,7 @@ def test_a_source_may_not_reach_for_an_agent():
     the capability depend on the thing calling it."""
     reached = {}
     for name, tree in modules():
-        if not name.startswith("sources/"):
+        if "sources/" not in name:
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(

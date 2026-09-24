@@ -1,28 +1,24 @@
 """The one place a memory kind is known — filled by `register()`, read by the rest.
 
-Ticket 12 folds the hardcoded memory-kind maps (`_READERS`, `_WRITERS`,
-`MEMORY_DATA`) and the `MemoryKind` closed enum into a `MemoryKindSpec` registry.
-A kind now *registers itself* — a `MemoryKindSpec` (name, data, writers,
-cardinality, injected) handed to `register_memory_kind` at boot — and the store,
-the board and the injection path read the registry instead of a table beside the
-kind.
+Ticket 12 folded the hardcoded memory-kind maps and the `MemoryKind` enum into a
+`MemoryKindSpec` registry; ticket 14 moved the structured *pack* kinds
+(`devops.*`) out to the devops plugin, leaving the **core** kinds here — the ones
+every install has. A kind registers itself (a `MemoryKindSpec` handed to
+`register_memory_kind` at boot), and the store, the board and the injection path
+read the registry instead of a table beside the kind.
 
 **Readers come from the reader's side** (DESIGN-v2 §9.2): the kind no longer
 names its readers. Each reader (an agent, or `"code"`) declares the kinds it
 needs through `register_reader`, and `readers_for`/`domain_kinds` derive from
-that — the reverse of the old `_READERS`, so a kind and its readers cannot
-disagree and the kind names nothing above it.
+that. `register_reader` **merges**, so a plugin adds its kinds to a reader the
+core already routes to (`code`) without naming what the core put there.
 
-The registry lives here, above `friday.domain` (it holds `MemoryKindSpec`, an
-`sdk` type, and references domain's `*Data` classes). `friday.domain` never
-imports it — the value layer stays at the bottom; the store and the board reach
-*up* to the registry, never the reverse.
+**A kind's natural key is on its spec** (`MemoryKindSpec.key`, ticket 14): the
+per-kind branch that used to live in `natural_key` moved onto the spec so a pack
+kind ships its key derivation with the plugin. `natural_key` just delegates.
 
-`MemoryKind` is a **validated string** now: `validate_kind` is the closed-set
-check the enum's constructor used to give, against the registered set rather than
-a compiled-in one. The name constants below are readable aliases for the strings,
-not a second closed set — the registry is the authority. `ModelMemoryKind`
-(the five kinds a model writes) stays a closed enum in `friday.domain`.
+The registry lives above `friday.domain` (it holds `MemoryKindSpec`, an `sdk`
+type, and references domain's `*Data` classes). `friday.domain` never imports it.
 """
 
 from __future__ import annotations
@@ -33,35 +29,28 @@ from typing import Any
 
 from friday.domain.models import (
     DecisionData,
-    DependencyData,
-    EnvironmentData,
     FindingData,
     MemoryRefused,
     PersonData,
-    ProjectData,
-    RouteData,
-    RunbookData,
-    ServiceData,
+    SkillData,
     SummaryData,
 )
 from friday.sdk.memory import MemoryKindSpec, Origin
 
-# ── kind names ───────────────────────────────────────────────────────────────
+# ── core kind names ───────────────────────────────────────────────────────────
 # Readable aliases for the kind strings; the registry (not this list) is the
 # authority for what is valid. Core kinds stay unprefixed (every install has
-# them); the structured pack kinds move to the devops plugin in ticket 14.
+# them); the structured pack kinds are the devops plugin's (`devops.service` …).
 FACT = "fact"
 CONSTRAINT = "constraint"
 DECISION = "decision"
 VOICE = "voice"
 FINDING = "finding"
-RUNBOOK = "runbook"
 SUMMARY = "summary"
-PROJECT = "project"
-SERVICE = "service"
-ROUTE = "route"
-ENVIRONMENT = "environment"
-DEPENDENCY = "dependency"
+#: The procedures a diagnosis reads. Was `runbook` until ticket 14 (DESIGN-v2
+#: §6.3: procedures are skills); the `skill` kind carries the same shape and the
+#: same operator-given key, and a data migration renamed the rows.
+SKILL = "skill"
 PERSON = "person"
 
 __all__ = [
@@ -99,9 +88,10 @@ def register_memory_kind(spec: MemoryKindSpec) -> None:
 
 
 def register_reader(name: str, needs: frozenset[str]) -> None:
-    """Declare the kinds one reader (an agent, or `"code"`) reads. The reverse of
-    the old `_READERS`: readers name their kinds, kinds name no readers."""
-    _READER_NEEDS[name] = frozenset(needs)
+    """Declare the kinds one reader (an agent, or `"code"`) reads. **Merges** —
+    a plugin adds its kinds to `code` without re-declaring the core kinds routed
+    there. The reverse of the old `_READERS`: readers name their kinds."""
+    _READER_NEEDS[name] = _READER_NEEDS.get(name, frozenset()) | frozenset(needs)
 
 
 def clear() -> None:
@@ -171,11 +161,8 @@ def readers_for(kind: str) -> frozenset[str]:
 
 def domain_kinds() -> frozenset[str]:
     """The kinds rendered into the extractor's prompt: its declared needs that
-    are `injected`. The reader side picks *which* agent reads a kind; `injected`
-    decides whether that kind is rendered into a prompt section at all rather
-    than read only through a tool — so a kind the extractor needed but that was
-    marked tool-only would be excluded here. `db.domain_memories` loads exactly
-    these. Derived, never a second enumeration (D14)."""
+    are `injected`. `db.domain_memories` loads exactly these. Derived, never a
+    second enumeration (D14)."""
     return frozenset(
         k for k in _READER_NEEDS.get("extractor", frozenset()) if injected_of(k)
     )
@@ -208,51 +195,39 @@ def named_by(kind: str) -> tuple[tuple[str, str], ...]:
 
 
 def natural_key(kind: str, data: dict[str, Any] | None, given: str | None) -> str | None:
-    """A structured kind's natural key — the spec's `key=` column — read off its
-    already-validated `data`, so the key cannot disagree with the row.
-
-    `runbook` is the one kind whose key is not in its data (a short name the
-    operator gives), so it is the one that takes `given` and refuses without it.
-    `summary` has a fixed key, which is what makes the partial unique index hold
-    it to one per room. Prose kinds and `decision` have none.
-
-    The per-kind branches stay hardcoded for now: a key-derivation field on the
-    spec is a later trigger (§9.2), and the pack kinds move to the devops plugin
-    with this logic in ticket 14.
-    """
-    kind = validate_kind(kind)
-    d = data or {}
-    if kind == RUNBOOK:
-        if not (given or "").strip():
-            raise MemoryRefused("a runbook needs a key — a short name for it")
-        return given.strip()
-    return {
-        FINDING: lambda: f"{d.get('service')}:{d.get('error_code') or ''}",
-        SUMMARY: lambda: "room",
-        PROJECT: lambda: d.get("name"),
-        SERVICE: lambda: d.get("name"),
-        ROUTE: lambda: d.get("domain"),
-        ENVIRONMENT: lambda: d.get("suffix"),
-        DEPENDENCY: lambda: f"{d.get('from_service')}->{d.get('to_service')}",
-        PERSON: lambda: d.get("discord_id"),
-    }.get(kind, lambda: None)()
+    """A kind's natural key — the one row a `one-per-key` kind holds — from its
+    spec's `key` derivation (`MemoryKindSpec.key`), or `None` when it has none (a
+    prose kind, `decision`). The per-kind branches that used to live here moved
+    onto the specs in ticket 14, so a pack kind ships its own key logic."""
+    spec = _SPECS[validate_kind(kind)]
+    return spec.key(data, given) if spec.key is not None else None
 
 
-# ── the core kind set, and who reads it ──────────────────────────────────────
-# The catalog that was `_WRITERS` + `MEMORY_DATA` + `_READERS`, now each kind
-# registering itself. `injected` is true for the prose kinds an agent reads and
-# false for the structured kinds only code is parameterised by; `cardinality` is
-# `append` for `finding` (every diagnosis of a known fault is worth keeping) and
-# `one-per-key` for the rest. Ticket 14 moves the structured pack kinds and this
-# routing into the devops plugin.
+# ── the core kind set, its keys, and who reads it ────────────────────────────
 _MODEL_AND_ADMIN = frozenset(Origin)
 _MODEL = frozenset({Origin.MODEL})
 _ADMIN = frozenset({Origin.ADMIN})
 
 
-def register_all_memory_kinds() -> None:
-    """Register the core + pack kinds and the reader routing — the composition
-    root and the test fixture call this. Idempotent via `clear` first."""
+def _finding_key(data: dict | None, _given: str | None) -> str:
+    d = data or {}
+    return f"{d.get('service')}:{d.get('error_code') or ''}"
+
+
+def _skill_key(_data: dict | None, given: str | None) -> str:
+    """`skill` is the one kind whose key is not in its data — a short name the
+    operator gives — so it refuses without one."""
+    if not (given or "").strip():
+        raise MemoryRefused("a skill needs a key — a short name for it")
+    return given.strip()
+
+
+def register_all_memory_kinds(config: Any = None) -> None:
+    """Register the core kinds and reader routing, then every configured
+    plugin's pack kinds. `config` is the application `Config` whose `plugins`
+    list says which to load; `None` loads the default set (`plugins.devops`) with
+    default config, so a script or a test that only needs the kinds registered
+    calls this with no argument. Idempotent via `clear` first."""
     clear()
     prose = dict(cardinality="one-per-key", injected=True)
     for spec in (
@@ -261,29 +236,30 @@ def register_all_memory_kinds() -> None:
         MemoryKindSpec(name=DECISION, data=DecisionData, writers=_MODEL_AND_ADMIN, **prose),
         MemoryKindSpec(name=VOICE, data=None, writers=_MODEL_AND_ADMIN, **prose),
         MemoryKindSpec(name=FINDING, data=FindingData, writers=_MODEL,
-                       cardinality="append", injected=True),
-        MemoryKindSpec(name=SUMMARY, data=SummaryData, writers=_MODEL, **prose),
-        MemoryKindSpec(name=RUNBOOK, data=RunbookData, writers=_ADMIN, **prose),
-        MemoryKindSpec(name=PROJECT, data=ProjectData, writers=_ADMIN,
-                       cardinality="one-per-key", injected=False),
-        MemoryKindSpec(name=SERVICE, data=ServiceData, writers=_ADMIN,
-                       cardinality="one-per-key", injected=False),
-        MemoryKindSpec(name=ROUTE, data=RouteData, writers=_ADMIN,
-                       cardinality="one-per-key", injected=False),
-        MemoryKindSpec(name=ENVIRONMENT, data=EnvironmentData, writers=_ADMIN,
-                       cardinality="one-per-key", injected=False),
-        MemoryKindSpec(name=DEPENDENCY, data=DependencyData, writers=_ADMIN,
-                       cardinality="one-per-key", injected=False),
+                       cardinality="append", injected=True, key=_finding_key),
+        MemoryKindSpec(name=SUMMARY, data=SummaryData, writers=_MODEL,
+                       key=lambda _d, _g: "room", **prose),
+        MemoryKindSpec(name=SKILL, data=SkillData, writers=_ADMIN,
+                       key=_skill_key, **prose),
         MemoryKindSpec(name=PERSON, data=PersonData, writers=_ADMIN,
-                       cardinality="one-per-key", injected=False),
+                       cardinality="one-per-key", injected=False,
+                       key=lambda d, _g: (d or {}).get("discord_id")),
     ):
         register_memory_kind(spec)
 
-    # Readers name their kinds (the transpose of the old `_READERS`).
+    # Readers name their kinds (the transpose of the old `_READERS`). `devops.
+    # diagnose` and the devops kinds under `code` are the plugin's; it declares
+    # them through `register_reader`, which merges.
     register_reader("extractor", frozenset({FACT, CONSTRAINT, DECISION, FINDING}))
-    register_reader("diagnose", frozenset({FACT, CONSTRAINT, DECISION, FINDING, RUNBOOK}))
     register_reader("responder", frozenset({VOICE, SUMMARY}))
     register_reader("triage", frozenset({SUMMARY}))
-    register_reader(
-        "code", frozenset({PROJECT, SERVICE, ROUTE, ENVIRONMENT, DEPENDENCY, PERSON})
-    )
+    register_reader("code", frozenset({PERSON}))
+
+    from friday.plugin_host import MemoryKindAPI, configured_plugins
+
+    class _DefaultConfig:
+        plugins = ("plugins.devops",)
+        plugin_blocks: dict = {}
+
+    for plugin, cfg in configured_plugins(config if config is not None else _DefaultConfig()):
+        plugin.register(MemoryKindAPI(cfg))

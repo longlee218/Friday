@@ -14,7 +14,7 @@ diagnosis that is warm, which is not a property a diagnosis should have.
 
 from __future__ import annotations
 
-from friday.agent.instruction_prompt import (
+from friday.sdk.prompt import (
     assemble,
     critical_reminder,
     job,

@@ -115,7 +115,7 @@ async def _classified(db, message_id: str, kind: str, text: str) -> None:
 async def test_only_what_was_marked_right_becomes_an_example(db):
     """The whole ticket. An unmarked classification is one nobody read, and
     an agent that learns from its own unreviewed output drifts with no floor."""
-    await _classified(db, "m1", "api_issue", "checkout is 500ing")
+    await _classified(db, "m1", "devops.api_issue", "checkout is 500ing")
     await _classified(db, "m2", "skip", "anyone want lunch")
     await _classified(db, "m3", "doc_question", "where is the spec")
 
@@ -129,11 +129,11 @@ async def test_only_what_was_marked_right_becomes_an_example(db):
 
     examples = await db.confirmed_classifications()
 
-    assert examples == [("checkout is 500ing", "api_issue")]
+    assert examples == [("checkout is 500ing", "devops.api_issue")]
 
 
 async def test_a_mark_taken_back_stops_being_an_example(db):
-    await _classified(db, "m1", "api_issue", "checkout is 500ing")
+    await _classified(db, "m1", "devops.api_issue", "checkout is 500ing")
     await db.record_verdict(
         provider="fake", provider_message_id="m1", mark="right", by="operator"
     )
@@ -145,7 +145,7 @@ async def test_a_mark_taken_back_stops_being_an_example(db):
 
 
 async def test_changing_right_to_wrong_removes_it_from_the_examples(db):
-    await _classified(db, "m1", "api_issue", "checkout is 500ing")
+    await _classified(db, "m1", "devops.api_issue", "checkout is 500ing")
     await db.record_verdict(
         provider="fake", provider_message_id="m1", mark="right", by="operator"
     )
@@ -159,7 +159,7 @@ async def test_changing_right_to_wrong_removes_it_from_the_examples(db):
 
 async def test_the_newest_marks_come_first(db):
     for n, text in ((1, "first"), (2, "second"), (3, "third")):
-        await _classified(db, f"m{n}", "api_issue", text)
+        await _classified(db, f"m{n}", "devops.api_issue", text)
         await db.record_verdict(
             provider="fake", provider_message_id=f"m{n}", mark="right", by="operator"
         )
@@ -284,11 +284,11 @@ def test_examples_are_rendered_with_what_they_turned_out_to_be():
     model."""
     from friday.triage.prompt import build_instructions
 
-    built = build_instructions([("checkout is 500ing", "api_issue")])
+    built = build_instructions([("checkout is 500ing", "devops.api_issue")])
 
     assert "<examples>" in built
     assert "checkout is 500ing" in built
-    assert "api_issue" in built
+    assert "devops.api_issue" in built
 
 
 # --- the marks that must not cancel each other ------------------------------
@@ -348,7 +348,7 @@ async def test_a_state_recorded_as_a_decision_never_becomes_an_example(db):
     assert await db.confirmed_classifications() == []
 
 
-@pytest.mark.parametrize("kind", ["api_issue", "access_request", "doc_question", "skip"])
+@pytest.mark.parametrize("kind", ["devops.api_issue", "access_request", "doc_question", "skip"])
 async def test_every_type_the_classifier_can_produce_can_become_an_example(db, kind):
     """Including `skip`. The hardest thing a classifier learns is when *not*
     to open a task, and a negative example is the only thing that teaches it."""
@@ -372,14 +372,14 @@ async def test_one_afternoon_of_marking_skips_does_not_fill_every_slot(db):
     """Marks arrive in bursts. An afternoon spent confirming that a noisy
     channel is mostly `skip` is a realistic afternoon, and eight of eight
     examples reading "this one is skip" teaches the classifier to skip."""
-    await _confirmed(db, "real", "api_issue", "checkout is 500ing")
+    await _confirmed(db, "real", "devops.api_issue", "checkout is 500ing")
     for n in range(12):
         await _confirmed(db, f"lunch{n}", "skip", f"anyone want lunch {n}")
 
     examples = await db.confirmed_classifications(limit=4)
 
     kinds = [kind for _, kind in examples]
-    assert "api_issue" in kinds, "the only positive example was crowded out"
+    assert "devops.api_issue" in kinds, "the only positive example was crowded out"
     assert len(examples) == 4
 
 
@@ -387,9 +387,9 @@ async def test_balancing_does_not_invent_types_nobody_confirmed(db):
     """Only what exists is shared out. One type marked means examples of one
     type — this balances, it does not fabricate."""
     for n in range(5):
-        await _confirmed(db, f"bug{n}", "api_issue", f"broken {n}")
+        await _confirmed(db, f"bug{n}", "devops.api_issue", f"broken {n}")
 
     examples = await db.confirmed_classifications(limit=3)
 
     assert len(examples) == 3
-    assert {kind for _, kind in examples} == {"api_issue"}
+    assert {kind for _, kind in examples} == {"devops.api_issue"}

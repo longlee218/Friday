@@ -26,6 +26,8 @@ from typing import Any
 
 from friday.sdk.workflow import Deps
 
+from plugins.devops.config import DEFAULT_CONTAINER_ROOTS, DEFAULT_NOT_OURS
+
 __all__ = ["ApiIssueDeps"]
 
 
@@ -41,3 +43,12 @@ class ApiIssueDeps(Deps):
     log_sources: dict[str, Any] = field(default_factory=dict, kw_only=True)
     #: The release source a production tag is compared against, or `None`.
     release_source: Any = field(default=None, kw_only=True)
+    #: The container source roots and vendored-path markers the code reader maps
+    #: a frame against (box 4) — from `DevopsConfig`, so the deployment's image
+    #: layout is data the run carries, not a constant in the reader. The field
+    #: defaults keep a directly-constructed `ApiIssueDeps` (a test's) on the
+    #: standard layout; the deps factory passes the configured values.
+    container_roots: tuple[str, ...] = field(
+        default=DEFAULT_CONTAINER_ROOTS, kw_only=True
+    )
+    not_ours: tuple[str, ...] = field(default=DEFAULT_NOT_OURS, kw_only=True)

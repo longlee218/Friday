@@ -38,7 +38,7 @@ class Refusing(Sender):
 
 async def task(db, *, state="pending"):
     return await db.create_task(
-        conversation=WATCHED, type="api_issue", state=state,
+        conversation=WATCHED, type="devops.api_issue", state=state,
         confidence=0.9, params={"summary": "s"},
     )
 
@@ -389,7 +389,7 @@ async def _opened_by(db, task, message_id="m1"):
 
     await _said(db, message_id, "@Lee API lỗi", secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id=message_id), task.id, decision={"type": "api_issue"}
+        make_event(message_id=message_id), task.id, decision={"type": "devops.api_issue"}
     )
 
 

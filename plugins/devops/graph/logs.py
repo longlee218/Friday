@@ -1,6 +1,6 @@
 """Node 2: which window to read, and what to keep of it.
 
-The reading itself is `friday/sources/logs.py` — two back ends and only two
+The reading itself is `plugins/devops/sources/logs.py` — two back ends and only two
 (D4). This is the formula over them: the window measured back from the
 reporter's message, one widening when it holds nothing loud, and the
 recall-first cut.
@@ -18,12 +18,11 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from friday.dag.api_issue.distil import distil, frames as frames_of
-from friday.dag.api_issue.resolve import path_of, resolved
-from friday.dag.api_issue.deps import ApiIssueDeps
-from friday.sdk.workflow import DAGState, Node, envelope
-from friday.domain.actions import Ask
-from friday.sources import Lines
+from plugins.devops.graph.distil import distil, frames as frames_of
+from plugins.devops.graph.resolve import path_of, resolved
+from plugins.devops.graph.deps import ApiIssueDeps
+from friday.sdk.workflow import Ask, DAGState, Node, envelope
+from friday.sdk.sources import Lines
 
 __all__ = ["dossier_of", "find_request_log_node"]
 

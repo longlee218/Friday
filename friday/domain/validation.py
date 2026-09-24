@@ -8,6 +8,12 @@ also knows its own message is the one that survives being quoted back to the
 operator. A bare predicate only knows true/false; a rule knows "this
 correlation id is the wrong shape" and that is what the workflow turns into a
 question.
+
+This is the pure value layer — no friday imports, no I/O — so it stays in
+`friday.domain`, the bottom of the stack. `friday.sdk.validation` re-exports it
+(sdk imports domain, never the reverse), which is how a plugin reaches the DSL
+to declare its params' rules (`ApiIssueParams._RULES`) while importing `sdk`
+only.
 """
 
 from __future__ import annotations

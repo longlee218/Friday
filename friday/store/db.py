@@ -1604,7 +1604,7 @@ class Database:
                         schema.Memory.deleted_at.is_(None),
                         schema.Memory.status == MemoryStatus.ACTIVE,
                         schema.Memory.kind.in_(
-                            [*domain, memory_kinds.RUNBOOK, memory_kinds.FINDING]
+                            [*domain, memory_kinds.SKILL, memory_kinds.FINDING]
                         ),
                     )
                     .order_by(schema.Memory.created_at)
@@ -1614,7 +1614,7 @@ class Database:
         known = sorted((r for r in rows if r.kind in domain), key=admin_first)
         runbooks = [
             r for r in rows
-            if r.kind == memory_kinds.RUNBOOK
+            if r.kind == memory_kinds.SKILL
             and _runbook_matches(r.data, service, error_code, path, text)
         ]
         findings = [

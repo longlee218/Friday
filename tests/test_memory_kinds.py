@@ -15,12 +15,7 @@ import pytest
 
 from conftest import BoardClient
 from friday.domain.memory_guard import InstructionShaped
-from friday.domain.models import (
-    FridayState,
-    MemoryOrigin,
-    MemoryRefused,
-    ModelMemoryKind,
-)
+from friday.domain.models import FridayState, MemoryOrigin, MemoryRefused, ModelMemoryKind
 from friday.memory import registry as memory_kinds
 from friday.ops.api import build_api
 
@@ -65,7 +60,7 @@ VALID = {
          "refs": ["log:1"], "confidence": 0.8},
         "refs", "log:1",
     ),
-    memory_kinds.RUNBOOK: (
+    memory_kinds.SKILL: (
         {"when": {"services": ["midas"], "error_codes": ["ERR3xx"],
                   "path_patterns": [], "keywords": []}},
         "when", "midas",
@@ -74,17 +69,17 @@ VALID = {
         {"topic": "orders", "facts": [], "decisions": [], "constraints": []},
         "facts", 3,
     ),
-    memory_kinds.PROJECT: (
+    "devops.project": (
         {"name": "reelme", "repo_path": "/src/reelme", "default_branch": "main",
          "stack": "python", "docs_paths": ["docs"]},
         "docs_paths", "docs",
     ),
-    memory_kinds.SERVICE: (SERVICE, "prod", "prod-1"),
-    memory_kinds.ROUTE: (
+    "devops.service": (SERVICE, "prod", "prod-1"),
+    "devops.route": (
         {"domain": "api.reelme.io", "env": "production", "service": "reelme-order"},
         "env", "staging",
     ),
-    memory_kinds.DEPENDENCY: (
+    "devops.dependency": (
         {"from_service": "reelme-order", "to_service": "midas", "via": "http",
          "join_key": "userId",
          "db_checks": [{"table": "transactions", "key_column": "user_id",
@@ -124,19 +119,19 @@ def test_the_reader_of_each_kind_is_the_spec_table():
     """`reader_for` became `readers_for` because `finding` has two readers
     and a structured kind's reader is code. The table is the spec's."""
     table = {
-        "fact": {"extractor", "diagnose"},
-        "constraint": {"extractor", "diagnose"},
-        "decision": {"extractor", "diagnose"},
-        "finding": {"diagnose", "extractor"},
+        "fact": {"extractor", "devops.diagnose"},
+        "constraint": {"extractor", "devops.diagnose"},
+        "decision": {"extractor", "devops.diagnose"},
+        "finding": {"devops.diagnose", "extractor"},
         "voice": {"responder"},
-        "runbook": {"diagnose"},
+        "skill": {"devops.diagnose"},
         "summary": {"triage", "responder"},
-        "project": {"code"},
-        "service": {"code"},
-        "route": {"code"},
-        "dependency": {"code"},
+        "devops.project": {"code"},
+        "devops.service": {"code"},
+        "devops.route": {"code"},
+        "devops.dependency": {"code"},
         "person": {"code"},
-        "environment": {"code"},
+        "devops.environment": {"code"},
     }
     assert {k: set(memory_kinds.readers_for(k)) for k in memory_kinds.kinds()} == table
     assert all(isinstance(memory_kinds.readers_for(k), frozenset) for k in memory_kinds.kinds())
@@ -222,11 +217,11 @@ def test_the_memory_tools_offer_a_model_no_kind_outside_its_five():
 @pytest.mark.parametrize("kind", list(VALID))
 async def test_each_structured_kind_accepts_its_own_shape(db, kind):
     data, _, _ = VALID[kind]
-    key = "midas-3xx" if kind is memory_kinds.RUNBOOK else None
+    key = "midas-3xx" if kind is memory_kinds.SKILL else None
     await parents(db, kind)
 
     written = await db.memory_add(
-        OPERATOR, "steps in words" if kind is memory_kinds.RUNBOOK else "",
+        OPERATOR, "steps in words" if kind is memory_kinds.SKILL else "",
         kind=kind, origin=_origin_for(kind), key=key, data=data,
     )
 
@@ -243,7 +238,7 @@ async def test_a_wrong_typed_field_is_refused_and_named(db, kind):
     with pytest.raises(MemoryRefused) as refused:
         await db.memory_add(
             OPERATOR, "steps", kind=kind, origin=_origin_for(kind),
-            key="k" if kind is memory_kinds.RUNBOOK else None, data=bad,
+            key="k" if kind is memory_kinds.SKILL else None, data=bad,
         )
 
     assert field in str(refused.value)
@@ -257,16 +252,16 @@ async def test_a_prose_kind_carries_no_data(db):
 
 
 async def test_the_natural_key_comes_from_the_data(db):
-    await parents(db, memory_kinds.SERVICE)
-    service = await db.memory_add(OPERATOR, "", kind=memory_kinds.SERVICE,
+    await parents(db, "devops.service")
+    service = await db.memory_add(OPERATOR, "", kind="devops.service",
                                   origin=ADMIN, data=SERVICE)
     route = await db.memory_add(
-        OPERATOR, "", kind=memory_kinds.ROUTE, origin=ADMIN,
+        OPERATOR, "", kind="devops.route", origin=ADMIN,
         data={"domain": "api.reelme.io", "env": "dev", "service": "reelme-order"},
     )
     dependency = await db.memory_add(
-        OPERATOR, "", kind=memory_kinds.DEPENDENCY, origin=ADMIN,
-        data=VALID[memory_kinds.DEPENDENCY][0],
+        OPERATOR, "", kind="devops.dependency", origin=ADMIN,
+        data=VALID["devops.dependency"][0],
     )
     finding = await db.memory_add(
         ROOM, "ERR301 is Midas", kind=memory_kinds.FINDING,
@@ -281,22 +276,22 @@ async def test_the_natural_key_comes_from_the_data(db):
 
 async def test_a_runbook_is_named_by_its_writer(db):
     with pytest.raises(MemoryRefused, match="key"):
-        await db.memory_add(OPERATOR, "read midas first", kind=memory_kinds.RUNBOOK,
-                            origin=ADMIN, data=VALID[memory_kinds.RUNBOOK][0])
+        await db.memory_add(OPERATOR, "read midas first", kind=memory_kinds.SKILL,
+                            origin=ADMIN, data=VALID[memory_kinds.SKILL][0])
 
 
 async def test_one_active_row_per_key_until_it_is_gone(db):
     """The partial unique index: a second active `reelme-order` is refused,
     and once the first is deleted the name is free again."""
-    await parents(db, memory_kinds.SERVICE)
-    first = await db.memory_add(OPERATOR, "", kind=memory_kinds.SERVICE,
+    await parents(db, "devops.service")
+    first = await db.memory_add(OPERATOR, "", kind="devops.service",
                                 origin=ADMIN, data=SERVICE)
     with pytest.raises(MemoryRefused, match="reelme-order"):
-        await db.memory_add(OPERATOR, "", kind=memory_kinds.SERVICE,
+        await db.memory_add(OPERATOR, "", kind="devops.service",
                             origin=ADMIN, data=SERVICE)
 
     assert await db.memory_delete(OPERATOR, first.id, origin=ADMIN)
-    again = await db.memory_add(OPERATOR, "", kind=memory_kinds.SERVICE,
+    again = await db.memory_add(OPERATOR, "", kind="devops.service",
                                 origin=ADMIN, data=SERVICE)
     assert again is not None
 
@@ -315,7 +310,7 @@ async def test_the_guard_reads_text_and_not_data(db):
 
 async def test_a_model_may_not_write_an_operators_kind(db):
     with pytest.raises(MemoryRefused, match="service"):
-        await db.memory_add(ROOM, "", kind=memory_kinds.SERVICE, data=SERVICE)
+        await db.memory_add(ROOM, "", kind="devops.service", data=SERVICE)
 
 
 async def test_an_operator_may_not_write_a_models_kind(db):
@@ -349,8 +344,8 @@ async def test_a_model_cannot_touch_an_operators_row(db):
 
 
 async def test_the_operator_can_correct_and_remove_their_own_row(db):
-    await parents(db, memory_kinds.SERVICE)
-    row = await db.memory_add(OPERATOR, "", kind=memory_kinds.SERVICE,
+    await parents(db, "devops.service")
+    row = await db.memory_add(OPERATOR, "", kind="devops.service",
                               origin=ADMIN, data=SERVICE)
 
     moved = {**SERVICE, "name": "reelme-orders"}
@@ -366,8 +361,8 @@ async def test_the_operator_can_correct_and_remove_their_own_row(db):
 
 
 async def test_superseding_a_keyed_row_keeps_its_key(db):
-    await parents(db, memory_kinds.SERVICE)
-    row = await db.memory_add(OPERATOR, "", kind=memory_kinds.SERVICE,
+    await parents(db, "devops.service")
+    row = await db.memory_add(OPERATOR, "", kind="devops.service",
                               origin=ADMIN, data=SERVICE)
 
     new = await db.memory_supersede(OPERATOR, row.id, "", origin=ADMIN)
@@ -387,10 +382,10 @@ async def test_diagnose_reads_the_domain_the_matching_runbook_and_finding(db):
     )
     await db.memory_add(OPERATOR, "they like short replies", kind=memory_kinds.VOICE,
                         origin=ADMIN)
-    await db.memory_add(OPERATOR, "read midas first", kind=memory_kinds.RUNBOOK,
-                        origin=ADMIN, key="midas", data=VALID[memory_kinds.RUNBOOK][0])
+    await db.memory_add(OPERATOR, "read midas first", kind=memory_kinds.SKILL,
+                        origin=ADMIN, key="midas", data=VALID[memory_kinds.SKILL][0])
     await db.memory_add(
-        OPERATOR, "read the cdn log", kind=memory_kinds.RUNBOOK, origin=ADMIN,
+        OPERATOR, "read the cdn log", kind=memory_kinds.SKILL, origin=ADMIN,
         key="cdn", data={"when": {"services": ["cdn"], "error_codes": [],
                                   "path_patterns": [], "keywords": []}},
     )
@@ -400,8 +395,8 @@ async def test_diagnose_reads_the_domain_the_matching_runbook_and_finding(db):
         ROOM, "ERR500 is a timeout", kind=memory_kinds.FINDING,
         data={**VALID[memory_kinds.FINDING][0], "error_code": "ERR500"},
     )
-    await parents(db, memory_kinds.SERVICE)
-    await db.memory_add(OPERATOR, "", kind=memory_kinds.SERVICE, origin=ADMIN,
+    await parents(db, "devops.service")
+    await db.memory_add(OPERATOR, "", kind="devops.service", origin=ADMIN,
                         data=SERVICE)
 
     read = await db.diagnose_memories("c1", service="midas", error_code="ERR301")
@@ -435,8 +430,8 @@ async def test_findings_on_one_fault_pile_up_and_diagnose_reads_the_newest(db):
 
 
 async def test_the_extractor_still_reads_what_it_read(db):
-    await db.memory_add(OPERATOR, "read midas first", kind=memory_kinds.RUNBOOK,
-                        origin=ADMIN, key="midas", data=VALID[memory_kinds.RUNBOOK][0])
+    await db.memory_add(OPERATOR, "read midas first", kind=memory_kinds.SKILL,
+                        origin=ADMIN, key="midas", data=VALID[memory_kinds.SKILL][0])
     await db.memory_add(ROOM, "test.apero is staging", kind=memory_kinds.FACT)
 
     assert [m.text for m in await db.domain_memories("c1")] == ["test.apero is staging"]
@@ -454,9 +449,9 @@ def test_the_operator_writes_corrects_and_removes_a_row(client):
     # The project first: ticket 19 refuses a service naming one that does not
     # exist, through this route as through every other.
     client.post("/api/channels/c1/memories",
-                json={"kind": "project", "data": VALID[memory_kinds.PROJECT][0]})
+                json={"kind": "devops.project", "data": VALID["devops.project"][0]})
     made = client.post("/api/channels/c1/memories",
-                       json={"kind": "service", "data": SERVICE})
+                       json={"kind": "devops.service", "data": SERVICE})
     assert made.status_code == 201, made.text
     row = made.json()
     assert row["origin"] == "admin" and row["key"] == "reelme-order"
@@ -472,7 +467,7 @@ def test_the_operator_writes_corrects_and_removes_a_row(client):
 
 def test_the_routes_say_why_a_write_was_refused(client):
     unfit = client.post("/api/channels/c1/memories",
-                        json={"kind": "route", "data": {"domain": "a", "env": "staging",
+                        json={"kind": "devops.route", "data": {"domain": "a", "env": "staging",
                                                         "service": "s"}})
     assert unfit.status_code == 422 and "env" in unfit.json()["detail"]
 
@@ -481,19 +476,19 @@ def test_the_routes_say_why_a_write_was_refused(client):
     assert shaped.status_code == 422 and "instruction" in shaped.json()["detail"]
 
     client.post("/api/channels/c1/memories",
-                json={"kind": "project", "data": VALID[memory_kinds.PROJECT][0]})
-    client.post("/api/channels/c1/memories", json={"kind": "service", "data": SERVICE})
+                json={"kind": "devops.project", "data": VALID["devops.project"][0]})
+    client.post("/api/channels/c1/memories", json={"kind": "devops.service", "data": SERVICE})
     taken = client.post("/api/channels/c1/memories",
-                        json={"kind": "service", "data": SERVICE})
+                        json={"kind": "devops.service", "data": SERVICE})
     assert taken.status_code == 409
 
     dangling = client.post(
         "/api/channels/c1/memories",
-        json={"kind": "route", "data": {"domain": "a.b", "env": "dev",
+        json={"kind": "devops.route", "data": {"domain": "a.b", "env": "dev",
                                         "service": "nobody"}},
     )
     assert dangling.status_code == 422
-    assert "no service row" in dangling.json()["detail"], (
+    assert "no devops.service row" in dangling.json()["detail"], (
         "ticket 19's refusal reaches the form the same way every other does"
     )
 

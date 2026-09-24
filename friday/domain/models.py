@@ -8,7 +8,6 @@ from typing import Any, Literal
 from enum import StrEnum
 
 from friday.domain.conversation import ConversationId, resolve
-from friday.domain.validation import InSet, Matches, OneOf
 
 
 class MentionType(StrEnum):
@@ -184,188 +183,6 @@ proceed without.
 
 
 @dataclass(frozen=True, slots=True)
-class ApiIssueParams:
-    #: The docstring below reaches a model: triage's `classify` tool reads
-    #: it as this type's description, one line each, the same place its
-    #: fields are defined. `AccessRequestParams` and `DocQuestionParams`
-    #: carry the same pattern.
-    """Something this team's systems did, or did not do, that somebody wants
-    looked at: an integration failing, a request, log, curl or response with
-    an error code to check, a symptom with no name yet ("I bought the plan
-    at 15:00 and half an hour later the coins are still not there"), or a
-    question about what an endpoint is for, which one fits their case, and
-    how its rules behave — an API is business logic reachable over HTTP, so
-    a question about that logic belongs here rather than in
-    doc_question."""
-
-    #: Every field has a default, because nothing fills them in at
-    #: construction time any more. Triage classifies and stops; the task is
-    #: opened with no parameters at all, and the extractor fills them from
-    #: what the reporter actually wrote.
-    #:
-    #: `doc` is the field's meaning, *for the extraction model*. It renders
-    #: into the extractor's prompt, so it is written to the model: what to
-    #: look for, what shape it has, and that null beats a guess. These lines
-    #: lived in triage's tool docstrings until triage stopped extracting —
-    #: removing them then, instead of moving them here, left the extractor
-    #: reading a schema of "summary: summary". Same place as the field, so a
-    #: field and its meaning cannot drift apart again.
-    #:
-    #: `ask` is how to ask a *person* about it — the same field, a different
-    #: reader, so a different string. `doc` addresses a model about
-    #: recognising a value ("null if none is named"); `ask` is the phrase the
-    #: responder writes a question from, and what a reporter eventually reads
-    #: is the responder's wording of it, never this text verbatim.
-    #:
-    #: It lived in a dict in the node that renders the question until ticket
-    #: 13 — the arrangement the paragraph above exists to describe the failure
-    #: of — and had already drifted: `project` was askable with no entry, and a
-    #: fallback made it read acceptably enough that nothing said so. Every
-    #: askable field carries one now (`askable_fields` below), and a test says
-    #: so. `OneOf` holds the argument for where a *rule*'s phrase lives.
-    summary: str = field(
-        default="",
-        metadata={
-            "doc": "One line saying what is wrong, in Vietnamese, in your own "
-            "words. The only field you write rather than copy."
-        },
-    )
-    environment: str | None = field(
-        default=None,
-        metadata={
-            # `staging` was in this enum and in this sentence until board
-            # `read-it-the-way-the-operator-does`, ticket 01: no project this
-            # room serves has a staging environment, so the only thing the
-            # word could do was let a reporter's guess validate cleanly and
-            # send `Resolve` looking for logs of somewhere that does not
-            # exist. `external` is deliberately absent too — it is what the
-            # `environment` rows *conclude* about a domain (see
-            # `friday/dag/api_issue/resolve.py`), never something a reporter
-            # names about themselves.
-            "doc": "Which environment they named: production or dev. 'prod' "
-            "is production. null if none is named.",
-            "ask": "which environment you're on",
-        },
-    )
-    response: str | None = field(
-        default=None,
-        metadata={
-            # **Where a correlationId actually comes from** (ticket 01). The
-            # operator never receives one from a reporter; they receive the
-            # response the reporter pasted and read it out of that. Asking a
-            # reporter for "the correlationId" asks them to do a lookup they
-            # do not know how to do, and the three `ask_for_details` messages
-            # this system has ever sent all had to teach it inline — which is
-            # the responder adding content nobody approved
-            # (`tests/test_responder_check.py`).
-            #
-            # An artifact id, like `curl` and for ticket 18's reason: a
-            # response body is long, and a model copying it out by hand gets
-            # a character wrong.
-            "doc": "The id of the artifact holding the response they pasted "
-            "— the `ab12cd34` in `[artifact ab12cd34: …]`, on its own, "
-            "nothing else. Do not copy the response itself: it is put back "
-            "for you. If they typed it inline with no artifact around it, "
-            "give it as they wrote it. null if they pasted no response.",
-            "ask": "the response you got back",
-        },
-    )
-    endpoint: str | None = field(
-        default=None,
-        metadata={
-            "doc": "The endpoint they called, as they named it — a path like "
-            "`/v1/onboarding/completed`, or the name they used for it "
-            "('login API'). null if they named none.",
-            "ask": "which endpoint you called",
-        },
-    )
-    identifier: str | None = field(
-        default=None,
-        metadata={
-            "doc": "One id the failing request carried, copied exactly, "
-            "whatever kind they gave: deviceId, userId, email, orderId. It "
-            "is matched against log lines by machine, so copy it as written "
-            "and do not reformat it. null if they gave none.",
-            "ask": "the deviceId, userId, email or order id you used",
-        },
-    )
-    #: **Read out of `response`, never asked for** — which is why it carries a
-    #: `doc` and no `ask`, and so is not in `askable_fields`. The value is
-    #: short enough for a model to copy correctly, which is why it is lifted
-    #: into a field of its own rather than left inside the span: the log
-    #: sources search for one plain substring, and a whole response body is
-    #: not one.
-    correlation_id: str | None = field(
-        default=None,
-        metadata={
-            "doc": "The correlation id, trace id, request id or x-request-id "
-            "in what they wrote — usually inside the response they pasted — "
-            "copied exactly: it is matched by machine. Usually shaped like a "
-            "uuid. null if absent.",
-        },
-    )
-    curl: str | None = field(
-        default=None,
-        metadata={
-            # Board `read-it-the-way-the-operator-does`, ticket 18. This used
-            # to say "verbatim with its line breaks — somebody will paste it
-            # into a terminal", and that is still what the field has to hold;
-            # it is no longer what the model is asked to produce. Task 6
-            # stored 676 characters of a 678-character Bearer token because
-            # copying it out by hand is a thing a model does imperfectly and
-            # a thing code does not do at all.
-            "doc": "The id of the artifact holding the request they pasted — "
-            "the `ab12cd34` in `[artifact ab12cd34: …]`, on its own, nothing "
-            "else. Do not copy the request itself: it is put back for you. "
-            "If they typed it inline with no artifact around it, give the "
-            "command as they wrote it. null if there is no request at all.",
-            "ask": "the curl you used",
-        },
-    )
-
-    #: Validate catches what the LLM extractor got wrong. `environment` has to
-    #: be one of the two environments we actually serve; `correlation_id`
-    #: has to look like a uuid for Loki's query_range filter to find it.
-    #:
-    #: `_traceable` is this type's override of the general required-ness rule,
-    #: which reads its answer off the annotations: every field below is
-    #: `str | None`, so none of them is individually required — and yet a
-    #: report that names no request at all cannot be investigated. That is not
-    #: something a type can say, which is what `OneOf` is for.
-    #:
-    #: Without it nothing in the gate knew, so a report with nothing to trace
-    #: on validated cleanly and the graph ran its whole path to discover it
-    #: could do nothing.
-    #:
-    #: **The alternatives are the curl, or the endpoint plus one id** (D2,
-    #: and ticket 01's correction of what this rule used to say). It used to
-    #: read `correlation_id` *or* `curl`, which asked a reporter for the one
-    #: thing they never have, and refused as unusable a report that already
-    #: said everything needed — "login API, deviceId X, 500" names a request
-    #: the log can be searched for. The endpoint alone is not enough: measured
-    #: on the production case, 2026-09-21, matching on the path alone returns
-    #: every *other* caller's successful request to it — 18 dossier lines
-    #: where the id gives 8 — so the id is what narrows it to this reporter.
-    _RULES = {
-        "environment": InSet(frozenset({"production", "dev"})),
-        "correlation_id": Matches(
-            r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",
-            name="uuid",
-            # The phrase is on the rule because the field has none: a
-            # malformed correlationId is answered by the response it should
-            # have been read out of, not by asking the reporter to go and
-            # find an id.
-            ask="the response you got back",
-        ),
-        "_traceable": OneOf(
-            fields=("curl", ("endpoint", "identifier")),
-            ask="the curl you used, or which endpoint you called plus one id "
-            "it carried",
-        ),
-    }
-
-
-@dataclass(frozen=True, slots=True)
 class AccessRequestParams:
     """Someone wants to be let in somewhere: a repository, an environment, a
     dashboard, a channel, an API key, a role, a permission — for themselves
@@ -429,7 +246,7 @@ class DocQuestionParams:
 #: parameters to carry — triage says `skip` and the message is recorded as
 #: having been looked at. There was one, holding a `reason`, until triage
 #: stopped producing anything but a type and a confidence.
-Params = ApiIssueParams | AccessRequestParams | DocQuestionParams
+Params = AccessRequestParams | DocQuestionParams
 
 #: The one decision that opens no work. Everything a task type names is work;
 #: this names the absence of one, and it is not a task type — so it lives here,
@@ -541,7 +358,7 @@ class FindingData:
 
 
 @dataclass(frozen=True, slots=True)
-class RunbookWhen:
+class SkillWhen:
     services: list[str] = field(default_factory=list)
     error_codes: list[str] = field(default_factory=list)
     path_patterns: list[str] = field(default_factory=list)
@@ -549,102 +366,8 @@ class RunbookWhen:
 
 
 @dataclass(frozen=True, slots=True)
-class RunbookData:
-    when: RunbookWhen
-
-
-@dataclass(frozen=True, slots=True)
-class ProjectData:
-    name: str
-    #: **Picked, not spelled** (ticket 19). A path on the operator's own
-    #: machine whose typo reads exactly like a correct one: the row looks
-    #: right in the form and `ReadFailingCode` quietly reads nothing.
-    #: Declared here for the same reason `names` is — the form has no list
-    #: of its own to disagree with.
-    repo_path: str = field(metadata={"picks": "directory"})
-    default_branch: str
-    stack: str
-    docs_paths: list[str] = field(default_factory=list)
-    error_codes_doc: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ProdPlacement:
-    cluster: str
-    namespace: str
-    app: str
-
-
-@dataclass(frozen=True, slots=True)
-class DevPlacement:
-    kube_context: str
-    namespace: str
-    pod_pattern: str
-
-
-@dataclass(frozen=True, slots=True)
-class ServiceData:
-    name: str
-    #: **`names` is a foreign key, declared where the field is.** The store
-    #: matches this against a `project` row's own key by string equality, and
-    #: for as long as that was a fact only two call sites knew, the form
-    #: asked for it as free text — a question whose wrong answers look
-    #: exactly like its right ones, and the first six rows ever typed proved
-    #: it (ticket 19). Declared here so the form offers the rows that exist
-    #: and a later check can refuse one that does not, from one statement
-    #: rather than two that have to agree.
-    project: str = field(metadata={"names": "project"})
-    prod: ProdPlacement
-    dev: DevPlacement
-
-
-@dataclass(frozen=True, slots=True)
-class EnvironmentData:
-    """What a domain suffix means: ours, and which environment.
-
-    **Longest suffix wins**, which is what lets one table hold a rule and its
-    exceptions with no branch for either. `aperogroup.ai → production` and
-    `dev.aperogroup.ai → dev` are the rule; one row for
-    `api-mobile-spec-reviewer.aperogroup.ai → dev` is an exception, and it
-    wins by being longer rather than by being special.
-
-    A domain no row matches is **external** — not ours, and the graph ends
-    there promising nothing. A room with no rows at all knows nothing about
-    any domain, which is a different thing and says so.
-    """
-
-    suffix: str
-    env: Literal["dev", "production"]
-
-
-@dataclass(frozen=True, slots=True)
-class RouteData:
-    #: The exact host. `environment` answers "ours, and which" for a family
-    #: of hosts; this answers "which service" for one. `env` is carried here
-    #: too, and the redundancy is deliberate: these are two rows an operator
-    #: types by hand, and `Resolve` refuses when they disagree rather than
-    #: picking — a production search run against dev is not a thing to
-    #: discover from its results.
-    domain: str
-    env: Literal["dev", "production"]
-    #: The same foreign key as `ServiceData.project`, and the same reason.
-    service: str = field(metadata={"names": "service"})
-
-
-@dataclass(frozen=True, slots=True)
-class DbCheck:
-    table: str
-    key_column: str
-    state_column: str
-
-
-@dataclass(frozen=True, slots=True)
-class DependencyData:
-    from_service: str
-    to_service: str
-    via: Literal["http", "queue", "webhook"]
-    join_key: str
-    db_checks: list[DbCheck] = field(default_factory=list)
+class SkillData:
+    when: SkillWhen
 
 
 @dataclass(frozen=True, slots=True)

@@ -62,6 +62,7 @@ from openai import (
 from friday.agent.structured import Unfit, describe, find_json, fits
 from friday.config import AgentConfig
 from friday.domain.models import FridayState
+from friday.sdk.tools import ToolSpec
 
 __all__ = [
     "Harness",
@@ -121,12 +122,31 @@ def tool(func=None, **options):
     is why this wrapper adds no `failure_error_function` of its own. A tool that
     wants the model to *fix* its call raises `ModelRetry` itself; anything else
     it raises is turned into the "unavailable" message there.
+
+    A plugin, which may not import this module, declares its tools as neutral
+    `ToolSpec`s through `friday.sdk.tools.tool` instead; `_bind_tool_spec` binds
+    those to a `Tool` here, the one place that names the SDK.
     """
 
     def make(fn):
         return Tool(fn, **options)
 
     return make(func) if func is not None else make
+
+
+def _bind_tool_spec(spec: Any) -> Any:
+    """A vendor `Tool` from whatever a caller handed in `tools=`.
+
+    A plugin declares a tool as a neutral `ToolSpec` (`friday.sdk.tools`) so it
+    never names the SDK; this is the one place that turns each into the vendor's
+    `Tool(fn, **options)`, the same call `tool` above makes — Pydantic AI then
+    infers the run-context parameter and the docstring arg descriptions exactly
+    as before. A `Tool` already built (or a plain callable) is passed through,
+    so a caller that has one is not made to unwrap it.
+    """
+    if isinstance(spec, ToolSpec):
+        return Tool(spec.fn, **spec.options)
+    return spec
 
 
 class Harness:
@@ -219,6 +239,10 @@ class Harness:
                 describe_skill_tool(skills),
                 read_skill_file_tool(skills),
             ]
+        # A tool arrives as a neutral `ToolSpec` (a plugin declaring one names no
+        # vendor) or as an already-built `Tool`; bound to the SDK's `Tool` here,
+        # the one place that names it.
+        tool_list = [_bind_tool_spec(t) for t in tool_list]
         self._tools = tool_list
         self._toolsets = list(mcp_servers or [])
 

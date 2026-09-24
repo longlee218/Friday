@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from friday.domain.models import ApiIssueParams, Memory
+from friday.domain.models import Memory
+from plugins.devops.params import ApiIssueParams
 from friday.extraction.context import build_full_context
 from tests.test_extraction import _context
 from tests.test_outbox import _asked, _opened_by
@@ -198,7 +199,7 @@ async def test_the_builder_never_writes_even_when_over_budget(db):
     huge = "@Lee " + ("API lỗi rồi rất là dài. " * 200)
     await _said(db, "m1", huge, secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
     )
 
     context = await build_full_context(

@@ -19,21 +19,60 @@ from types import SimpleNamespace
 
 import pytest
 
-from friday.dag.api_issue import build_api_issue_dag, build_log_sources
-from friday.dag.api_issue.code import read_failing_code_node, repo_file
-from friday.dag.api_issue.diagnose import (
+from plugins.devops.graph import build_devops_dag, build_log_sources
+from plugins.devops.config import DevopsConfig, load_devops_config
+from plugins.devops.config import DEFAULT_CONTAINER_ROOTS
+from plugins.devops.graph.code import read_failing_code_node, repo_file
+from plugins.devops.graph.diagnose import (
     Diagnosis,
     diagnose_node,
     unresolved_refs,
 )
-from friday.dag.api_issue.logs import find_request_log_node
-from friday.dag.api_issue.report import render, report_node
-from friday.dag.api_issue.resolve import resolve_node
-from friday.dag.api_issue.deps import ApiIssueDeps
+from plugins.devops.graph.logs import find_request_log_node
+from plugins.devops.graph.report import render, report_node
+
+
+class _StubCaps:
+    """A stand-in for the composition root's boot caps, for building the devops
+    DAG in a test without a live process (ticket 14)."""
+
+    def __init__(self, *, diagnose_harness=None, budget_tokens=None, diagnose_agent=None):
+        self.config = SimpleNamespace(
+            agents=({"devops.diagnose": diagnose_agent} if diagnose_agent else {}),
+            context=SimpleNamespace(extraction_budget_tokens=budget_tokens),
+        )
+        self.servers = {}
+        self.sender = "discord_user"
+        self.approver = "discord_bot"
+        self._harness = diagnose_harness
+
+    def prepare_node(self, *a, **k):
+        from friday.dag.prepare import prepare_node
+        return prepare_node(*a, **k)
+
+    def make_harness(self, *, agent, instructions, answers=None, tools=None):
+        return self._harness
+
+
+def _dag(*, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnose_agent=None):
+    """The `devops.api_issue` DAG, built through the plugin's own builder."""
+    api = SimpleNamespace(
+        caps=_StubCaps(
+            diagnose_harness=diagnose_harness,
+            budget_tokens=budget_tokens,
+            diagnose_agent=diagnose_agent,
+        ),
+        config=DevopsConfig(reports_dir=str(reports_dir) if reports_dir else "./data/reports"),
+    )
+    return build_devops_dag(api)
+
+from plugins.devops.graph.resolve import resolve_node
+from plugins.devops.graph.deps import ApiIssueDeps
 from friday.dag.engine import DAGState, status_of
 from friday.domain.actions import Ask, HandOver, Reply
 from friday.domain.conversation import ConversationId
-from friday.domain.models import ApiIssueParams, FridayState, MemoryOrigin
+from friday.domain.models import FridayState, MemoryOrigin
+from plugins.devops.params import ApiIssueParams
 
 CURL = (
     'curl -X POST -H "Content-Type: application/json" '
@@ -83,7 +122,7 @@ async def write_environment_rows(db, channel_id: str = "watched"):
     state = FridayState(channel_id=channel_id, agent="admin")
     for suffix, env in (("aperogroup.ai", "production"), ("dev.aperogroup.ai", "dev")):
         await db.memory_add(
-            state, f"{suffix} is {env}", kind="environment",
+            state, f"{suffix} is {env}", kind="devops.environment",
             origin=MemoryOrigin.ADMIN, data={"suffix": suffix, "env": env},
         )
 
@@ -104,7 +143,7 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
         else "api-reelme-v2.aperogroup.ai"
     )
     await db.memory_add(
-        state, "the ReelMe repository", kind="project",
+        state, "the ReelMe repository", kind="devops.project",
         origin=MemoryOrigin.ADMIN,
         data={
             "name": "reelme", "repo_path": repo or "/nowhere",
@@ -112,7 +151,7 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
         },
     )
     await db.memory_add(
-        state, "the ReelMe v2 backend", kind="service",
+        state, "the ReelMe v2 backend", kind="devops.service",
         origin=MemoryOrigin.ADMIN,
         data={
             "name": "backend-reelme-v2",
@@ -122,7 +161,7 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
         },
     )
     await db.memory_add(
-        state, "ReelMe v2 on dev", kind="route", origin=MemoryOrigin.ADMIN,
+        state, "ReelMe v2 on dev", kind="devops.route", origin=MemoryOrigin.ADMIN,
         data={"domain": domain, "env": env, "service": "backend-reelme-v2"},
     )
 
@@ -158,7 +197,7 @@ class FakeSource:
         hit by asking for everything in a busy window, which is the case the
         narrowing exists to avoid.
         """
-        from friday.sources import Lines
+        from friday.sdk.sources import Lines
 
         self.asked.append((since, until, needle))
         answer = self.answers[min(len(self.spans) - 1, len(self.answers) - 1)]
@@ -257,11 +296,11 @@ async def test_a_route_row_that_disagrees_with_the_domain_is_refused(db):
     await db.memory_delete(
         state,
         [m for m in await db.memories_for_channel("watched")
-         if m.kind == "route"][0].id,
+         if m.kind == "devops.route"][0].id,
         origin=MemoryOrigin.ADMIN,
     )
     await db.memory_add(
-        state, "mistyped", kind="route", origin=MemoryOrigin.ADMIN,
+        state, "mistyped", kind="devops.route", origin=MemoryOrigin.ADMIN,
         data={
             "domain": "api-reelme-v2.dev.aperogroup.ai",
             "env": "production",
@@ -289,7 +328,7 @@ async def test_one_row_for_one_host_beats_the_convention_it_breaks(db):
     """The 2026-09-18 survey found `api-mobile-spec-reviewer.aperogroup.ai`
     served from `dev` with no `.dev` in it. Longest suffix wins, so the
     exception is one more row rather than a branch."""
-    from friday.dag.api_issue.resolve import environment_of
+    from plugins.devops.graph.resolve import environment_of
 
     rows = [
         SimpleNamespace(suffix="aperogroup.ai", env="production"),
@@ -449,7 +488,7 @@ def test_the_kubectl_window_is_clipped_by_the_runtimes_own_stamps():
     what makes the upper bound possible, and it is the container runtime's
     stamp rather than the line's own field, because dev is JSON today and a
     Python traceback tomorrow."""
-    from friday.sources.logs import _within
+    from plugins.devops.sources.logs import _within
 
     since = datetime(2026, 9, 20, 4, 10, tzinfo=timezone.utc)
     until = datetime(2026, 9, 20, 4, 45, tzinfo=timezone.utc)
@@ -498,7 +537,7 @@ def test_a_frame_is_mapped_into_the_clone(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "orders.ts").write_text("a\nb\nc\n")
 
-    found = repo_file("/app/src/orders.ts", str(tmp_path))
+    found = repo_file("/app/src/orders.ts", str(tmp_path), container_roots=DEFAULT_CONTAINER_ROOTS)
 
     assert found == (tmp_path / "src" / "orders.ts").resolve()
 
@@ -517,8 +556,8 @@ def test_a_frame_that_climbs_out_of_the_clone_is_never_opened(tmp_path):
     secret = tmp_path / "secret.txt"
     secret.write_text("not yours")
 
-    assert repo_file("/app/../secret.txt", str(repo)) is None
-    assert repo_file("/etc/passwd", str(repo)) is None
+    assert repo_file("/app/../secret.txt", str(repo), container_roots=DEFAULT_CONTAINER_ROOTS) is None
+    assert repo_file("/etc/passwd", str(repo), container_roots=DEFAULT_CONTAINER_ROOTS) is None
     assert secret.is_file(), "the escape target was real"
 
 
@@ -840,7 +879,7 @@ async def test_the_reporter_is_told_it_is_being_worked_on(db):
     do about silence is ask again."""
     from conftest import make_event
 
-    from friday.dag.api_issue.acknowledge import SAYS, acknowledge_node
+    from plugins.devops.graph.acknowledge import SAYS, acknowledge_node
     from friday.outbox import DEFAULT_SENDER, Kind
 
     await db.record_message(make_event(message_id="m1"))
@@ -864,7 +903,7 @@ async def test_the_acknowledgement_does_not_wait_for_approval(db):
     """The operator's call, 2026-09-22. It promises no finding, quotes no
     log line and names no fault — and one that waits for a person arrives
     after the reply it was meant to precede."""
-    from friday.dag.api_issue.acknowledge import acknowledge_node
+    from plugins.devops.graph.acknowledge import acknowledge_node
     from friday.outbox import DEFAULT_SENDER, Kind
 
     await acknowledge_node().run(
@@ -879,7 +918,7 @@ async def test_a_resumed_graph_does_not_acknowledge_twice(db):
     """A graph re-runs from its checkpoint after the reporter answers a
     question. A second "đang xử lý" three minutes after the first reads as a
     stuck robot."""
-    from friday.dag.api_issue.acknowledge import acknowledge_node
+    from plugins.devops.graph.acknowledge import acknowledge_node
     from friday.outbox import DEFAULT_SENDER
 
     deps = deps_for(db, extra={"sender": DEFAULT_SENDER})
@@ -900,7 +939,7 @@ def test_nobody_is_acknowledged_before_the_placement_is_known():
     which is a different test that already existed, and stayed green with
     `acknowledge` moved ahead of `resolve`.
     """
-    dag = build_api_issue_dag()
+    dag = _dag()
     ok = DAGState.empty().with_result("resolve", {"status": "ok", "reason": ""})
 
     assert dag.next_after("resolve", ok) == "acknowledge"
@@ -914,13 +953,13 @@ def test_nobody_is_acknowledged_before_the_placement_is_known():
 async def test_a_run_with_no_sender_investigates_anyway(db):
     """Nothing here is worth failing an investigation over — and a run that
     says why it stayed quiet beats one that is quiet about being quiet."""
-    from friday.dag.api_issue.acknowledge import acknowledge_node
+    from plugins.devops.graph.acknowledge import acknowledge_node
 
     result = await acknowledge_node().run(prepared(), deps_for(db))
 
     assert status_of(result) == "skipped"
     assert "sender" in result["reason"]
-    assert build_api_issue_dag().next_after(
+    assert _dag().next_after(
         "acknowledge", DAGState.empty().with_result("acknowledge", result)
     ) == "find_request_log"
 
@@ -983,7 +1022,7 @@ def test_the_brief_carries_the_cause_and_not_the_evidence():
     says more about this machine than they need, and `next_checks` is what
     *this* investigation would do next — to a reporter it reads as a list of
     things they have been asked to do."""
-    from friday.dag.api_issue.report import brief
+    from plugins.devops.graph.report import brief
 
     said = brief(Diagnosis(
         cause="categoryId rỗng", confidence="certain", conclusive=True,
@@ -994,7 +1033,7 @@ def test_the_brief_carries_the_cause_and_not_the_evidence():
 
 
 def test_a_brief_that_is_not_conclusive_says_so_in_words():
-    from friday.dag.api_issue.report import brief
+    from plugins.devops.graph.report import brief
 
     said = brief(Diagnosis(
         cause="có thể do cache", confidence="likely", conclusive=False, refs=["L1"],
@@ -1025,7 +1064,7 @@ def test_the_pool_and_the_graph_send_as_the_same_two_identities():
 
 
 def test_api_issue_is_the_one_graph_with_an_investigation_past_node_zero():
-    dag = build_api_issue_dag()
+    dag = _dag()
 
     assert [n.name for n in dag.nodes] == [
         "prepare", "resolve", "acknowledge", "find_request_log",
@@ -1036,14 +1075,14 @@ def test_api_issue_is_the_one_graph_with_an_investigation_past_node_zero():
 def test_nothing_past_resolve_runs_when_resolve_hands_over():
     """A node reading an earlier node's hand-over as if it were a result is
     the wiring mistake `DAGState` raises on, and the fix is in the edges."""
-    dag = build_api_issue_dag()
+    dag = _dag()
     state = DAGState.empty().with_result("resolve", HandOver("not ours"))
 
     assert dag.next_after("resolve", state) is None
 
 
 def test_a_skipped_log_node_still_reaches_the_report():
-    dag = build_api_issue_dag()
+    dag = _dag()
     state = DAGState.empty().with_result(
         "find_request_log", {"status": "skipped", "reason": "no source"}
     )
@@ -1055,24 +1094,21 @@ def test_a_blank_setting_means_not_configured_rather_than_the_word_none():
     """`ssh_host:` with nothing after it parses as `None`, and `str(None)` is
     a truthy `"None"` — which built a source pointing at a host called None
     and turned every dev task into a failed subprocess."""
-    from friday.config import _api_issue
-
-    assert _api_issue({"ssh_host": None}).ssh_host == ""
+    
+    assert load_devops_config({"ssh_host": None}).ssh_host == ""
     assert build_log_sources(
-        SimpleNamespace(api_issue=_api_issue({"ssh_host": None})), {}
+        load_devops_config({"ssh_host": None}), {}
     ) == {}
 
 
 def test_log_sources_are_only_built_for_what_is_configured():
-    from friday.config import ApiIssueConfig
-
-    none = build_log_sources(SimpleNamespace(api_issue=ApiIssueConfig()), {})
+    
+    none = build_log_sources(DevopsConfig(), {})
     dev = build_log_sources(
-        SimpleNamespace(api_issue=ApiIssueConfig(ssh_host="dev")), {}
+        DevopsConfig(ssh_host="dev"), {}
     )
     prod = build_log_sources(
-        SimpleNamespace(api_issue=ApiIssueConfig(loki_server="devops")),
-        {"devops": object()},
+        DevopsConfig(loki_server="devops"), {"devops": object()},
     )
 
     assert none == {}
@@ -1123,7 +1159,7 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
             )
 
     reports_dir = tmp_path / "reports"
-    dag = build_api_issue_dag(
+    dag = _dag(
         diagnose_harness=Honest(), reports_dir=reports_dir
     )
     source = FakeSource(answers=[[
@@ -1166,8 +1202,8 @@ def test_a_captured_case_runs_through_the_real_source():
     """
     import asyncio
 
-    from friday.sources import Placement
-    from friday.sources.logs import LokiSource
+    from friday.sdk.sources import Placement
+    from plugins.devops.sources.logs import LokiSource
     from replay_case import CannedReads
 
     answer = {
@@ -1218,7 +1254,7 @@ def test_the_parameters_are_read_off_the_dataclass_not_the_class_body():
     a base class."""
     import dataclasses
 
-    from friday.domain.models import ApiIssueParams
+    from plugins.devops.params import ApiIssueParams
     from replay_case import case_params
 
     kept = case_params({
@@ -1238,7 +1274,7 @@ def test_a_dev_case_is_captured_from_kubectl_and_replays_through_it():
     """
     import asyncio
 
-    from friday.sources import Placement
+    from friday.sdk.sources import Placement
     from replay_case import canned_source
 
     name, source = canned_source({
@@ -1297,7 +1333,7 @@ def test_a_node_that_ended_the_run_does_not_read_as_one_that_passed_it_on():
     from replay_case import answers
 
     run = NodeRun(
-        dag_name="api_issue", node="resolve", attempt=1,
+        dag_name="devops.api_issue", node="resolve", attempt=1,
         status="ok", reason="", duration_ms=6,
     )
     final = DAGState.empty().with_result("resolve", HandOver("no service row"))
@@ -1316,7 +1352,7 @@ def test_a_node_that_failed_is_named_as_a_seam_that_broke():
 
     def run(node, status, reason=""):
         return NodeRun(
-            dag_name="api_issue", node=node, attempt=1,
+            dag_name="devops.api_issue", node=node, attempt=1,
             status=status, reason=reason, duration_ms=1,
         )
 
@@ -1351,7 +1387,7 @@ def test_lokis_streams_are_merged_into_one_line_of_time():
     whatever order they arrived is one whose surrounding lines belong to a
     different process than the line they surround — and `distil` keeps ±2
     lines around what it finds."""
-    from friday.sources.logs import _streams
+    from plugins.devops.sources.logs import _streams
 
     found = _streams(LOKI_ANSWER)
 
@@ -1361,7 +1397,7 @@ def test_lokis_streams_are_merged_into_one_line_of_time():
 
 
 def test_the_timestamp_comes_off_and_the_cap_is_reported():
-    from friday.sources.logs import _streams
+    from plugins.devops.sources.logs import _streams
 
     found = _streams(LOKI_ANSWER)
 
@@ -1372,7 +1408,7 @@ def test_the_timestamp_comes_off_and_the_cap_is_reported():
 def test_an_answer_loki_never_gave_is_empty_rather_than_a_crash():
     """A changed shape should read as "Loki said nothing I understood",
     which the node reports, not as a graph that died."""
-    from friday.sources.logs import _streams
+    from plugins.devops.sources.logs import _streams
 
     assert _streams("not json").lines == ()
     assert _streams('{"streams": null}').lines == ()
@@ -1427,7 +1463,7 @@ async def test_the_request_is_found_when_the_window_read_misses_it_entirely(db):
         decisive = 'ERROR /v1/pod/orders/init ERR19 "categoryId must be a UUID"'
 
         async def lines(self, placement, *, since, until, limit, needle=""):
-            from friday.sources import Lines
+            from friday.sdk.sources import Lines
 
             if needle:
                 return Lines((self.decisive,), truncated=False)
@@ -1637,7 +1673,7 @@ async def test_a_request_found_only_by_the_narrowed_read_is_not_out_of_reach(db)
         name = "kubectl"
 
         async def lines(self, placement, *, since, until, limit, needle=""):
-            from friday.sources import Lines
+            from friday.sdk.sources import Lines
 
             if needle:
                 return Lines(("ERROR /v1/pod/orders/init 500",), oldest=since)
@@ -1668,7 +1704,7 @@ async def test_the_seam_between_the_two_reads_is_marked(db):
         name = "kubectl"
 
         async def lines(self, placement, *, since, until, limit, needle=""):
-            from friday.sources import Lines
+            from friday.sdk.sources import Lines
 
             if needle:
                 return Lines(("ERROR abc-123 /v1/pod/orders/init 500",))
@@ -1695,8 +1731,8 @@ def _kubectl_returning(count: int):
     """
     import asyncio
 
-    from friday.sources import Placement
-    from friday.sources.logs import SshKubectlSource
+    from friday.sdk.sources import Placement
+    from plugins.devops.sources.logs import SshKubectlSource
 
     class Source(SshKubectlSource):
         async def _run(self, remote):
@@ -1734,7 +1770,7 @@ def test_both_parsers_say_which_span_they_handed_over():
     """`newest` is what lets the capped sentence name a span. A parser that
     populated only `oldest` would leave it saying "an unknown part", which
     is the sentence it replaced."""
-    from friday.sources.logs import _streams, _within
+    from plugins.devops.sources.logs import _streams, _within
 
     parsed = _streams(
         '{"streams":[{"labels":{},"lines":['
@@ -1758,8 +1794,8 @@ def test_loki_asks_its_back_end_for_the_lines_that_carry_the_needle():
     of it with `truncated: false`."""
     import asyncio
 
-    from friday.sources import Placement, Reads
-    from friday.sources.logs import LokiSource
+    from friday.sdk.sources import Placement, Reads
+    from plugins.devops.sources.logs import LokiSource
 
     class Server:
         asked: dict = {}
@@ -1789,7 +1825,7 @@ def test_a_needle_carrying_a_quote_is_escaped_rather_than_ending_the_filter():
     """LogQL's filter is a Go quoted string. A needle with a `"` in it would
     otherwise close the literal and change the query instead of being
     searched for."""
-    from friday.sources.logs import _logql
+    from plugins.devops.sources.logs import _logql
 
     assert _logql('a"b') == 'a\\"b'
     assert _logql("a\\b") == "a\\\\b"
@@ -1802,8 +1838,8 @@ def test_kubectl_searches_the_whole_window_rather_than_its_tail():
     searches all of it — and `head` keeps the answer bounded."""
     import asyncio
 
-    from friday.sources import Placement
-    from friday.sources.logs import SshKubectlSource
+    from friday.sdk.sources import Placement
+    from plugins.devops.sources.logs import SshKubectlSource
 
     ran: list[str] = []
 
@@ -1829,8 +1865,8 @@ def test_a_needle_reaches_the_shell_quoted():
     between that and a command line."""
     import asyncio
 
-    from friday.sources import Placement
-    from friday.sources.logs import SshKubectlSource
+    from friday.sdk.sources import Placement
+    from plugins.devops.sources.logs import SshKubectlSource
 
     ran: list[str] = []
 
@@ -1871,8 +1907,8 @@ def test_a_failing_kubectl_is_not_hidden_by_the_pipe_that_narrows_it():
     """
     import asyncio
 
-    from friday.sources import Placement
-    from friday.sources.logs import SshKubectlSource
+    from friday.sdk.sources import Placement
+    from plugins.devops.sources.logs import SshKubectlSource
 
     ran: list[str] = []
 
@@ -1903,7 +1939,7 @@ async def test_a_capped_narrowed_read_says_the_request_has_more_lines(db):
         name = "kubectl"
 
         async def lines(self, placement, *, since, until, limit, needle=""):
-            from friday.sources import Lines
+            from friday.sdk.sources import Lines
 
             if needle:
                 return Lines(("ERROR abc-123 boom",), truncated=True)
@@ -1928,8 +1964,8 @@ async def test_a_reader_may_not_call_a_tool_it_did_not_declare():
     not configuration. The server this narrows also offers `release_apply`,
     `release_rollback` and `godaddy_dns_edit_record` — and a guard a file can
     widen is one the file's next editor widens by accident."""
-    from friday.sources import Reads
-    from friday.sources.logs import LokiSource
+    from friday.sdk.sources import Reads
+    from plugins.devops.sources.logs import LokiSource
 
     class Server:
         async def call_tool(self, tool, arguments):
@@ -1946,7 +1982,7 @@ def test_a_raw_server_cannot_be_handed_to_a_reader_by_mistake():
     """`Reads` is deliberately not a drop-in for a server: it answers `call`
     where a server answers `call_tool`, so an unnarrowed server fails at the
     first read instead of reaching the whole catalogue."""
-    from friday.sources import Reads
+    from friday.sdk.sources import Reads
 
     assert hasattr(Reads, "call") and not hasattr(Reads, "call_tool")
 
@@ -1954,10 +1990,10 @@ def test_a_raw_server_cannot_be_handed_to_a_reader_by_mistake():
 def test_what_a_server_is_filtered_to_is_read_off_the_readers():
     """A list beside the classes is a list that disagrees with them — so the
     set grows when a reader is added and by no other means."""
-    from friday.sources import declared
-    from friday.sources.db import DbSource
-    from friday.sources.logs import LokiSource
-    from friday.sources.release import ReleaseSource
+    from plugins.devops.sources import declared
+    from plugins.devops.sources.db import DbSource
+    from plugins.devops.sources.logs import LokiSource
+    from plugins.devops.sources.release import ReleaseSource
 
     assert declared() == LokiSource.TOOLS | DbSource.TOOLS | ReleaseSource.TOOLS
     assert "execute_mongo_query" not in declared(), "no caller yet"
@@ -2003,7 +2039,7 @@ def test_a_compiled_frame_is_translated_back_to_the_source(tmp_path):
     is `workflow-credit.service.ts:109`, forty-nine lines away. Mapping the
     file and keeping the line would hand `Diagnose` the wrong place and call
     it the throw site."""
-    from friday.sources.code import original
+    from plugins.devops.sources.code import original
 
     _built(tmp_path, js_line=3, ts_line=11)
 
@@ -2014,7 +2050,7 @@ def test_a_compiled_frame_is_translated_back_to_the_source(tmp_path):
 
 def test_a_compiled_file_with_no_map_beside_it_is_not_translated(tmp_path):
     """`None` means "read the built file and say so", never "guess"."""
-    from friday.sources.code import original
+    from plugins.devops.sources.code import original
 
     _built(tmp_path)
     (tmp_path / "dist" / "x.js.map").unlink()
@@ -2023,7 +2059,7 @@ def test_a_compiled_file_with_no_map_beside_it_is_not_translated(tmp_path):
 
 
 def test_a_map_that_does_not_parse_is_not_translated(tmp_path):
-    from friday.sources.code import original
+    from plugins.devops.sources.code import original
 
     _built(tmp_path)
     (tmp_path / "dist" / "x.js.map").write_text("{ not json")
@@ -2080,7 +2116,7 @@ def test_a_map_naming_a_file_outside_the_clone_is_refused(tmp_path):
     applied to the function added under it — found by review."""
     import json
 
-    from friday.sources.code import original
+    from plugins.devops.sources.code import original
 
     _built(tmp_path, js_line=3, ts_line=11)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -2096,7 +2132,7 @@ def test_a_map_whose_sources_hold_null_is_not_followed(tmp_path):
     `TypeError` out of the graph node rather than answering `None`."""
     import json
 
-    from friday.sources.code import original
+    from plugins.devops.sources.code import original
 
     _built(tmp_path)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -2119,7 +2155,7 @@ def test_a_map_with_a_character_that_is_not_vlq_is_rejected_whole(tmp_path):
     """
     import json
 
-    from friday.sources.code import original
+    from plugins.devops.sources.code import original
 
     _built(tmp_path, js_line=3, ts_line=11)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -2217,7 +2253,7 @@ def test_only_the_codes_that_turned_up_are_read_out_of_the_doc(tmp_path):
     """Ticket 16 measured 2,104 of 2,104 HTTP 500s carrying `ERR19` — the
     generic code — so the doc is what turns a code into an answer. The whole
     doc is 271 lines; a run needs the three lines it saw."""
-    from friday.sources.code import meanings
+    from plugins.devops.sources.code import meanings
 
     doc = tmp_path / "docs" / "error-codes.md"
     doc.parent.mkdir(parents=True)
@@ -2232,7 +2268,7 @@ def test_only_the_codes_that_turned_up_are_read_out_of_the_doc(tmp_path):
 
 
 def test_a_code_the_doc_does_not_list_is_absent_rather_than_invented(tmp_path):
-    from friday.sources.code import meanings
+    from plugins.devops.sources.code import meanings
 
     doc = tmp_path / "error-codes.md"
     doc.write_text(CODES_DOC)
@@ -2243,7 +2279,7 @@ def test_a_code_the_doc_does_not_list_is_absent_rather_than_invented(tmp_path):
 def test_a_doc_outside_the_clone_is_not_read(tmp_path):
     """`error_codes_doc` is a path from a row somebody typed, and this module
     checks a path before it opens it — the same rule as a stack frame."""
-    from friday.sources.code import meanings
+    from plugins.devops.sources.code import meanings
 
     outside = tmp_path / "outside" / "error-codes.md"
     outside.parent.mkdir(parents=True)
@@ -2282,7 +2318,7 @@ def test_a_two_column_table_is_read_as_well_as_a_three(tmp_path):
     """The real document has both — 130 rows of `code | name | meaning` and
     69 of `code | meaning`. Wanting three silently dropped every Midas code,
     `ERR306` among them, which ticket 16 counted 3,455 times in 30 days."""
-    from friday.sources.code import meanings
+    from plugins.devops.sources.code import meanings
 
     doc = tmp_path / "error-codes.md"
     doc.write_text(
@@ -2373,7 +2409,7 @@ def test_every_node_in_the_graph_has_a_ceiling():
     `report` each reach the database, and a hung connection would hold a
     pool slot for the life of the process — the thing ticket 13 went to some
     trouble to prevent."""
-    dag = build_api_issue_dag()
+    dag = _dag()
 
     assert [n.name for n in dag.nodes if n.timeout_seconds is None] == []
 
@@ -2387,7 +2423,7 @@ def test_a_graph_that_can_outlast_its_budget_is_refused_at_boot():
     from friday.config import ConfigError
     from friday.dag.router import check_graph_clocks
 
-    dag = build_api_issue_dag()
+    dag = _dag()
     total = sum(n.timeout_seconds or 0.0 for n in dag.nodes)
 
     check_graph_clocks([dag], {dag.name: total})
@@ -2406,7 +2442,7 @@ def test_a_node_with_no_clock_is_refused_however_large_the_budget():
         return None
 
     loose = DAG(
-        name="api_issue",
+        name="devops.api_issue",
         nodes=(Node("a", _nothing, timeout_seconds=1.0), Node("b", _nothing)),
         edges=(),
     )
@@ -2441,19 +2477,15 @@ def test_the_budget_is_read_as_a_number_and_must_be_positive(tmp_path):
     text; `str()` on this one would compare a string to a sum."""
     import pytest as _pytest
 
-    from friday.config import ConfigError, load_config
+    from plugins.devops.config import ConfigError, load_devops_config
 
-    path = tmp_path / "config.yaml"
-    path.write_text('api_issue:\n  timeout_seconds: 300\n')
-    assert load_config(path).api_issue.timeout_seconds == 300.0
+    assert load_devops_config({"timeout_seconds": 300}).timeout_seconds == 300.0
 
-    path.write_text('api_issue:\n  timeout_seconds: "soon"\n')
     with _pytest.raises(ConfigError, match="must be a number"):
-        load_config(path)
+        load_devops_config({"timeout_seconds": "soon"})
 
-    path.write_text('api_issue:\n  timeout_seconds: 0\n')
     with _pytest.raises(ConfigError, match="must be positive"):
-        load_config(path)
+        load_devops_config({"timeout_seconds": 0})
 
 
 def test_the_boot_actually_checks_the_graph_clocks(monkeypatch):
@@ -2540,7 +2572,7 @@ def test_the_running_tag_is_read_out_of_the_release_answer():
     import asyncio
     import json
 
-    from friday.sources.release import ReleaseSource
+    from plugins.devops.sources.release import ReleaseSource
 
     class Server:
         async def call(self, tool, arguments):
@@ -2562,7 +2594,7 @@ def test_not_knowing_which_version_runs_is_an_answer_not_a_failure():
     runs" into a failed investigation."""
     import asyncio
 
-    from friday.sources.release import ReleaseSource
+    from plugins.devops.sources.release import ReleaseSource
 
     class Broken:
         async def call(self, tool, arguments):
@@ -2582,7 +2614,7 @@ def test_reading_at_a_ref_never_moves_the_operators_clone(tmp_path):
     disk, cleanup and a failure mode for a read that needs none of it."""
     import subprocess
 
-    from friday.sources.code import at_ref
+    from plugins.devops.sources.code import at_ref
 
     root = tmp_path / "clone"
     root.mkdir()
@@ -2613,7 +2645,7 @@ def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monke
     Asserts git is never *invoked*, not that the call returned `None` — a
     bad ref makes `git show` fail and return `None` too, so the weaker
     assertion passed with the guard deleted."""
-    from friday.sources import code as code_source
+    from plugins.devops.sources import code as code_source
 
     ran = []
     monkeypatch.setattr(
@@ -2790,7 +2822,7 @@ def test_the_asking_node_does_not_end_the_graph_by_its_edges():
     """An `Ask` ends the pass in the runner, not by an edge — the edge out of
     this node is unconditional, so the resumed run walks on when the node
     answers with a dossier instead."""
-    dag = build_api_issue_dag()
+    dag = _dag()
     ok = DAGState.empty().with_result(
         "find_request_log", {"status": "ok", "reason": ""}
     )
@@ -2912,7 +2944,7 @@ def test_the_model_is_told_both_to_fill_it_and_what_happens_if_it_does_not():
     alternative, and the warning that claiming `conclusive` without one is
     refused. Asserting only the field name passed with the warning deleted,
     because the instruction mentions it too."""
-    from friday.dag.api_issue.prompt import build_instructions
+    from plugins.devops.graph.prompt import build_instructions
 
     said = build_instructions()
 
@@ -2930,7 +2962,7 @@ def test_git_failing_is_no_ref_rather_than_an_exception(tmp_path, monkeypatch):
     function misled — `read_code` was exactly that caller."""
     import subprocess
 
-    from friday.sources import code as code_source
+    from plugins.devops.sources import code as code_source
 
     def explode(*_a, **_k):
         raise FileNotFoundError("git")
@@ -2951,15 +2983,12 @@ def test_the_reads_switch_is_true_or_false_and_nothing_else(tmp_path):
     decision anybody made."""
     import pytest as _pytest
 
-    from friday.config import ConfigError, load_config
+    from plugins.devops.config import ConfigError, load_devops_config
 
-    path = tmp_path / "config.yaml"
-    path.write_text("api_issue:\n  diagnose_reads: true\n")
-    assert load_config(path).api_issue.diagnose_reads is True
+    assert load_devops_config({"diagnose_reads": True}).diagnose_reads is True
 
-    path.write_text('api_issue:\n  diagnose_reads: "yes"\n')
     with _pytest.raises(ConfigError, match="true or false"):
-        load_config(path)
+        load_devops_config({"diagnose_reads": "yes"})
 
 
 async def test_the_switch_decides_which_way_diagnose_answers(db):
@@ -2971,18 +3000,16 @@ async def test_the_switch_decides_which_way_diagnose_answers(db):
     The first version of this test built both graphs and asserted `True`; it
     was written while fixing tests that guarded nothing.
     """
-    import friday.dag.api_issue as api_issue
-    from friday.config import ApiIssueConfig
-    from friday.dag import registry, task_types
-
     reached = []
 
-    def spy(config, *, record=None, spent=None, tools=None):
-        # The v3.3 factory is invoked with this run's `tools`; a boot-time build
-        # gets none. Recording only the tool'd calls is recording the factory.
-        if tools is not None:
-            reached.append(tools)
-        return None  # "no agent configured" — the node skips, which is enough
+    class SpyCaps(_StubCaps):
+        # The v3.3 factory is invoked with this run's `tools`; the boot-time
+        # build gets none. Recording only the tool'd calls records the factory,
+        # which the plugin's builder wires only when `diagnose_reads`.
+        def make_harness(self, *, agent, instructions, answers=None, tools=None):
+            if tools is not None:
+                reached.append(tools)
+            return None  # "no agent configured" — the node skips, which is enough
 
     state = (
         prepared()
@@ -2995,27 +3022,18 @@ async def test_the_switch_decides_which_way_diagnose_answers(db):
         .with_result("read_failing_code", {"status": "empty", "reason": "none"})
     )
 
-    original = api_issue.build_diagnose_harness
-    api_issue.build_diagnose_harness = spy
-    try:
-        for reads in (False, True):
-            reached.clear()
-            # The gating (a factory only when `diagnose_reads`) lives in
-            # `task_types` now, not the router — register the graph and read it
-            # back, then run its diagnose node.
-            task_types.register_all(
-                task_types.BootContext(
-                    config=SimpleNamespace(
-                        context=SimpleNamespace(extraction_budget_tokens=1000),
-                        agents={},
-                        api_issue=ApiIssueConfig(diagnose_reads=reads),
-                    )
-                )
-            )
-            await registry.dag_of("api_issue").node("diagnose").run(state, deps_for(db))
-            assert bool(reached) is reads, f"diagnose_reads={reads}"
-    finally:
-        api_issue.build_diagnose_harness = original
+    for reads in (False, True):
+        reached.clear()
+        # The gating (a factory only when `diagnose_reads`) lives in the plugin's
+        # graph builder now — build the graph with the switch and run its
+        # diagnose node.
+        api = SimpleNamespace(
+            caps=SpyCaps(budget_tokens=1000),
+            config=DevopsConfig(diagnose_reads=reads),
+        )
+        dag = build_devops_dag(api)
+        await dag.node("diagnose").run(state, deps_for(db))
+        assert bool(reached) is reads, f"diagnose_reads={reads}"
 
 
 def test_check_deps_refuses_a_deps_factory_that_forgets_a_required_field():
@@ -3036,7 +3054,8 @@ def test_check_deps_refuses_a_deps_factory_that_forgets_a_required_field():
     dag = DAG(name="bad", nodes=(Node(name="n", run=lambda s, d: None),))
     registry.clear()
     registry.register_task_type(
-        TaskTypeSpec(name="bad", params=ApiIssueParams, graph=lambda _d: dag, deps=forgets_sender)
+        TaskTypeSpec(name="bad", params=ApiIssueParams, deps=forgets_sender),
+        dag=dag,
     )
     try:
         with pytest.raises(ConfigError, match="deps factory"):

@@ -14,14 +14,11 @@ from typing import Literal, get_args, get_type_hints
 import pytest
 
 from friday.domain.actions import Decided, make_decided
-from friday.domain.models import (
-    AccessRequestParams,
-    ApiIssueParams,
-    DocQuestionParams,
-)
+from friday.domain.models import AccessRequestParams, DocQuestionParams
+from plugins.devops.params import ApiIssueParams
 
 CATALOG = {
-    "api_issue": ApiIssueParams,
+    "devops.api_issue": ApiIssueParams,
     "access_request": AccessRequestParams,
     "doc_question": DocQuestionParams,
 }
@@ -30,15 +27,15 @@ CATALOG = {
 def test_decided_is_a_plain_value_type():
     """The value type carries a bare string — no static Literal, so it needs no
     task-type catalog at import."""
-    d = Decided(type="api_issue", confidence=0.9)
-    assert d.type == "api_issue" and d.confidence == 0.9
+    d = Decided(type="devops.api_issue", confidence=0.9)
+    assert d.type == "devops.api_issue" and d.confidence == 0.9
     assert get_type_hints(Decided)["type"] is str
 
 
 def test_make_decided_closes_the_type_to_the_registry_plus_skip():
     cls = make_decided(CATALOG)
     allowed = set(get_args(get_type_hints(cls)["type"]))
-    assert allowed == {"api_issue", "access_request", "doc_question", "skip"}
+    assert allowed == {"devops.api_issue", "access_request", "doc_question", "skip"}
 
 
 def test_make_decided_carries_each_types_own_description():

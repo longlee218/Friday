@@ -30,7 +30,7 @@ class StubTriage:
 
 
 def api_issue(confidence=0.9):
-    return Decided(type="api_issue", confidence=confidence)
+    return Decided(type="devops.api_issue", confidence=confidence)
 
 
 def runner(db, triage, threshold=0.7):
@@ -43,7 +43,7 @@ async def test_a_confident_decision_becomes_a_task(inbox, provider, db):
 
     created = await runner(db, StubTriage(api_issue())).run_once()
 
-    assert [t.type for t in created] == ["api_issue"]
+    assert [t.type for t in created] == ["devops.api_issue"]
     stored = await db.tasks()
     # Opened empty: triage said what it is and nothing more. The extractor
     # fills it in on the first plan, and until then there is nothing here to
@@ -128,7 +128,7 @@ async def test_a_message_of_a_different_type_gets_its_own_task(inbox, provider, 
 
     tasks = await db.tasks()
     assert [(t.type, t.state) for t in tasks] == [
-        ("api_issue", "needs_human"),   # flagged: its subject changed
+        ("devops.api_issue", "needs_human"),   # flagged: its subject changed
         ("access_request", "pending"),  # and the new report is real work
     ]
 
@@ -228,7 +228,7 @@ async def test_an_opened_task_records_its_decision_too(inbox, provider, db):
     created = await runner(db, StubTriage(api_issue())).run_once()
 
     (decision,) = await db.decisions()
-    assert decision["type"] == "api_issue"
+    assert decision["type"] == "devops.api_issue"
     assert decision["confidence"] == 0.9
     assert decision["task_id"] == created[0].id
 
@@ -322,7 +322,7 @@ async def test_a_question_back_does_not_close_the_report(inbox, provider, db):
     await runner(db, StubTriage(other)).run_once()
 
     tasks = await db.tasks()
-    assert [(t.type, t.state) for t in tasks] == [("api_issue", "pending")]
+    assert [(t.type, t.state) for t in tasks] == [("devops.api_issue", "pending")]
 
 
 async def test_the_answer_reaches_the_task_that_asked_for_it(inbox, provider, db):
@@ -346,7 +346,7 @@ async def test_the_answer_reaches_the_task_that_asked_for_it(inbox, provider, db
     await captured(inbox)
     await runner(db, StubTriage(Decided(type="access_request", confidence=0.9))).run_once()
 
-    assert [(t.type, t.state) for t in await db.tasks()] == [("api_issue", "pending")]
+    assert [(t.type, t.state) for t in await db.tasks()] == [("devops.api_issue", "pending")]
 
 
 async def test_an_unprompted_message_is_still_checked_by_type(inbox, provider, db):
@@ -361,7 +361,7 @@ async def test_an_unprompted_message_is_still_checked_by_type(inbox, provider, d
     await runner(db, StubTriage(api_issue(), access)).run_once()
 
     assert [(t.type, t.state) for t in await db.tasks()] == [
-        ("api_issue", "needs_human"),
+        ("devops.api_issue", "needs_human"),
         ("access_request", "pending"),
     ]
 
@@ -385,7 +385,7 @@ async def test_a_reply_to_a_message_of_ours_that_had_no_task(inbox, provider, db
 
     await runner(db, StubTriage(api_issue())).run_once()
 
-    assert [t.type for t in await db.tasks()] == ["api_issue"]
+    assert [t.type for t in await db.tasks()] == ["devops.api_issue"]
 
 
 async def test_a_reply_does_not_reopen_finished_work(inbox, provider, db):
@@ -405,7 +405,7 @@ async def test_a_reply_does_not_reopen_finished_work(inbox, provider, db):
     await runner(db, StubTriage(api_issue())).run_once()
 
     states = [(t.type, t.state) for t in await db.tasks()]
-    assert ("api_issue", "done") in states
+    assert ("devops.api_issue", "done") in states
     assert len(states) == 2, "the thank-you opened its own task rather than reopening"
 
 
@@ -551,7 +551,7 @@ async def _one_of_ours_in_the_queue(db, *, text="Alive. 79 messages held."):
 
     task = await db.create_task(
         conversation=ConversationId("fake", "watched"),
-        type="api_issue", state="pending", confidence=0.9, params={},
+        type="devops.api_issue", state="pending", confidence=0.9, params={},
     )
     row = await db.queue_outbound(
         task_id=task.id, conversation=task.conversation, kind=Kind.HELP_WANTED,
@@ -598,7 +598,7 @@ async def test_one_unreadable_message_does_not_stop_the_others(db):
 
     acted = await runner(db, StubTriage(api_issue())).run_once()
 
-    assert [t.type for t in acted] == ["api_issue"], (
+    assert [t.type for t in acted] == ["devops.api_issue"], (
         "the good message was triaged despite the bad one ahead of it"
     )
 
@@ -790,7 +790,7 @@ async def test_a_late_answer_to_our_own_question_is_never_outdated(db):
     reported = make_event(message_id="1", text="the api is down")
     await db.record_message(reported)
     task = await db.create_task(
-        conversation=reported.conversation, type="api_issue",
+        conversation=reported.conversation, type="devops.api_issue",
         state=TaskState.WAITING_FOR_DETAILS, confidence=0.9, params={},
     )
     asked = await db.queue_outbound(

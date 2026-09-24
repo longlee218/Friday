@@ -149,7 +149,7 @@ async def test_a_call_made_for_a_task_is_read_back_by_that_task(db):
     stored under no key at all.
     """
     task = await db.create_task(
-        conversation=ConversationId("fake", "watched"), type="api_issue",
+        conversation=ConversationId("fake", "watched"), type="devops.api_issue",
         state=TaskState.PENDING, confidence=0.9, params={},
     )
     common = dict(model="m", system_prompt="s", output="o",

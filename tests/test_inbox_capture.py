@@ -426,7 +426,7 @@ async def test_a_message_this_process_posted_is_never_work_whichever_identity_se
 
     task = await db.create_task(
         conversation=ConversationId("fake", "watched"),
-        type="api_issue", state="pending", confidence=0.9, params={},
+        type="devops.api_issue", state="pending", confidence=0.9, params={},
     )
     row = await db.queue_outbound(
         task_id=task.id, conversation=task.conversation, kind=Kind.HELP_WANTED,
@@ -462,7 +462,7 @@ async def test_our_own_message_is_recognised_before_the_outbox_records_its_id(
 
     task = await db.create_task(
         conversation=ConversationId("fake", "watched"),
-        type="api_issue", state="pending", confidence=0.9, params={},
+        type="devops.api_issue", state="pending", confidence=0.9, params={},
     )
     await db.queue_outbound(
         task_id=task.id, conversation=task.conversation, kind=Kind.HELP_WANTED,

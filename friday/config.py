@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -240,62 +241,6 @@ class MCPServerConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class ApiIssueConfig:
-    """What the `api_issue` graph reaches outside this process with.
-
-    Every field is empty or a default on purpose: a fresh install has no dev
-    host and no Loki server, and every node that needs one skips with a
-    reason rather than failing. That is the difference between this graph and
-    the five-node one the operator deleted, where the skipping was silent.
-    """
-
-    #: The SSH alias `kubectl` runs behind, from `~/.ssh/config`. Empty means
-    #: dev logs are not read at all — measured 2026-09-18: there is no
-    #: kubeconfig for dev on this machine, so this is the only way in.
-    ssh_host: str = ""
-    #: Which configured MCP server carries the Loki tools, and which of its
-    #: tools answers a range query. A name, not code, because the session
-    #: that measured the server read its catalogue without running a query
-    #: through it — so this is the field most likely to be wrong, and it
-    #: should be correctable without a release.
-    loki_server: str = "devops-generic"
-    loki_tool: str = "loki_query_range"
-    #: Where a run's report is written. Beside the database, for the same
-    #: reason: state this process produced, not source.
-    reports_dir: str = "./data/reports"
-    #: **The longest one task may hold a pool slot**, checked at boot against
-    #: the sum of the graph's node ceilings.
-    #:
-    #: Ticket 13 bounded the pool by working its batch side by side, and said
-    #: `api_issue` was "bounded at five minutes". That was true of a one-node
-    #: graph. Measured 2026-09-22, the seven-node graph's ceilings sum to
-    #: 340s and three of its nodes had no ceiling at all — so the sentence
-    #: ticket 13 relied on had quietly stopped being true, and nothing said
-    #: so. With `workflows.concurrency` at 2, two slow tasks are two slots,
-    #: and for that long nothing else is triaged, drafted or answered.
-    #:
-    #: A budget rather than a runtime kill: cancelling a graph half way
-    #: leaves a task that has read a log, queued an acknowledgement and
-    #: written nothing. Refusing at boot is the same choice
-    #: `check_node_clocks` already makes — a clock that does not add up is a
-    #: configuration mistake, and the place to find it is the start.
-    #:
-    #: 420s because the graph's ceilings sum to 400 and a budget with no
-    #: headroom is one that refuses the next node anybody adds. **The lever,
-    #: if seven minutes is too long: `agents.diagnose.timeout_seconds` is
-    #: 150 of it** — the node gets that plus a margin, and it is the single
-    #: biggest term by a distance.
-    timeout_seconds: float = 420.0
-    #: **v3.3: let `Diagnose` read for itself** (spec, "Architecture v3.3").
-    #: Off by default, and deliberately so: it replaces a pipeline that
-    #: works with one that costs several model calls and is no longer
-    #: deterministic. The switch is what lets `evals/run_api_issue_eval.py`
-    #: run the same cases both ways and compare, which is the only evidence
-    #: that would justify making it the default.
-    diagnose_reads: bool = False
-
-
-@dataclass(frozen=True, slots=True)
 class OutboxConfig:
     #: How many times to try one message before handing it to a person.
     max_attempts: int = 3
@@ -346,8 +291,15 @@ class Config:
     workflows: WorkflowConfig = field(default_factory=WorkflowConfig)
     outbox: OutboxConfig = field(default_factory=OutboxConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
-    api_issue: ApiIssueConfig = field(default_factory=ApiIssueConfig)
     mcp_servers: tuple[MCPServerConfig, ...] = ()
+    #: The plugins this build loads, by import path (`friday.plugin_host` reads
+    #: each package's `PLUGIN`). A plugin owns its own config block, validated
+    #: against its own schema — the core no longer names any of them.
+    plugins: tuple[str, ...] = ("plugins.devops",)
+    #: The raw config mapping, so `friday.plugin_host` can read a plugin's own
+    #: block by its id (`plugin_blocks["devops"]`) and hand it to the plugin's
+    #: validator. Kept raw because the core does not know a plugin's schema.
+    plugin_blocks: Mapping[str, Any] = field(default_factory=dict)
     #: Classifications the operator wrote by hand, as `(message, task type)`.
     #: Used whether or not anything has been marked in Discord — a fresh
     #: install has nothing marked, and waiting for the first reaction before
@@ -442,7 +394,11 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             else int(raw.get("summary_at_hour", 9))
         ),
         keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
-        api_issue=_api_issue(raw.get("api_issue") or {}),
+        plugins=tuple(raw.get("plugins") or ("plugins.devops",)),
+        # Raw, so `friday.plugin_host` can read each plugin's own block by id
+        # and validate it against the plugin's own schema — the core does not
+        # know a plugin's config shape.
+        plugin_blocks=raw,
         mcp_servers=_mcp_servers(_expand(raw.get("mcp_servers") or {})),
         triage_examples=_triage_examples(raw.get("triage_examples") or []),
         sensitive_words=_sensitive_words(raw.get("sensitive_words") or []),
@@ -578,48 +534,6 @@ def _mention_type(value: str) -> MentionType:
         ) from exc
 
 
-def _api_issue(raw: dict) -> ApiIssueConfig:
-    """The api_issue block, or its defaults. An unknown key is refused rather
-    than ignored: a misspelled `ssh_host` that reads as absent is a graph
-    that silently stops reading dev logs."""
-    if not isinstance(raw, dict):
-        raise ConfigError("api_issue: expected a block of settings")
-    known = {f.name for f in fields(ApiIssueConfig)}
-    unknown = sorted(set(raw) - known)
-    if unknown:
-        raise ConfigError(
-            f"api_issue: unknown setting(s) {unknown} (known: {sorted(known)})"
-        )
-    # `ssh_host:` with nothing after it parses as `None`, and `str(None)` is
-    # `"None"` — a truthy hostname that turns every dev task into a failed
-    # `ssh None`. An empty setting means "not configured", which is what a
-    # blank line in a config file plainly means.
-    # Every other setting here is a name or a path and is read as text;
-    # `timeout_seconds` is the one number, and `str()` on it would make the
-    # boot check compare a string to a sum.
-    reads = raw.pop("diagnose_reads", None)
-    clock = raw.pop("timeout_seconds", None)
-    settings: dict = {k: "" if v is None else str(v) for k, v in raw.items()}
-    if clock is not None:
-        try:
-            settings["timeout_seconds"] = float(clock)
-        except (TypeError, ValueError):
-            raise ConfigError(
-                f"api_issue: timeout_seconds must be a number, not {clock!r}"
-            ) from None
-        if settings["timeout_seconds"] <= 0:
-            raise ConfigError(
-                f"api_issue: timeout_seconds must be positive, not {clock!r}"
-            )
-    if reads is not None:
-        if not isinstance(reads, bool):
-            raise ConfigError(
-                f"api_issue: diagnose_reads is true or false, not {reads!r}"
-            )
-        settings["diagnose_reads"] = reads
-    return ApiIssueConfig(**settings)
-
-
 def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
     """A server with neither a command nor a url is half a connection, which is
     worse than none: it fails at the first tool call, inside an agent run, hours
@@ -683,7 +597,7 @@ def _triage_examples(raw) -> tuple[tuple[str, str], ...]:
     rather than as configuration:
 
         triage_examples:
-          - "the checkout api is 500ing": api_issue
+          - "the checkout api is 500ing": devops.api_issue
           - "can I get access to the payments repo": access_request
 
     A malformed entry is refused rather than skipped. An example the operator

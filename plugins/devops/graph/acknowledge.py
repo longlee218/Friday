@@ -24,9 +24,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from friday.dag.api_issue.deps import ApiIssueDeps
+from plugins.devops.graph.deps import ApiIssueDeps
 from friday.sdk.workflow import DAGState, Node, envelope
-from friday.outbox import Kind
+from friday.sdk.outbox import Kind
 
 __all__ = ["acknowledge_node"]
 
