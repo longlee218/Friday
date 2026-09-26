@@ -9,7 +9,7 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | --- | --- | --- | --- |
 | 1 | Superset capture + canned source | ✅ code (2 boxes pend) | — |
 | 2 | Diagnose output: HandOver (Ask→t4) | ✅ done | — |
-| 3 | The Intake node | ⬜ | — |
+| 3 | The Intake node | ✅ done (built, NOT wired — ticket 6 wires) | — |
 | 4 | Checkpoint/resume on `placement_identity` | ⬜ | 2, 3 |
 | 5 | Remove FindRequestLog + ReadFailingCode | ⬜ | 3 |
 | 6 | Rewire graph; drop extraction | ⬜ | 3, 4, 5 |
@@ -18,6 +18,15 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 9 | Doc debts (CONTEXT/DESIGN/ADR) | ⬜ | 6 |
 
 ## Now
+- **Ticket 3 — done (built, NOT wired).** `Intake` — deterministic, no model —
+  in `plugins/devops/graph/intake.py`: folds `Resolve`'s env/service table
+  lookup + regex hints (uuid correlation_id, artifact ids) + `diagnose_memories`
+  retrieval (memory/skills/findings) + `reported_at`, into one `IntakeContext`
+  with a `placement_identity` staleness key. Service uses the decided (c)→(a)
+  whole-token match (never a model guess; vague → room candidate set). NOT on
+  the live edges — ticket 6 wires it and drops the extractor. `code-review`:
+  no critical/high; M1 (substring→token service match) + L2 (storage round-trip
+  test) fixed, both guards watched red. Suite: 1624 passed, 7 known env fails.
 - **Ticket 2 — done.** `HandOver` via a `hand_over(reason)` terminal output tool
   on the diagnose reads loop; reaches the operator end-to-end with the model's
   reason (gated `diagnose→report` edge). New general Harness `ends_with` seam.
@@ -30,6 +39,12 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
   unblocked by ticket 1.
 
 ## Log
+- 2026-09-26 — ticket 3 (Intake node) implemented (built, not wired). New
+  `plugins/devops/graph/intake.py` + 11 tests in `tests/test_api_issue.py`.
+  `code-review` found 1 medium (M1 substring service match) + 3 low; M1 + L2
+  fixed, L1/L3 noted as ticket-6 follow-ups; two guards deleted-and-watched-red.
+  Suite: 1624 passed, 1 skipped, 7 failed (all pre-existing `OPENROUTER_API_KEY`
+  env, unrelated). Not committed.
 - 2026-09-26 — boards committed on branch `plan/the-graph-becomes-a-loop`
   (`f6adb1d`).
 - 2026-09-26 — ticket 1 implemented; `code-review` found 2 HIGH bugs (kubectl

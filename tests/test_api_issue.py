@@ -13,7 +13,7 @@ missing, and it says out loud what it did not check.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -3239,3 +3239,291 @@ def test_check_deps_refuses_a_deps_factory_that_forgets_a_required_field():
             check_deps()
     finally:
         registry.clear()
+
+
+# --- intake (ticket 03: built, NOT wired — ticket 6 puts it on the graph) ----
+
+
+async def _task_with_text(
+    db, text: str, *, channel_id: str = "watched", code: tuple[str, ...] = ()
+) -> int:
+    """A real task whose transcript `original_text_for` actually reads —
+    Intake's `request_text` comes from there, not from `state["prepare"]`
+    (this node runs with no extractor upstream of it). `code` mirrors
+    `test_artifacts.py`'s `_curl_event`: a verbatim span becomes an artifact
+    reference in what `original_text_for` hands back."""
+    from conftest import make_event
+
+    conversation = ConversationId("fake", channel_id)
+    task = await db.create_task(
+        conversation=conversation, type="devops.api_issue", state="pending",
+        confidence=0.9, params={},
+    )
+    event = replace(
+        make_event(channel_id=channel_id, message_id=f"m{task.id}", text=text),
+        code=code,
+    )
+    await db.record_message(event)
+    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    return task.id
+
+
+async def test_intake_makes_no_model_call():
+    """No `agent`, no harness parameter — a model call is not something this
+    node's construction can even make."""
+    from plugins.devops.graph.intake import intake_node
+
+    import inspect
+
+    node = intake_node()
+
+    assert node.agent is None
+    assert list(inspect.signature(node.run).parameters) == ["state", "deps"]
+
+
+async def test_intake_resolves_a_named_service_and_its_placement(db):
+    from plugins.devops.graph.intake import intake_node
+
+    await write_rows(db, env="dev", repo="/clone/reelme")
+    task_id = await _task_with_text(
+        db,
+        "loi roi anh\n"
+        f"```\n{CURL}\n```\n"
+        "correlationId 8f14e45f-ceea-467a-9b3a-1e0e4a1b2c3d, "
+        "service backend-reelme-v2 dang tra 500",
+        code=(CURL,),
+    )
+
+    result = await intake_node().run(
+        DAGState.empty(), deps_for(db, task_id=task_id)
+    )
+
+    assert status_of(result) == "ok"
+    placement = result["intake"]["placement"]
+    assert placement["env"] == "dev"
+    assert placement["service"] == "backend-reelme-v2"
+    assert placement["namespace"] == "dev"
+    assert placement["pod_selector"] == "backend-reelme-v2"
+    assert placement["clone_path"] == "/clone/reelme"
+    assert placement["repo_path"] == "/clone/reelme"
+    assert placement["candidates"] == []
+
+
+async def test_intake_never_guesses_a_vague_service(db):
+    """Zero matches — the room's candidate set, not a guess (the (c)->(a)
+    hybrid fork, ticket 03)."""
+    from plugins.devops.graph.intake import intake_node
+
+    await write_rows(db, env="dev")
+    task_id = await _task_with_text(db, "co loi 500 nhung khong biet service nao")
+
+    result = await intake_node().run(
+        DAGState.empty(), deps_for(db, task_id=task_id)
+    )
+
+    placement = result["intake"]["placement"]
+    assert placement["service"] == ""
+    assert placement["candidates"] == ["backend-reelme-v2"]
+
+
+async def _add_mirror_service(db):
+    state = FridayState(channel_id="watched", agent="admin")
+    await db.memory_add(
+        state, "the ReelMe v2 backend, mirrored", kind="devops.service",
+        origin=MemoryOrigin.ADMIN,
+        data={
+            "name": "backend-reelme-v2-mirror",
+            "project": "reelme",
+            "prod": {"cluster": "vultr-ailab", "namespace": "sw",
+                     "app": "backend-reelme-v2-mirror"},
+            "dev": {"kube_context": "dev", "namespace": "dev",
+                    "pod_pattern": "backend-reelme-v2-mirror"},
+        },
+    )
+
+
+async def test_intake_never_guesses_when_several_services_match(db):
+    """Two services named as distinct tokens in the same text is as much a
+    guess as none — the candidate set, not whichever sorted first."""
+    from plugins.devops.graph.intake import intake_node
+
+    await write_rows(db, env="dev")
+    await _add_mirror_service(db)
+    task_id = await _task_with_text(
+        db, "backend-reelme-v2 va backend-reelme-v2-mirror deu dang tra 500"
+    )
+
+    result = await intake_node().run(
+        DAGState.empty(), deps_for(db, task_id=task_id)
+    )
+
+    placement = result["intake"]["placement"]
+    assert placement["service"] == ""
+    assert set(placement["candidates"]) == {
+        "backend-reelme-v2", "backend-reelme-v2-mirror",
+    }
+
+
+async def test_intake_resolves_the_more_specific_name_over_its_prefix(db):
+    """A name that is a prefix of another (`backend-reelme-v2` ⊂
+    `…-mirror`) must not force the candidate set: naming the mirror as a whole
+    token resolves the mirror, not both. Guards the token-boundary match — a
+    substring match would resolve neither (both would match) and go red."""
+    from plugins.devops.graph.intake import intake_node
+
+    await write_rows(db, env="dev")
+    await _add_mirror_service(db)
+    task_id = await _task_with_text(db, "backend-reelme-v2-mirror dang tra 500")
+
+    result = await intake_node().run(
+        DAGState.empty(), deps_for(db, task_id=task_id)
+    )
+
+    placement = result["intake"]["placement"]
+    assert placement["service"] == "backend-reelme-v2-mirror"
+    assert placement["candidates"] == []
+
+
+async def test_intake_does_not_resolve_a_short_name_inside_a_host(db):
+    """A service named `api` must NOT match inside the host
+    `api-reelme-v2.dev…` in a pasted URL — a substring match would silently
+    resolve the wrong service (M1); the whole-token match yields the candidate
+    set instead. Guard goes red if the match is a substring again."""
+    from plugins.devops.graph.intake import intake_node
+
+    await write_rows(db, env="dev")
+    state = FridayState(channel_id="watched", agent="admin")
+    await db.memory_add(
+        state, "the gateway", kind="devops.service", origin=MemoryOrigin.ADMIN,
+        data={
+            "name": "api",
+            "project": "reelme",
+            "prod": {"cluster": "vultr-ailab", "namespace": "sw", "app": "api"},
+            "dev": {"kube_context": "dev", "namespace": "dev", "pod_pattern": "api"},
+        },
+    )
+    # URL inline (not a code artifact) so the host stays in request_text.
+    task_id = await _task_with_text(
+        db, "loi 500 tren https://api-reelme-v2.dev.aperogroup.ai/v1/pod/orders/init"
+    )
+
+    result = await intake_node().run(
+        DAGState.empty(), deps_for(db, task_id=task_id)
+    )
+
+    placement = result["intake"]["placement"]
+    assert placement["service"] == ""            # not "api"
+    assert "api" in placement["candidates"]
+
+
+async def test_intake_context_carries_reported_at_and_container_roots_and_hints(db):
+    from plugins.devops.graph.intake import intake_node
+
+    task_id = await _task_with_text(
+        db,
+        "loi roi\n"
+        f"```\n{CURL}\n```\n"
+        "correlationId 8f14e45f-ceea-467a-9b3a-1e0e4a1b2c3d",
+        code=(CURL,),
+    )
+
+    result = await intake_node().run(
+        DAGState.empty(), deps_for(db, task_id=task_id)
+    )
+
+    intake = result["intake"]
+    assert intake["reported_at"]  # non-empty ISO timestamp
+    assert intake["placement"]["container_roots"] == list(DEFAULT_CONTAINER_ROOTS)
+    assert intake["hints"]["correlation_id"] == "8f14e45f-ceea-467a-9b3a-1e0e4a1b2c3d"
+    assert intake["hints"]["curl_artifact_id"]  # the curl became an artifact
+
+
+def test_placement_identity_is_stable_when_memory_or_skills_change():
+    """Only env/service/clone/repo/tag invalidate a running investigation
+    (ticket 01's checkpoint discard key) — memory and skills changing must
+    not."""
+    from plugins.devops.graph.intake import Hints, IntakeContext, Placement
+
+    placement = Placement(env="dev", service="backend-reelme-v2", repo_path="/r")
+    hints = Hints()
+    a = IntakeContext(request_text="x", reported_at="t", placement=placement, hints=hints)
+    b = IntakeContext(
+        request_text="x", reported_at="t", placement=placement, hints=hints,
+        memory=("a fact",), skills=("a skill",),
+    )
+
+    assert a.placement_identity == b.placement_identity == (
+        "dev", "backend-reelme-v2", "", "/r", "",
+    )
+
+
+async def test_intake_retrieval_lands_matched_skills_and_facts(db):
+    from plugins.devops.graph.intake import intake_node
+
+    await write_rows(db, env="dev")
+    state = FridayState(channel_id="watched", agent="admin")
+    await db.memory_add(
+        state, "backend-reelme-v2 has flaky retries", kind="fact",
+        origin=MemoryOrigin.ADMIN,
+    )
+    await db.memory_add(
+        state, "read backend-reelme-v2's queue depth first", kind="skill",
+        origin=MemoryOrigin.ADMIN, key="reelme-queue",
+        data={"when": {"services": ["backend-reelme-v2"], "error_codes": [],
+                        "path_patterns": [], "keywords": []}},
+    )
+    task_id = await _task_with_text(db, "backend-reelme-v2 dang tra 500")
+
+    result = await intake_node().run(
+        DAGState.empty(), deps_for(db, task_id=task_id)
+    )
+
+    intake = result["intake"]
+    assert "backend-reelme-v2 has flaky retries" in intake["memory"]
+    assert "read backend-reelme-v2's queue depth first" in intake["skills"]
+    assert "read backend-reelme-v2's queue depth first" not in intake["memory"]
+
+
+async def test_intake_of_round_trips_the_envelope_with_tuples_not_lists(db):
+    from plugins.devops.graph.intake import IntakeContext, Placement, intake_node, intake_of
+
+    await write_rows(db, env="dev", repo="/clone/reelme")
+    task_id = await _task_with_text(
+        db, f"service backend-reelme-v2 loi\n```\n{CURL}\n```"
+    )
+
+    result = await intake_node().run(
+        DAGState.empty(), deps_for(db, task_id=task_id)
+    )
+    context = intake_of(result)
+
+    assert isinstance(context, IntakeContext)
+    assert isinstance(context.placement, Placement)
+    assert isinstance(context.placement.container_roots, tuple)
+    assert isinstance(context.placement.dbs, tuple)
+    assert isinstance(context.placement.candidates, tuple)
+    assert isinstance(context.memory, tuple)
+    assert isinstance(context.skills, tuple)
+    assert isinstance(context.related_tasks, tuple)
+    assert context.placement.service == "backend-reelme-v2"
+
+
+async def test_intake_result_survives_dagstate_storage_round_trip(db):
+    """The property the `_listed` conversion exists for: the envelope must
+    survive `DAGState.to_dict`'s `json.loads(json.dumps(v)) == v` check, or the
+    result is dropped as `UNSTORABLE` and the node re-runs on resume. Guards the
+    tuple->list pass — a raw tuple field would fail the equality and go red."""
+    from friday.sdk.workflow_state import UNSTORABLE
+
+    from plugins.devops.graph.intake import intake_node
+
+    await write_rows(db, env="dev", repo="/clone/reelme")
+    task_id = await _task_with_text(db, "service backend-reelme-v2 loi 500")
+
+    result = await intake_node().run(
+        DAGState.empty(), deps_for(db, task_id=task_id)
+    )
+    stored = DAGState.empty().with_result("intake", result).to_dict()
+
+    assert UNSTORABLE not in stored["intake"]
+    assert stored["intake"] == result
