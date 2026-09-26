@@ -63,6 +63,14 @@ graph rework (that is `build-the-loop`, which runs in parallel).
   `build-the-loop` settles the shape, ~after ticket 6); the **per-instance
   model-proposed** criteria, the full dynamic Plan, and the verifier **agent**
   (needs calibration via the cassette-eval) wait for durable-spine's `Planner`.
+- [The merged Contract/Plan schema](issues/02-the-merged-contract-plan-schema.md):
+  two names, one runtime artifact — `TaskContract` (per-type template: the
+  consolidated `constraints`/`allowed_actions`/`approval_policy`/`budget` +
+  `acceptance_template`) and `Plan` (per-run: carries its contract + instance
+  `objective`/`acceptance`/`steps`). `Acceptance = {name, check: code|agent,
+  description}`. Only the `TaskContract` half + naming the deterministic gate
+  lands now; the `Plan`'s instance fields wait for the `Planner`. Stub:
+  `contract_plan_STUB.py`.
 
 ## Not yet specified
 
