@@ -11,7 +11,7 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 2 | Diagnose output: HandOver | ✅ done | — |
 | 3 | The Intake node | ✅ done (built, NOT wired — ticket 6 wires) | — |
 | 4 | Checkpoint/resume on `placement_identity` (resume half) | ⬜ deferred | 6 |
-| 5 | Remove FindRequestLog + ReadFailingCode | ⬜ | 3 |
+| 5 | Remove FindRequestLog + ReadFailingCode | ⬜ re-gated | 3, 7 |
 | 6 | Rewire graph; drop extraction | ⬜ | 3, 5, 10 |
 | 7 | Operator: capture ≥10 cases | 🧑 | 1 |
 | 8 | Delete fixed-feed baseline | ⬜ | 6, 7 |
@@ -19,6 +19,13 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 10 | `ask_reporter` terminal tool (Ask outcome, split from 4) | ✅ done | — |
 
 ## Now
+- **Ticket 5 — re-gated on ticket 7 (not started).** `diagnose_reads` defaults
+  to False, so dossier-mode (fed by `find_request_log`/`read_failing_code`) is
+  the live path — those two nodes ARE the fixed-feed baseline. Removing them =
+  deleting the baseline, which ticket 8 gates behind ticket 7's ≥10-case
+  measurement (measure-before-cut). So ticket 5 now `Blocked by: 03, 07`; it and
+  ticket 8 are the two halves of cutting the baseline, both after ticket 7.
+  **Bottleneck is now ticket 7 (operator captures ≥10 cases) — 🧑 human.**
 - **Ticket 10 — done (split from ticket 4).** `ask_reporter(question) -> Ask`
   terminal tool on the diagnose loop, mirroring ticket 2's `hand_over`; wired
   into `ends_with=[hand_over, ask_reporter]`. The loop can now end as
@@ -47,6 +54,10 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
   unblocked by ticket 1.
 
 ## Log
+- 2026-09-26 — ticket 5 re-gated `03` → `03, 07`. Removing the two fixed read
+  nodes deletes the fixed-feed baseline (dossier-mode is the `diagnose_reads=False`
+  default), which ticket 8 gates behind ticket 7's measurement. No code changed;
+  board only.
 - 2026-09-26 — ticket 4 split. `ask_reporter` Ask terminal tool shipped as
   ticket 10 (mirror of ticket 2's `hand_over`; +3 tests; guard watched red;
   suite 1627 passed, 7 known env fails; code-review clean). Ticket 4 reduced to
