@@ -22,14 +22,13 @@ import pytest
 from plugins.devops.graph import build_devops_dag, build_log_sources
 from plugins.devops.config import DevopsConfig, load_devops_config
 from plugins.devops.config import DEFAULT_CONTAINER_ROOTS
-from plugins.devops.graph.code import read_failing_code_node, repo_file
 from plugins.devops.graph.diagnose import (
     Diagnosis,
     diagnose_node,
     unresolved_refs,
 )
-from plugins.devops.graph.logs import find_request_log_node
 from plugins.devops.graph.report import render, report_node
+from plugins.devops.sources.code import repo_file
 
 
 class _StubCaps:
@@ -169,6 +168,8 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
 
 
 @dataclass
+
+
 class FakeSource:
     """A log source that answers from a script and records what it was asked."""
 
@@ -359,130 +360,6 @@ async def test_a_report_with_no_curl_says_so_rather_than_blaming_the_domain(db):
 # --- find_request_log -------------------------------------------------------
 
 
-async def test_a_source_that_is_not_configured_skips_out_loud(db):
-    """The failure the deleted five-node graph had: every node skipped on
-    every run, and nothing said so."""
-    await write_rows(db)
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(state, deps_for(db))
-
-    assert status_of(result) == "skipped"
-    assert "kubectl" in result["reason"]
-
-
-async def test_the_dossier_keeps_the_lines_that_name_the_request(db):
-    await write_rows(db)
-    source = FakeSource(answers=[[
-        "GET /v1/health 200",
-        "ERROR POST /v1/pod/orders/init 500 ERR19",
-        "GET /v1/health 200",
-    ]])
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert status_of(result) == "ok"
-    assert "ERR19" in result["dossier"]
-    assert result["total"] == 3
-
-
-async def test_the_identifier_narrows_the_read_when_there_is_no_correlation_id(db):
-    """D2's second way of naming a request, now that the type carries it
-    (board `read-it-the-way-the-operator-does`, ticket 01).
-
-    The identifier and not the endpoint path, which is the whole point of
-    asking for one: the path matches every caller of it, and `limit` is a
-    tail — measured on the production case of 2026-09-21, narrowing on the
-    path returned 18 lines of which ten were other people's successful
-    requests. The path stays in what `distil` matches on; it is only the
-    *narrowed read* this chooses.
-    """
-    await write_rows(db)
-    source = FakeSource(answers=[[
-        "GET /v1/health 200",
-        "ERROR POST /v1/pod/orders/init 500 ERR19 device-42",
-    ]])
-    state = prepared(correlation_id=None, identifier="device-42")
-
-    await find_request_log_node().run(
-        state.with_result("resolve", await resolve_node().run(state, deps_for(db))),
-        deps_for(db, extra={"log_sources": {"kubectl": source}}),
-    )
-
-    assert [needle for _, _, needle in source.asked if needle] == ["device-42"]
-
-
-async def test_a_quiet_window_is_widened_once_and_only_once(db):
-    """Spec: one automatic widening of the window, recorded in `not_checked`."""
-    await write_rows(db)
-    source = FakeSource(answers=[["GET /v1/health 200"], ["GET /v1/health 200"]])
-    # A reporter who has already given everything they have, so the empty
-    # window is reported rather than asked about — the widening is what this
-    # test is for.
-    said = prepared(response="artifact-1")
-    state = said.with_result(
-        "resolve", await resolve_node().run(said, deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert source.windows == ["0.58h", "6.08h"]
-    assert any("widened" in line for line in result["not_checked"])
-
-
-async def test_the_window_is_measured_back_from_the_reporters_message(db):
-    """D5: "within a window of six hours back from **the reporter's
-    message**". A clock anchored to now finds nothing for a case reported
-    this morning — and every one of ticket 00's five cases is old, so this is
-    the difference between a slice that can be run against them and one that
-    cannot."""
-    await write_rows(db)
-    source = FakeSource(answers=[["ERROR POST /v1/pod/orders/init 500"]])
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    # Both reads of the one window — the window itself and the one narrowed
-    # to this request — and both anchored to the message, not to now.
-    assert {(since, until) for since, until, _ in source.asked} == {
-        (REPORTED_AT - timedelta(minutes=30), REPORTED_AT + timedelta(minutes=5))
-    }
-
-
-async def test_a_window_older_than_the_pod_keeps_is_not_reported_as_not_found(db):
-    """Found by the first real run, 2026-09-21. Case 1 was reported sixteen
-    hours before the oldest line its dev pod still held. "Nothing names this
-    request" would send the operator looking for a request that was never
-    searched for; it was not there to search."""
-    await write_rows(db)
-    source = FakeSource(answers=[[]], oldest=REPORTED_AT + timedelta(hours=16))
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert status_of(result) == "empty"
-    assert "oldest line" in result["reason"]
-    assert "not searched for" in result["reason"]
-    assert any("does not reach back" in line for line in result["not_checked"])
-
-
 def test_the_kubectl_window_is_clipped_by_the_runtimes_own_stamps():
     """`--tail` counts from the newest line and there is no `--until`, so a
     window that opened sixteen hours ago came back as the newest 400 lines of
@@ -509,27 +386,6 @@ def test_the_kubectl_window_is_clipped_by_the_runtimes_own_stamps():
         "đúng request của reporter",
     ), "kubectl's own warning is kept; the stamp is taken back off"
     assert found.oldest == datetime(2026, 9, 20, 4, 40, tzinfo=timezone.utc)
-
-
-async def test_a_source_that_fails_is_work_rather_than_a_crash(db):
-    await write_rows(db)
-
-    class Broken:
-        name = "kubectl"
-
-        async def lines(self, placement, *, since, until, limit):
-            raise RuntimeError("ssh: Could not resolve hostname dev")
-
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": Broken()}})
-    )
-
-    assert status_of(result) == "error"
-    assert "Could not resolve hostname" in result["reason"]
 
 
 # --- read_failing_code ------------------------------------------------------
@@ -563,81 +419,6 @@ def test_a_frame_that_climbs_out_of_the_clone_is_never_opened(tmp_path):
     assert secret.is_file(), "the escape target was real"
 
 
-async def test_the_code_node_says_it_read_head_rather_than_the_running_tag(
-    db, tmp_path
-):
-    (tmp_path / "orders.ts").write_text("\n".join(f"line {i}" for i in range(50)))
-    await write_rows(db, repo=str(tmp_path))
-    resolve = await resolve_node().run(prepared(), deps_for(db))
-    state = (
-        prepared()
-        .with_result("resolve", resolve)
-        .with_result(
-            "find_request_log",
-            {"status": "ok", "reason": "", "frames": [["/app/orders.ts", 12]]},
-        )
-    )
-
-    result = await read_failing_code_node().run(state, deps_for(db))
-
-    assert status_of(result) == "ok"
-    assert "line 11" in result["code"]
-    assert any("HEAD" in line for line in result["not_checked"])
-
-
-async def test_a_project_row_with_no_repository_path_reads_nothing(db):
-    """`Path("")` is `.`, so an empty root turns "inside the clone" into
-    "inside whatever directory this process is in" — and a frame from a log
-    line then names files under it. Found by review, not by a run."""
-    state = (
-        prepared()
-        .with_result("resolve", {
-            "status": "ok", "reason": "",
-            "placement": {"env": "dev", "service": "s"},
-            "project": {"name": "reelme", "repo_path": ""},
-        })
-        .with_result("find_request_log", {
-            "status": "ok", "reason": "",
-            "frames": [["/app/conftest.py", 1]],
-        })
-    )
-
-    result = await read_failing_code_node().run(state, deps_for(db))
-
-    assert status_of(result) == "skipped"
-    assert "no repository path" in result["reason"]
-
-
-async def test_no_project_row_means_no_code_is_read(db):
-    """**Not reachable through the store any more, and still reachable.**
-    Ticket 19 refuses a `service` naming a `project` that does not exist and
-    refuses removing one that is still named — so this state cannot be
-    *typed*. It can still be *met*: the live database holds rows written
-    before that check, and this node is what reads them. So the envelope is
-    built here rather than through `write_rows`, which can no longer produce
-    it."""
-    state = (
-        prepared()
-        .with_result("resolve", {
-            "status": "ok", "reason": "",
-            "placement": {"env": "dev", "service": "backend-reelme-v2"},
-            "project": None,
-        })
-        .with_result(
-            "find_request_log",
-            {"status": "ok", "reason": "", "frames": [["/app/orders.ts", 1]]},
-        )
-    )
-
-    result = await read_failing_code_node().run(state, deps_for(db))
-
-    assert status_of(result) == "skipped"
-    # Ticket 19, step 0: the message names what it looked for. Without it,
-    # the first six rows ever typed gave "no project row names a repository"
-    # and no way to tell which name was wrong.
-    assert "backend-reelme-v2" in result["reason"]
-
-
 # --- diagnose ---------------------------------------------------------------
 
 
@@ -664,153 +445,40 @@ def test_a_pointer_is_read_however_the_model_spelled_it():
 async def test_an_ungrounded_diagnosis_is_not_reported(db):
     """The failure this board exists to avoid: a cause built on something the
     model supplied itself, asserted in the operator's name."""
-
-    class Inventing:
-        last_error = None
-
-        async def run_structured(self, prompt, **kw):
-            return Diagnosis(
-                cause="the database is down", confidence="certain",
-                conclusive=True, refs=["L99"],
-            )
-
-    state = (
-        prepared()
-        .with_result(
-            "find_request_log",
-            {"status": "ok", "reason": "", "dossier": "ERROR ERR19", "not_checked": []},
-        )
-        .with_result("read_failing_code", {"status": "empty", "reason": "", "not_checked": []})
-    )
-
-    result = await diagnose_node(harness=Inventing()).run(state, deps_for(db))
+    result = await diagnose_node(
+        make_harness=_answered_after_reading(
+            cause="the database is down", confidence="certain",
+            conclusive=True, refs=["L99"],
+        ),
+        agent="devops.diagnose",
+    ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "empty"
     assert "L99" in result["reason"]
 
 
-async def test_a_grounded_diagnosis_is_carried_with_what_was_not_checked(db):
-    class Honest:
-        last_error = None
-
-        async def run_structured(self, prompt, **kw):
-            assert "L1 | ERROR ERR19" in prompt, "every line carries an id"
-            return Diagnosis(
-                cause="ERR19 từ orders.init", confidence="likely",
-                conclusive=False, refs=["L1"],
-            )
-
-    state = (
-        prepared()
-        .with_result(
-            "find_request_log",
-            {
-                "status": "ok", "reason": "", "dossier": "ERROR ERR19",
-                "not_checked": ["the window was widened once"],
-            },
-        )
-        .with_result(
-            "read_failing_code",
-            {"status": "ok", "reason": "", "code": "", "not_checked": ["read at HEAD"]},
-        )
-    )
-
-    result = await diagnose_node(harness=Honest()).run(state, deps_for(db))
-
-    assert status_of(result) == "ok"
-    assert result["diagnosis"]["cause"] == "ERR19 từ orders.init"
-    assert result["quotes"] == ["ERROR ERR19"], "code puts the text back"
-    assert result["not_checked"] == ["the window was widened once", "read at HEAD"]
-
-
-async def test_nothing_to_reason_over_is_not_something_to_reason_over(db):
-    """A model asked to diagnose an empty dossier writes a plausible cause
-    from the endpoint's name alone, and it reads like one built on evidence."""
-
-    class Unused:
-        last_error = None
-
-        async def run_structured(self, prompt, **kw):  # pragma: no cover
-            raise AssertionError("the model should not have been called")
-
-    state = (
-        prepared()
-        .with_result("find_request_log", {"status": "skipped", "reason": "no source"})
-        .with_result("read_failing_code", {"status": "empty", "reason": "no frame"})
-    )
-
-    result = await diagnose_node(harness=Unused()).run(state, deps_for(db))
-
-    assert status_of(result) == "empty"
-
-
 async def test_a_conclusive_answer_that_points_at_nothing_is_not_reported(db):
     """Otherwise the gate is optional: an answer with no pointers has nothing
     to refuse, and "conclusive" is exactly the claim that needs one."""
-
-    class Assertive:
-        last_error = None
-
-        async def run_structured(self, prompt, **kw):
-            return Diagnosis(
-                cause="nó hỏng", confidence="certain", conclusive=True, refs=[],
-                # Filled, so this reaches the refs gate rather than the
-                # alternatives one: the two refuse for different reasons and
-                # this test is about pointing at nothing.
-                alternatives_rejected=[
-                    {"hypothesis": "mạng chập", "why": "không có timeout nào"}
-                ],
-            )
-
-    state = (
-        prepared()
-        .with_result("find_request_log", {"status": "ok", "reason": "", "dossier": "ERROR x"})
-        .with_result("read_failing_code", {"status": "empty", "reason": ""})
-    )
-
-    result = await diagnose_node(harness=Assertive()).run(state, deps_for(db))
+    result = await diagnose_node(
+        make_harness=_answered_after_reading(
+            cause="nó hỏng", confidence="certain", conclusive=True, refs=[],
+            # Filled, so this reaches the refs gate rather than the
+            # alternatives one: the two refuse for different reasons and
+            # this test is about pointing at nothing.
+            alternatives_rejected=[
+                {"hypothesis": "mạng chập", "why": "không có timeout nào"}
+            ],
+        ),
+        agent="devops.diagnose",
+    ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "empty"
     assert "pointed at" in result["reason"]
 
 
-async def test_the_first_frame_is_read_and_the_rest_are_named(db, tmp_path):
-    """The spec reads "±15 lines around the first frame"; the others are on
-    the stack, not at the throw site. `node_modules` frames are dropped
-    **before** the cap — truncating first buried the throw site under five
-    framework frames, which is the shape a NestJS trace actually has."""
-    (tmp_path / "orders.ts").write_text("\n".join(f"line {i}" for i in range(40)))
-    await write_rows(db, repo=str(tmp_path))
-    resolve = await resolve_node().run(prepared(), deps_for(db))
-    state = (
-        prepared()
-        .with_result("resolve", resolve)
-        .with_result("find_request_log", {
-            "status": "ok", "reason": "",
-            "frames": [
-                ["/app/node_modules/express/lib/router.js", 3],
-                ["/app/orders.ts", 12],
-                ["/app/orders.ts", 30],
-            ],
-        })
-    )
-
-    result = await read_failing_code_node().run(state, deps_for(db))
-
-    assert "line 11" in result["code"], "the first frame that is ours"
-    assert "line 29" not in result["code"], "the rest are named, not opened"
-    assert any("further down the stack" in line for line in result["not_checked"])
-    assert not any("node_modules" in line for line in result["not_checked"])
-
-
 async def test_no_diagnose_agent_skips_rather_than_failing(db):
-    state = (
-        prepared()
-        .with_result("find_request_log", {"status": "ok", "reason": "", "dossier": "x"})
-        .with_result("read_failing_code", {"status": "empty", "reason": ""})
-    )
-
-    result = await diagnose_node(harness=None).run(state, deps_for(db))
+    result = await diagnose_node().run(prepared(), deps_for(db))
 
     assert status_of(result) == "skipped"
 
@@ -854,19 +522,37 @@ async def test_the_report_is_written_and_the_reporter_is_offered_the_cause(db, t
     assert "read at HEAD" in written.read_text()
 
 
-def test_the_report_says_what_it_did_not_check_even_with_no_diagnosis():
-    from datetime import datetime, timezone
-
+def test_the_report_no_longer_renders_the_dossier_sections():
+    """`render` used to read `find_request_log`/`read_failing_code` for a log
+    source line, a counted error-code table and the raw lines each fed the
+    model — both nodes are gone (ticket 05), and a checkpoint written before
+    this change can still carry their keys. `render` must not resurrect them;
+    `not_checked` now comes off the diagnose node's own envelope alone."""
     state = (
         DAGState.empty()
-        .with_result("find_request_log", {"status": "skipped", "reason": "no kubectl source"})
-        .with_result("read_failing_code", {"status": "skipped", "reason": "no project row"})
+        .with_result(
+            "find_request_log",
+            {"status": "ok", "reason": "", "dossier": "ERROR ERR19",
+             "source": "kubectl", "kept": 1, "total": 90,
+             "histogram": [["ERR19", 90]]},
+        )
+        .with_result(
+            "read_failing_code",
+            {"status": "ok", "reason": "", "code": "throw new Error()"},
+        )
+        .with_result("diagnose", {
+            "status": "empty", "reason": "no diagnose agent is configured",
+            "not_checked": ["the log does not reach back to the report"],
+        })
     )
 
     text = render(state, task_id=6, at=datetime(2026, 9, 20, tzinfo=timezone.utc))
 
-    assert "no kubectl source" in text
-    assert "no project row" in text
+    assert "log source" not in text
+    assert "ERROR ERR19" not in text
+    assert "throw new Error" not in text
+    assert "the log does not reach back to the report" in text
+    assert "no diagnose agent is configured" in text
 
 
 # --- the graph --------------------------------------------------------------
@@ -963,7 +649,7 @@ async def test_a_run_with_no_sender_investigates_anyway(db):
     assert "sender" in result["reason"]
     assert _dag().next_after(
         "acknowledge", DAGState.empty().with_result("acknowledge", result)
-    ) == "find_request_log"
+    ) == "diagnose"
 
 
 def _diagnosed() -> DAGState:
@@ -1069,8 +755,7 @@ def test_api_issue_is_the_one_graph_with_an_investigation_past_node_zero():
     dag = _dag()
 
     assert [n.name for n in dag.nodes] == [
-        "prepare", "resolve", "acknowledge", "find_request_log",
-        "read_failing_code", "diagnose", "report",
+        "prepare", "resolve", "acknowledge", "diagnose", "report",
     ]
 
 
@@ -1081,15 +766,6 @@ def test_nothing_past_resolve_runs_when_resolve_hands_over():
     state = DAGState.empty().with_result("resolve", HandOver("not ours"))
 
     assert dag.next_after("resolve", state) is None
-
-
-def test_a_skipped_log_node_still_reaches_the_report():
-    dag = _dag()
-    state = DAGState.empty().with_result(
-        "find_request_log", {"status": "skipped", "reason": "no source"}
-    )
-
-    assert dag.next_after("find_request_log", state) == "read_failing_code"
 
 
 def test_a_blank_setting_means_not_configured_rather_than_the_word_none():
@@ -1142,55 +818,58 @@ async def test_a_complete_report_is_investigated_rather_than_handed_back(db, wor
 
 async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
     """Every node of the slice, in one pass, with the rows and a source in
-    place — the shape ticket 00's five cases are run through."""
+    place — the shape ticket 00's five cases are run through. The reads loop
+    is the only diagnose mode now: `Diagnose` reads the log itself rather
+    than being handed a dossier."""
     from replay_case import _run_on_adapter
     from tests.test_pool import make_task
 
-    (tmp_path / "orders.ts").write_text("\n".join(f"line {i}" for i in range(40)))
     await write_rows(db, repo=str(tmp_path))
     task = await make_task(db, curl=CURL, environment="dev")
 
     class Honest:
         last_error = None
 
+        def __init__(self, tools):
+            self._tools = {t.fn.__name__: t.fn for t in tools}
+
         async def run_structured(self, prompt, **kw):
-            assert "ERR19" in prompt, "the dossier reaches the model"
+            assert "Nothing has been read for you" in prompt
+            read = await self._tools["read_log"](needle="ERR19")
+            assert "ERR19" in read
             return Diagnosis(
                 cause="ERR19 ở orders.init", confidence="likely",
                 conclusive=False, refs=["L1"],
             )
 
+    class HonestCaps(_StubCaps):
+        def make_harness(self, *, agent, instructions, answers=None,
+                         tools=None, ends_with=None):
+            return None if tools is None else Honest(tools)
+
     reports_dir = tmp_path / "reports"
-    dag = _dag(
-        diagnose_harness=Honest(), reports_dir=reports_dir
+    source = FakeSource(answers=[["ERROR ERR19 POST /v1/pod/orders/init 500"]])
+    api = SimpleNamespace(
+        caps=HonestCaps(),
+        config=DevopsConfig(reports_dir=str(reports_dir)),
     )
-    source = FakeSource(answers=[[
-        "ERROR ERR19 POST /v1/pod/orders/init 500",
-        "at handler (/app/orders.ts:12:3)",
-    ]])
-    # Node 0 runs outside the walk (the pool does exactly this); the workflow
-    # runs from `resolve` with `prepare` pre-seeded.
+    dag = build_devops_dag(api)
     final, runs, _ = await _run_on_adapter(
         dag,
-        deps=ApiIssueDeps(task=task, db=db, sender="", approver="", log_sources={"kubectl": source}),
+        deps=ApiIssueDeps(
+            task=task, db=db, sender="", approver="",
+            log_sources={"kubectl": source},
+        ),
         seed={"prepare": ApiIssueParams(**task.params)},
         system_db=tmp_path / "sys.db",
         wfid="test-whole-line",
     )
 
-    assert [r.node for r in runs] == [
-        "resolve", "acknowledge", "find_request_log", "read_failing_code",
-        "diagnose", "report",
-    ]
-    # A cause was reached, so the reporter is offered one — and it waits for
-    # approval, which is what `Reply` means to the pool.
+    assert [r.node for r in runs] == ["resolve", "acknowledge", "diagnose", "report"]
     assert isinstance(final["report"], Reply)
     assert "ERR19 ở orders.init" in final["report"].text
     (written,) = list(reports_dir.glob("*.md"))
-    text = written.read_text()
-    assert "ERR19 ở orders.init" in text
-    assert "line 11" in text, "the source around the frame is in the report"
-    assert "HEAD" in text, "and what it did not check"
+    assert "ERR19 ở orders.init" in written.read_text()
 
 
 # --- replay_case.py, the tool that answers questions 3 and 4 -----------------
@@ -1536,313 +1215,6 @@ def test_an_answer_loki_never_gave_is_empty_rather_than_a_crash():
     assert _streams('{"streams": null}').lines == ()
 
 
-async def test_a_capped_answer_says_which_part_of_the_window_it_covered(db):
-    """Measured against production, 2026-09-21. The sentence used to say "a
-    sample of the window and not all of it" and stop — and a dossier drawn
-    from the last eighty-four seconds of a thirty-five minute window reads
-    exactly like a dossier of the whole of it. The span is the difference
-    between the two, so the span is what it has to say."""
-    await write_rows(db)
-    source = FakeSource(answers=[["ERROR POST /v1/pod/orders/init 500"]])
-    source.truncated = True
-    source.oldest = REPORTED_AT - timedelta(minutes=2)
-    source.newest = REPORTED_AT
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    (said,) = [line for line in result["not_checked"] if "capped" in line]
-    # The span itself, which is the whole of the fix — not merely the word
-    # "capped", which the sentence it replaced also carried.
-    assert "2026-09-20T04:38:46Z–2026-09-20T04:40:46Z" in said
-    # The window asked for is `since`→`reported_at + MARGIN`: 35 minutes, not
-    # the 30 of FIRST_WINDOW. A sentence corrected for accuracy that is five
-    # minutes out is a sentence that still misleads.
-    assert "of the 35m asked for" in said
-    assert "this request's own lines came from a separate read" in said
-
-
-async def test_the_request_is_found_when_the_window_read_misses_it_entirely(db):
-    """**The production shape, measured 2026-09-21.** A thirty-five minute
-    window of `backend-reelme-v2` is ~12,400 lines; `limit=400` returned the
-    newest eighty-four seconds of it, and the 400 under investigation had
-    happened twenty-three minutes earlier. Filtering after the read cannot
-    recover a line the read never fetched, so the read itself is narrowed.
-
-    The fake stands in for that exactly: the window read answers with lines
-    that do not contain the request, and only the narrowed read reaches it.
-    """
-    await write_rows(db)
-
-    class Tail:
-        """A back end whose cap is a tail, and whose filter is not."""
-
-        name = "kubectl"
-        decisive = 'ERROR /v1/pod/orders/init ERR19 "categoryId must be a UUID"'
-
-        async def lines(self, placement, *, since, until, limit, needle=""):
-            from friday.sdk.sources import Lines
-
-            if needle:
-                return Lines((self.decisive,), truncated=False)
-            return Lines(
-                tuple(f"INFO later {i}" for i in range(limit)), truncated=True
-            )
-
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": Tail()}})
-    )
-
-    assert status_of(result) == "ok"
-    assert Tail.decisive in result["dossier"]
-
-
-async def test_a_line_both_reads_returned_is_not_counted_or_quoted_twice(db):
-    """The two reads overlap whenever the window was not truncated — which
-    is the ordinary case on a quiet service. The same line arriving twice
-    would be quoted twice in the dossier and counted twice in the
-    histogram, and a doubled `ERR19` is a number nobody can act on."""
-    await write_rows(db)
-    source = FakeSource(answers=[[
-        '{"level":"ERROR","correlationId":"abc-123","errorCode":"ERR19"}'
-    ]])
-    state = prepared(correlation_id="abc-123").with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert result["kept"] == 1
-    assert dict(result["histogram"])["ERR19"] == 1
-
-
-async def test_the_path_is_a_fallback_and_not_an_addition(db):
-    """D2: "a curl, **or** an endpoint plus one identifier" — *or*.
-
-    Measured on the production case, 2026-09-21: matching the path as well
-    as the correlationId made the dossier 18 lines instead of 8, and all ten
-    extra lines were *other people's successful calls to the same endpoint*
-    with two lines of context each. The request's own lines were the same
-    two either way.
-    """
-    await write_rows(db)
-    others = [
-        f'{{"correlationId":"someone-{i}","path":"/v1/pod/orders/init",'
-        f'"statusCode":200}}'
-        for i in range(6)
-    ]
-    source = FakeSource(answers=[[
-        *others,
-        '{"level":"ERROR","correlationId":"abc-123",'
-        '"path":"/v1/pod/orders/init","statusCode":500}',
-    ]])
-    state = prepared(correlation_id="abc-123").with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert "abc-123" in result["dossier"]
-    assert "someone-0" not in result["dossier"]
-
-
-async def test_a_correlation_id_the_log_never_carries_falls_back_to_the_path(db):
-    """The reporter read it off a response body, or a gateway rewrote it.
-    Dropping the path because an id was *supplied* — rather than because it
-    matched — would leave a dossier of nothing."""
-    await write_rows(db)
-    # Deliberately **not** a loud line: a line carrying ERROR is kept by
-    # `_LOUD` whether or not the path is a needle, so a fixture like that
-    # passes this test with the fallback deleted. It did, once.
-    source = FakeSource(answers=[[
-        '{"level":"INFO","path":"/v1/pod/orders/init","statusCode":500}'
-    ]])
-    state = prepared(correlation_id="never-logged").with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert "/v1/pod/orders/init" in result["dossier"]
-
-
-async def test_a_correlation_id_that_matched_nothing_is_said_out_loud(db):
-    """The most actionable thing a dossier can carry: the id is wrong, or
-    this is not the service that logged it, or the window is. Detecting it
-    and then discarding the detection — which the first version did — turns
-    a finding into a search that quietly widened itself."""
-    await write_rows(db)
-    source = FakeSource(answers=[[
-        '{"level":"ERROR","path":"/v1/pod/orders/init","statusCode":500}'
-    ]])
-    state = prepared(correlation_id="never-logged").with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert any(
-        "carries the correlationId 'never-logged'" in line
-        for line in result["not_checked"]
-    )
-
-
-async def test_the_widened_window_narrows_the_same_way_the_first_one_did(db):
-    """Its own test because it is its own call site: replacing the rule with
-    the old one *in the widened branch alone* left the whole suite green."""
-    await write_rows(db)
-    quiet = [f'{{"level":"INFO","n":{i}}}' for i in range(3)]
-    loud = [
-        *[f'{{"correlationId":"someone-{i}","path":"/v1/pod/orders/init"}}'
-          for i in range(6)],
-        '{"level":"ERROR","correlationId":"abc-123","path":"/v1/pod/orders/init"}',
-    ]
-    source = FakeSource(answers=[quiet, loud])
-    state = prepared(correlation_id="abc-123").with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert source.windows == ["0.58h", "6.08h"], "it widened"
-    assert "abc-123" in result["dossier"]
-    assert "someone-0" not in result["dossier"]
-
-
-async def test_the_narrowed_read_asks_for_the_correlation_id_over_the_path(db):
-    """Both are substrings a back end can search for, and the correlationId
-    names one request where the path names every call of that endpoint."""
-    await write_rows(db)
-    source = FakeSource(answers=[["ERROR abc-123 /v1/pod/orders/init 500"]])
-    state = prepared(correlation_id="abc-123").with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert [needle for *_, needle in source.asked] == ["", "abc-123"]
-
-
-async def test_with_nothing_naming_the_request_there_is_nothing_to_narrow_to(db):
-    """No correlationId and no curl: the window read is all there is, and
-    asking the back end to search for the empty string would return it."""
-    await write_rows(db)
-    source = FakeSource(answers=[["ERROR something"]])
-    state = prepared(curl=None).with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert [needle for *_, needle in source.asked] == [""]
-
-
-async def test_a_window_of_routine_warnings_is_still_worth_widening(db):
-    """**Measured on production, 2026-09-21.** `backend-reelme-v2` emits
-    about seven WARN lines a minute of routine engine chatter — "Engine
-    returned an unmappable node status … skipping node". With WARN counting
-    as an error, `has_error` was true in every window this service will ever
-    produce, so the spec's one automatic widening could never fire for it.
-    A chatty service disarmed it permanently and silently."""
-    await write_rows(db)
-    chatter = [
-        '{"level":"WARN","msg":"Engine returned an unmappable node status '
-        f'for run {i}: \\"awaiting-callback\\" — skipping node"}}'
-        for i in range(20)
-    ]
-    source = FakeSource(answers=[chatter, ["ERROR /v1/pod/orders/init 500"]])
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert source.windows == ["0.58h", "6.08h"], "the widening fired"
-
-
-async def test_a_request_found_only_by_the_narrowed_read_is_not_out_of_reach(db):
-    """`out_of_reach` means "the log does not go back that far", and it is
-    read off the *window* read — whose lines can all fall outside the window
-    while the narrowed read holds the request. Without this the production
-    shape reports a request it found as one it could not search for."""
-    await write_rows(db)
-
-    class Retained:
-        name = "kubectl"
-
-        async def lines(self, placement, *, since, until, limit, needle=""):
-            from friday.sdk.sources import Lines
-
-            if needle:
-                return Lines(("ERROR /v1/pod/orders/init 500",), oldest=since)
-            # Nothing inside the window, and an oldest line newer than it —
-            # which on its own reads as a pod that does not reach back.
-            return Lines((), oldest=until)
-
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": Retained()}})
-    )
-
-    assert status_of(result) == "ok"
-    assert "does not reach back" not in " ".join(result["not_checked"])
-
-
-async def test_the_seam_between_the_two_reads_is_marked(db):
-    """They are put end to end but they are not contiguous — in the case
-    this was built for the join is a twenty-three minute jump, and `distil`
-    keeps a line either side of what it keeps. Unmarked, it reaches across
-    and presents two unrelated spans as one story."""
-    await write_rows(db)
-
-    class Split:
-        name = "kubectl"
-
-        async def lines(self, placement, *, since, until, limit, needle=""):
-            from friday.sdk.sources import Lines
-
-            if needle:
-                return Lines(("ERROR abc-123 /v1/pod/orders/init 500",))
-            return Lines(tuple(f"INFO unrelated {i}" for i in range(3)))
-
-    state = prepared(correlation_id="abc-123").with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": Split()}})
-    )
-
-    assert "a separate read narrowed to" in result["dossier"]
-
-
 def _kubectl_returning(count: int):
     """A `SshKubectlSource` whose back end hands back `count` stamped lines.
 
@@ -2051,36 +1423,6 @@ def test_a_failing_kubectl_is_not_hidden_by_the_pipe_that_narrows_it():
     assert "|| true" in ran[-1], "an empty match is not a failed read"
 
 
-async def test_a_capped_narrowed_read_says_the_request_has_more_lines(db):
-    """The other cap, and a different sentence: when even the search for
-    this request hit its bound, the dossier is a prefix of one request
-    rather than a sample of a window."""
-    await write_rows(db)
-
-    class Busy:
-        name = "kubectl"
-
-        async def lines(self, placement, *, since, until, limit, needle=""):
-            from friday.sdk.sources import Lines
-
-            if needle:
-                return Lines(("ERROR abc-123 boom",), truncated=True)
-            return Lines(("INFO something",))
-
-    state = prepared(correlation_id="abc-123").with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": Busy()}})
-    )
-
-    assert any(
-        "has more lines than were read" in line
-        for line in result["not_checked"]
-    )
-
-
 async def test_a_reader_may_not_call_a_tool_it_did_not_declare():
     """The operator's call, 2026-09-21: which tools may be called is code,
     not configuration. The server this narrows also offers `release_apply`,
@@ -2189,48 +1531,6 @@ def test_a_map_that_does_not_parse_is_not_translated(tmp_path):
     assert original(tmp_path / "dist" / "x.js", 3, tmp_path) is None
 
 
-async def test_the_node_reads_the_typescript_and_says_where_it_came_from(db, tmp_path):
-    _built(tmp_path, js_line=3, ts_line=11)
-    state = (
-        prepared()
-        .with_result("resolve", {
-            "status": "ok", "reason": "",
-            "placement": {"env": "dev", "service": "backend-reelme-v2"},
-            "project": {"name": "reelme", "repo_path": str(tmp_path)},
-        })
-        .with_result("find_request_log", {
-            "status": "ok", "reason": "", "frames": [["/app/dist/x.js", 3]],
-        })
-    )
-
-    result = await read_failing_code_node().run(state, deps_for(db))
-
-    assert "ts line 11" in result["code"], "the source, at the mapped line"
-    assert "js line 3" not in result["code"]
-    assert "x.ts:11" in result["code"] and "/app/dist/x.js" in result["code"]
-
-
-async def test_a_built_frame_with_no_map_says_it_is_the_built_line(db, tmp_path):
-    _built(tmp_path)
-    (tmp_path / "dist" / "x.js.map").unlink()
-    state = (
-        prepared()
-        .with_result("resolve", {
-            "status": "ok", "reason": "",
-            "placement": {"env": "dev", "service": "s"},
-            "project": {"name": "reelme", "repo_path": str(tmp_path)},
-        })
-        .with_result("find_request_log", {
-            "status": "ok", "reason": "", "frames": [["/app/dist/x.js", 3]],
-        })
-    )
-
-    result = await read_failing_code_node().run(state, deps_for(db))
-
-    assert "js line 3" in result["code"]
-    assert any("not the one you wrote" in line for line in result["not_checked"])
-
-
 def test_a_map_naming_a_file_outside_the_clone_is_refused(tmp_path):
     """`repo_file` refuses a stack frame that climbs out of the clone, and a
     `.map` naming `../../../../etc/hosts` is the same climb by a quieter
@@ -2288,67 +1588,6 @@ def test_a_map_with_a_character_that_is_not_vlq_is_rejected_whole(tmp_path):
     map_file.write_text(json.dumps(loaded))
 
     assert original(tmp_path / "dist" / "x.js", 3, tmp_path) is None
-
-
-async def test_the_counts_reach_the_model_and_the_report(db, tmp_path):
-    """The histogram is evidence of a different kind: a code appearing forty
-    times in the window is background, and the one appearing once beside this
-    request is not. Forty lines say that forty times; one count says it
-    once."""
-    seen: list[str] = []
-
-    class Reads:
-        last_error = None
-
-        async def run_structured(self, prompt, **kw):
-            seen.append(prompt)
-            return Diagnosis(
-                cause="ERR306 là Midas nói qua ExceptionFilter",
-                confidence="likely", conclusive=False, refs=["L1"],
-            )
-
-    state = (
-        prepared()
-        .with_result("find_request_log", {
-            "status": "ok", "reason": "", "dossier": "ERROR ERR306 abc",
-            "histogram": [["ERR951", 40], ["ERR306", 1]], "not_checked": [],
-        })
-        .with_result("read_failing_code", {"status": "empty", "reason": ""})
-    )
-
-    result = await diagnose_node(harness=Reads()).run(state, deps_for(db))
-    await report_node(reports_dir=tmp_path).run(
-        state.with_result("diagnose", result), deps_for(db)
-    )
-
-    assert "ERR951: 40" in seen[0] and "ERR306: 1" in seen[0]
-    written = (tmp_path / "1.md").read_text()
-    assert "`ERR951`: 40" in written
-
-
-async def test_the_window_s_counts_survive_a_cut_that_drops_the_lines(db):
-    """Counted before the cut. The point of counting is to say what the
-    window held, which is not what survived being cut out of it."""
-    await write_rows(db)
-    # `"level":"error"` so these are loud lines and therefore candidates to
-    # be quoted — `"errorCode"` alone is not, because `\berror\b` does not
-    # match inside `errorCode`, and the histogram counts a wider set than the
-    # cut ever considers quoting.
-    source = FakeSource(answers=[[
-        *[f'{{"level":"error","errorCode":"ERR951","n":{i}}}' for i in range(40)],
-        '{"level":"error","errorCode":"ERR306","path":"/v1/pod/orders/init"}',
-    ]])
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert dict(result["histogram"])["ERR951"] == 40
-    assert result["kept"] <= 12, "the spec's ceiling for this check"
-    assert any("of 40" in line for line in result["not_checked"])
 
 
 # --- what a code means (ticket 04, the repo's own docs) ---------------------
@@ -2411,31 +1650,6 @@ def test_a_doc_outside_the_clone_is_not_read(tmp_path):
     assert meanings(outside, ("ERR19",), tmp_path / "clone") == {}
 
 
-async def test_the_node_carries_the_meanings_of_what_it_saw(db, tmp_path):
-    doc = tmp_path / "error-codes.md"
-    doc.write_text(CODES_DOC)
-    state = (
-        prepared()
-        .with_result("resolve", {
-            "status": "ok", "reason": "",
-            "placement": {"env": "dev", "service": "s"},
-            "project": {
-                "name": "reelme", "repo_path": str(tmp_path),
-                "error_codes_doc": str(doc),
-            },
-        })
-        .with_result("find_request_log", {
-            "status": "ok", "reason": "", "frames": [],
-            "histogram": [["ERR19", 2104], ["ERR999", 1]],
-        })
-    )
-
-    result = await read_failing_code_node().run(state, deps_for(db))
-
-    assert result["codes"] == {"ERR19": "INTERNAL_ERROR — Something failed server-side"}
-    assert "ERR999" not in result["codes"], "not in the doc, not invented"
-
-
 def test_a_two_column_table_is_read_as_well_as_a_three(tmp_path):
     """The real document has both — 130 rows of `code | name | meaning` and
     69 of `code | meaning`. Wanting three silently dropped every Midas code,
@@ -2452,74 +1666,6 @@ def test_a_two_column_table_is_read_as_well_as_a_three(tmp_path):
     assert meanings(doc, ("ERR306",), tmp_path) == {
         "ERR306": "Content pack required"
     }
-
-
-async def test_what_a_code_means_reaches_the_model(db):
-    """`ERR19` is on every one of this service's HTTP 500s, so the number
-    alone is not evidence of anything. What the repository says it means is
-    the repository's word, not the model's recollection."""
-    seen: list[str] = []
-
-    class Reads:
-        last_error = None
-
-        async def run_structured(self, prompt, **kw):
-            seen.append(prompt)
-            return Diagnosis(
-                cause="ERR19", confidence="possible", conclusive=False, refs=[],
-            )
-
-    state = (
-        prepared()
-        .with_result("find_request_log", {
-            "status": "ok", "reason": "", "dossier": "ERROR ERR19",
-            "histogram": [["ERR19", 2104]], "not_checked": [],
-        })
-        .with_result("read_failing_code", {
-            "status": "empty", "reason": "no frame",
-            "codes": {"ERR19": "INTERNAL_SERVER_ERROR — Internal server error"},
-        })
-    )
-
-    await diagnose_node(harness=Reads()).run(state, deps_for(db))
-
-    assert "ERR19: INTERNAL_SERVER_ERROR" in seen[0]
-    assert "from the repository" in seen[0]
-
-
-async def test_a_business_error_with_no_stack_is_still_worth_diagnosing(db):
-    """A 4xx with a domain message carries no stack at all, and what its code
-    means is the whole of what there is to read. Refusing to think without a
-    dossier would refuse exactly the case the operator says is harder."""
-    class Reads:
-        last_error = None
-
-        async def run_structured(self, prompt, **kw):
-            return Diagnosis(
-                cause="ERR306: content pack required", confidence="likely",
-                conclusive=True, refs=[],
-                # Filled so this reaches the refs gate rather than the
-                # alternatives one — the two refuse for different reasons
-                # and this test is about the first.
-                alternatives_rejected=[{
-                    "hypothesis": "the pack exists and the user lacks it",
-                    "why": "the code means the pack itself is required",
-                }],
-            )
-
-    state = (
-        prepared()
-        .with_result("find_request_log", {"status": "empty", "reason": "no line"})
-        .with_result("read_failing_code", {
-            "status": "empty", "reason": "no frame",
-            "codes": {"ERR306": "Content pack required"},
-        })
-    )
-
-    result = await diagnose_node(harness=Reads()).run(state, deps_for(db))
-
-    assert status_of(result) == "empty", "conclusive with no ref is still refused"
-    assert "pointed at nothing" in result["reason"]
 
 
 # --- the clock (ticket 06) ---------------------------------------------------
@@ -2637,53 +1783,6 @@ def load_config_for_test():
     return load_config()
 
 
-async def test_the_endpoint_is_not_matched_beside_a_narrower_id(db):
-    """`distil` ORs what it is given, so handing it the endpoint *as well as*
-    the identifier is handing it the endpoint. Measured on this shape: eight
-    other callers of the same path plus this reporter distils to 9 lines with
-    both and 3 with the identifier alone.
-
-    The node got the ordering right for the *source* narrowing and not for
-    the distillation — one lesson applied in one of the two places it
-    governs."""
-    await write_rows(db)
-    source = FakeSource(answers=[[
-        *[f'{{"correlationId":"someone-{i}","path":"/v1/pod/orders/init",'
-          f'"statusCode":200}}' for i in range(8)],
-        '{"level":"ERROR","deviceId":"DEV-42","path":"/v1/pod/orders/init"}',
-    ]])
-    state = prepared(
-        curl=None, endpoint="/v1/pod/orders/init", identifier="DEV-42",
-    ).with_result("resolve", await resolve_node().run(prepared(), deps_for(db)))
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert "DEV-42" in result["dossier"]
-    assert "someone-0" not in result["dossier"]
-
-
-async def test_a_dead_correlation_id_still_says_so_when_the_endpoint_matched(db):
-    """The endpoint happening to match is not a reason to stop reporting that
-    the id did not — folding the note into the choice dropped this sentence
-    the first time it was written."""
-    await write_rows(db)
-    source = FakeSource(answers=[[
-        '{"level":"ERROR","path":"/v1/pod/orders/init","statusCode":500}'
-    ]])
-    state = prepared(correlation_id="never-logged").with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert "/v1/pod/orders/init" in result["dossier"], "the fallback still ran"
-    assert any("never-logged" in line for line in result["not_checked"])
-
-
 # --- reading the code that is actually running (ticket 04) -------------------
 
 
@@ -2779,228 +1878,56 @@ def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monke
     assert ran == []
 
 
-def _clone_with_tag(tmp_path, *, released: str, now: str):
-    """A clone whose tag `1.0.0` holds `released` and whose tree holds `now`."""
-    import subprocess
-
-    root = tmp_path / "clone"
-    root.mkdir()
-    run = lambda *a: subprocess.run(  # noqa: E731
-        ["git", "-C", str(root), *a], capture_output=True, text=True, check=True
-    )
-    run("init", "-q")
-    run("config", "user.email", "t@t")
-    run("config", "user.name", "t")
-    (root / "orders.ts").write_text(released)
-    run("add", "orders.ts")
-    run("commit", "-qm", "released")
-    run("tag", "1.0.0")
-    (root / "orders.ts").write_text(now)
-    return root
-
-
-class Release:
-    def __init__(self, tag="1.0.0"):
-        self.tag = tag
-        self.asked = []
-
-    async def running_tag(self, project, env):
-        self.asked.append((project, env))
-        return self.tag
-
-
-async def _code_for(db, root, release=None, env="production"):
-    await write_rows(db, env=env, repo=str(root))
-    curl = PROD_CURL if env == "production" else CURL
-    resolve = await resolve_node().run(prepared(curl=curl), deps_for(db))
-    state = (
-        prepared(curl=curl)
-        .with_result("resolve", resolve)
-        .with_result(
-            "find_request_log",
-            {"status": "ok", "reason": "", "frames": [["/app/orders.ts", 3]]},
-        )
-    )
-    extra = {} if release is None else {"release_source": release}
-    return await read_failing_code_node().run(state, deps_for(db, extra=extra))
-
-
-async def test_code_identical_to_the_running_tag_says_so_instead_of_hedging(
-    db, tmp_path
-):
-    """The question is not "which ref shall I read" but "is what I just read
-    the code that is running". When the clone's copy is byte-identical to the
-    tag's, HEAD *is* the running version for this file, and saying so is
-    worth more than the standing caveat."""
-    same = "\n".join(f"line {i}" for i in range(20))
-    root = _clone_with_tag(tmp_path, released=same, now=same)
-
-    result = await _code_for(db, root, Release("1.0.0"))
-
-    assert "identical to the running tag 1.0.0" in result["code"]
-    assert not any("HEAD" in line for line in result["not_checked"])
-
-
-async def test_code_that_differs_shows_the_tag_s_copy_and_says_which(db, tmp_path):
-    """What the operator is told about is what production is running. The
-    clone is whatever the last person checked out."""
-    root = _clone_with_tag(
-        tmp_path,
-        released="\n".join(f"released {i}" for i in range(20)),
-        now="\n".join(f"working tree {i}" for i in range(20)),
-    )
-
-    result = await _code_for(db, root, Release("1.0.0"))
-
-    assert "released 2" in result["code"]
-    assert "working tree 2" not in result["code"]
-    assert any("differs from the running tag 1.0.0" in l for l in result["not_checked"])
-
-
-async def test_with_the_version_unresolved_it_still_reads_and_still_says_so(
-    db, tmp_path
-):
-    """Not knowing which version runs is not a failed investigation — but it
-    is not silence either."""
-    root = _clone_with_tag(tmp_path, released="a\nb\nc\nd\n", now="a\nb\nc\nd\n")
-
-    result = await _code_for(db, root, Release(""))
-
-    assert status_of(result) == "ok"
-    assert any(
-        "could not be resolved" in line for line in result["not_checked"]
-    )
-
-
-async def test_dev_is_not_asked_which_tag_is_running(db, tmp_path):
-    """Dev deploys from a branch. There is no tag to compare against, and
-    asking would be a round trip for an answer that does not exist."""
-    root = _clone_with_tag(tmp_path, released="a\nb\nc\nd\n", now="a\nb\nc\nd\n")
-    release = Release("1.0.0")
-
-    await _code_for(db, root, release, env="dev")
-
-    assert release.asked == []
-
-
-# --- searched and not found, so the reporter is asked (ticket 02) ------------
-
-
-async def test_a_searched_window_that_holds_nothing_asks_the_reporter(db):
-    """The log reaches back and the request is not in it, so the likeliest
-    reasons are answerable: the id was read off something else, the endpoint
-    was named loosely, or it happened outside the window measured from their
-    message. D2 asks for the response — where a correlationId actually comes
-    from — and for when."""
-    await write_rows(db)
-    source = FakeSource(answers=[["GET /v1/health 200"], ["GET /v1/health 200"]])
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert isinstance(result, Ask)
-    assert "response" in result.text
-
-
-async def test_a_reporter_who_gave_everything_is_not_asked_again(db):
-    """Asking someone who already answered is how a system teaches people to
-    stop answering it. They get the honest "searched and not found"."""
-    await write_rows(db)
-    source = FakeSource(answers=[["GET /v1/health 200"], ["GET /v1/health 200"]])
-    said = prepared(response="artifact-1", correlation_id="abc-123")
-    state = said.with_result("resolve", await resolve_node().run(said, deps_for(db)))
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert not isinstance(result, Ask)
-    assert status_of(result) == "empty"
-
-
-async def test_a_log_that_does_not_reach_back_is_not_a_question(db):
-    """**The one case that must not become a question.** Every line the
-    window could have held is gone; asking a reporter to re-send something
-    into a log that no longer reaches back is asking for nothing."""
-    await write_rows(db)
-    source = FakeSource(answers=[[]], oldest=REPORTED_AT + timedelta(hours=16))
-    state = prepared().with_result(
-        "resolve", await resolve_node().run(prepared(), deps_for(db))
-    )
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert not isinstance(result, Ask)
-    assert "does not reach back" in " ".join(result["not_checked"])
-
-
-def test_the_asking_node_does_not_end_the_graph_by_its_edges():
-    """An `Ask` ends the pass in the runner, not by an edge — the edge out of
-    this node is unconditional, so the resumed run walks on when the node
-    answers with a dossier instead."""
-    dag = _dag()
-    ok = DAGState.empty().with_result(
-        "find_request_log", {"status": "ok", "reason": ""}
-    )
-
-    assert dag.next_after("find_request_log", ok) == "read_failing_code"
-
-
-async def test_a_response_with_nothing_naming_the_request_asks_for_the_endpoint(db):
-    """The other half of D2. They pasted a response but named no request —
-    no curl, no endpoint, no id — so there is nothing to search the log
-    for, and that is the question."""
-    await write_rows(db)
-    source = FakeSource(answers=[["GET /v1/health 200"], ["GET /v1/health 200"]])
-    said = prepared(curl=None, response="artifact-1")
-    state = said.with_result("resolve", await resolve_node().run(prepared(), deps_for(db)))
-
-    result = await find_request_log_node().run(
-        state, deps_for(db, extra={"log_sources": {"kubectl": source}})
-    )
-
-    assert isinstance(result, Ask)
-    assert "endpoint" in result.text and "deviceId" in result.text
-
-
 # --- the shape forces the question (ticket 05) ------------------------------
 
 
-def _answering(**kw):
-    """A harness that answers with one fixed `Diagnosis`."""
-    class Said:
-        last_error = None
-
-        async def run_structured(self, prompt, **_):
-            return Diagnosis(**kw)
-
-    return Said()
-
-
-def _with_dossier():
-    return (
-        prepared()
-        .with_result(
-            "find_request_log",
-            {"status": "ok", "reason": "", "dossier": "ERROR boom"},
-        )
-        .with_result("read_failing_code", {"status": "empty", "reason": ""})
+def _reads_state():
+    """A resolve result reads-mode needs: a placement and an (empty) project."""
+    return prepared().with_result(
+        "resolve",
+        {
+            "placement": {"env": "dev", "service": "s", "pod_pattern": "p"},
+            "project": {},
+        },
     )
+
+
+def _reading_deps(db):
+    """Deps whose `read_log` finds one real line, so a gate test's `refs`
+    cite something `Evidence` actually holds rather than an invented id."""
+    return deps_for(db, extra={
+        "log_sources": {"kubectl": FakeSource(answers=[["ERROR boom"]])},
+    })
+
+
+def _answered_after_reading(**kw):
+    """A reads-mode harness that reads one line — so `L1` is a real
+    citation — then answers with a fixed `Diagnosis`. The reads-mode
+    equivalent of the old `_answering` dossier stub."""
+
+    def make(*, tools):
+        class Said:
+            last_error = None
+
+            async def run_structured(self, prompt, **_):
+                await tools[0].fn(needle="boom")
+                return Diagnosis(**kw)
+
+        return Said()
+
+    return make
 
 
 async def test_conclusive_without_a_rejected_alternative_is_refused(db):
     """Spec, tier 1 of self-questioning: the answer shape forces it. A cause
     nothing was weighed against is the first thing the evidence suggested —
     which is exactly the answer a reader cannot tell from a considered one."""
-    result = await diagnose_node(harness=_answering(
-        cause="x", confidence="certain", conclusive=True, refs=["L1"],
-    )).run(_with_dossier(), deps_for(db))
+    result = await diagnose_node(
+        make_harness=_answered_after_reading(
+            cause="x", confidence="certain", conclusive=True, refs=["L1"],
+        ),
+        agent="devops.diagnose",
+    ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "empty"
     assert "ruled out" in result["reason"]
@@ -3010,10 +1937,13 @@ async def test_an_alternative_with_no_reason_does_not_satisfy_the_gate(db):
     """An empty hypothesis rules nothing out and a reason with no substance
     is an assertion. Counting the field's existence would let the gate be
     satisfied by the shape rather than by the thinking."""
-    result = await diagnose_node(harness=_answering(
-        cause="x", confidence="certain", conclusive=True, refs=["L1"],
-        alternatives_rejected=[{"hypothesis": "   ", "why": ""}, "not a dict"],
-    )).run(_with_dossier(), deps_for(db))
+    result = await diagnose_node(
+        make_harness=_answered_after_reading(
+            cause="x", confidence="certain", conclusive=True, refs=["L1"],
+            alternatives_rejected=[{"hypothesis": "   ", "why": ""}, "not a dict"],
+        ),
+        agent="devops.diagnose",
+    ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "empty"
     assert "ruled out" in result["reason"]
@@ -3129,28 +2059,33 @@ def test_an_ask_from_diagnose_ends_the_walk_instead_of_reaching_report():
 
 
 async def test_a_weighed_conclusive_answer_is_reported(db):
-    result = await diagnose_node(harness=_answering(
-        cause="x", confidence="certain", conclusive=True, refs=["L1"],
-        alternatives_rejected=[
-            {"hypothesis": "downstream timeout", "why": "no timeout line",
-             "ref": "L1"}
-        ],
-    )).run(_with_dossier(), deps_for(db))
+    result = await diagnose_node(
+        make_harness=_answered_after_reading(
+            cause="x", confidence="certain", conclusive=True, refs=["L1"],
+            alternatives_rejected=[
+                {"hypothesis": "downstream timeout", "why": "no timeout line",
+                 "ref": "L1"}
+            ],
+        ),
+        agent="devops.diagnose",
+    ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "ok"
     assert result["diagnosis"]["alternatives_rejected"][0]["ref"] == "L1"
+    assert result["quotes"] == ["ERROR boom"], "code puts the text back"
 
 
 async def test_an_alternative_pointing_at_a_line_it_was_not_shown_voids_it(db):
     """It is shown to the operator as evidence something was ruled out, so an
     id naming no line is the same invention the main refs are checked for. A
     gate that checked half the answer is a gate a model learns the shape of."""
-    result = await diagnose_node(harness=_answering(
-        cause="x", confidence="certain", conclusive=True, refs=["L1"],
-        alternatives_rejected=[
-            {"hypothesis": "y", "why": "z", "ref": "L99"}
-        ],
-    )).run(_with_dossier(), deps_for(db))
+    result = await diagnose_node(
+        make_harness=_answered_after_reading(
+            cause="x", confidence="certain", conclusive=True, refs=["L1"],
+            alternatives_rejected=[{"hypothesis": "y", "why": "z", "ref": "L99"}],
+        ),
+        agent="devops.diagnose",
+    ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "empty"
     assert "L99" in result["reason"]
@@ -3159,10 +2094,13 @@ async def test_an_alternative_pointing_at_a_line_it_was_not_shown_voids_it(db):
 async def test_a_tentative_answer_needs_no_alternative(db):
     """`conclusive: false` costs nothing, and the gate is the claim of
     certainty — not a tax on every answer."""
-    result = await diagnose_node(harness=_answering(
-        cause="có thể do cache", confidence="likely", conclusive=False,
-        refs=["L1"],
-    )).run(_with_dossier(), deps_for(db))
+    result = await diagnose_node(
+        make_harness=_answered_after_reading(
+            cause="có thể do cache", confidence="likely", conclusive=False,
+            refs=["L1"],
+        ),
+        agent="devops.diagnose",
+    ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "ok"
 
@@ -3206,66 +2144,6 @@ def test_git_failing_is_no_ref_rather_than_an_exception(tmp_path, monkeypatch):
 
     monkeypatch.setattr(code_source.subprocess, "run", hang)
     assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "1.0.0") is None
-
-
-def test_the_reads_switch_is_true_or_false_and_nothing_else(tmp_path):
-    """It decides whether a pipeline that works is replaced by one that
-    costs several model calls. A string that happens to be truthy is not a
-    decision anybody made."""
-    import pytest as _pytest
-
-    from plugins.devops.config import ConfigError, load_devops_config
-
-    assert load_devops_config({"diagnose_reads": True}).diagnose_reads is True
-
-    with _pytest.raises(ConfigError, match="true or false"):
-        load_devops_config({"diagnose_reads": "yes"})
-
-
-async def test_the_switch_decides_which_way_diagnose_answers(db):
-    """Off by default, and the switch is what lets the eval run the same
-    cases both ways — a graph that read for itself regardless would have
-    nothing to compare against.
-
-    Asserted by running the node and seeing whether the factory was reached.
-    The first version of this test built both graphs and asserted `True`; it
-    was written while fixing tests that guarded nothing.
-    """
-    reached = []
-
-    class SpyCaps(_StubCaps):
-        # The v3.3 factory is invoked with this run's `tools`; the boot-time
-        # build gets none. Recording only the tool'd calls records the factory,
-        # which the plugin's builder wires only when `diagnose_reads`.
-        def make_harness(self, *, agent, instructions, answers=None, tools=None,
-                         ends_with=None):
-            if tools is not None:
-                reached.append(tools)
-            return None  # "no agent configured" — the node skips, which is enough
-
-    state = (
-        prepared()
-        .with_result("resolve", {
-            "status": "ok", "reason": "",
-            "placement": {"env": "dev", "service": "s", "pod_pattern": "p"},
-            "project": {"repo_path": "/nowhere"},
-        })
-        .with_result("find_request_log", {"status": "empty", "reason": "none"})
-        .with_result("read_failing_code", {"status": "empty", "reason": "none"})
-    )
-
-    for reads in (False, True):
-        reached.clear()
-        # The gating (a factory only when `diagnose_reads`) lives in the plugin's
-        # graph builder now — build the graph with the switch and run its
-        # diagnose node.
-        api = SimpleNamespace(
-            caps=SpyCaps(budget_tokens=1000),
-            config=DevopsConfig(diagnose_reads=reads),
-        )
-        dag = build_devops_dag(api)
-        await dag.node("diagnose").run(state, deps_for(db))
-        assert bool(reached) is reads, f"diagnose_reads={reads}"
 
 
 def test_check_deps_refuses_a_deps_factory_that_forgets_a_required_field():
@@ -3582,3 +2460,4 @@ async def test_intake_result_survives_dagstate_storage_round_trip(db):
 
     assert UNSTORABLE not in stored["intake"]
     assert stored["intake"] == result
+

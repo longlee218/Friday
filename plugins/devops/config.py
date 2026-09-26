@@ -60,10 +60,6 @@ class DevopsConfig:
     #: ceilings sum to 400; the lever, if seven minutes is too long, is
     #: `agents."devops.diagnose".timeout_seconds`, which is 150 of it.
     timeout_seconds: float = 420.0
-    #: **v3.3: let `Diagnose` read for itself.** Off by default, and
-    #: deliberately so: it replaces a pipeline that works with one that costs
-    #: several model calls and is no longer deterministic.
-    diagnose_reads: bool = False
     #: The container source roots and vendored-path markers the code reader maps
     #: a stack frame against (box 4): data, so an operator whose images lay
     #: their source out differently corrects it in `config.yaml` rather than in
@@ -87,7 +83,6 @@ def load_devops_config(raw: object) -> DevopsConfig:
             f"devops: unknown setting(s) {unknown} (known: {sorted(known)})"
         )
     raw = dict(raw)
-    reads = raw.pop("diagnose_reads", None)
     clock = raw.pop("timeout_seconds", None)
     # The two path lists are the one place a setting is a list rather than a
     # scalar, so they are taken out before the `str(v)` coercion below (which
@@ -122,11 +117,5 @@ def load_devops_config(raw: object) -> DevopsConfig:
             raise ConfigError(
                 f"devops: timeout_seconds must be positive, not {clock!r}"
             )
-    if reads is not None:
-        if not isinstance(reads, bool):
-            raise ConfigError(
-                f"devops: diagnose_reads is true or false, not {reads!r}"
-            )
-        settings["diagnose_reads"] = reads
     settings.update(paths)
     return DevopsConfig(**settings)

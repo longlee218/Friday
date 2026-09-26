@@ -1,10 +1,10 @@
 """Node 4: say what caused it, and say what was not checked.
 
-**No tools on this path** (ticket 00). The dossier and the source excerpts
-are already in the prompt, and the Collector that would fetch more is ticket
-15, gated on ticket 14's baseline. So this node is one model call over a
-fixed set of evidence — which is also what makes it measurable: ticket 14
-freezes that evidence and re-runs the call alone.
+**The reads loop is the only diagnose mode** (ticket 05): the model fetches
+its own evidence through `plugins.devops.investigate`'s tools rather than
+being handed a fixed dossier. The two fixed pre-fetch nodes that used to
+build one — `FindRequestLog`, `ReadFailingCode` — are gone; `_reading` below
+is what is left.
 
 **The grounding gate** is the one guard here. `Diagnosis.refs` are **line
 ids**, not quotes — the spec retired quote-checking on a measurement (ticket
@@ -17,7 +17,6 @@ mode this whole board exists to avoid.
 The spec has the *answer tool* refuse it, so the model can correct inside its
 own turn budget (D8). The slice checks after the answer instead, and an
 ungrounded answer is an envelope the graph hands over on rather than a reply.
-Ticket 05 owns moving it into the tool.
 """
 
 from __future__ import annotations
@@ -27,9 +26,6 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from plugins.devops.graph.code import code_of, codes_of
-from plugins.devops.graph.logs import dossier_of, histogram_of
-from plugins.devops.graph.prompt import build_input, numbered
 from plugins.devops.graph.deps import ApiIssueDeps
 from friday.sdk.tools import tool
 from friday.sdk.workflow import Ask, DAGState, HandOver, Node, envelope
@@ -227,13 +223,12 @@ def quoted(diagnosis: Diagnosis, index: dict[str, str]) -> list[str]:
 
 
 def _judged(answer: Any, index: dict, not_checked: tuple, deps: Any) -> Any:
-    """The gates, shared by both ways of getting an answer.
+    """The gates a diagnosis has to pass before it is reported.
 
     **One copy on purpose.** They are the difference between a diagnosis and
-    a plausible sentence, and two copies is one that stops being updated —
-    which matters most here, where a second path was added precisely to be
-    compared against the first. A gate that held on one and not the other
-    would make the comparison meaningless.
+    a plausible sentence — and, while the dossier path this used to also
+    serve was still around, the thing that kept a gate from holding on one
+    path and not the other.
     """
     invented = unresolved_refs(answer, index)
     if invented:
@@ -362,69 +357,29 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
 
 
 def diagnose_node(
-    *, harness: Any = None, agent: str | None = None,
+    *, agent: str | None = None,
     timeout_seconds: float | None = None,
-    #: v3.3: build a harness per run, with this run's tools. Given, the node
-    #: reads for itself and `harness` is not used.
+    #: Build a harness per run, with this run's tools — the tools carry this
+    #: run's placement and numbering, so a harness built once at boot would
+    #: read the previous case's service. `None` when no `diagnose` agent is
+    #: configured — a fresh install, and every test that does not set one up.
     make_harness: Any = None,
 ) -> Node:
     """Build node 4.
 
-    `harness` is `None` when no `diagnose` agent is configured — a fresh
-    install, and every test that does not set one up. The node skips, with a
-    reason, and the graph still reaches `Report`. That is the difference
-    between this and the graph the operator deleted: a node that skips says
-    so where somebody reads it.
+    The node skips, with a reason, when no agent is configured, and the
+    graph still reaches `Report`. That is the difference between this and
+    the graph the operator deleted: a node that skips says so where somebody
+    reads it.
     """
 
     async def _diagnose(state: DAGState, deps: ApiIssueDeps) -> Any:
-        if make_harness is not None:
-            return await _reading(state, deps, make_harness)
-        if harness is None:
+        if make_harness is None:
             return envelope(
                 "skipped",
                 "no diagnose agent is configured, so nothing was diagnosed",
             )
-
-        dossier, log_not_checked = dossier_of(state["find_request_log"])
-        histogram = histogram_of(state["find_request_log"])
-        code, code_not_checked = code_of(state["read_failing_code"])
-        codes = codes_of(state["read_failing_code"])
-        not_checked = (*log_not_checked, *code_not_checked)
-
-        if not dossier and not code and not codes:
-            # Nothing to reason over. A model asked to diagnose an empty
-            # dossier writes a plausible cause from the endpoint's name
-            # alone, and it reads exactly like one built from evidence.
-            return envelope(
-                "empty",
-                "neither a log line nor a line of source reached this node, "
-                "so there was nothing to diagnose from",
-                not_checked=list(not_checked),
-            )
-
-        params = state["prepare"]
-        shown_dossier, shown_code, index = numbered(dossier, code)
-        answer = await harness.run_structured(
-            build_input(
-                report=getattr(params, "summary", "") or "",
-                dossier=shown_dossier,
-                code=shown_code,
-                not_checked=not_checked,
-                histogram=histogram,
-                codes=codes,
-            ),
-            task_id=deps.task.id,
-            node="diagnose",
-        )
-        if answer is None:
-            return envelope(
-                "error",
-                harness.last_error or "the diagnose agent returned no answer",
-                not_checked=list(not_checked),
-            )
-
-        return _judged(answer, index, not_checked, deps)
+        return await _reading(state, deps, make_harness)
 
     return Node(
         "diagnose", _diagnose, agent=agent, timeout_seconds=timeout_seconds  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py

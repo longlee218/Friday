@@ -1,8 +1,10 @@
 """The `devops.api_issue` graph — the one type with an investigation past node 0.
 
-`Prepare → Resolve → FindRequestLog → ReadFailingCode → Diagnose → Report`,
-which is the operator's own routine with the parts they said Friday may not do
-left out.
+`Prepare → Resolve → Acknowledge → Diagnose → Report`. The two fixed pre-fetch
+nodes the diagram used to name here — `FindRequestLog`, `ReadFailingCode` —
+are gone (ticket 05): `Diagnose` reads the log and the code itself, through
+`plugins.devops.investigate`'s tools, so there is nothing left to fetch in
+advance of it.
 
 **Built against the sdk, and the caps the composition root hands in.** A plugin
 imports `friday.sdk` only, so this builder never reaches for the kernel's
@@ -31,14 +33,12 @@ from friday.sdk.workflow import (
     status_of,
 )
 from plugins.devops.graph.acknowledge import acknowledge_node
-from plugins.devops.graph.code import read_failing_code_node
 from plugins.devops.graph.diagnose import (
     Diagnosis,
     ask_reporter,
     diagnose_node,
     hand_over,
 )
-from plugins.devops.graph.logs import find_request_log_node
 from plugins.devops.graph.prompt import build_instructions
 from plugins.devops.graph.report import report_node
 from plugins.devops.graph.resolve import resolve_node
@@ -63,9 +63,6 @@ TASK_TYPE = "devops.api_issue"
 #: as long as the process lives — holding a pool slot. Generous enough that a
 #: busy SQLite write never trips it, small enough to be a bound.
 ROW_TIMEOUT_SECONDS = 20.0
-
-LOG_TIMEOUT_SECONDS = 90.0
-CODE_TIMEOUT_SECONDS = 30.0
 
 
 def _ran_ok(node: str):
@@ -116,26 +113,18 @@ def build_devops_dag(api: Any) -> DAG:
     diagnose_agent = whole.agents.get("devops.diagnose")
     budget_tokens = whole.context.extraction_budget_tokens
 
-    diagnose_harness = caps.make_harness(
+    # A factory, because the tools carry this run's placement and numbering —
+    # one harness built at boot would read the previous case's service.
+    # `caps.make_harness` is itself `None` when `diagnose_agent` is `None`, so
+    # this needs no separate gate for "no agent configured".
+    make_diagnose_harness = lambda *, tools: caps.make_harness(
         agent=diagnose_agent,
-        instructions=build_instructions(reads=False),
+        instructions=build_instructions(reads=bool(tools)),
         answers=Diagnosis,
-    )
-    # A factory, because under v3.3 the tools carry this run's placement and
-    # numbering — one harness built at boot would read the previous case's
-    # service.
-    make_diagnose_harness = (
-        (lambda *, tools: caps.make_harness(
-            agent=diagnose_agent,
-            instructions=build_instructions(reads=bool(tools)),
-            answers=Diagnosis,
-            tools=tools,
-            # The model may finish by handing the case to the operator instead
-            # of answering — a terminal output tool beside the answer shape.
-            ends_with=[hand_over, ask_reporter],
-        ))
-        if cfg.diagnose_reads
-        else None
+        tools=tools,
+        # The model may finish by handing the case to the operator instead
+        # of answering — a terminal output tool beside the answer shape.
+        ends_with=[hand_over, ask_reporter],
     )
 
     return DAG(
@@ -159,10 +148,7 @@ def build_devops_dag(api: Any) -> DAG:
             ),
             resolve_node(timeout_seconds=ROW_TIMEOUT_SECONDS),
             acknowledge_node(timeout_seconds=ROW_TIMEOUT_SECONDS),
-            find_request_log_node(timeout_seconds=LOG_TIMEOUT_SECONDS),
-            read_failing_code_node(timeout_seconds=CODE_TIMEOUT_SECONDS),
             diagnose_node(
-                harness=diagnose_harness,
                 make_harness=make_diagnose_harness,
                 agent=None if diagnose_agent is None else "devops.diagnose",
                 timeout_seconds=(
@@ -179,15 +165,11 @@ def build_devops_dag(api: Any) -> DAG:
         edges=(
             Edge("prepare", "resolve"),
             Edge("resolve", "acknowledge", when=_ran_ok("resolve")),
-            Edge("acknowledge", "find_request_log"),
-            Edge("find_request_log", "read_failing_code"),
-            Edge("read_failing_code", "diagnose"),
-            # Gated: a `HandOver` from the reads loop is the decision, so the
-            # walk stops at diagnose rather than falling through to `report`
-            # (which would replace the model's reason with its own).
-            # Gated: a `HandOver` from the reads loop is the decision, so the
-            # walk stops at diagnose rather than falling through to `report`
-            # (which would replace the model's reason with its own).
+            Edge("acknowledge", "diagnose"),
+            # Gated: an `Ask` or a `HandOver` from the reads loop is the
+            # decision, so the walk stops at diagnose rather than falling
+            # through to `report` (which would replace the model's reason
+            # with its own).
             Edge("diagnose", "report", when=_did_not_decide("diagnose")),
         ),
     )

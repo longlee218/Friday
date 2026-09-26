@@ -21,10 +21,9 @@ from friday.sdk.prompt import (
     role,
     thinking_style,
     trust_boundary,
-    user_input,
 )
 
-__all__ = ["build_input", "build_instructions", "numbered"]
+__all__ = ["build_instructions", "build_reads_input"]
 
 JOB = """
 You are given what a reporter sent, the log lines that survived a
@@ -146,85 +145,3 @@ def build_reads_input(
         "why, instead of guessing.",
     ]
     return "\n".join(said)
-
-
-def numbered(dossier: str, code: str) -> tuple[str, str, dict[str, str]]:
-    """Both bodies with an id on every line, and the map code keeps.
-
-    **Pointers, not quotes** (spec, measured 2026-09-18, ticket 16): asked to
-    quote a JSON log line verbatim the configured model succeeded 32 times in
-    40, and every failure put the line's own keys into the answer; asked to
-    point at a line by an id it succeeded 20 times in 20. So the model names
-    a line and this process supplies the text — which also means the check is
-    an exact lookup rather than a fuzzy match on a rewrapped quote.
-    """
-    index: dict[str, str] = {}
-    rendered: list[str] = []
-    for body in (dossier, code):
-        lines = []
-        for raw in body.splitlines():
-            if not raw.strip():
-                lines.append("")
-                continue
-            ref = f"L{len(index) + 1}"
-            index[ref] = raw
-            lines.append(f"{ref} | {raw}")
-        rendered.append("\n".join(lines))
-    return rendered[0], rendered[1], index
-
-
-def build_input(
-    *,
-    report: str,
-    dossier: str,
-    code: str,
-    not_checked: tuple[str, ...],
-    histogram: tuple[tuple[str, int], ...] = (),
-    codes: dict[str, str] | None = None,
-) -> str:
-    """The case, as one prompt: what was reported, what the log said, what the
-    code says, and what nobody looked at.
-
-    **Every part of it is quoted** (finding D). Log lines, source and the
-    reporter's own words are all reporter-influenced text — a log line
-    carries whatever somebody got the service to print — and this agent is
-    one that writes to memory in a later ticket. Quoting is what keeps a
-    crafted log line a line of data rather than an instruction.
-    """
-    parts = [
-        "## What was reported",
-        user_input(report) or "(nothing)",
-        "",
-        "## Log lines that survived the cut",
-        user_input(dossier) or "(none — the log was not read, or held nothing)",
-        "",
-        "## Source around the stack frames",
-        user_input(code) or "(none — no frame named a file in the clone)",
-    ]
-    if histogram:
-        # Counts, not lines, and they are evidence of a different kind: a
-        # code appearing 40 times in the window is background, and the one
-        # appearing once beside this request is not. Unquoted because it is
-        # this process's own arithmetic over what it read, not something a
-        # reporter wrote.
-        parts += [
-            "",
-            "## Every error code in the window, counted",
-            *(f"- {code}: {n}" for code, n in histogram),
-        ]
-    if codes:
-        # The repository's own document, not the model's recollection of
-        # what a code means. `ERR19` is on every one of this service's HTTP
-        # 500s, so without this the number is all there is.
-        parts += [
-            "",
-            "## What those codes mean, from the repository",
-            *(f"- {code}: {meaning}" for code, meaning in sorted(codes.items())),
-        ]
-    if not_checked:
-        parts += [
-            "",
-            "## Not checked",
-            *(f"- {line}" for line in not_checked),
-        ]
-    return "\n".join(parts)

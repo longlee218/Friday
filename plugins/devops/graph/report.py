@@ -22,7 +22,7 @@ from typing import Any
 from plugins.devops.graph.diagnose import diagnosis_of
 from plugins.devops.graph.resolve import resolved
 from plugins.devops.graph.deps import ApiIssueDeps
-from friday.sdk.workflow import DAGState, HandOver, Node, Reply, status_of
+from friday.sdk.workflow import DAGState, HandOver, Node, Reply
 from friday.sdk.outbox import Kind
 from friday.sdk.redact import scrub
 
@@ -39,8 +39,6 @@ def render(state: DAGState, *, task_id: int, at: datetime) -> str:
     a reader stops trusting it. A cause at the top with the evidence below
     reads as an assertion; the evidence first reads as an argument.
     """
-    found = state.get("find_request_log", {})
-    read = state.get("read_failing_code", {})
     thought = state.get("diagnose", {})
     diagnosis = diagnosis_of(thought)
 
@@ -67,8 +65,6 @@ def render(state: DAGState, *, task_id: int, at: datetime) -> str:
         "## Where it looked",
         "",
         where,
-        f"- log source: `{found.get('source', '—')}` "
-        f"({found.get('kept', 0)} of {found.get('total', 0)} lines kept)",
         "",
         "## What it concluded",
         "",
@@ -90,46 +86,15 @@ def render(state: DAGState, *, task_id: int, at: datetime) -> str:
         lines.append(f"Nothing. {reason or 'The diagnose node did not run.'}")
 
     not_checked = list(thought.get("not_checked", [])) if isinstance(thought, dict) else []
-    if not not_checked:
-        # The diagnose node merges the earlier nodes' lists into its own
-        # envelope; when it never ran, they are still owed to the reader.
-        for node in (found, read):
-            if isinstance(node, dict):
-                not_checked += list(node.get("not_checked", []))
-                if status_of(node) in {"skipped", "empty", "error"}:
-                    not_checked.append(f"{node.get('reason', '')}")
-
-    explained = (read.get("codes") or {}) if isinstance(read, dict) else {}
-    counted = found.get("histogram") or []
-    if counted:
-        lines += ["", "## Every error code in the window, counted", ""]
-        lines += [
-            f"- `{code}`: {n}"
-            + (f" — {explained[code]}" if code in explained else "")
-            for code, n in counted
-        ]
 
     lines += ["", "## What it did not check", ""]
     lines += [f"- {line}" for line in not_checked if line] or ["- nothing recorded"]
 
-    lines += [
-        "",
-        "## The lines it read",
-        "",
-        "```",
-        found.get("dossier", "") or "(none)",
-        "```",
-        "",
-        "## The source it read",
-        "",
-        "```",
-        read.get("code", "") or "(none)",
-        "```",
-        "",
-    ]
-    # The dossier is reporter-influenced text and the report is a file the
-    # operator opens; `scrub` is what keeps a token that reached a log line
-    # from being written to disk a second time.
+    # A log line or a source line the model cited is reporter-influenced
+    # text and the report is a file the operator opens; `scrub` is what
+    # keeps a token that reached one from being written to disk a second
+    # time. The quotes rendered above, under "What it concluded", are the
+    # only lines from a run this file carries verbatim now.
     return scrub("\n".join(lines))
 
 

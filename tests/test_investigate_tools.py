@@ -491,10 +491,11 @@ async def test_an_answer_written_without_reading_anything_is_refused(db):
     assert "without reading a single line" in result["reason"]
 
 
-async def test_both_ways_of_answering_pass_through_the_same_gates(db):
-    """Two copies of the gates is one that stops being updated — and this
-    second path exists precisely to be compared against the first, which a
-    gate holding on one and not the other would make meaningless."""
+async def test_answering_passes_through_one_copy_of_the_gates(db):
+    """One path now (ticket 05: the fixed-dossier path is gone), and `_judged`
+    is still its own function rather than inlined — the gates are the
+    difference between a diagnosis and a plausible sentence, and that is
+    worth keeping legible on its own even with one caller."""
     import inspect
 
     from plugins.devops.graph import diagnose as module
@@ -503,7 +504,7 @@ async def test_both_ways_of_answering_pass_through_the_same_gates(db):
 
     assert source.count("without naming one") == 1, "the alternatives gate, once"
     assert source.count("which names no line it was shown") == 1, "the refs gate, once"
-    assert source.count("_judged(") == 3, "defined once, called from both paths"
+    assert source.count("_judged(") == 2, "defined once, called once"
 
 
 def test_the_instructions_change_when_the_model_fetches_its_own_evidence():

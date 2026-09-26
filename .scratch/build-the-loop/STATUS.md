@@ -11,21 +11,28 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 2 | Diagnose output: HandOver | ✅ done | — |
 | 3 | The Intake node | ✅ done (built, NOT wired — ticket 6 wires) | — |
 | 4 | Checkpoint/resume on `placement_identity` (resume half) | ⬜ deferred | 6 |
-| 5 | Remove FindRequestLog + ReadFailingCode | ⬜ re-gated | 3, 7 |
-| 6 | Rewire graph; drop extraction | ⬜ | 3, 5, 10 |
-| 7 | Operator: capture ≥10 cases | 🧑 | 1 |
-| 8 | Delete fixed-feed baseline | ⬜ | 6, 7 |
+| 5 | Remove FindRequestLog + ReadFailingCode | ✅ done | 3 |
+| 6 | Rewire graph; drop extraction | ⬜ **takeable** | 3, 5, 10 (all done) |
+| 7 | Operator: capture ≥10 cases | 🧑 parked (needs launch) | 1 |
+| 8 | Delete fixed-feed baseline | ⬜ code done, measure parked | 7 |
 | 9 | Doc debts (CONTEXT/DESIGN/ADR) | ⬜ | 6 |
 | 10 | `ask_reporter` terminal tool (Ask outcome, split from 4) | ✅ done | — |
 
 ## Now
-- **Ticket 5 — re-gated on ticket 7 (not started).** `diagnose_reads` defaults
-  to False, so dossier-mode (fed by `find_request_log`/`read_failing_code`) is
-  the live path — those two nodes ARE the fixed-feed baseline. Removing them =
-  deleting the baseline, which ticket 8 gates behind ticket 7's ≥10-case
-  measurement (measure-before-cut). So ticket 5 now `Blocked by: 03, 07`; it and
-  ticket 8 are the two halves of cutting the baseline, both after ticket 7.
-  **Bottleneck is now ticket 7 (operator captures ≥10 cases) — 🧑 human.**
+- **Ticket 5 — done (option B).** Deleted `graph/code.py`, removed
+  `find_request_log`/`read_failing_code` nodes + the dossier diagnose path + the
+  `diagnose_reads` flag; **reads-mode `_reading` is now the only diagnose path**.
+  Graph: `prepare → resolve → acknowledge → diagnose → report`. ~54 dossier tests
+  removed; the seven `_judged` gates rewritten through reads-mode (code-review:
+  no gate lost coverage). This also landed ticket 8's **code** half.
+- **Ticket 8 — code done, measurement parked.** Flag/baseline path gone (ticket
+  5); the eval showing agentic ≥ baseline needs real cases → parked with ticket 7.
+  `Blocked by: 06, 07` → `07`.
+- **Next takeable: ticket 6** (rewire: Intake as node 0, drop extraction) — its
+  blockers 3/5/10 are all done. Intake (ticket 3) is built-not-wired; ticket 6
+  wires it and removes `prepare`/the extractor.
+- **Parked (need launch/data): ticket 7** (capture ≥10 real cases) and ticket 8's
+  measurement. See [[build-the-loop-scoring-deferred]].
 - **Ticket 10 — done (split from ticket 4).** `ask_reporter(question) -> Ask`
   terminal tool on the diagnose loop, mirroring ticket 2's `hand_over`; wired
   into `ends_with=[hand_over, ask_reporter]`. The loop can now end as
@@ -53,11 +60,15 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
   carries the Ask outcome (build it with resume). Ticket 7 (operator cases)
   unblocked by ticket 1.
 
-## Log
-- 2026-09-26 — ticket 5 re-gated `03` → `03, 07`. Removing the two fixed read
-  nodes deletes the fixed-feed baseline (dossier-mode is the `diagnose_reads=False`
-  default), which ticket 8 gates behind ticket 7's measurement. No code changed;
-  board only.
+- 2026-09-26 — ticket 5 done (option B). Deleted graph/code.py; removed the two
+  fixed nodes + dossier path + diagnose_reads flag; reads-mode is the only
+  diagnose path; report.py + config.py pruned. ~54 dossier tests removed, 7
+  `_judged` gates rewritten through reads-mode + 1 guard watched-red. Suite: 1580
+  passed, 1 skipped, 7 known env fails. code-review: clean, no gate lost.
+  Landed ticket 8's code half (measurement parked). Not committed.
+- 2026-09-26 — ticket 5 re-gated `03` → `03, 07` then un-gated back to `03`
+  under option B (measurement deferred to post-launch; no baseline to protect
+  pre-launch).
 - 2026-09-26 — ticket 4 split. `ask_reporter` Ask terminal tool shipped as
   ticket 10 (mirror of ticket 2's `hand_over`; +3 tests; guard watched red;
   suite 1627 passed, 7 known env fails; code-review clean). Ticket 4 reduced to
