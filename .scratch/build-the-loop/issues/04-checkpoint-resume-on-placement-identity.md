@@ -1,17 +1,19 @@
 Status: ready-for-agent
-Blocked by: 02, 03
+Blocked by: 06
 
 # Checkpoint / resume on placement identity
 
 Decision: [The reply that both resumes and invalidates](../../the-graph-becomes-a-loop/issues/01-the-reply-that-both-resumes-and-invalidates.md).
 
-## Also carries (moved from ticket 2, 2026-09-26)
+## Split (2026-09-26)
 
-The **`Ask` outcome** of the diagnose loop lands here, not in ticket 2: `Ask` is
-a pause/resume, so it is built together with its resume half. Ticket 2 shipped
-the terminal-tool seam (`Harness.ends_with`) and `hand_over`; add an
-`ask_reporter(question)` terminal tool the same way, map it to `Action=Ask`,
-and wire the resume below.
+The **`Ask` outcome** (`ask_reporter` terminal tool) was split out to
+[ticket 10](10-ask-reporter-terminal-tool.md) and **shipped** — it is buildable
+on the ticket-2 seam without any resume machinery. What remains here is the
+**resume half**, and it now depends on **ticket 6**: it makes `Intake` the
+staleness anchor and resumes the diagnose loop, neither of which is on the live
+graph until ticket 6 rewires it. Building the resume before then would be inert.
+Hence `Blocked by: 06` (was `02, 03`).
 
 ## Goal
 

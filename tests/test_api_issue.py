@@ -3073,6 +3073,61 @@ def test_a_hand_over_from_diagnose_ends_the_walk_instead_of_reaching_report():
     assert dag.next_after("diagnose", empty) == "report"
 
 
+def test_ask_reporter_returns_an_ask_action():
+    """The terminal tool the reads loop calls when a missing piece blocks it —
+    maps to `Action=Ask`, whose text is sent to the reporter (ticket 04)."""
+    from plugins.devops.graph.diagnose import ask_reporter
+
+    # `@tool` wraps it in a ToolSpec; `.fn` is the underlying function.
+    result = ask_reporter.fn("Ban gui giup correlationId duoc khong?")
+
+    assert isinstance(result, Ask)
+    assert result.text == "Ban gui giup correlationId duoc khong?"
+
+
+async def test_the_reading_loop_can_ask_the_reporter_instead_of_answering(db):
+    """A reads-mode diagnosis can end by asking the reporter for a missing
+    piece: the model calls `ask_reporter(question)` and the node returns that
+    `Ask` Action rather than a diagnosis. Like `hand_over`, it may ask without
+    reading anything, so the 'answered without reading' gate must not turn it
+    into an empty envelope."""
+
+    class Asks:
+        last_error = None
+
+        async def run_structured(self, prompt, **_):
+            return Ask("Ban dung moi truong nao, production hay dev?")
+
+    node = diagnose_node(
+        make_harness=lambda *, tools: Asks(), agent="devops.diagnose"
+    )
+    state = prepared().with_result(
+        "resolve",
+        {
+            "placement": {
+                "env": "production", "service": "s", "cluster": "c",
+                "namespace": "n", "app": "a",
+            },
+            "project": {},
+        },
+    )
+
+    result = await node.run(state, deps_for(db))
+
+    assert isinstance(result, Ask)
+    assert "moi truong" in result.text
+
+
+def test_an_ask_from_diagnose_ends_the_walk_instead_of_reaching_report():
+    """An `Ask` the reads loop returns is the run's decision — the
+    `diagnose -> report` edge must NOT fire on it, exactly as for `HandOver`;
+    otherwise `report` swallows the question and asks its own generic one."""
+    dag = _dag()
+
+    asked = DAGState.empty().with_result("diagnose", Ask("which env?"))
+    assert dag.next_after("diagnose", asked) is None
+
+
 async def test_a_weighed_conclusive_answer_is_reported(db):
     result = await diagnose_node(harness=_answering(
         cause="x", confidence="certain", conclusive=True, refs=["L1"],

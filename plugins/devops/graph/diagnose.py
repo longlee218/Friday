@@ -32,15 +32,34 @@ from plugins.devops.graph.logs import dossier_of, histogram_of
 from plugins.devops.graph.prompt import build_input, numbered
 from plugins.devops.graph.deps import ApiIssueDeps
 from friday.sdk.tools import tool
-from friday.sdk.workflow import DAGState, HandOver, Node, envelope
+from friday.sdk.workflow import Ask, DAGState, HandOver, Node, envelope
 
 __all__ = [
     "Diagnosis",
+    "ask_reporter",
     "diagnose_node",
     "diagnosis_of",
     "hand_over",
     "unresolved_refs",
 ]
+
+
+@tool
+def ask_reporter(question: str) -> Ask:
+    """Ask the reporter for something you need and cannot read yourself.
+
+    Call this only when a missing piece of the report blocks the diagnosis and
+    the reporter is the one who has it — a correlationId they did not paste, the
+    exact request that failed, which environment they hit. Do NOT call it to
+    hand the case to the operator (use `hand_over`), and do NOT call it merely
+    because you are unsure — an unsure diagnosis with `conclusive: false` is more
+    useful than a question. Unlike `hand_over`'s reason, `question` is sent to
+    the reporter, so write it in their language and ask for exactly one thing.
+
+    Args:
+        question: what you need from the reporter, one sentence, in Vietnamese.
+    """
+    return Ask(text=question)
 
 
 @tool
@@ -315,12 +334,13 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
     # left out is a fact about the read, and a model asked to remember it
     # reproduces it unreliably.
     not_checked = tuple(evidence.not_checked)
-    if isinstance(answer, HandOver):
-        # The model handed the case to the operator instead of diagnosing it,
-        # by calling `hand_over`. It may do so without having read anything (a
-        # case it cannot investigate at all), so this is checked before the
-        # "answered without reading" gate below. The node returns the Action;
-        # the run ends here rather than reaching `Report`.
+    if isinstance(answer, (Ask, HandOver)):
+        # The model ended the loop with an Action instead of a diagnosis:
+        # `hand_over(reason)` to the operator, or `ask_reporter(question)` for a
+        # missing piece only the reporter has. Either may happen without having
+        # read anything (a case it cannot start on), so this is checked before
+        # the "answered without reading" gate below. The node returns the
+        # Action; the run ends here rather than reaching `Report`.
         return answer
     if answer is None:
         return envelope(

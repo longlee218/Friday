@@ -1,5 +1,10 @@
 Status: ready-for-agent
-Blocked by: 03, 04, 05
+Blocked by: 03, 05, 10
+
+<!-- Was `03, 04, 05`. Ticket 04 split (2026-09-26): its `ask_reporter` half
+became ticket 10 (a rewire prerequisite — the loop's Ask terminal tool); its
+resume half now depends on THIS ticket, so 04 no longer blocks 06. -->
+
 
 # Rewire the graph; drop extraction/prepare for api_issue
 

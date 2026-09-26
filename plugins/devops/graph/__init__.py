@@ -32,7 +32,12 @@ from friday.sdk.workflow import (
 )
 from plugins.devops.graph.acknowledge import acknowledge_node
 from plugins.devops.graph.code import read_failing_code_node
-from plugins.devops.graph.diagnose import Diagnosis, diagnose_node, hand_over
+from plugins.devops.graph.diagnose import (
+    Diagnosis,
+    ask_reporter,
+    diagnose_node,
+    hand_over,
+)
 from plugins.devops.graph.logs import find_request_log_node
 from plugins.devops.graph.prompt import build_instructions
 from plugins.devops.graph.report import report_node
@@ -127,7 +132,7 @@ def build_devops_dag(api: Any) -> DAG:
             tools=tools,
             # The model may finish by handing the case to the operator instead
             # of answering — a terminal output tool beside the answer shape.
-            ends_with=[hand_over],
+            ends_with=[hand_over, ask_reporter],
         ))
         if cfg.diagnose_reads
         else None
