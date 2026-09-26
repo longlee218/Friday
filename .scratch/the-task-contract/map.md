@@ -71,6 +71,17 @@ graph rework (that is `build-the-loop`, which runs in parallel).
   description}`. Only the `TaskContract` half + naming the deterministic gate
   lands now; the `Plan`'s instance fields wait for the `Planner`. Stub:
   `contract_plan_STUB.py`.
+- [How the verifier agent is trusted](issues/03-how-the-verifier-agent-is-trusted.md):
+  two tiers, not a code-vs-agent choice. **Grounding (`check="code"`)** is the
+  floor (every claim resolves to a cited `Lnn`; also blocks a citation-stuffed
+  Judge); the **correctness Judge (`check="agent"`)** is load-bearing because the
+  read-only diagnosis has no executable ground truth. The Judge scores a
+  **rubric** (G-Eval style), runs **shadow-only** against operator marks on the
+  cassette cases, and **gates only after ≥10 labeled cases agree** — erring
+  strict (a false-"pass" is worse than a false-"fail"). A FAIL → **`HandOver`**
+  naming the failed criteria + reasoning (never silent "done"); bounded replan
+  waits for durable-spine. The Judge is **independent**: fresh context, artifact
+  + evidence only, never the doer's chain-of-thought.
 
 ## Not yet specified
 
