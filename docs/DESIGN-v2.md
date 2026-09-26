@@ -1,16 +1,28 @@
 # friday-agents — Design v2 (target architecture)
 
-**Status: accepted target (operator, 2026-09-22), revised 2026-09-21 after
-a five-lens review (Appendix A), an external review (Appendix B) and an
-independent review (Appendix C), then re-sequenced 2026-09-22 (Appendix D,
-`docs/adr/0001-runtime-libraries-before-plugin-migration.md`). Nothing here
-is built yet.** `docs/DESIGN.md` describes the system as it
-exists and stays authoritative until a piece of this document is
-implemented; each migration step (§15) moves its section across and
-deletes it here. Where the two disagree today, `DESIGN.md` and the code
-are right. **Where the body below and Appendix D disagree, Appendix D and
-ADR 0001 win** — the body is being brought into line as the plan (§15) is
-executed.
+**Status: HISTORICAL — the target has been built (`plugin-restructure`
+board, all 21 tickets done, 2026-09-26).** This document is kept as the
+**design record**: the target architecture that was accepted (operator,
+2026-09-22), the rationale, and the review log (Appendices A–D,
+`docs/adr/0001-runtime-libraries-before-plugin-migration.md`). It is **no
+longer the plan and not authoritative for what exists.**
+
+- **`docs/DESIGN.md` is the authoritative as-built record.** It was kept
+  current in place as each ticket landed; consult it, not this document,
+  for how the system is today.
+- The original plan (spec US-30 / §15) was for each migration step to
+  *move its section from here into `DESIGN.md` and delete it here*. That
+  drain was **never executed** — `DESIGN.md` was updated directly instead,
+  so this document still holds its full target-shape body. The two
+  therefore differ, and that is expected: this is the vision + rationale,
+  `DESIGN.md` is reality.
+- Parts of this document are **permanently not as-built** and were never
+  meant to move: §16 (deferred, with triggers), §18 (open questions),
+  Appendices A–D (review history), and the *later* forms of each
+  contribution type (built only when their trigger fires).
+- Where this body and Appendix D disagree, **Appendix D and ADR 0001 win**;
+  where this document and the code disagree, **the code and `DESIGN.md`
+  win.**
 
 The one-line version: **a small kernel that owns the safety invariants,
 and everything else — every task type, tool, source, memory kind, skill,
