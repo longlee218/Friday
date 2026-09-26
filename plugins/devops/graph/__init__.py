@@ -20,10 +20,19 @@ from pathlib import Path
 from typing import Any
 
 from friday.sdk.sources import Reads
-from friday.sdk.workflow import DAG, DAGState, Edge, NODE_CLOCK_MARGIN_SECONDS, status_of
+from friday.sdk.workflow import (
+    DAG,
+    DAGState,
+    Edge,
+    NODE_CLOCK_MARGIN_SECONDS,
+    Ask,
+    HandOver,
+    Reply,
+    status_of,
+)
 from plugins.devops.graph.acknowledge import acknowledge_node
 from plugins.devops.graph.code import read_failing_code_node
-from plugins.devops.graph.diagnose import Diagnosis, diagnose_node
+from plugins.devops.graph.diagnose import Diagnosis, diagnose_node, hand_over
 from plugins.devops.graph.logs import find_request_log_node
 from plugins.devops.graph.prompt import build_instructions
 from plugins.devops.graph.report import report_node
@@ -63,6 +72,24 @@ def _ran_ok(node: str):
     return when
 
 
+def _did_not_decide(node: str):
+    """Follow this edge only when `node` returned an envelope to carry on with,
+    not an `Action` that already decides the task.
+
+    A node that hands over (or asks, or replies) has decided the case; the walk
+    must **stop there** so the pool reads that `Action` off the state — exactly
+    as the adapter's own note says a `HandOver` "flows on as a terminal result".
+    An ungated edge here would fall through to `Report`, which sees a non-dict
+    in the diagnose slot, produces its *own* generic hand-over, and discards the
+    model's reason. Unlike `_ran_ok`, an `empty`/`error` envelope still advances:
+    `Report` is what turns those into the operator's brief."""
+
+    def when(state: DAGState) -> bool:
+        return not isinstance(state.get(node), (Ask, HandOver, Reply))
+
+    return when
+
+
 def build_devops_dag(api: Any) -> DAG:
     """The whole graph, built from the plugin's config and the composition
     root's boot capabilities (`api.caps`).
@@ -98,6 +125,9 @@ def build_devops_dag(api: Any) -> DAG:
             instructions=build_instructions(reads=bool(tools)),
             answers=Diagnosis,
             tools=tools,
+            # The model may finish by handing the case to the operator instead
+            # of answering — a terminal output tool beside the answer shape.
+            ends_with=[hand_over],
         ))
         if cfg.diagnose_reads
         else None
@@ -147,7 +177,13 @@ def build_devops_dag(api: Any) -> DAG:
             Edge("acknowledge", "find_request_log"),
             Edge("find_request_log", "read_failing_code"),
             Edge("read_failing_code", "diagnose"),
-            Edge("diagnose", "report"),
+            # Gated: a `HandOver` from the reads loop is the decision, so the
+            # walk stops at diagnose rather than falling through to `report`
+            # (which would replace the model's reason with its own).
+            # Gated: a `HandOver` from the reads loop is the decision, so the
+            # walk stops at diagnose rather than falling through to `report`
+            # (which would replace the model's reason with its own).
+            Edge("diagnose", "report", when=_did_not_decide("diagnose")),
         ),
     )
 

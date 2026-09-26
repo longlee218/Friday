@@ -43,6 +43,27 @@ def harness(*steps, config=None, **kw) -> Harness:
     )
 
 
+# Module-level so `get_type_hints` resolves the terminal tool's return type, the
+# way the real `hand_over(reason) -> HandOver` is module-level. A nested class
+# is invisible to `get_type_hints`.
+from dataclasses import dataclass as _dataclass
+
+
+@_dataclass
+class _ReplyShape:
+    value: str = ""
+
+
+@_dataclass
+class _Escalated:
+    reason: str
+
+
+def _escalate(reason: str) -> _Escalated:
+    """Hand this off to a person who can decide (a terminal output tool)."""
+    return _Escalated(reason)
+
+
 class _Counting(FunctionModel):
     """A scripted model that counts the requests it was handed, so a test can
     assert a hiccup was tried again and a rejection was not."""
@@ -869,6 +890,72 @@ def test_an_agent_with_a_shape_may_not_have_its_mechanism_overridden():
 
     # An agent that declares neither is untouched.
     assert build(model_settings={"max_tokens": 64}).agent.model_settings["max_tokens"] == 64
+
+
+async def test_a_terminal_tool_finishes_the_run_beside_the_answer():
+    """`ends_with` adds a second output tool: calling it ends the run with its
+    own return, the way the answer tool ends it with the answer shape. The
+    diagnose loop offers `hand_over(reason)` this way, so the model can escalate
+    instead of answering."""
+    handed = await harness(
+        [function_call("_escalate", {"reason": "beyond me"})],
+        answers=_ReplyShape,
+        ends_with=[_escalate],
+    ).run_structured("go")
+
+    assert handed == _Escalated("beyond me")
+
+
+async def test_the_answer_shape_still_wins_when_the_model_answers():
+    """The terminal tool is a *second* way to finish, not a replacement: a model
+    that calls the answer tool still comes back as the answer shape."""
+    answered = await harness(
+        [function_call("answer", {"value": "done"})],
+        answers=_ReplyShape,
+        ends_with=[_escalate],
+    ).run_structured("go")
+
+    assert answered == _ReplyShape(value="done")
+
+
+def test_a_terminal_tool_without_a_resolvable_return_is_refused():
+    """A terminal tool whose return type cannot be read would be callable by the
+    model but unrecognised by `run_structured` — the outcome would be silently
+    lost as 'no answer'. Refuse it at build time, where the message names it."""
+    def escalate(reason):  # no return annotation
+        return _Escalated(reason)
+
+    with pytest.raises(ValueError, match="return annotation"):
+        Harness(
+            config=CONFIG, instructions="i", model=ScriptedModel([]),
+            answers=_ReplyShape, ends_with=[escalate],
+        )
+
+
+def test_a_terminal_tool_whose_name_collides_is_refused():
+    """The answer tool is named 'answer'; a terminal tool may not reuse that
+    name (nor another terminal's) — duplicate output-tool names are undefined in
+    Pydantic AI, so the collision is caught at build time."""
+    from friday.sdk.tools import tool as sdk_tool
+
+    clashing = sdk_tool(name="answer")(_escalate)  # a terminal named 'answer'
+
+    with pytest.raises(ValueError, match="collides"):
+        Harness(
+            config=CONFIG, instructions="i", model=ScriptedModel([]),
+            answers=_ReplyShape, ends_with=[clashing],
+        )
+
+
+def test_a_terminal_tool_without_an_answer_shape_is_refused():
+    """`ends_with` is a finish *beside* an answer; with no `answers=` there is
+    nothing for it to sit beside, and Pydantic AI's forced-output mechanism the
+    terminal tools ride on is not set up."""
+    with pytest.raises(ValueError, match="answers"):
+        Harness(
+            config=CONFIG, instructions="i",
+            model=ScriptedModel([]), ends_with=[_escalate],
+        )
 
 
 class _Slow(FunctionModel):

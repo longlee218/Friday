@@ -77,6 +77,10 @@ class BootContext:
         instructions: str,
         answers: type | None = None,
         tools: list | None = None,
+        #: Terminal output tools this agent may finish through besides its
+        #: `answers` shape — the diagnose loop's `hand_over(reason)`. Passed
+        #: straight to the `Harness`; see its `ends_with`.
+        ends_with: list | None = None,
     ) -> Any:
         """A model harness built from a configured agent, or `None` when the
         agent is not configured — a fresh install, and every test that does not
@@ -92,6 +96,7 @@ class BootContext:
             instructions=instructions,
             answers=answers,
             tools=tools,
+            ends_with=ends_with,
             record=self.record,
             spent=self.spent,
         )

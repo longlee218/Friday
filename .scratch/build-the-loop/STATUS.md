@@ -8,7 +8,7 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | # | Ticket | State | Blocked by |
 | --- | --- | --- | --- |
 | 1 | Superset capture + canned source | ✅ code (2 boxes pend) | — |
-| 2 | Diagnose output `Diagnosis\|Ask\|HandOver` | ⬜ | — |
+| 2 | Diagnose output: HandOver (Ask→t4) | ✅ done | — |
 | 3 | The Intake node | ⬜ | — |
 | 4 | Checkpoint/resume on `placement_identity` | ⬜ | 2, 3 |
 | 5 | Remove FindRequestLog + ReadFailingCode | ⬜ | 3 |
@@ -18,14 +18,16 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 9 | Doc debts (CONTEXT/DESIGN/ADR) | ⬜ | 6 |
 
 ## Now
-- **Ticket 1 — code complete & reviewed.** Additive `reads["superset"]` in
-  `replay_case.py`'s canned sources filters the whole captured window by
-  needle/window/limit the way Loki/kubectl do; legacy `{window, narrowed}`
-  untouched. +4 tests. Two acceptance boxes intentionally open: end-to-end
-  replay pends a superset-format case (**ticket 7**); repo-snapshot **deferred**
-  (read_code already replays offline against the clone at the release tag).
-- **Next takeable:** ticket 2 (loop output types) or ticket 3 (Intake node) —
-  both unblocked, parallel. Ticket 7 (operator cases) unblocked by ticket 1.
+- **Ticket 2 — done.** `HandOver` via a `hand_over(reason)` terminal output tool
+  on the diagnose reads loop; reaches the operator end-to-end with the model's
+  reason (gated `diagnose→report` edge). New general Harness `ends_with` seam.
+  Ask deferred to ticket 4. code-review found a SEVERE "passes tests, does
+  nothing" bug (edge fall-through) + 3 more — all fixed & guarded.
+- **Ticket 1 — code complete.** Superset canned source; 2 boxes pend (ticket 7
+  case; repo-snapshot deferred).
+- **Next takeable:** ticket 3 (Intake node) — unblocked. Ticket 4 now also
+  carries the Ask outcome (build it with resume). Ticket 7 (operator cases)
+  unblocked by ticket 1.
 
 ## Log
 - 2026-09-26 — boards committed on branch `plan/the-graph-becomes-a-loop`

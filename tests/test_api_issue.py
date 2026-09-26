@@ -50,7 +50,8 @@ class _StubCaps:
         from friday.kernel.dag.prepare import prepare_node
         return prepare_node(*a, **k)
 
-    def make_harness(self, *, agent, instructions, answers=None, tools=None):
+    def make_harness(self, *, agent, instructions, answers=None, tools=None,
+                     ends_with=None):
         return self._harness
 
 
@@ -3018,6 +3019,60 @@ async def test_an_alternative_with_no_reason_does_not_satisfy_the_gate(db):
     assert "ruled out" in result["reason"]
 
 
+async def test_the_reading_loop_can_hand_over_instead_of_answering(db):
+    """A reads-mode diagnosis can end by handing the case to the operator: the
+    model calls `hand_over(reason)` and the node returns that `HandOver` Action
+    rather than a diagnosis. It may hand over without reading anything (a case
+    it cannot investigate at all), so the 'answered without reading' gate must
+    not turn it into an empty envelope."""
+
+    class HandsOver:
+        last_error = None
+
+        async def run_structured(self, prompt, **_):
+            return HandOver("this needs a migration I may not run")
+
+    node = diagnose_node(
+        make_harness=lambda *, tools: HandsOver(), agent="devops.diagnose"
+    )
+    state = prepared().with_result(
+        "resolve",
+        {
+            "placement": {
+                "env": "production", "service": "s", "cluster": "c",
+                "namespace": "n", "app": "a",
+            },
+            "project": {},
+        },
+    )
+
+    result = await node.run(state, deps_for(db))
+
+    assert isinstance(result, HandOver)
+    assert "migration" in result.reason
+
+
+def test_a_hand_over_from_diagnose_ends_the_walk_instead_of_reaching_report():
+    """A `HandOver` the reads loop returns is the run's decision — the
+    `diagnose -> report` edge must NOT fire on it. If it did, `report` sees a
+    non-dict in the diagnose slot, produces its own generic hand-over, and the
+    model's reason is lost. A normal envelope still advances to `report`."""
+    dag = _dag()
+
+    handed = DAGState.empty().with_result("diagnose", HandOver("needs a migration"))
+    assert dag.next_after("diagnose", handed) is None
+
+    diagnosed = DAGState.empty().with_result(
+        "diagnose", {"status": "ok", "reason": "", "diagnosis": {}}
+    )
+    assert dag.next_after("diagnose", diagnosed) == "report"
+
+    # An `empty`/`error` envelope must still reach `report` — that is what turns
+    # "nothing was diagnosed" into the operator's brief.
+    empty = DAGState.empty().with_result("diagnose", {"status": "empty", "reason": "x"})
+    assert dag.next_after("diagnose", empty) == "report"
+
+
 async def test_a_weighed_conclusive_answer_is_reported(db):
     result = await diagnose_node(harness=_answering(
         cause="x", confidence="certain", conclusive=True, refs=["L1"],
@@ -3127,7 +3182,8 @@ async def test_the_switch_decides_which_way_diagnose_answers(db):
         # The v3.3 factory is invoked with this run's `tools`; the boot-time
         # build gets none. Recording only the tool'd calls records the factory,
         # which the plugin's builder wires only when `diagnose_reads`.
-        def make_harness(self, *, agent, instructions, answers=None, tools=None):
+        def make_harness(self, *, agent, instructions, answers=None, tools=None,
+                         ends_with=None):
             if tools is not None:
                 reached.append(tools)
             return None  # "no agent configured" — the node skips, which is enough

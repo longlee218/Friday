@@ -5,6 +5,14 @@ Blocked by: 02, 03
 
 Decision: [The reply that both resumes and invalidates](../../the-graph-becomes-a-loop/issues/01-the-reply-that-both-resumes-and-invalidates.md).
 
+## Also carries (moved from ticket 2, 2026-09-26)
+
+The **`Ask` outcome** of the diagnose loop lands here, not in ticket 2: `Ask` is
+a pause/resume, so it is built together with its resume half. Ticket 2 shipped
+the terminal-tool seam (`Harness.ends_with`) and `hand_over`; add an
+`ask_reporter(question)` terminal tool the same way, map it to `Action=Ask`,
+and wire the resume below.
+
 ## Goal
 
 Make `Intake` the staleness anchor and let an `Ask` resume without re-burning

@@ -31,14 +31,33 @@ from plugins.devops.graph.code import code_of, codes_of
 from plugins.devops.graph.logs import dossier_of, histogram_of
 from plugins.devops.graph.prompt import build_input, numbered
 from plugins.devops.graph.deps import ApiIssueDeps
-from friday.sdk.workflow import DAGState, Node, envelope
+from friday.sdk.tools import tool
+from friday.sdk.workflow import DAGState, HandOver, Node, envelope
 
 __all__ = [
     "Diagnosis",
     "diagnose_node",
     "diagnosis_of",
+    "hand_over",
     "unresolved_refs",
 ]
+
+
+@tool
+def hand_over(reason: str) -> HandOver:
+    """Give up and hand this case to the operator instead of answering.
+
+    Call this only when you genuinely cannot diagnose it and a person must: the
+    fix needs an action you may not take, the evidence is out of reach, or the
+    case is outside what these tools can investigate. Do NOT call it merely
+    because you are unsure — an unsure diagnosis with `conclusive: false` is more
+    useful than a hand-over. `reason` is read by the operator and is never sent
+    to the reporter.
+
+    Args:
+        reason: why you are handing over, one or two sentences, for the operator.
+    """
+    return HandOver(reason=reason)
 
 log = logging.getLogger(__name__)
 
@@ -296,6 +315,13 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
     # left out is a fact about the read, and a model asked to remember it
     # reproduces it unreliably.
     not_checked = tuple(evidence.not_checked)
+    if isinstance(answer, HandOver):
+        # The model handed the case to the operator instead of diagnosing it,
+        # by calling `hand_over`. It may do so without having read anything (a
+        # case it cannot investigate at all), so this is checked before the
+        # "answered without reading" gate below. The node returns the Action;
+        # the run ends here rather than reaching `Report`.
+        return answer
     if answer is None:
         return envelope(
             "error",

@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, fields as dataclass_fields, replace
-from typing import Any, cast
+from typing import Any, cast, get_type_hints
 
 from pydantic import TypeAdapter
 from pydantic_ai import (
@@ -149,8 +149,31 @@ def _bind_tool_spec(spec: Any) -> Any:
     return spec
 
 
+def _ends_fn(spec: Any) -> Any:
+    """The function behind a terminal output tool — a `ToolSpec`'s, or a plain
+    callable passed through."""
+    return spec.fn if isinstance(spec, ToolSpec) else spec
+
+
+def _ends_type(spec: Any) -> type | None:
+    """The type a terminal output tool returns, read off its return annotation,
+    so `run_structured` can recognise its output. `None` when it is unannotated
+    or the annotation will not resolve to a class — then the run's output is
+    matched only against `answers`."""
+    try:
+        got = get_type_hints(_ends_fn(spec)).get("return")
+    except Exception:  # noqa: BLE001 - an unresolved annotation is not fatal here
+        return None
+    return got if isinstance(got, type) else None
+
+
 class Harness:
     """Builds an agent from configuration, and runs it."""
+
+    #: Class-level default so `run_structured` is safe on a test double that
+    #: subclasses this and skips `__init__`; a built harness overrides it in
+    #: `__init__` with the terminal tools' result types.
+    _ends_with_types: tuple[type, ...] = ()
 
     def __init__(
         self,
@@ -184,6 +207,15 @@ class Harness:
         #: does not vary per call, so its output tool and correction budget are
         #: built exactly once.
         answers: type | None = None,
+        #: Extra ways this agent may **finish** besides its `answers` shape —
+        #: terminal output tools, as `ToolSpec`s (or plain functions). Calling
+        #: one ends the run with that tool's return value as the output, the
+        #: same way the answer tool ends it with the answer. The diagnose loop
+        #: offers `hand_over(reason)` this way, so the model can end the
+        #: investigation by escalating to the operator rather than by answering.
+        #: `run_structured` hands the return value back as-is; the caller
+        #: branches on its type. Requires `answers` (a finish beside an answer).
+        ends_with: list | None = None,
         context_type: type | None = None,
         **agent_options: Any,
     ) -> None:
@@ -247,8 +279,16 @@ class Harness:
         self._toolsets = list(mcp_servers or [])
 
         self.answers = answers
+        #: The result types of the terminal output tools in `ends_with`, so
+        #: `run_structured` recognises one of their returns as a finished run
+        #: rather than a shape that did not fit `answers`.
+        self._ends_with_types: tuple[type, ...] = ()
         output_type: Any = str
         retries: Any = None
+        if answers is None and ends_with:
+            raise ValueError(
+                "ends_with is a finish beside an answer; it needs answers="
+            )
         if answers is not None:
             # **Two things a caller may not override**, because they are the
             # mechanism, not a default: the output tool is what forces a
@@ -270,7 +310,7 @@ class Harness:
                     f"{' and '.join(owned)}; passing one would silently disable "
                     f"the mechanism it was built around"
                 )
-            output_type = ToolOutput(
+            answer_output = ToolOutput(
                 self._answer_output(answers),
                 name=ANSWER,
                 description=(
@@ -279,6 +319,59 @@ class Harness:
                 ),
             )
             retries = {"output": 1}
+            if ends_with:
+                # Each terminal tool is a second output tool: Pydantic AI ends
+                # the run when the model calls any output tool, so calling
+                # `hand_over` finishes the run with a `HandOver` the same way
+                # the answer tool finishes it with a `Diagnosis`. **Named
+                # explicitly** — an unnamed `ToolOutput` in a union registers as
+                # `final_result_<fn>`, not the function's own name, which no
+                # caller can predict; the schema and description still come from
+                # the function's signature and docstring, the way a tool's do.
+                terminals = []
+                types: list[type] = []
+                # The answer tool's name and each terminal's must be distinct —
+                # duplicate output-tool names are undefined in Pydantic AI.
+                names = {ANSWER}
+                for spec in ends_with:
+                    fn = _ends_fn(spec)
+                    result_type = _ends_type(spec)
+                    if result_type is None:
+                        # **Registered but unrecognisable is worse than
+                        # refused.** Without a resolvable return type the tool is
+                        # still a callable output — the model can end the run
+                        # with it — but `run_structured` cannot match its output,
+                        # so the outcome is silently lost as "no answer". Refuse
+                        # at build time instead, where it names the tool.
+                        raise ValueError(
+                            f"terminal tool {getattr(fn, '__name__', fn)!r} needs "
+                            f"a return annotation that resolves to a class, so "
+                            f"run_structured can hand its output back"
+                        )
+                    opts = spec.options if isinstance(spec, ToolSpec) else {}
+                    name = opts.get("name") or fn.__name__
+                    if name in names:
+                        raise ValueError(
+                            f"terminal tool name {name!r} collides with the "
+                            f"answer tool or another terminal tool"
+                        )
+                    names.add(name)
+                    types.append(result_type)
+                    terminals.append(
+                        ToolOutput(
+                            fn,
+                            name=name,
+                            description=(
+                                opts.get("description")
+                                or (fn.__doc__ or "").strip()
+                                or None
+                            ),
+                        )
+                    )
+                self._ends_with_types = tuple(types)
+                output_type = [answer_output, *terminals]
+            else:
+                output_type = answer_output
 
         # `config.settings` first, then a caller's `model_settings`, so what a
         # caller wired wins over the file — the direction `answers=` needs, and
@@ -450,6 +543,17 @@ class Harness:
             # A run that answered — corrected or not — is not an unfit run.
             # `_refused` fires per turned-down call; clearing it here makes the
             # flag mean "this run produced no answer that fits".
+            self.unfit = None
+            return said.output
+
+        if (
+            said is not None
+            and self._ends_with_types
+            and isinstance(said.output, self._ends_with_types)
+        ):
+            # A terminal output tool finished the run (e.g. `hand_over`): its
+            # return is the run's outcome, not an answer that failed to fit
+            # `answers`. Hand it back as-is for the caller to branch on.
             self.unfit = None
             return said.output
 

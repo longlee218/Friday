@@ -140,7 +140,10 @@ def build_reads_input(
     said += [
         "", "## Your job",
         "Read what you need with the tools, then answer the shape. Nothing "
-        "has been read for you.",
+        "has been read for you. If you genuinely cannot diagnose this and a "
+        "person must take it — the fix needs an action you may not take, or "
+        "the case is outside what these tools reach — call `hand_over` with "
+        "why, instead of guessing.",
     ]
     return "\n".join(said)
 
