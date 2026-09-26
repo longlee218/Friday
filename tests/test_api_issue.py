@@ -1325,6 +1325,126 @@ def test_a_captured_case_answers_the_two_reads_separately():
     assert "streams" in window and "truncated" in ours
 
 
+def test_a_superset_capture_serves_any_needle_the_loop_chooses():
+    """A fixed pipeline captured one needle's answer; an agentic loop asks its
+    own. The superset holds the whole window, so the canned source narrows it
+    the way Loki does — any needle in the window is served, not just the one it
+    was captured for, and a line outside the window is not."""
+    import asyncio
+
+    from friday.sdk.sources import Placement
+    from plugins.devops.sources.logs import LokiSource
+    from replay_case import CannedReads
+
+    superset = [
+        "2026-09-21T09:00:00Z ERROR boom user=old",   # before the window
+        "2026-09-21T10:35:01Z ERROR boom user=abc",
+        "2026-09-21T10:35:02Z INFO ok user=xyz",
+        "2026-09-21T10:35:03Z ERROR boom user=def",
+    ]
+    src = LokiSource(server=CannedReads({"superset": superset}))
+    place = Placement(env="production", service="s", cluster="c",
+                      namespace="n", app="a")
+    since = datetime(2026, 9, 21, 10, tzinfo=timezone.utc)
+    until = datetime(2026, 9, 21, 11, tzinfo=timezone.utc)
+
+    boom = asyncio.run(src.lines(place, since=since, until=until, limit=400,
+                                 needle="boom"))
+    xyz = asyncio.run(src.lines(place, since=since, until=until, limit=400,
+                                needle="xyz"))
+    gone = asyncio.run(src.lines(place, since=since, until=until, limit=400,
+                                 needle="nope"))
+
+    assert boom.lines == ("ERROR boom user=abc", "ERROR boom user=def")
+    assert xyz.lines == ("INFO ok user=xyz",)
+    assert gone.lines == ()
+
+
+def test_a_superset_read_is_capped_at_the_limit_and_says_truncated():
+    """The cap is the flag Loki sets and `kubectl` cannot — the canned source
+    reports it when it drops a line, so a capped read does not read as a whole
+    window."""
+    import asyncio
+
+    from friday.sdk.sources import Placement
+    from plugins.devops.sources.logs import LokiSource
+    from replay_case import CannedReads
+
+    superset = [f"2026-09-21T10:35:0{i}Z ERROR boom {i}" for i in range(5)]
+    src = LokiSource(server=CannedReads({"superset": superset}))
+    place = Placement(env="production", service="s", cluster="c",
+                      namespace="n", app="a")
+
+    read = asyncio.run(src.lines(
+        place,
+        since=datetime(2026, 9, 21, 10, tzinfo=timezone.utc),
+        until=datetime(2026, 9, 21, 11, tzinfo=timezone.utc),
+        limit=2, needle="boom",
+    ))
+
+    assert len(read.lines) == 2 and read.truncated
+
+
+def test_a_kubectl_superset_serves_the_needle_the_loop_chose():
+    """The dev back end, served from a superset too — dev retention is the
+    reason captured cases exist, so a superset that covered production alone
+    would miss the one environment that needs it."""
+    import asyncio
+
+    from friday.sdk.sources import Placement
+    from replay_case import canned_source
+
+    name, source = canned_source({
+        "source": "kubectl",
+        "reads": {"superset": [
+            "2026-09-21T10:35:01Z ERROR boom",
+            "2026-09-21T10:35:02Z INFO quiet",
+        ]},
+    })
+
+    read = asyncio.run(source.lines(
+        Placement(env="dev", service="s", namespace="n", pod_pattern="backend"),
+        since=datetime(2026, 9, 21, 10, tzinfo=timezone.utc),
+        until=datetime(2026, 9, 21, 11, tzinfo=timezone.utc),
+        limit=400, needle="boom",
+    ))
+
+    assert name == "kubectl" and read.lines == ("ERROR boom",)
+
+
+def test_a_kubectl_superset_serves_a_needle_with_spaces_and_a_quote():
+    """The `kubectl` remote is shell-quoted twice, so a needle carrying a space
+    or an apostrophe must still be extracted whole — not read still-quoted (an
+    empty result) nor split mid-token (a crash). Multi-word substrings are
+    exactly what a loop searching log text picks, so this is the superset path's
+    main case, not an edge."""
+    import asyncio
+
+    from friday.sdk.sources import Placement
+    from replay_case import canned_source
+
+    name, source = canned_source({
+        "source": "kubectl",
+        "reads": {"superset": [
+            "2026-09-21T10:35:01Z ERROR connection refused to db",
+            "2026-09-21T10:35:02Z WARN can't reach cache",
+            "2026-09-21T10:35:03Z INFO quiet",
+        ]},
+    })
+    place = Placement(env="dev", service="s", namespace="n",
+                      pod_pattern="backend")
+    since = datetime(2026, 9, 21, 10, tzinfo=timezone.utc)
+    until = datetime(2026, 9, 21, 11, tzinfo=timezone.utc)
+
+    spaced = asyncio.run(source.lines(place, since=since, until=until,
+                                      limit=400, needle="connection refused"))
+    quoted = asyncio.run(source.lines(place, since=since, until=until,
+                                      limit=400, needle="can't"))
+
+    assert spaced.lines == ("ERROR connection refused to db",)
+    assert quoted.lines == ("WARN can't reach cache",)
+
+
 def test_a_node_that_ended_the_run_does_not_read_as_one_that_passed_it_on():
     """`node_runs` records any `Action` as `ok`, because an `Action` carries
     no envelope. So a `resolve` that handed over — ending the whole run —

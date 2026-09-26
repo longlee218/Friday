@@ -39,6 +39,9 @@ import json
 import sqlite3
 import sys
 import time
+import re
+import shlex
+
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
@@ -241,6 +244,88 @@ def render(
     return "\n".join(lines)
 
 
+# A superset capture's line shape: "<rfc3339> <log line>", the same shape both
+# back ends hand `_streams` / `_within`. `reads["superset"]` is the whole
+# incident window, unfiltered — so an agentic loop that chooses its own needle
+# and window is served any slice of it, the way the live back end would answer,
+# instead of the single pre-narrowed pair a fixed pipeline left behind.
+_SUPERSET_LINE = re.compile(r"^(?P<at>\d{4}-\d\d-\d\dT[\d:.]+Z)\s+(?P<line>.*)$")
+
+
+def _needle_of_logql(query: str) -> str:
+    """The string inside a LogQL `|= "..."` line filter, unescaped — the
+    reverse of `logs._logql`. Empty when the query carries no filter."""
+    found = re.search(r'\|=\s*"((?:\\.|[^"\\])*)"', str(query))
+    if not found:
+        return ""
+    return found.group(1).replace('\\"', '"').replace("\\\\", "\\")
+
+
+def _parse_rfc3339(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _superset_within(
+    lines: Any,
+    *,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    needle: str = "",
+    limit: int = 0,
+) -> tuple[list[str], bool]:
+    """The lines a back end would return for one read of the superset: inside
+    `[since, until]` when given, carrying `needle` when given, capped at
+    `limit`. Returns `(kept, truncated)` — `truncated` is whether the cap
+    dropped any, which is the flag Loki sets and `kubectl` cannot.
+
+    The needle is matched against the *log line*, not its stamp — that is what
+    Loki's `|=` sees. The window is matched against the stamp; a line with no
+    stamp is kept (a `kubectl` warning ahead of the log), the same forgiveness
+    `_within` shows.
+    """
+    kept: list[str] = []
+    for raw in lines or ():
+        found = _SUPERSET_LINE.match(str(raw))
+        text = found.group("line") if found else str(raw)
+        if needle and needle not in text:
+            continue
+        if found and (since or until):
+            at = datetime.fromisoformat(found.group("at").replace("Z", "+00:00"))
+            if since and at < since:
+                continue
+            if until and at > until:
+                continue
+        kept.append(str(raw))
+    truncated = bool(limit) and len(kept) > limit
+    return (kept[:limit] if limit else kept), truncated
+
+
+def _kubectl_needle(remote: str) -> str:
+    """The needle out of a canned `kubectl` read's `grep -F -- <needle>`.
+
+    The remote is shell-quoted **twice**: `SshKubectlSource.lines` wraps the
+    whole pipeline in `bash -o pipefail -c <shlex.quote(piped)>`, and `piped`
+    already carries `shlex.quote(needle)`. Peel the `bash -c` layer first — so a
+    needle with a space or an apostrophe is neither read still-quoted (an empty
+    result) nor split mid-token (a crash) — then take the grep argument,
+    anchored on ` || true` so a needle containing `||` is not cut short."""
+    inner = (shlex.split(remote) or [remote])[-1]
+    found = re.search(r"grep -F -- (.+?) \|\| true", inner)
+    return shlex.split(found.group(1))[0] if found else ""
+
+
+def _kubectl_limit(remote: str) -> int:
+    """The cap out of a canned `kubectl` read — `head -n N` on the needle
+    path, `--tail=N` on the plain one."""
+    found = re.search(r"head -n (\d+)", remote) or re.search(r"--tail=(\d+)", remote)
+    return int(found.group(1)) if found else 0
+
+
 @dataclass(frozen=True, slots=True)
 class CannedReads:
     """A `Reads` that answers out of a captured case instead of the network.
@@ -263,17 +348,34 @@ class CannedReads:
     ones. Only the socket is missing.
     """
 
-    #: `{"window": <answer>, "narrowed": <answer>}`, each exactly what the
-    #: Loki tool returned on the day.
+    #: Either `{"superset": [<"iso line">, …]}` — the whole captured window,
+    #: filtered here the way Loki would — or the legacy `{"window": <answer>,
+    #: "narrowed": <answer>}` pair, each exactly what the Loki tool returned on
+    #: the day. A case with a superset serves any needle the loop chooses; a
+    #: legacy case serves only the one it was captured for.
     reads: dict[str, Any]
 
     async def call(self, tool: str, arguments: dict[str, Any]) -> Any:
-        # Which of the two reads this is, off the query the source built.
-        # A captured case holds one window, so a graph that widens sees the
-        # same lines again — true to what was captured and not pretending to
-        # be more.
-        narrowed = "|=" in str(arguments.get("query", ""))
-        return json.dumps(self.reads["narrowed" if narrowed else "window"])
+        superset = self.reads.get("superset")
+        if superset is None:
+            # Legacy capture: one window and one narrowed answer, chosen off
+            # the `|=` the source built. A graph that widens sees the same
+            # lines again — true to what that older capture holds, and no more.
+            narrowed = "|=" in str(arguments.get("query", ""))
+            return json.dumps(self.reads["narrowed" if narrowed else "window"])
+        # Superset capture: narrow the whole window the way Loki does
+        # server-side, so any needle/window the loop chooses is answered
+        # faithfully rather than with the one pair a fixed pipeline left.
+        kept, truncated = _superset_within(
+            superset,
+            since=_parse_rfc3339(arguments.get("start")),
+            until=_parse_rfc3339(arguments.get("end")),
+            needle=_needle_of_logql(arguments.get("query", "")),
+            limit=int(arguments.get("limit", 0) or 0),
+        )
+        return json.dumps(
+            {"streams": [{"labels": {}, "lines": kept}], "truncated": truncated}
+        )
 
 
 #: Everything a captured case may say that is not a parameter of the issue
@@ -348,8 +450,19 @@ class CannedKubectl(SshKubectlSource):
     async def _run(self, remote: str) -> str:
         if "get pods" in remote:
             return "pod/captured-0\n"
-        # The narrowed read is the one that greps; see the source itself.
-        return str(self.reads["narrowed" if "grep -F" in remote else "window"])
+        superset = self.reads.get("superset")
+        if superset is None:
+            # The narrowed read is the one that greps; see the source itself.
+            return str(self.reads["narrowed" if "grep -F" in remote else "window"])
+        # Superset: `grep` the needle and `head` the cap the way the real
+        # remote does; the window is re-applied by `_within` in `lines()`, so
+        # it is not applied here.
+        kept, _ = _superset_within(
+            superset,
+            needle=_kubectl_needle(remote),
+            limit=_kubectl_limit(remote),
+        )
+        return "\n".join(kept) + ("\n" if kept else "")
 
 
 async def run_captured(case: dict, *, with_model: bool, into: Path):

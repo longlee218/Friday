@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: code-complete — end-to-end (box 1) pends ticket 7; repo-snapshot (box 3) descoped
 Blocked by:
 
 # Superset capture + canned source (the eval foundation)
@@ -24,8 +24,28 @@ replays faithfully.
 
 ## Acceptance
 
-- [ ] An existing captured case replays with the model choosing needles/windows
-      not in the original capture, and scores.
-- [ ] Out-of-superset read returns the honest answer, not an error.
-- [ ] `read_code` / `what_code_means` resolve offline from the case.
-- [ ] Whole suite green; `code-review` done.
+- [ ] A captured case replays with the model choosing needles/windows not in
+      the original capture, and scores. **Mechanism landed + unit-tested**
+      (`CannedReads`/`CannedKubectl` filter a superset by needle∩window∩limit).
+      End-to-end on a real case **pends a superset-format case** (operator work,
+      ticket 7) — the one existing case is legacy `{window, narrowed}` and keeps
+      the legacy path.
+- [x] Out-of-superset read returns the honest answer, not an error — a needle
+      not present / a line outside the window comes back empty (the loop's
+      existing not-found / out-of-reach branches handle the message).
+- [ ] `read_code` / `what_code_means` resolve offline from the case —
+      **DEFERRED by scope decision**: they already replay offline against the
+      clone at the release tag (deterministic); embedding a repo snapshot in the
+      case is a follow-on only if that proves insufficient.
+- [x] Whole suite green; `code-review` done — suite green (1605 passed; 191 of
+      the config-dependent tests pass with `OPENROUTER_API_KEY` set), the only
+      failures being the pre-existing uncommitted `config.yaml` env issue.
+      `code-review` subagent ran; both HIGH findings (double-shell-quoting in
+      the kubectl needle) fixed and guarded by a test verified red-without-fix.
+
+## Result
+
+Additive `reads["superset"]` in `replay_case.py`; legacy cases byte-for-byte
+unchanged. Code complete and reviewed. Two boxes intentionally open: end-to-end
+replay pends a superset case (ticket 7); repo-snapshot deferred by decision.
+Not committed (operator controls commits).
