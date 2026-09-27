@@ -45,10 +45,6 @@ class _StubCaps:
         self.approver = "discord_bot"
         self._harness = diagnose_harness
 
-    def prepare_node(self, *a, **k):
-        from friday.kernel.dag.prepare import prepare_node
-        return prepare_node(*a, **k)
-
     def make_harness(self, *, agent, instructions, answers=None, tools=None,
                      ends_with=None):
         return self._harness
@@ -66,8 +62,8 @@ def _dag(*, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnos
     )
     return build_devops_dag(api)
 
-from plugins.devops.graph.resolve import resolve_node
 from plugins.devops.graph.deps import ApiIssueDeps
+from plugins.devops.graph.intake import intake_of
 from friday.sdk.workflow import DAGState, status_of
 from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
@@ -80,7 +76,6 @@ CURL = (
     '--data \'{"items":[]}\' '
     '"https://api-reelme-v2.dev.aperogroup.ai/v1/pod/orders/init"'
 )
-PROD_CURL = 'curl "https://api-reelme-v2.aperogroup.ai/v1/pod/orders/init"'
 
 
 # --- fixtures ---------------------------------------------------------------
@@ -242,89 +237,7 @@ class FakeSource:
         ]
 
 
-# --- resolve ----------------------------------------------------------------
-
-
-async def test_the_environment_comes_from_the_domain_and_the_service_from_a_row(db):
-    await write_rows(db)
-
-    result = await resolve_node().run(prepared(), deps_for(db))
-
-    assert status_of(result) == "ok"
-    assert result["placement"]["env"] == "dev"
-    assert result["placement"]["pod_pattern"] == "backend-reelme-v2"
-
-
-async def test_production_reads_the_loki_labels_and_dev_reads_the_pod_pattern(db):
-    await write_rows(db, env="production")
-
-    result = await resolve_node().run(prepared(curl=PROD_CURL), deps_for(db))
-
-    assert result["placement"]["cluster"] == "vultr-ailab"
-    assert result["placement"]["app"] == "backend-reelme-v2"
-    assert result["placement"]["pod_pattern"] == ""
-
-
-async def test_a_domain_that_is_not_ours_ends_the_graph_at_once(db):
-    """Sometimes an unknown domain is a proxy of ours the table does not know
-    yet, and that call is the operator's."""
-    await write_environment_rows(db)
-
-    result = await resolve_node().run(
-        prepared(curl='curl "https://api.stripe.com/v1/charges"'), deps_for(db)
-    )
-
-    assert isinstance(result, HandOver)
-    assert "stripe.com" in result.reason
-
-
-async def test_a_missing_route_row_is_a_hand_over_not_a_guess(db):
-    """D3, and finding G: guessing which pod serves a domain is how a
-    diagnosis gets built from another product's logs."""
-    await write_environment_rows(db)
-
-    result = await resolve_node().run(prepared(), deps_for(db))
-
-    assert isinstance(result, HandOver)
-    assert "no route row" in result.reason
-
-
-async def test_a_route_row_that_disagrees_with_the_domain_is_refused(db):
-    """One of the two is wrong, and picking either silently is how a
-    production search runs against dev."""
-    # The service first: ticket 19 refuses a route naming one that does not
-    # exist, so the row this test is about can only be written after it.
-    await write_rows(db)
-    state = FridayState(channel_id="watched", agent="admin")
-    await db.memory_delete(
-        state,
-        [m for m in await db.memories_for_channel("watched")
-         if m.kind == "devops.route"][0].id,
-        origin=MemoryOrigin.ADMIN,
-    )
-    await db.memory_add(
-        state, "mistyped", kind="devops.route", origin=MemoryOrigin.ADMIN,
-        data={
-            "domain": "api-reelme-v2.dev.aperogroup.ai",
-            "env": "production",
-            "service": "backend-reelme-v2",
-        },
-    )
-
-    result = await resolve_node().run(prepared(), deps_for(db))
-
-    assert isinstance(result, HandOver)
-    assert "production" in result.reason and "dev" in result.reason
-
-
-async def test_a_room_that_knows_no_domains_says_that_and_not_external(db):
-    """A room with no `environment` rows knows nothing about any domain.
-    Answering "not ours" there would be a claim rather than a lookup, and it
-    is the claim an operator would act on by looking somewhere else."""
-    result = await resolve_node().run(prepared(), deps_for(db))
-
-    assert isinstance(result, HandOver)
-    assert "which domains are ours" in result.reason
+# --- resolve.py's surviving helpers (node 1 itself is gone, ticket 6) -------
 
 
 async def test_one_row_for_one_host_beats_the_convention_it_breaks(db):
@@ -343,18 +256,6 @@ async def test_one_row_for_one_host_beats_the_convention_it_breaks(db):
     assert environment_of("api-reelme-v2.dev.aperogroup.ai", rows) == "dev"
     assert environment_of("api-mobile-spec-reviewer.aperogroup.ai", rows) == "dev"
     assert environment_of("api.stripe.com", rows) == "external"
-
-
-async def test_a_report_with_no_curl_says_so_rather_than_blaming_the_domain(db):
-    """D2: without a curl there is no domain. A correlationId makes a report
-    findable, not routable."""
-    result = await resolve_node().run(
-        prepared(curl=None, correlation_id="8f14e45f-ceea-467a-9b3a-1e0e4a1b2c3d"),
-        deps_for(db),
-    )
-
-    assert isinstance(result, HandOver)
-    assert "URL" in result.reason
 
 
 # --- find_request_log -------------------------------------------------------
@@ -488,16 +389,7 @@ async def test_no_diagnose_agent_skips_rather_than_failing(db):
 
 async def test_the_report_is_written_and_the_reporter_is_offered_the_cause(db, tmp_path):
     state = (
-        prepared()
-        .with_result("resolve", {"status": "ok", "reason": "", "placement": {
-            "env": "dev", "service": "backend-reelme-v2", "pod_pattern": "p",
-        }, "project": None})
-        .with_result(
-            "find_request_log",
-            {"status": "ok", "reason": "", "dossier": "ERROR ERR19", "source": "kubectl",
-             "kept": 1, "total": 90, "not_checked": []},
-        )
-        .with_result("read_failing_code", {"status": "empty", "reason": "no frame"})
+        _intake_state(env="dev", service="backend-reelme-v2", pod_pattern="p")
         .with_result("diagnose", {
             "status": "ok", "reason": "",
             "diagnosis": {
@@ -567,18 +459,19 @@ async def test_the_reporter_is_told_it_is_being_worked_on(db):
     do about silence is ask again."""
     from conftest import make_event
 
-    from plugins.devops.graph.acknowledge import SAYS, acknowledge_node
+    from plugins.devops.graph.acknowledge import ack_text, acknowledge_node
     from friday.kernel.outbox import DEFAULT_SENDER, Kind
 
     await db.record_message(make_event(message_id="m1"))
+    state = _intake_state(service="backend-reelme-v2")
     result = await acknowledge_node().run(
-        prepared(), deps_for(db, extra={"sender": DEFAULT_SENDER})
+        state, deps_for(db, extra={"sender": DEFAULT_SENDER})
     )
 
     assert status_of(result) == "ok"
     (row,) = await db.outbound()
     assert row.kind == Kind.ACKNOWLEDGED
-    assert row.text == SAYS
+    assert row.text == ack_text(intake_of(state["intake"]).placement)
     assert row.sender == DEFAULT_SENDER, "the reporter's channel, not a DM"
     # Hung under the message it answers, which is what keeps a busy channel
     # readable. A real mention is recorded first, or both sides of this are
@@ -595,7 +488,7 @@ async def test_the_acknowledgement_does_not_wait_for_approval(db):
     from friday.kernel.outbox import DEFAULT_SENDER, Kind
 
     await acknowledge_node().run(
-        prepared(), deps_for(db, extra={"sender": DEFAULT_SENDER})
+        _intake_state(), deps_for(db, extra={"sender": DEFAULT_SENDER})
     )
 
     assert not Kind.ACKNOWLEDGED.needs_approval
@@ -610,32 +503,71 @@ async def test_a_resumed_graph_does_not_acknowledge_twice(db):
     from friday.kernel.outbox import DEFAULT_SENDER
 
     deps = deps_for(db, extra={"sender": DEFAULT_SENDER})
-    await acknowledge_node().run(prepared(), deps)
-    again = await acknowledge_node().run(prepared(), deps)
+    state = _intake_state()
+    await acknowledge_node().run(state, deps)
+    again = await acknowledge_node().run(state, deps)
 
     assert status_of(again) == "skipped"
     assert len(await db.outbound()) == 1
 
 
 def test_nobody_is_acknowledged_before_the_placement_is_known():
-    """An external domain, an unknown route or a service with no row all end
-    the run at `resolve`. None of them should have told anybody that work was
-    starting.
+    """`intake` always runs — it makes no model call and hands over on
+    nothing — so nobody today reaches this edge with a hand-over. The gate
+    stays anyway: `acknowledge` must never fire from a node whose result was
+    not `ok`, whatever kind of result that turns out to be.
 
-    Asserts *which node* `resolve` leads to, not merely that a hand-over
+    Asserts *which node* `intake` leads to, not merely that a hand-over
     stops the walk — the first version of this test asserted the latter,
     which is a different test that already existed, and stayed green with
-    `acknowledge` moved ahead of `resolve`.
+    `acknowledge` moved ahead of `intake`.
     """
     dag = _dag()
-    ok = DAGState.empty().with_result("resolve", {"status": "ok", "reason": ""})
+    ok = DAGState.empty().with_result("intake", {"status": "ok", "reason": ""})
 
-    assert dag.next_after("resolve", ok) == "acknowledge"
+    assert dag.next_after("intake", ok) == "acknowledge"
     assert dag.next_after(
-        "resolve", DAGState.empty().with_result("resolve", HandOver("not ours"))
+        "intake", DAGState.empty().with_result("intake", HandOver("not ours"))
     ) is None
     assert [n.name for n in dag.nodes].index("acknowledge") > \
-        [n.name for n in dag.nodes].index("resolve")
+        [n.name for n in dag.nodes].index("intake")
+
+
+def test_ack_text_names_the_service_or_stays_generic():
+    """Names the service when Intake resolved one; otherwise stays generic —
+    never 'log của external' (external is not a place a reporter knows, and the
+    loop reads code/docs, not only logs). Operator's fog-item call, 2026-09-27."""
+    from friday.sdk.sources import Placement
+
+    from plugins.devops.graph.acknowledge import ack_text
+
+    named = ack_text(Placement(env="production", service="backend-reelme-v2"))
+    assert "backend-reelme-v2" in named and "log của backend-reelme-v2" in named
+
+    vague = ack_text(Placement(env="external", service="", candidates=("a", "b")))
+    assert "external" not in vague and "log của" not in vague
+    assert "xem lại vụ này" in vague
+
+
+def test_the_reads_input_names_the_stack_when_known():
+    """The stack (e.g. NestJS) is a hint the diagnose prompt gives the model so
+    it reads a trace in that framework's idiom — restored on the unified
+    Placement (2026-09-27). Absent when the placement carries no stack."""
+    from friday.sdk.sources import Placement
+
+    from plugins.devops.graph.prompt import build_reads_input
+
+    with_stack = build_reads_input(
+        report="loi 500",
+        placement=Placement(env="dev", service="s", stack="NestJS"),
+        not_checked=(),
+    )
+    assert "stack: NestJS" in with_stack
+
+    without = build_reads_input(
+        report="loi 500", placement=Placement(env="dev", service="s"), not_checked=()
+    )
+    assert "stack:" not in without
 
 
 async def test_a_run_with_no_sender_investigates_anyway(db):
@@ -643,7 +575,7 @@ async def test_a_run_with_no_sender_investigates_anyway(db):
     says why it stayed quiet beats one that is quiet about being quiet."""
     from plugins.devops.graph.acknowledge import acknowledge_node
 
-    result = await acknowledge_node().run(prepared(), deps_for(db))
+    result = await acknowledge_node().run(DAGState.empty(), deps_for(db))
 
     assert status_of(result) == "skipped"
     assert "sender" in result["reason"]
@@ -654,7 +586,7 @@ async def test_a_run_with_no_sender_investigates_anyway(db):
 
 def _diagnosed() -> DAGState:
     """A state that reached a cause, which is what the last two outputs need."""
-    return prepared().with_result("diagnose", {
+    return DAGState.empty().with_result("diagnose", {
         "status": "ok", "reason": "",
         "diagnosis": {
             "cause": "ERR19 ở orders.init", "confidence": "likely",
@@ -755,17 +687,17 @@ def test_api_issue_is_the_one_graph_with_an_investigation_past_node_zero():
     dag = _dag()
 
     assert [n.name for n in dag.nodes] == [
-        "prepare", "resolve", "acknowledge", "diagnose", "report",
+        "intake", "acknowledge", "diagnose", "report",
     ]
 
 
-def test_nothing_past_resolve_runs_when_resolve_hands_over():
+def test_nothing_past_intake_runs_when_intake_hands_over():
     """A node reading an earlier node's hand-over as if it were a result is
     the wiring mistake `DAGState` raises on, and the fix is in the edges."""
     dag = _dag()
-    state = DAGState.empty().with_result("resolve", HandOver("not ours"))
+    state = DAGState.empty().with_result("intake", HandOver("not ours"))
 
-    assert dag.next_after("resolve", state) is None
+    assert dag.next_after("intake", state) is None
 
 
 def test_a_blank_setting_means_not_configured_rather_than_the_word_none():
@@ -797,23 +729,25 @@ def test_log_sources_are_only_built_for_what_is_configured():
 async def test_a_complete_report_is_investigated_rather_than_handed_back(db, workflows):
     """The behaviour task 6 met, and the reason this board exists.
 
-    Node 0 finds nothing to ask about — a curl satisfies `_traceable` — and
-    before this graph the answer was "everything needed is here, and there is
-    no investigation past this point". Now the same task reaches `Resolve`,
-    and what it hands over with is a missing *row*, which somebody can fix.
+    Node 0 used to find nothing to ask about — a curl satisfies `_traceable`
+    — and the answer was "everything needed is here, and there is no
+    investigation past this point". `Intake` (ticket 06) makes no such call
+    at all: it never hands over, so every report reaches `Diagnose`. With no
+    `devops.diagnose` agent configured (every test that does not set one up),
+    that node skips and `Report` hands the case to the operator rather than
+    asserting a cause it has none for.
     """
     from friday.kernel.pool.pool import Pool
-    from tests.test_pool import make_task
 
     await write_environment_rows(db)
-    await make_task(db, curl=CURL, environment="dev")
+    task_id = await _task_with_text(db, f"loi 500 tren backend-reelme-v2\n{CURL}")
 
     await Pool(db=db, auto_ask=True).run_once()
 
-    pauses = await db.pauses_for([(await db.tasks())[0].id])
+    pauses = await db.pauses_for([task_id])
     (question,) = pauses.values()
     assert "no investigation past this point" not in question
-    assert "route row" in question
+    assert "no diagnose agent is configured" in question
 
 
 async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
@@ -822,10 +756,12 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
     is the only diagnose mode now: `Diagnose` reads the log itself rather
     than being handed a dossier."""
     from replay_case import _run_on_adapter
-    from tests.test_pool import make_task
 
     await write_rows(db, repo=str(tmp_path))
-    task = await make_task(db, curl=CURL, environment="dev")
+    task_id = await _task_with_text(
+        db, "backend-reelme-v2 dang tra 500\n" f"```\n{CURL}\n```", code=(CURL,),
+    )
+    task = await db.task(task_id)
 
     class Honest:
         last_error = None
@@ -860,12 +796,12 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
             task=task, db=db, sender="", approver="",
             log_sources={"kubectl": source},
         ),
-        seed={"prepare": ApiIssueParams(**task.params)},
+        seed={},
         system_db=tmp_path / "sys.db",
         wfid="test-whole-line",
     )
 
-    assert [r.node for r in runs] == ["resolve", "acknowledge", "diagnose", "report"]
+    assert [r.node for r in runs] == ["intake", "acknowledge", "diagnose", "report"]
     assert isinstance(final["report"], Reply)
     assert "ERR19 ở orders.init" in final["report"].text
     (written,) = list(reports_dir.glob("*.md"))
@@ -1881,15 +1817,37 @@ def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monke
 # --- the shape forces the question (ticket 05) ------------------------------
 
 
-def _reads_state():
-    """A resolve result reads-mode needs: a placement and an (empty) project."""
-    return prepared().with_result(
-        "resolve",
-        {
-            "placement": {"env": "dev", "service": "s", "pod_pattern": "p"},
-            "project": {},
+def _intake_state(
+    *, env="dev", service="s", cluster="", namespace="", app="",
+    pod_pattern="p", repo_path="", release_tag="", error_code_doc="",
+    candidates=(), request_text="500 khi init đơn",
+) -> DAGState:
+    """An `intake` envelope reads-mode (and `acknowledge`/`report`) needs —
+    the JSON-round-tripped shape `intake_of` reads back."""
+    return DAGState.empty().with_result("intake", {
+        "status": "ok", "reason": "",
+        "intake": {
+            "request_text": request_text,
+            "reported_at": REPORTED_AT.isoformat(),
+            "placement": {
+                "env": env, "service": service, "cluster": cluster,
+                "namespace": namespace, "app": app, "pod_pattern": pod_pattern,
+                "clone_path": repo_path, "repo_path": repo_path,
+                "release_tag": release_tag, "error_code_doc": error_code_doc,
+                "container_roots": [], "dbs": [], "candidates": list(candidates),
+            },
+            "hints": {
+                "correlation_id": None, "curl_artifact_id": None,
+                "response_artifact_id": None,
+            },
+            "memory": [], "skills": [], "related_tasks": [],
         },
-    )
+    })
+
+
+def _reads_state():
+    """A placement reads-mode needs, off a real `intake` envelope."""
+    return _intake_state(env="dev", service="s", pod_pattern="p")
 
 
 def _reading_deps(db):
@@ -1965,15 +1923,8 @@ async def test_the_reading_loop_can_hand_over_instead_of_answering(db):
     node = diagnose_node(
         make_harness=lambda *, tools: HandsOver(), agent="devops.diagnose"
     )
-    state = prepared().with_result(
-        "resolve",
-        {
-            "placement": {
-                "env": "production", "service": "s", "cluster": "c",
-                "namespace": "n", "app": "a",
-            },
-            "project": {},
-        },
+    state = _intake_state(
+        env="production", service="s", cluster="c", namespace="n", app="a",
     )
 
     result = await node.run(state, deps_for(db))
@@ -2031,15 +1982,8 @@ async def test_the_reading_loop_can_ask_the_reporter_instead_of_answering(db):
     node = diagnose_node(
         make_harness=lambda *, tools: Asks(), agent="devops.diagnose"
     )
-    state = prepared().with_result(
-        "resolve",
-        {
-            "placement": {
-                "env": "production", "service": "s", "cluster": "c",
-                "namespace": "n", "app": "a",
-            },
-            "project": {},
-        },
+    state = _intake_state(
+        env="production", service="s", cluster="c", namespace="n", app="a",
     )
 
     result = await node.run(state, deps_for(db))
@@ -2236,7 +2180,7 @@ async def test_intake_resolves_a_named_service_and_its_placement(db):
     assert placement["env"] == "dev"
     assert placement["service"] == "backend-reelme-v2"
     assert placement["namespace"] == "dev"
-    assert placement["pod_selector"] == "backend-reelme-v2"
+    assert placement["pod_pattern"] == "backend-reelme-v2"
     assert placement["clone_path"] == "/clone/reelme"
     assert placement["repo_path"] == "/clone/reelme"
     assert placement["candidates"] == []

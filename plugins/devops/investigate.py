@@ -133,22 +133,22 @@ def investigate_tools(
     *,
     evidence: Evidence,
     placement: Placement,
-    project: dict[str, Any],
     log_sources: dict[str, Any],
     reported_at: Any,
-    release_tag: str = "",
-    container_roots: tuple[str, ...],
 ) -> list[Any]:
     """The tools for one run, closed over where this case lives.
 
     Built per run rather than once, because every one of them needs the
-    placement `Resolve` produced — and a tool that outlived the run that
-    made it would read the previous case's service.
+    placement `Intake` produced — and a tool that outlived the run that made
+    it would read the previous case's service. `placement` now carries the
+    repository, the running tag and the container roots too (ticket 6), so
+    there is no separate `project` dict or `release_tag`/`container_roots`
+    argument to keep in step with it.
     """
     return [
         _read_log(evidence, placement, log_sources, reported_at),
-        _read_code(evidence, project, release_tag, container_roots),
-        _what_code_means(evidence, project),
+        _read_code(evidence, placement),
+        _what_code_means(evidence, placement),
     ]
 
 
@@ -248,13 +248,10 @@ def _read_log(
     return read_log
 
 
-def _read_code(
-    evidence: Evidence,
-    project: dict[str, Any],
-    release_tag: str,
-    container_roots: tuple[str, ...],
-):
-    repo_path = str(project.get("repo_path") or "")
+def _read_code(evidence: Evidence, placement: Placement):
+    repo_path = placement.repo_path
+    release_tag = placement.release_tag
+    container_roots = placement.container_roots
 
     @tool
     def read_code(file: str, line: int) -> str:
@@ -311,9 +308,9 @@ def _read_code(
     return read_code
 
 
-def _what_code_means(evidence: Evidence, project: dict[str, Any]):
-    doc = str(project.get("error_codes_doc") or "")
-    repo_path = str(project.get("repo_path") or "")
+def _what_code_means(evidence: Evidence, placement: Placement):
+    doc = placement.error_code_doc
+    repo_path = placement.repo_path
 
     @tool
     def what_code_means(code: str) -> str:

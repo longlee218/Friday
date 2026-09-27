@@ -68,7 +68,11 @@ class Reads:
 
 @dataclass(frozen=True, slots=True)
 class Placement:
-    """Where one service's logs are, for the environment in hand.
+    """Where one case lives — the single type, folded from `Resolve`'s old
+    `Placement` + `project` dict and `plugins.devops.graph.intake`'s own
+    (ticket 6): every reader wants one place, and a reader that has to
+    remember which of two shapes to read is one that one day reads the
+    other.
 
     The address a `LogSource` reads from, and the reason it lives here rather
     than beside whatever resolved it: a source that imported the graph that
@@ -81,13 +85,33 @@ class Placement:
     """
 
     env: str
-    service: str
+    service: str = ""
     #: Production: the Loki labels. Dev: empty.
     cluster: str = ""
     namespace: str = ""
     app: str = ""
     #: Dev: the pod name pattern to grep for. Production: empty.
     pod_pattern: str = ""
+    #: Where the operator's clone is. `clone_path`/`repo_path` are the same
+    #: path today — kept as two fields because `Resolve`'s two halves named
+    #: them separately and nothing yet forces them to agree.
+    clone_path: str = ""
+    repo_path: str = ""
+    #: The running version, when a `CodeSource` can compare a frame against
+    #: it, or `""` when it could not be resolved.
+    release_tag: str = ""
+    #: What the repository's own error-code doc says each code means.
+    error_code_doc: str = ""
+    #: The service's tech stack (e.g. "NestJS"), a hint the diagnose prompt
+    #: gives the model so it reads a stack trace in that framework's idiom.
+    stack: str = ""
+    #: The container source roots and vendored-path markers a `CodeSource`
+    #: maps a frame against.
+    container_roots: tuple[str, ...] = ()
+    dbs: tuple[str, ...] = ()
+    #: The room's candidate services, when `service` is unresolved (vague or
+    #: no match). Empty once a service is resolved.
+    candidates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,10 +198,10 @@ class CodeSource(Protocol):
     worktree, no fetch (finding H). **A frame is reporter-influenced text**, so
     a path that resolves outside the clone is refused, not read.
 
-    The port is the read surface the `read_failing_code` check calls; the
-    concrete reader (a repo clone, its container-root policy loaded from config
-    or a memory row) implements it in the plugin. Every method returns `None`
-    for "not here / cannot read", never an exception into a graph node.
+    The port is the read surface the `Diagnose` loop's `read_code` tool calls;
+    the concrete reader (a repo clone, its container-root policy loaded from
+    config or a memory row) implements it in the plugin. Every method returns
+    `None` for "not here / cannot read", never an exception into a graph node.
     """
 
     def repo_file(self, frame: str) -> Path | None:

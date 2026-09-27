@@ -13,10 +13,10 @@ finding, quotes no log line and names no fault. An acknowledgement that
 waits for approval is an acknowledgement that arrives after the reply it
 was supposed to precede, which is the whole of what it was for.
 
-**After `resolve`, never before it.** An external domain, an unknown route
-or a service with no row all end the run there, and none of them should have
-told anybody that work was starting. This node exists on the edge that only
-a successful `resolve` takes.
+**After `intake`, never before it.** `intake` always runs (it makes no
+model call and hands over on nothing), so in practice this is simply "after
+node 0" — the edge gate stays anyway, so a future `intake` that can fail
+does not silently acknowledge a case nobody is investigating.
 """
 
 from __future__ import annotations
@@ -25,23 +25,42 @@ import logging
 from typing import Any
 
 from plugins.devops.graph.deps import ApiIssueDeps
+from plugins.devops.graph.intake import intake_of
+from friday.sdk.sources import Placement
 from friday.sdk.workflow import DAGState, Node, envelope
 from friday.sdk.outbox import Kind
 
-__all__ = ["acknowledge_node"]
+__all__ = ["ack_text", "acknowledge_node"]
 
 log = logging.getLogger(__name__)
 
-#: What the reporter is told. **Written in code and in one language**, which
-#: is the room's rather than the system's — the board's own ticket wrote this
-#: phrase. It becomes configuration on the day a second room needs a second
-#: language, and not before; a setting nobody has asked for is a setting
-#: whose default nobody has checked.
-#:
-#: Deliberately without a model. An acknowledgement is worth having because
-#: it is immediate, and a rewording call is both slower than the thing it
-#: rewords and one more way for it not to arrive at all.
-SAYS = "Đang xử lý — mình đang xem log và code, sẽ báo lại khi có kết quả."
+
+def ack_text(placement: Placement) -> str:
+    """What the reporter is told. **Written in code and in one language**,
+    which is the room's rather than the system's — the board's own ticket
+    wrote this phrase. It becomes configuration on the day a second room
+    needs a second language, and not before; a setting nobody has asked for
+    is a setting whose default nobody has checked.
+
+    Deliberately without a model. An acknowledgement is worth having because
+    it is immediate, and a rewording call is both slower than the thing it
+    rewords and one more way for it not to arrive at all.
+
+    **Names the service when `Intake` resolved one; otherwise stays generic**
+    (the operator's fog-item call, 2026-09-26, refined 2026-09-27). A service
+    still vague at this point is a case with `placement.candidates` set — naming
+    the candidate list would read as a robot thinking aloud, and naming the
+    `env` ("log của external") is worse: `external` is not a place a reporter
+    knows, and the investigation reads code and docs, not only logs, so it can
+    still help a case with no matching log environment. So an unresolved case
+    gets a plain "đang xem lại vụ này" — no place name, no logs-only claim.
+    """
+    if placement.service:
+        return (
+            f"Đang xử lý — mình đang xem log của {placement.service}, "
+            "sẽ báo lại khi có kết quả."
+        )
+    return "Đang xử lý — mình đang xem lại vụ này, sẽ báo lại khi có kết quả."
 
 
 def acknowledge_node(*, timeout_seconds: float | None = None) -> Node:
@@ -72,16 +91,17 @@ def acknowledge_node(*, timeout_seconds: float | None = None) -> Node:
         if already:
             return envelope("skipped", "this task was already acknowledged")
 
+        text = ack_text(intake_of(state["intake"]).placement)
         await deps.db.queue_outbound(
             task_id=deps.task.id,
             conversation=deps.task.conversation,
             kind=Kind.ACKNOWLEDGED,
             sender=sender,
-            text=SAYS,
+            text=text,
             reply_to=await deps.db.last_mention_in(deps.task.conversation),
         )
         log.info("task %s: acknowledged", deps.task.id)
-        return envelope("ok", "", said=SAYS)
+        return envelope("ok", "", said=text)
 
     # The adapter hands every api_issue node an `ApiIssueDeps`; `Node.run` is
     # typed `[Deps]` (not generic over the subtype), so the narrower parameter is

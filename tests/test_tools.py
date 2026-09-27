@@ -82,15 +82,15 @@ def _factories() -> dict[str, object]:
         read_skill_file_tool(library),
         *memory_tools(object()),
         # Built per run rather than once: every one of these needs the
-        # placement `Resolve` produced, so there is nothing to inject here
+        # placement `Intake` produced, so there is nothing to inject here
         # but a stand-in for it.
         *investigate_tools(
             evidence=Evidence(),
-            placement=Placement(env="dev", service="s"),
-            project={},
+            placement=Placement(
+                env="dev", service="s", container_roots=DEFAULT_CONTAINER_ROOTS,
+            ),
             log_sources={},
             reported_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
-            container_roots=DEFAULT_CONTAINER_ROOTS,
         ),
     ]
     # A plugin declares a tool as a neutral `ToolSpec` (`friday.sdk.tools`); the

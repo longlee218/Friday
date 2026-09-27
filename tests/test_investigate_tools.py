@@ -37,16 +37,17 @@ class Log:
         return Lines(tuple(found), self.oldest, truncated=self.truncated)
 
 
-def built(source=None, project=None, tag=""):
+def built(source=None, *, repo_path="", error_code_doc="", tag=""):
     evidence = Evidence()
     tools = investigate_tools(
         evidence=evidence,
-        placement=Placement(env="dev", service="s", pod_pattern="p"),
-        project=project or {},
+        placement=Placement(
+            env="dev", service="s", pod_pattern="p",
+            repo_path=repo_path, error_code_doc=error_code_doc,
+            release_tag=tag, container_roots=DEFAULT_CONTAINER_ROOTS,
+        ),
         log_sources={} if source is None else {"kubectl": source},
-        release_tag=tag,
         reported_at=AT,
-        container_roots=DEFAULT_CONTAINER_ROOTS,
     )
     # Plugin tools are neutral `ToolSpec`s; the harness binds each to the
     # vendor's `Tool`. Bind here so the test sees what the model sees (ticket 14).
@@ -261,7 +262,7 @@ def test_code_is_read_at_the_running_tag_and_says_which(tmp_path):
     run("tag", "1.0.0")
     (root / "orders.ts").write_text("edited since\nb\nc\nd\n")
 
-    _, tools = built(project={"repo_path": str(root)}, tag="1.0.0")
+    _, tools = built(repo_path=str(root), tag="1.0.0")
 
     said = call(tools["read_code"], file="/app/orders.ts", line=1)
 
@@ -270,7 +271,7 @@ def test_code_is_read_at_the_running_tag_and_says_which(tmp_path):
 
 
 def test_code_outside_the_clone_is_named_rather_than_opened():
-    _, tools = built(project={"repo_path": "/nowhere"})
+    _, tools = built(repo_path="/nowhere")
 
     said = call(tools["read_code"], file="/app/node_modules/x/y.js", line=3)
 
@@ -279,7 +280,7 @@ def test_code_outside_the_clone_is_named_rather_than_opened():
 
 def test_the_lines_of_code_are_citable_like_any_other(tmp_path):
     (tmp_path / "a.ts").write_text("one\ntwo\nthree\n")
-    evidence, tools = built(project={"repo_path": str(tmp_path)})
+    evidence, tools = built(repo_path=str(tmp_path))
 
     call(tools["read_code"], file="/app/a.ts", line=2)
 
@@ -290,7 +291,7 @@ def test_the_lines_of_code_are_citable_like_any_other(tmp_path):
 
 
 def test_a_project_with_no_table_says_so_rather_than_guessing():
-    _, tools = built(project={})
+    _, tools = built()
 
     assert "records no error-code table" in call(
         tools["what_code_means"], code="ERR19"
@@ -357,21 +358,21 @@ def test_the_error_codes_in_what_was_read_are_counted():
 def test_reading_code_counts_against_the_ceiling_too():
     """`spent()` says it is checked by every tool. One of them did not."""
     source = Log(["ERROR abc"])
-    evidence, tools = built(source, project={"repo_path": "/nowhere"})
+    evidence, tools = built(source, repo_path="/nowhere")
     evidence.reads = MAX_READS
 
     assert "limit" in call(tools["read_code"], file="/app/a.ts", line=1)
 
 
 def test_asking_what_a_code_means_counts_too():
-    evidence, tools = built(project={})
+    evidence, tools = built()
     evidence.reads = MAX_READS
 
     assert "limit" in call(tools["what_code_means"], code="ERR19")
 
 
 def test_a_service_with_no_repository_recorded_says_so(tmp_path):
-    _, tools = built(project={})
+    _, tools = built()
 
     assert "No repository is recorded" in call(
         tools["read_code"], file="/app/a.ts", line=1
@@ -381,9 +382,7 @@ def test_a_service_with_no_repository_recorded_says_so(tmp_path):
 def test_a_code_the_table_does_not_carry_says_so(tmp_path):
     doc = tmp_path / "codes.md"
     doc.write_text("| Code | Meaning |\n| --- | --- |\n| ERR19 | Internal |\n")
-    _, tools = built(project={
-        "repo_path": str(tmp_path), "error_codes_doc": doc.name,
-    })
+    _, tools = built(repo_path=str(tmp_path), error_code_doc=doc.name)
 
     assert "not in this project's table" in call(
         tools["what_code_means"], code="ERR999"
@@ -393,7 +392,7 @@ def test_a_code_the_table_does_not_carry_says_so(tmp_path):
 def test_a_clone_missing_the_running_tag_says_so_where_the_node_sees_it(tmp_path):
     """Degrading is correct; degrading silently is not."""
     (tmp_path / "a.ts").write_text("one\ntwo\n")
-    evidence, tools = built(project={"repo_path": str(tmp_path)}, tag="9.9.9")
+    evidence, tools = built(repo_path=str(tmp_path), tag="9.9.9")
 
     call(tools["read_code"], file="/app/a.ts", line=1)
 
@@ -403,23 +402,29 @@ def test_a_clone_missing_the_running_tag_says_so_where_the_node_sees_it(tmp_path
 # --- Diagnose reading for itself (v3.3, ticket 15) --------------------------
 
 
-def _state(db_rows_written=True):
-    """A run that has resolved a placement and read nothing."""
+def _state():
+    """A run that has resolved a placement (via `Intake`) and read nothing."""
     from friday.sdk.workflow import DAGState
-    from plugins.devops.params import ApiIssueParams
 
-    return (
-        DAGState.empty()
-        .with_result("prepare", ApiIssueParams(summary="500 khi init đơn"))
-        .with_result("resolve", {
-            "status": "ok", "reason": "",
+    return DAGState.empty().with_result("intake", {
+        "status": "ok", "reason": "",
+        "intake": {
+            "request_text": "500 khi init đơn",
+            "reported_at": AT.isoformat(),
             "placement": {
-                "env": "dev", "service": "backend-reelme-v2",
-                "pod_pattern": "backend-reelme-v2", "namespace": "dev",
+                "env": "dev", "service": "backend-reelme-v2", "cluster": "",
+                "namespace": "dev", "app": "",
+                "pod_pattern": "backend-reelme-v2", "clone_path": "",
+                "repo_path": "/nowhere", "release_tag": "", "error_code_doc": "",
+                "container_roots": [], "dbs": [], "candidates": [],
             },
-            "project": {"name": "reelme", "repo_path": "/nowhere"},
-        })
-    )
+            "hints": {
+                "correlation_id": None, "curl_artifact_id": None,
+                "response_artifact_id": None,
+            },
+            "memory": [], "skills": [], "related_tasks": [],
+        },
+    })
 
 
 class Answering:

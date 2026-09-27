@@ -109,7 +109,7 @@ def build_instructions(*, reads: bool = False) -> str:
 
 
 def build_reads_input(
-    *, report: str, placement: Any, project: dict, not_checked: tuple[str, ...]
+    *, report: str, placement: Any, not_checked: tuple[str, ...]
 ) -> str:
     """The case as metadata: where it lives, and nothing read yet.
 
@@ -125,10 +125,10 @@ def build_reads_input(
         where.append(f"loki app: {placement.app} in {placement.namespace}")
     if placement.pod_pattern:
         where.append(f"pods matching: {placement.pod_pattern}")
-    if project.get("repo_path"):
-        where.append(f"repository: {project['repo_path']}")
-    if project.get("stack"):
-        where.append(f"stack: {project['stack']}")
+    if placement.repo_path:
+        where.append(f"repository: {placement.repo_path}")
+    if placement.stack:
+        where.append(f"stack: {placement.stack}")
 
     said = [
         "## What was reported", report or "(nothing beyond the parameters)",

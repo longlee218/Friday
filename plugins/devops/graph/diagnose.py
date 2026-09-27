@@ -290,23 +290,19 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
     checked against what this run was actually shown rather than against a
     dossier built in advance.
     """
+    from plugins.devops.graph.intake import intake_of
     from plugins.devops.graph.logs import _reported_at
     from plugins.devops.graph.prompt import build_reads_input
-    from plugins.devops.graph.resolve import resolved
     from plugins.devops.investigate import Evidence, investigate_tools
 
-    placement, project = resolved(state["resolve"])
-    if project is None:
-        project = {}
+    ctx = intake_of(state["intake"])
+    placement = ctx.placement
     evidence = Evidence()
     tools = investigate_tools(
         evidence=evidence,
         placement=placement,
-        project=project,
         log_sources=deps.log_sources,
         reported_at=_reported_at(deps.task),
-        release_tag=str(state.get("resolve", {}).get("release_tag") or ""),
-        container_roots=deps.container_roots,
     )
     harness = make_harness(tools=tools)
     if harness is None:
@@ -314,12 +310,10 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
             "skipped", "no diagnose agent is configured, so nothing was diagnosed"
         )
 
-    params = state["prepare"]
     answer = await harness.run_structured(
         build_reads_input(
-            report=getattr(params, "summary", "") or "",
+            report=ctx.request_text,
             placement=placement,
-            project=project,
             not_checked=(),
         ),
         task_id=deps.task.id,

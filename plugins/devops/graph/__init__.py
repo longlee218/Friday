@@ -1,18 +1,22 @@
 """The `devops.api_issue` graph — the one type with an investigation past node 0.
 
-`Prepare → Resolve → Acknowledge → Diagnose → Report`. The two fixed pre-fetch
-nodes the diagram used to name here — `FindRequestLog`, `ReadFailingCode` —
-are gone (ticket 05): `Diagnose` reads the log and the code itself, through
+`Intake → Acknowledge → Diagnose → Report` (ticket 06). `Prepare`/`Resolve` —
+the extractor and the table-lookup node that used to sit ahead of
+`Acknowledge` — are gone for this task type: `Intake` folds both into one
+deterministic node (ticket 03), so there is no extraction pass and no
+separate resolve step left to run. The two fixed pre-fetch nodes the diagram
+used to name here — `FindRequestLog`, `ReadFailingCode` — were already gone
+(ticket 05): `Diagnose` reads the log and the code itself, through
 `plugins.devops.investigate`'s tools, so there is nothing left to fetch in
 advance of it.
 
 **Built against the sdk, and the caps the composition root hands in.** A plugin
 imports `friday.sdk` only, so this builder never reaches for the kernel's
-`prepare_node` or the `Harness` class: it asks `caps.prepare_node(...)` for
-node 0 and `caps.make_harness(...)` for the model behind `Diagnose`. `caps` also
-carries the tool servers a run opened and the `sender`/`approver` identities a
-queued row uses. Ticket 14 lifted this package out of `friday/kernel/dag/api_issue/`
-into `plugins/devops/` unchanged in shape, only in where it reaches for things.
+`Harness` class directly: it asks `caps.make_harness(...)` for the model
+behind `Diagnose`. `caps` also carries the tool servers a run opened and the
+`sender`/`approver` identities a queued row uses. Ticket 14 lifted this
+package out of `friday/kernel/dag/api_issue/` into `plugins/devops/` unchanged
+in shape, only in where it reaches for things.
 """
 
 from __future__ import annotations
@@ -39,10 +43,9 @@ from plugins.devops.graph.diagnose import (
     diagnose_node,
     hand_over,
 )
+from plugins.devops.graph.intake import intake_node
 from plugins.devops.graph.prompt import build_instructions
 from plugins.devops.graph.report import report_node
-from plugins.devops.graph.resolve import resolve_node
-from plugins.devops.params import ApiIssueParams
 from plugins.devops.sources.logs import LokiSource, SshKubectlSource
 from plugins.devops.sources.release import ReleaseSource
 
@@ -58,7 +61,7 @@ log = logging.getLogger(__name__)
 TASK_TYPE = "devops.api_issue"
 
 #: The three nodes that only read a row or write one. **Bounded because nothing
-#: is**, not because they are slow: `resolve`, `acknowledge` and `report` all
+#: is**, not because they are slow: `intake`, `acknowledge` and `report` all
 #: reach the database, and a node with no ceiling waits on a hung connection for
 #: as long as the process lives — holding a pool slot. Generous enough that a
 #: busy SQLite write never trips it, small enough to be a bound.
@@ -96,11 +99,9 @@ def build_devops_dag(api: Any) -> DAG:
     """The whole graph, built from the plugin's config and the composition
     root's boot capabilities (`api.caps`).
 
-    Node 0 is `caps.prepare_node` — the same extractor node every task type
-    runs, reached through caps so this plugin imports none of the kernel's
-    graph machinery. `on_ready` is `None` on it: a complete set of parameters
-    is the *start* of the work here, not an answer, and `prepare` returns the
-    parameters for `Resolve` to read.
+    Node 0 is `intake_node()` — deterministic, no model, no `caps` involved:
+    it reads the task's own text rather than a set of extracted parameters,
+    so there is nothing here for `caps.prepare_node` to fill in first.
 
     The diagnose model is `caps.make_harness`, `None` when no `devops.diagnose`
     agent is configured — a fresh install, and every test that does not set one
@@ -108,10 +109,8 @@ def build_devops_dag(api: Any) -> DAG:
     """
     caps = api.caps
     cfg = api.config  # DevopsConfig (the plugin's own block)
-    whole = caps.config  # the full application Config, for shared agents/budget
-    extractor = whole.agents.get("extractor")
+    whole = caps.config  # the full application Config, for the shared agent
     diagnose_agent = whole.agents.get("devops.diagnose")
-    budget_tokens = whole.context.extraction_budget_tokens
 
     # A factory, because the tools carry this run's placement and numbering —
     # one harness built at boot would read the previous case's service.
@@ -130,23 +129,7 @@ def build_devops_dag(api: Any) -> DAG:
     return DAG(
         name=TASK_TYPE,
         nodes=(
-            caps.prepare_node(
-                TASK_TYPE,
-                ApiIssueParams,
-                on_ready=None,
-                budget_tokens=budget_tokens,
-                agent=None if extractor is None else "extractor",
-                # **A ceiling either way.** With no extractor configured this
-                # node makes no model call and is fast by construction — but
-                # fast by construction is not bounded. The agent's clock when
-                # there is one, the row clock when there is not.
-                timeout_seconds=(
-                    ROW_TIMEOUT_SECONDS
-                    if extractor is None
-                    else extractor.timeout_seconds + NODE_CLOCK_MARGIN_SECONDS
-                ),
-            ),
-            resolve_node(timeout_seconds=ROW_TIMEOUT_SECONDS),
+            intake_node(timeout_seconds=ROW_TIMEOUT_SECONDS),
             acknowledge_node(timeout_seconds=ROW_TIMEOUT_SECONDS),
             diagnose_node(
                 make_harness=make_diagnose_harness,
@@ -163,8 +146,7 @@ def build_devops_dag(api: Any) -> DAG:
             ),
         ),
         edges=(
-            Edge("prepare", "resolve"),
-            Edge("resolve", "acknowledge", when=_ran_ok("resolve")),
+            Edge("intake", "acknowledge", when=_ran_ok("intake")),
             Edge("acknowledge", "diagnose"),
             # Gated: an `Ask` or a `HandOver` from the reads loop is the
             # decision, so the walk stops at diagnose rather than falling

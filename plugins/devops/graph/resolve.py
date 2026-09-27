@@ -1,4 +1,4 @@
-"""Node 1: which environment, which service, and where it runs.
+"""Helpers for which environment a domain is, and which path a curl names.
 
 **The environment comes from the domain, by a table the operator wrote.**
 Not from the reporter, who says "dev" meaning the dev *app* against
@@ -17,53 +17,25 @@ longest-suffix table holds the rule and its exceptions with no branch for
 either — `aperogroup.ai → production`, `dev.aperogroup.ai → dev`, and the
 exception is one more row that wins by being longer.
 
-**Where it runs comes from rows the operator wrote** (D3). Domain → `route`
-→ `service`, and the service row carries the Loki labels for production and
-the pod pattern for dev. A missing row is a hand-over, not a guess: guessing
-which pod serves a domain is how a diagnosis gets built from another
-product's logs (finding G).
+**Node 1 itself is gone (ticket 6).** `Resolve` used to also read "where it
+runs" from rows the operator wrote (D3) and hand over on a missing row; that
+is now `Intake`'s job (`plugins/devops/graph/intake.py`), which imports
+`domain_of`/`environment_of` from here rather than duplicating them.
 """
 
 from __future__ import annotations
 
-import logging
 import re
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
 from typing import Any
-
-from friday.sdk.workflow import Deps as DAGDeps, DAGState, HandOver, Node, envelope
-from friday.sdk.sources import Placement
-from plugins.devops.memory import (
-    DEVOPS_ENVIRONMENT,
-    DEVOPS_PROJECT,
-    DEVOPS_ROUTE,
-    DEVOPS_SERVICE,
-)
 
 __all__ = [
     "domain_of",
     "environment_of",
     "path_of",
-    "resolve_node",
-    "resolved",
 ]
 
-log = logging.getLogger(__name__)
-
 _URL = re.compile(r"https?://(?P<host>[\w.-]+)")
-
-
-def resolved(result: Any) -> tuple[Placement, dict[str, Any] | None]:
-    """Read node 1's envelope back: where to look, and the project row.
-
-    A pair of plain values rather than an object, because what goes into the
-    envelope is JSON — `DAGState.to_dict` replaces anything that does not
-    survive a round trip with a marker, and a node marked unstorable runs
-    again after a restart. Cheap here, but the same envelope is what the
-    board renders, and a marker renders as nothing at all.
-    """
-    return Placement(**result["placement"]), result.get("project")
 
 
 def domain_of(curl: str | None) -> str | None:
@@ -118,109 +90,3 @@ def environment_of(domain: str | None, known: Sequence[Any]) -> str:
     if not matched:
         return "external"
     return max(matched, key=lambda row: len(row.suffix)).env
-
-
-def resolve_node(*, timeout_seconds: float | None = None) -> Node:
-    """Build node 1. No model: every decision here is a rule or a row."""
-
-    async def _resolve(state: DAGState, deps: DAGDeps) -> Any:
-        params = state["prepare"]
-        channel_id = deps.task.conversation.channel_id
-        domain = domain_of(getattr(params, "curl", None))
-
-        if domain is None:
-            # D2: "Without a curl there is no domain". A report is findable
-            # without one — `_traceable` lets an endpoint plus an identifier
-            # through, and ticket 01 made that the point of the type — but
-            # findable is not the same as routable, and the routing table is
-            # keyed on the domain. Naming a service another way is still not
-            # a thing a task can do, so this is a hand-over that says which
-            # of the two is missing, rather than the `external` one, which
-            # would blame a domain nobody wrote.
-            return HandOver(
-                "nothing here carries the URL that was called, so I cannot "
-                "tell which service or environment this is about. An "
-                "endpoint name or a correlationId does not say which host "
-                "it was called on."
-            )
-
-        known = await deps.db.structured_memories(
-            channel_id, kind=DEVOPS_ENVIRONMENT
-        )
-        if not known:
-            # Nothing has been written down about any domain. Saying
-            # "external" here would be a claim — that this domain is not ours
-            # — made by a room that knows nothing about any domain at all.
-            return HandOver(
-                f"nothing here says which domains are ours, so I cannot tell "
-                f"what {domain} is. One `environment` row per domain suffix "
-                f"— `aperogroup.ai` is production, `dev.aperogroup.ai` is dev "
-                f"— is what this reads."
-            )
-
-        env = environment_of(domain, known)
-
-        if env == "external":
-            return HandOver(
-                f"the request goes to {domain}, which no `environment` row "
-                "matches — so it is not one of ours and I have not looked at "
-                "anything. If it is a proxy of ours, the table does not know "
-                "it yet."
-            )
-
-        route = await deps.db.structured_memory(
-            channel_id, kind=DEVOPS_ROUTE, key=domain
-        )
-        if route is None:
-            return HandOver(
-                f"no route row for {domain}. Nothing says which service that "
-                "domain is, and guessing one reads another product's logs."
-            )
-        if route.env != env:
-            return HandOver(
-                f"the route row for {domain} says {route.env}, and the domain "
-                f"says {env}. One of the two is wrong and I will not pick."
-            )
-
-        service = await deps.db.structured_memory(
-            channel_id, kind=DEVOPS_SERVICE, key=route.service
-        )
-        if service is None:
-            return HandOver(
-                f"{domain} routes to the service {route.service!r}, which has "
-                "no row — so nothing says which pod or Loki app it is."
-            )
-
-        placement = (
-            Placement(
-                env=env,
-                service=route.service,
-                cluster=service.prod.cluster,
-                namespace=service.prod.namespace,
-                app=service.prod.app,
-            )
-            if env == "production"
-            else Placement(
-                env=env,
-                service=route.service,
-                namespace=service.dev.namespace,
-                pod_pattern=service.dev.pod_pattern,
-            )
-        )
-        project = await deps.db.structured_memory(
-            channel_id, kind=DEVOPS_PROJECT, key=service.project
-        )
-        if project is None:
-            log.info(
-                "task %s: no project row for %s — the code node will say so",
-                deps.task.id, service.project,
-            )
-        return envelope(
-            "ok",
-            "",
-            domain=domain,
-            placement=asdict(placement),
-            project=None if project is None else asdict(project),
-        )
-
-    return Node("resolve", _resolve, timeout_seconds=timeout_seconds)

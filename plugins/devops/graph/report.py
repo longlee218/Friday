@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from plugins.devops.graph.diagnose import diagnosis_of
-from plugins.devops.graph.resolve import resolved
+from plugins.devops.graph.intake import intake_of
 from plugins.devops.graph.deps import ApiIssueDeps
 from friday.sdk.workflow import DAGState, HandOver, Node, Reply
 from friday.sdk.outbox import Kind
@@ -43,14 +43,14 @@ def render(state: DAGState, *, task_id: int, at: datetime) -> str:
     diagnosis = diagnosis_of(thought)
 
     try:
-        placement, project = resolved(state["resolve"])
+        placement = intake_of(state["intake"]).placement
         where = (
             f"- environment: `{placement.env}`\n"
             f"- service: `{placement.service}`\n"
-            f"- repository: `{(project or {}).get('repo_path', '—')}`"
+            f"- repository: `{placement.repo_path or '—'}`"
         )
     except (KeyError, TypeError):
-        # A report is written whatever ran, so a state without a `resolve`
+        # A report is written whatever ran, so a state without an `intake`
         # result renders the rest rather than raising. Narrow on purpose:
         # this used to catch everything, which would have swallowed a real
         # fault in the two lines above it.

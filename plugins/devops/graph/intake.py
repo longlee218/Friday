@@ -6,11 +6,10 @@ node, producing an `IntakeContext`. Ticket 03 on board
 `the-graph-becomes-a-loop`; see
 `.scratch/the-graph-becomes-a-loop/issues/03-what-intake-gathers-and-the-shape-the-loop-returns.md`.
 
-**Built, not wired.** This node is not on `build_devops_dag`'s live edges —
-rewiring the graph and dropping `prepare`/`find_request_log`/`read_failing_code`
-is ticket 6 ("Rewire graph; drop extraction"). Its logic is exercised by
-`tests/test_api_issue.py` directly, the same way `resolve_node` was before it
-had an edge into it.
+**Wired in ticket 6** ("Rewire graph; drop extraction"), which also folded
+this node's own `Placement` into `friday.sdk.sources.Placement` — the single
+type now, carrying the superset of what `Resolve`'s old `Placement` + its
+separate `project` dict and this module's own richer shape each held.
 
 **The service fork — (c)→(a) hybrid, decided.** `request_text` is
 string-matched against the room's known service names (no model, no
@@ -27,6 +26,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from friday.sdk.sources import Placement
 from friday.sdk.workflow import DAGState, Node, envelope
 from plugins.devops.graph.deps import ApiIssueDeps
 from plugins.devops.graph.logs import _reported_at
@@ -51,29 +51,6 @@ _ARTIFACT_REF = re.compile(r"\[artifact ([0-9a-f]+): ([^\]]*)\]")
 #: is out of scope for this node (spec: "keep it simple, cap the counts").
 _MEMORY_CAP = 20
 _SKILLS_CAP = 10
-
-
-@dataclass(frozen=True, slots=True)
-class Placement:
-    """Where this case lives — devops-local and richer than
-    `friday.sdk.sources.Placement`, which a `LogSource` reads from and stays
-    untouched here; ticket 6 reconciles the two."""
-
-    env: str
-    service: str
-    clone_path: str = ""
-    repo_path: str = ""
-    release_tag: str = ""
-    namespace: str = ""
-    pod_selector: str = ""
-    cluster: str = ""
-    app: str = ""
-    dbs: tuple[str, ...] = ()
-    error_code_doc: str = ""
-    container_roots: tuple[str, ...] = ()
-    #: The room's candidate services, when `service` is unresolved (vague or
-    #: no match). Empty once a service is resolved.
-    candidates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,7 +155,7 @@ async def _placement(
             fields["app"] = resolved.prod.app
         elif env == "dev":
             fields["namespace"] = resolved.dev.namespace
-            fields["pod_selector"] = resolved.dev.pod_pattern
+            fields["pod_pattern"] = resolved.dev.pod_pattern
         project = await deps.db.structured_memory(
             channel_id, kind=DEVOPS_PROJECT, key=resolved.project
         )
@@ -186,6 +163,7 @@ async def _placement(
             fields["clone_path"] = project.repo_path or ""
             fields["repo_path"] = project.repo_path or ""
             fields["error_code_doc"] = project.error_codes_doc or ""
+            fields["stack"] = project.stack or ""
     else:
         # Vague, or unnamed: the candidate set, for the loop to narrow by
         # reading — never a guess (the (c)->(a) hybrid, ticket 03).
@@ -230,7 +208,7 @@ def intake_node(*, timeout_seconds: float | None = None) -> Node:
 def intake_of(result: Any) -> IntakeContext:
     """Intake's envelope read back — the JSON round trip, undone: lists
     become tuples again, at both levels `Placement`/`IntakeContext` carry
-    one (mirrors `resolve.resolved`)."""
+    one."""
     data = result["intake"]
     placement_data = dict(data["placement"])
     for field_name in ("dbs", "container_roots", "candidates"):
