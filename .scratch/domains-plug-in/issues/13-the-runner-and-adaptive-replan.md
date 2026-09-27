@@ -18,3 +18,7 @@ never re-runs — finished phases.
 > Note from "The plan schema and the step vocabulary" (10): the Plan has no
 > hypotheses and no per-case done-criteria; a step result is keyed by
 > `(task_id, step_key)` (content hash), not `(plan_version, phase_id)`.
+
+> Note from "The Planner" (12): a replan is a fresh Planner conversation given
+> the latest intake context, the current plan, the stored results of finished
+> steps and the replan reason; each replan gets its own 2 gate rewrites.

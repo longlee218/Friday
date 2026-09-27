@@ -205,6 +205,13 @@ without approval; an answer that states a cause always waits for the operator.
   trigger, lands in the gate. Refusal → all errors to the Planner, 2 rewrites
   (core constant, not `max_replans`) → `HandOver`. Operator sees plans on the
   board, never approves them; one plan line on the approval card.
+- [The Planner](issues/12-the-planner.md): one core agent, always runs;
+  sees intake context (incl. memory/skills), the contract, a new short
+  `description` per agent/toolset, optional `Action.planning` (outside the
+  contract). Tools `core.memory`/`core.skills` only; strong tier and budget
+  as core constants, time counts toward `total_time`. Gate refusal → same
+  conversation; failure → `HandOver` `planner_failed`; replan → fresh
+  conversation. Code-graded plan-shape eval on synthetic fixtures.
 
 ## Not yet specified
 
@@ -215,7 +222,7 @@ without approval; an answer that states a cause always waits for the operator.
 - **The `ops` domain beyond `request_permission`.**
 - **Hand-off between actions** — a question that turns out to be a failure, or
   the reverse: re-plan inside the run, re-triage, or hand over?
-- **Core agents' tiers** — triage, responder, room summary, and the Planner itself.
+- **Core agents' tiers** — triage, responder, room summary (the Planner's is decided: strong).
 - **Guards that keep it true** — structural tests once the API shape lands.
 - **What happens to `build-the-loop` ticket 4** (resume) — likely subsumed by
   the spine's pause/resume ticket.

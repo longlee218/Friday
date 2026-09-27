@@ -15,3 +15,8 @@ diff, continue vs re-plan — and whether this subsumes `build-the-loop` ticket 
 
 > Note from "GatePlan" (11): every plan version — refused ones with their gate
 > errors included — must be stored where the board can read it.
+
+> Note from "The Planner" (12): a gate refusal is rewritten in the same
+> Planner conversation, so its `message_history` must persist durably between
+> the Planner step and the GatePlan step. Planner time counts toward the
+> task's elapsed time.
