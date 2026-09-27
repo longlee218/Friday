@@ -1,0 +1,188 @@
+---
+labels: wayfinder:map
+---
+
+# Domains plug in without touching the core
+
+## Destination
+
+Lock the design of Friday's **agent-building framework** for the Python backend
+(`friday/` + `plugins/`): **one durable spine** that every task runs on, where a
+plugin is a **domain**, each task type is an **action** (an intent plus a
+contract), and a **Planner** composes each run's `Plan` from the step types the
+plugins register. Five threads:
+
+1. **Taxonomy** — domain = plugin; action = intent + contract.
+2. **Dynamic registration** — adding a domain or action touches (almost) nothing
+   in the core: triage, registry, prompt, config and board all read from the plugin.
+3. **The spine** — Intake → Plan → GatePlan → Run → Draft, durable end to end,
+   with bounded, re-gated replans (`docs/research/durable-spine-dynamic-plans.md`).
+4. **Tools & step types** — core ones in one place; domain ones inside their
+   plugin, registered through the plugin API.
+5. **Code standard** — class vs function, file size, one type per concept.
+
+Done when every thread is decided and a build board exists. Decided, not built.
+
+## Notes
+
+- **Domain**: Friday. Read `docs/research/durable-spine-dynamic-plans.md` (the
+  spine this board now adopts), `docs/DESIGN.md` § What exists, `CONTEXT.md` §
+  Vocabulary, `friday/sdk/plugin.py` (the plugin contract), and the boards this
+  sits beside: `build-the-loop` (graph → loop rework, done — its graph becomes
+  the first plan) and `the-task-contract` (the per-type contract; "the contract
+  IS the Plan" — this board is where that Plan gets built).
+- **Skills every session consults**: `grilling` + `domain-modeling`.
+- **Standing preferences**: design questions in **Vietnamese**, one at a time,
+  simple; code and docs in **English**.
+- **Plan, don't do.**
+- New terms (*domain*, *action*, *toolset*, *step type*, *model tier*,
+  *enricher*, *spine*) go to `CONTEXT.md` § Vocabulary at build time.
+
+### Reference: one API-error message, end to end (target shape)
+
+`✓` exists today · `◆NN` new, decided on this board (ticket number).
+
+```
+ Reporter on Discord: "@Friday POST /v1/onboarding/completed returns 400" + curl
+        │
+        ▼
+ 1. INBOX ✓            record + dedup; the pasted curl stored as an artifact
+        ▼
+ 2. TRIAGE (1 model call)                                                 ◆02
+        prompt = core reasoning + every registered action's recognition
+                 reasoning + operator-confirmed DB examples
+        → backend.trace_problem @ 0.9   (nothing clear → low → operator)
+        ▼
+ 3. TASK + POOL ✓      task of type backend.trace_problem; pool claims it
+        → starts the durable spine workflow task-<id> (DBOS)             ◆14
+        ▼
+ ╔═ DURABLE SPINE — every step durable, resumes after a crash ═════════════╗
+ ║ 4. INTAKE (no model)                                               ◆04 ║
+ ║      core:   request_text, reported_at, correlationId, curl artifact,  ║
+ ║              matching memory + skills                                   ║
+ ║      domain: backend enricher → env, service, cluster/namespace/app,    ║
+ ║              repo, stack                                                ║
+ ║      → placement_identity (env, service, clone, repo, tag)              ║
+ ║ 5. ACKNOWLEDGE ✓ (a step or a spine concern?)                      ◆15 ║
+ ║      → outbox, no approval: "looking at the logs of <service>…"         ║
+ ║ 6. PLANNER (model, inside the action's contract)               ◆12 ◆01 ║
+ ║      in:  intake context + trace_problem's contract (allowed step      ║
+ ║           types, toolsets backend.logs + backend.code, budget, tier)   ║
+ ║      out: Plan v1 (data)                                           ◆10 ║
+ ║           s1 sub_agent diagnose (toolsets: backend.logs, backend.code)  ║
+ ║           s2 draft report                                               ║
+ ║ 7. GATEPLAN                                                        ◆11 ║
+ ║      schema · within contract · no escalation · budget → freeze + hash  ║
+ ║      (fails → re-plan, over N → HandOver)                               ║
+ ║ 8. RUN (WorkflowRunner, each step memoized by DBOS)                ◆13 ║
+ ║      s1 diagnose agent loop ✓: read_log → L1..Ln, read_code,            ║
+ ║         what_code_means → ends with one of:                             ║
+ ║           Diagnosis (cause, refs [L12,L13], conclusive, alternatives)  ║
+ ║           Ask (ask_reporter) ─────────────────────┐                    ║
+ ║           HandOver (hand_over) ────────────┐      │                    ║
+ ║      after each step: transient → retry · tail wrong → patch + re-gate ║
+ ║      · goal gone → abort · over max_replans → HandOver                 ║
+ ║ 9. CHECK THE RESULT (the-task-contract)                            ✓/◆ ║
+ ║      code: every ref resolves in what was read; judge runs shadow      ║
+ ║ 10. DRAFT ✓  s2 → operator brief + the reporter's reply                ║
+ ╚═══════════════════════════╪═══════════════════╪══════╪══════════════════╝
+                             ▼                   │      │
+ 11. APPROVAL ✓   the Reply waits for the operator on the board
+                             ▼                   ▼      │
+ 12. OUTBOX ✓ (DBOS, never sends twice) → Discord; HandOver → operator only
+                                                        │
+ ASK BRANCH ────────────────────────────────────────────┘               ◆14
+   run pauses; the question goes to the reporter (no approval)
+   reporter replies → INTAKE re-runs over the whole conversation
+     ├ placement_identity unchanged → continue, the reply added to context
+     └ changed (another env/service) → the Planner re-plans
+```
+
+Only three model calls on the happy path: triage, the Planner, the diagnose
+agent (plus the judge once calibrated). Intake, the gate, the runner and the
+outbox are plain code. Only the acknowledgement and an `Ask` reach the reporter
+without approval; an answer that states a cause always waits for the operator.
+
+## Decisions so far
+
+<!-- Settled in the charting conversation, 2026-09-27. -->
+
+- **One domain = one plugin.** A plugin covers one system area and owns every
+  action in it, plus its step types, toolsets, sources, memory kinds and config.
+- **The initial catalog**: `backend.trace_problem` (the "trace a failure" half of
+  `devops.api_issue` — it *replaces* api_issue, not beside it),
+  `backend.answer_question` (the "how does this rule work" half of api_issue
+  **plus all of `docs.doc_question`** — the docs plugin goes),
+  `ops.request_permission` (was core `access_request`; `ops` holds other
+  operational actions later).
+- **Naming**: `<domain>.<verb_object>` in snake_case — one convention for
+  actions, memory kinds and agents; the action folder name equals the action name.
+- **The spine, not per-action graphs** (Q17): every task runs on one durable
+  spine — Intake → Plan → GatePlan → Run → Draft → Approval → Outbox. A plugin no
+  longer contributes a graph; it contributes **step types** and the capabilities
+  they use; a **Planner** composes the run's `Plan` (data, over a closed step
+  vocabulary), `GatePlan` validates and freezes it, a `WorkflowRunner` executes
+  it. Customising *how steps combine* is prompt/declaration; a *new capability*
+  is still a coded step type or toolset — Friday never runs model-written code.
+- **An action is an intent + a contract** (Q18): triage picks an action; the
+  action carries no graph but a contract — allowed step types and toolsets,
+  model tier, budget, acceptance criteria, intake enricher. The Planner plans
+  **inside** that contract. (Joins `the-task-contract`: the contract is the Plan's
+  frame.)
+- **Triage is assembled, not written**: the core keeps only the domain-agnostic
+  reasoning; **each action declares its own recognition reasoning and a few
+  examples**; triage loads all of them. `config.yaml` `triage_examples` is
+  deleted; operator-confirmed DB classifications still feed in as examples.
+- **No order and no catch-all label** in triage: nothing fits clearly → low
+  confidence → the operator decides (existing `needs_human` path).
+- **The extractor is deleted outright** — with the `Params` classes, the
+  validation DSL and `ask_for_details`. Understanding the request is the
+  Planner's and the agents' job. A reporter's reply re-runs Intake over the whole
+  conversation (enriching context); `placement_identity` unchanged → the run
+  continues with the reply added; changed → re-plan. Hard to reverse → an ADR.
+- **Intake is core + a domain enricher**: the core provides the common context
+  (request text, reported-at, uuid/artifact hints, memory/skill retrieval); a
+  domain registers an enricher (backend: `Placement`) and **defines its own
+  `placement_identity`**.
+- **Tools are toolset factories**: `api.toolset(name, factory)` builds tools per
+  run (they carry the run's placement and `Evidence`); the MCP tools a plugin's
+  sources need are declared through the same API. **One `tool` decorator**; core
+  tools become core toolsets (`core.skills`, `core.memory`).
+- **The plugin owns tools; the action is granted them** (Q19): toolsets are
+  split **by data source** — e.g. `backend.logs` (read_log), `backend.code`
+  (read_code, what_code_means), `backend.docs` (read_docs), `backend.db`
+  (query_db) — matching `sources/` and the sensitivity GatePlan checks. An
+  action's contract names the toolsets it may use (`trace_problem`: logs + code;
+  `answer_question`: code + docs), so a tool is written once and shared.
+- **Plugins are discovered, in one place**: every package under `plugins/` with
+  a `PLUGIN` loads; `config.yaml` only switches one off.
+- **`config.yaml` holds only provider keys and named model tiers** (named freely,
+  e.g. `sonnet-fast`, `super-strong`). Code picks a tier by name; an undeclared
+  tier refuses the boot.
+- **Class vs function**: a class when it holds a long-lived resource or state; a
+  function otherwise — a step-type implementation is a plain function, no factory
+  returning a closure.
+- **Files**: Python modules snake_case, long descriptive names; **200 lines is a
+  soft target** — split by responsibility. `development-rules.md` corrected at
+  build time.
+
+## Not yet specified
+
+- **Getting smarter** — plan exemplars (stored, retrieved, scored by outcome),
+  a reflection step; durable-spine §8. Needs real runs first.
+- **Invalidation sophistication** — guard steps the Planner inserts vs a world
+  cursor the runner checks; how much is enough before data exists.
+- **The `ops` domain beyond `request_permission`.**
+- **Hand-off between actions** — a question that turns out to be a failure, or
+  the reverse: re-plan inside the run, re-triage, or hand over?
+- **Core agents' tiers** — triage, responder, room summary, and the Planner itself.
+- **Guards that keep it true** — structural tests once the API shape lands.
+- **What happens to `build-the-loop` ticket 4** (resume) — likely subsumed by
+  the spine's pause/resume ticket.
+
+## Out of scope
+
+- The `web/` board redesign — beyond reading the action list from the API and
+  rendering a frozen plan.
+- Friday writing code (a separate charter).
+- Plugins living outside the repo, packaging, entry-point discovery.
