@@ -15,10 +15,16 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 6 | Rewire graph; drop extraction + unify Placement | ✅ done | 3, 5, 10 |
 | 7 | Operator: capture ≥10 cases | 🧑 parked (needs launch) | 1 |
 | 8 | Delete fixed-feed baseline | ⬜ code done, measure parked | 7 |
-| 9 | Doc debts (CONTEXT/DESIGN/ADR) | ⬜ **takeable** | 6 (done) |
+| 9 | Doc debts (CONTEXT/DESIGN/ADR) | ✅ done | 6 |
 | 10 | `ask_reporter` terminal tool (Ask outcome, split from 4) | ✅ done | — |
 
 ## Now
+- **Ticket 9 — done.** Docs caught up to the new shape: `CONTEXT.md` § Action
+  (findability no longer a gate for api_issue), new `## Placement identity`
+  vocab, `docs/DESIGN.md` (§ What exists / § Reasoning / § Workflows + the
+  extractor note) rewritten to `intake → acknowledge → diagnose loop → report`
+  with old text kept as superseded history, and **ADR 0002** (findability is not
+  a precondition for api_issue). Suite 1575 passed / 7 known env fails.
 - **Ticket 6 — done.** Graph rewired to `intake → acknowledge → diagnose →
   report`; `prepare`(extractor) + `resolve` removed for api_issue (shared
   `prepare_node`/`access_request` untouched). **`Placement` unified** into one
@@ -72,6 +78,9 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
   carries the Ask outcome (build it with resume). Ticket 7 (operator cases)
   unblocked by ticket 1.
 
+- 2026-09-27 — ticket 9 done. Docs updated to the intake→loop shape (CONTEXT §
+  Action + placement-identity vocab; DESIGN § What exists/Reasoning/Workflows +
+  extractor note), ADR 0002 (findability not a precondition). Suite 1575 passed.
 - 2026-09-27 — ticket 6 done. Rewire intake → acknowledge → diagnose → report
   (prepare+resolve dropped for api_issue); Placement unified into one
   sdk.sources.Placement; acknowledge always-on with generic text for vague/

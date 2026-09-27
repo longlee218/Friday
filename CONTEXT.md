@@ -314,10 +314,14 @@ side effect. Every task first **fills in** what the message carries and
 the reporter as a question; `Reply` answers the reporter in the operator's
 name and **waits for approval**; `HandOver` goes to the operator only and
 never reaches the reporter. A task missing something it cannot work without
-has to say so: required-ness is read off the parameter type, except where a
-type overrides it (`api_issue`: a correlationId *or* a curl makes a request
-findable). **A precondition belongs in the gate, not in the last node's else
-branch.** `api_issue`'s `Report` produces a `Reply` (a brief) today.
+has to say so: for a **single-node type** (e.g. `access_request`) required-ness
+is read off the parameter type and a precondition belongs in that gate, not in
+the last node's else branch. **`api_issue` is no longer gated on findability**
+(board `build-the-loop`, 2026-09-27; ADR 0002): its diagnose loop reads log,
+code and docs and calls `ask_reporter` only when genuinely stuck, so a missing
+correlationId/curl no longer blocks opening an investigation — the reversal of
+the old "a correlationId *or* a curl makes a request findable" precondition.
+`api_issue`'s `Report` produces a `Reply` (a brief) today.
 
 ## Graph
 
@@ -340,6 +344,17 @@ first that holds is taken. Deterministic Python.
   agent's by a margin, checked at load — two equal clocks race.
 - An agent is a node inside a graph, never the thing driving it; which agent
   and server a node gets is composition, handed in through `deps`.
+
+## Placement identity
+
+`api_issue`'s staleness key: the tuple `(env, service, clone, repo, tag)` on the
+`Intake` node's `Placement`. `Intake` runs fresh every pass and is never
+checkpointed; when the reporter answers an `Ask`, the graph resumes only if the
+placement identity is unchanged, and discards the running investigation if it
+differs (a reply that moves env/service is a different case, not a continuation).
+Memory/skills changing does **not** invalidate — only these five fields do.
+Introduced on board `the-graph-becomes-a-loop` (ticket 01) and wired on
+`build-the-loop`.
 
 ## Source, check, node
 

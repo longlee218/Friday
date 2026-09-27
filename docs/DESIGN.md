@@ -101,7 +101,7 @@ the repo root. Every module below that is not `sdk`/`store` lives under
 | `friday/kernel/plugin_host.py` | Loads the plugins named in `config.plugins` (default `plugins.devops`) and validates each one's config block against its `Plugin.config`. Two lifecycle-specific `PluginAPI` impls, so one `register(api)` serves both registration passes: `TaskTypeAPI` (in `register_all`) assembles and registers a plugin's task-type graph from the boot caps and ignores its memory kinds; `MemoryKindAPI` (in `register_all_memory_kinds`) registers its memory kinds and readers and ignores its task type. Folded into the kernel in ticket 21: it names no plugin statically (it loads them by name with `importlib`) and reaches the harness through the kernel, so both guards hold |
 | `friday/kernel/dag/` | `adapter.py` — the **DBOS adapter** beneath the port, the one module that imports `dbos`. A graph is a `@DBOS.workflow` walk, each node a memoized `@DBOS.step`; DBOS owns run persistence, step memoization and resume. The kernel chain (clock, retry, redaction, the `node_runs` record) is ported into `_invoke`, not delegated. An ast guard keeps `dbos` here |
 | `friday/kernel/dag/` | `prepare.py` builds the entry node (node 0) every graph shares. **`registry.py` is the one task-type registry** (ticket 11): a task type registers a `TaskTypeSpec` (params, graph, needs, run-deps, budget) — the map that used to be `PARAMS` + the extractor map + the router's `_graphs` — and the built DAG is stored beside it. `task_types.py` registers the one in-core simple type (`access_request`) and loads the plugins — its `BootContext` is the **caps** a plugin's graph builder reaches through (`prepare_node`, `make_harness`, and `simple_dag` for a persona whose whole graph is node 0); `router.py` is now generic — it reads the registry, builds `EDGE_ROUTER`, checks the clocks and (ticket 13) checks that every type's `deps` factory can build its run `Deps`, and **names no task type**. The `api_issue` investigation graph, its sources and its typed per-run `Deps` moved out to `plugins/devops/` in ticket 14. `adapter.py` is the **DBOS adapter** (the one module that imports `dbos`), folded in here when `dag/` and `workflow/` merged (ticket 20); the old `engine.py`/`state.py` re-export shims were deleted then, and the graph vocabulary is imported from `friday.sdk.workflow`/`friday.sdk.workflow_state` directly (the hand-written `DAGRunner` was retired onto DBOS) |
-| **`plugins/devops/`** | The first real plugin (ticket 14), and the proof the split holds: **imports `friday.sdk` only**. `__init__.py` exposes `PLUGIN` + `register(api)`, which contributes the `devops.api_issue` task type, its pack kinds (`devops.service`/`.route`/`.environment`/`.project`/`.dependency`, in `memory.py`) and their reader routing. `params.py` (`ApiIssueParams`), `config.py` (`DevopsConfig`, incl. the container-root policy as data — box 4), `graph/` (the six-node investigation graph, its diagnose prompt and `ApiIssueDeps`), `sources/` (`LokiSource`/`SshKubectlSource`/`ReleaseSource`/`DbSource` and the code reader, implementing the sdk ports), `investigate.py` (the diagnose read tools). The heavy handles it cannot import — the diagnose `Harness`, node 0's `prepare_node` — are injected by the composition root through the boot caps |
+| **`plugins/devops/`** | The first real plugin (ticket 14), and the proof the split holds: **imports `friday.sdk` only**. `__init__.py` exposes `PLUGIN` + `register(api)`, which contributes the `devops.api_issue` task type, its pack kinds (`devops.service`/`.route`/`.environment`/`.project`/`.dependency`, in `memory.py`) and their reader routing. `params.py` (`ApiIssueParams`), `config.py` (`DevopsConfig`, incl. the container-root policy as data — box 4), `graph/` (the investigation graph `intake → acknowledge → diagnose loop → report`, its diagnose prompt and `ApiIssueDeps`), `sources/` (`LokiSource`/`SshKubectlSource`/`ReleaseSource`/`DbSource` and the code reader, implementing the sdk ports), `investigate.py` (the diagnose read tools). The heavy handle it cannot import — the diagnose `Harness` — is injected by the composition root through the boot caps; node 0 is now the plugin's own deterministic `intake` node, not the shared `prepare_node` (board `build-the-loop`) |
 | **`plugins/docs/`** | The second persona (ticket 15), and the proof G2 holds — a new persona is a new plugin added with **zero kernel diff**. `docs.doc_question` has no investigation past node 0, so the plugin is `__init__.py` (`PLUGIN` + `register`) and `params.py` (`DocQuestionParams`) alone; its whole graph is the shared simple node-0, built through `api.caps.simple_dag` so it too imports `friday.sdk` only. Configured plugins are listed in `config.plugins` (default `plugins.devops`, `plugins.docs`) |
 | `friday/kernel/pool/` | The pool: runs node 0 itself each pass, then starts or resumes each task's durable DBOS workflow (`task-<id>`) and polls it to its next boundary — the outcome, or the `Ask` it suspended on. A workflow waiting on the reporter suspends and never blocks other tasks. Decides nothing about what a graph decides |
 | `friday/kernel/tools/` | Every tool an agent may call, one module per subject: skills (`fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file`), memory (`memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete`, scoped per channel, wired to the responder). `tests/test_tools.py` asserts the full list and forbids declaring a tool anywhere else (one exemption, below) |
@@ -256,11 +256,23 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   `register_dags`.
 - **Every task type is a graph. All but one get a single node** — extract,
   validate, then ask or hand over.
-- **`api_issue` has an investigation past node 0**: `Prepare → Resolve →
-  FindRequestLog → ReadFailingCode → Diagnose → Report`, in
-  `plugins/devops/graph/`, which owns its nodes, its prompt and the one agent
-  behind them. Three rules hold it together, and each replaces a way the
-  deleted five-node graph went wrong:
+- **`api_issue` has an investigation past node 0**: `Intake → Acknowledge →
+  Diagnose (loop) → Report`, in `plugins/devops/graph/`, which owns its nodes,
+  its prompt and the one agent behind them (board `build-the-loop`, 2026-09-27).
+  This replaced the older fixed pipeline `Prepare → Resolve → FindRequestLog →
+  ReadFailingCode → Diagnose → Report`:
+  - **`Intake`** (deterministic, no model) is node 0. It folds the old
+    `Prepare` (extractor) and `Resolve` (env/service table lookup) into one
+    pass: it derives placement from the `environment`/`service` rows, pulls
+    cheap regex `Hints` (correlationId, artifact ids), retrieves memory/skills,
+    and passes the reporter's raw text straight through. It runs fresh each pass
+    and is never checkpointed; its **placement identity** is the staleness key.
+  - The fixed **`FindRequestLog`/`ReadFailingCode`** pre-fetch nodes are gone —
+    the **`Diagnose` loop reads for itself** through tools (`read_log`,
+    `read_code`, `what_code_means`), and ends by returning `Diagnosis`, `Ask`
+    (via `ask_reporter`) or `HandOver` (via `hand_over`).
+  Three rules hold it together, and each replaces a way the deleted pipeline
+  went wrong:
   - **Every fact about where a request went is a row, not a rule in code.**
     `environment` rows say what a domain suffix means, longest suffix
     winning, so the convention (`aperogroup.ai` is production,
@@ -279,16 +291,17 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
     a JSON log line right 32 times in 40 and points at one 20 times in 20, so
     the model names lines and code puts the text back. A pointer that
     resolves to nothing voids the answer.
-  Only `Diagnose` calls a model. It is a slice (board
-  `read-it-the-way-the-operator-does`, ticket 00) and is allowed to be thrown
-  away once five real cases have been run through it.
-- **Gather gathers metadata; the model reads for itself** (operator,
-  2026-09-22, spec "Architecture v3.3" — **decided, not yet built**). The
-  fixed formulas that chose a needle, a window and when to widen were
-  judgement wearing a rule's clothes, and each was measured getting it
-  wrong within a week. So `Resolve` will produce only *where things are* —
-  repo, service, cluster, namespace, environment, running tag, readable
-  databases — and `Diagnose` will fetch through tools.
+  Only `Diagnose` calls a model.
+- **Intake gathers metadata; the model reads for itself** (operator,
+  2026-09-22, spec "Architecture v3.3" — **built** on board `build-the-loop`,
+  2026-09-27). The fixed formulas that chose a needle, a window and when to
+  widen were judgement wearing a rule's clothes, and each was measured getting
+  it wrong within a week. So `Intake` produces only *where things are* — repo,
+  service, cluster, namespace, environment, running tag, readable databases,
+  stack — and the `Diagnose` loop fetches through tools. Because the loop reads
+  code and docs, not only logs, a case with no matching log environment
+  (`env == "external"`) is still investigable, so a curl/correlationId is no
+  longer a precondition to open one (see CONTEXT.md § Action; ADR 0002).
 
   **A tool is not the back end, and the boundary is a measurement**: one raw
   `loki_query_range` window is 171 KB ≈ 43,654 tokens, and what `distil`
@@ -768,8 +781,18 @@ diagnosis, it is noticing a report is incomplete and asking for what is missing:
 > endpoint plus one id you called it with?"*
 
 That is mechanical, high-frequency, and cannot be embarrassingly wrong. An
-`api_issue` with no `curl` and no `endpoint`+`identifier` pair takes that
-path; one with either goes to tracing. Same type, different action, decided
+`access_request` missing its fields takes that path.
+
+> **Superseded for `api_issue`** (board `build-the-loop`, 2026-09-27). The
+> paragraph below describes the extractor-era gate — "an `api_issue` with no
+> `curl` and no `endpoint`+`identifier` takes the ask path; one with either goes
+> to tracing." `api_issue` no longer runs the extractor (`Intake` replaced it and
+> makes no model call), and findability is no longer a precondition: the diagnose
+> loop reads log, code and docs and calls `ask_reporter` only when genuinely
+> stuck. The historical reasoning is kept for the record (see ADR 0002).
+
+An `api_issue` with no `curl` and no `endpoint`+`identifier` pair took that
+path; one with either went to tracing. Same type, different action, decided
 by parameters.
 
 **Not the correlationId** (board `read-it-the-way-the-operator-does`, ticket
@@ -842,20 +865,27 @@ operator's, assembled from these parts rather than designed here.
 
 ## Workflows
 
-One workflow per type, **deterministic Python** — branching, not reasoning:
+One workflow per type, **deterministic Python** for the wiring — branching, not
+reasoning — with the reasoning confined to the one node that calls a model.
+`api_issue` is now an agentic loop (board `build-the-loop`, 2026-09-27):
 
 ```
 api_issue:
-    no curl and no endpoint+id       → ask for them
-    a domain that is not ours        → hand over, having read nothing
-    no route row for the domain      → hand over, naming the missing row
-    otherwise                        → read the log, read the code,
-                                       diagnose, write a report
+    intake      deterministic: placement from environment/service rows,
+                regex hints, retrieved memory/skills, the reporter's raw text
+    acknowledge tell the reporter it is being looked at (unapproved)
+    diagnose    agentic loop: read the log / code / docs with tools, then →
+                  Diagnosis  → report
+                  Ask        (ask_reporter) → pause for the reporter
+                  HandOver   (hand_over)    → the operator
+    report      the diagnosis as a Reply that waits for approval
 ```
 
-Agentic workflows are a later step, taken per type once the deterministic one is
-proven. Starting deterministic means the behaviour is inspectable, cheap, and
-identical every time, which is what makes the first weeks of logs worth reading.
+There is no upfront "ask for a curl" gate and no "not ours → hand over having
+read nothing": the loop reads code and docs, not only logs, so it investigates
+what it can and `Ask`s only when genuinely stuck (CONTEXT.md § Action; ADR 0002).
+Other task types stay a single deterministic node-0 (ask or hand over); an
+agentic loop is taken per type once it earns it.
 
 ## Responder
 
