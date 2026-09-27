@@ -98,8 +98,8 @@ Done when every thread is decided and a build board exists. Decided, not built.
      └ changed (another env/service) → the Planner re-plans
 ```
 
-Only three model calls on the happy path: triage, the Planner, the diagnose
-agent (plus the judge once calibrated). Intake, the gate, the runner and the
+Four model calls on the happy path: triage, the Planner, the diagnose
+agent, the responder writing the draft (plus the judge once calibrated). Intake, the gate, the runner and the
 outbox are plain code. Only the acknowledgement and an `Ask` reach the reporter
 without approval; an answer that states a cause always waits for the operator.
 
@@ -186,6 +186,18 @@ without approval; an answer that states a cause always waits for the operator.
   subset) → core retrieval keyed by the domain's `retrieval_keys()`. DB-only,
   no network; `release_tag` leaves `Placement` — diagnose reads the running
   version itself. `ops`: no enricher, identity `()`.
+- [What replaces `params` for the responder, the board and the pool](issues/05-what-replaces-params.md):
+  responder reads the intake context (+ `Outcome` when present), same
+  no-invention rule; nothing persisted — `tasks.params` dropped via Alembic
+  with the rename migration; board card = opening message text + triage
+  `reason` from its `decision_params`; pool line = first line of the opening
+  message; no per-action schema.
+- [The plan schema and the step vocabulary](issues/10-the-plan-schema-and-step-vocabulary.md):
+  `Plan` = task, action, version, `replaces`, contract, goal, a **straight
+  list** of steps `agent / ask / hand_over / draft` (`reads` = earlier steps);
+  `draft` = core responder model, fixed prompt. **Amends 01**: no hypotheses,
+  no per-case done-criteria. Hash = whole plan; results keyed by content
+  `step_key`, so a replan reuses identical steps.
 
 ## Not yet specified
 

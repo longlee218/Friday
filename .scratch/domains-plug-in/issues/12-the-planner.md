@@ -13,3 +13,7 @@ its model tier and budget, how the operator customises it by prompt/declaration
 (per action? per domain?), and its failure mode — no valid plan after N tries →
 `HandOver`, with what shown. One Planner for every action, or may an action ship
 planner guidance? And for a one-phase case, does the Planner still run?
+
+> Note from "The plan schema and the step vocabulary" (10): the Plan has no
+> hypotheses and no per-case done-criteria; a step result is keyed by
+> `(task_id, step_key)` (content hash), not `(plan_version, phase_id)`.

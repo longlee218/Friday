@@ -15,3 +15,8 @@ cannot be renamed mechanically. Decide: an Alembic data migration (the earlier
 renames' pattern) with what mapping for the split — or relabel the eval set by
 hand and leave old task rows under a legacy name? And the web reads the action
 list from the API.
+
+## Carried in from ticket 05 (2026-09-28)
+
+- The same Alembic migration also **drops `tasks.params`** (decided in
+  "What replaces `params`"); no data is carried over.
