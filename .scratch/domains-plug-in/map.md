@@ -62,7 +62,7 @@ Done when every thread is decided and a build board exists. Decided, not built.
  ║              matching memory + skills                                   ║
  ║      domain: backend enricher → env, service, cluster/namespace/app,    ║
  ║              repo, stack                                                ║
- ║      → placement_identity (env, service, clone, repo, tag)              ║
+ ║      → placement_identity (env, service, clone, repo)                   ║
  ║ 5. ACKNOWLEDGE ✓ (a step or a spine concern?)                      ◆15 ║
  ║      → outbox, no approval: "looking at the logs of <service>…"         ║
  ║ 6. PLANNER (model, inside the action's contract)               ◆12 ◆01 ║
@@ -174,6 +174,18 @@ without approval; an answer that states a cause always waits for the operator.
   plugin-registered **agent** that drives itself; steps shrink to `agent / ask /
   hand_over / draft`. Budget lives on the agent; the enricher on the domain.
   Names: `Action`, `ActionContract`, `Task`, `Plan`, `Outcome`.
+- [The recognition reasoning and the assembled triage prompt](issues/02-the-recognition-reasoning-and-the-assembled-triage-prompt.md):
+  `Recognition` = `means` + `pick_when` + `not_when` (signal → other action,
+  one-sided — replaces the ordered ladder) + `examples`. Label meaning lives in
+  the prompt only; the schema keeps a closed `Literal`. Examples add up
+  (plugin → core `skip` → DB-confirmed); labels render sorted by name, `skip`
+  last; boot refuses dangling `not_when`, shared or missing examples.
+- [Core intake and the domain enricher](issues/04-core-intake-and-the-domain-enricher.md):
+  core `intake()` = seed (text, time, raw hints) → the domain's one enricher
+  (one type, backend `Placement` incl. its hints; identity a declared field
+  subset) → core retrieval keyed by the domain's `retrieval_keys()`. DB-only,
+  no network; `release_tag` leaves `Placement` — diagnose reads the running
+  version itself. `ops`: no enricher, identity `()`.
 
 ## Not yet specified
 
