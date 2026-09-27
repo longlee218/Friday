@@ -6,9 +6,11 @@ Blocked by: 10, 11
 
 ## Question
 
-Decide how the runner executes a frozen plan durably (a step memoized by
-`(plan_version, step_id)`, resume from the last incomplete step), what it checks
-after each step, and the obstacle ladder — transient → retry (bounded); local →
-PATCH the tail and re-gate; fundamental → ABORT with a "situation changed"
-draft; ambiguous or over `max_replans` → `HandOver`. Where the bound sits and
-how a replan reuses (never re-runs) finished steps.
+Decide how the runner executes a frozen plan's phases durably (a phase memoized
+by `(plan_version, phase_id)`, resume from the last incomplete phase). Within a
+phase the agent adapts on its own; the Planner revisits only **between phases**
+or when an agent reports its hypothesis was wrong. Decide how an agent signals
+that, the obstacle ladder (transient → retry the phase; hypothesis wrong →
+re-plan the remaining phases and re-gate; goal gone → abort with a "situation
+changed" draft; over `max_replans` → `HandOver`), and how a re-plan reuses —
+never re-runs — finished phases.

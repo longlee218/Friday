@@ -9,15 +9,15 @@ labels: wayfinder:map
 Lock the design of Friday's **agent-building framework** for the Python backend
 (`friday/` + `plugins/`): **one durable spine** that every task runs on, where a
 plugin is a **domain**, each task type is an **action** (an intent plus a
-contract), and a **Planner** composes each run's `Plan` from the step types the
-plugins register. Five threads:
+contract), and a **Planner** writes each run's main-flow `Plan`, handing its
+phases to plugin-registered agents. Five threads:
 
 1. **Taxonomy** — domain = plugin; action = intent + contract.
 2. **Dynamic registration** — adding a domain or action touches (almost) nothing
    in the core: triage, registry, prompt, config and board all read from the plugin.
 3. **The spine** — Intake → Plan → GatePlan → Run → Draft, durable end to end,
    with bounded, re-gated replans (`docs/research/durable-spine-dynamic-plans.md`).
-4. **Tools & step types** — core ones in one place; domain ones inside their
+4. **Tools & agents** — core ones in one place; domain ones inside their
    plugin, registered through the plugin API.
 5. **Code standard** — class vs function, file size, one type per concept.
 
@@ -69,13 +69,13 @@ Done when every thread is decided and a build board exists. Decided, not built.
  ║      in:  intake context + trace_problem's contract (allowed step      ║
  ║           types, toolsets backend.logs + backend.code, budget, tier)   ║
  ║      out: Plan v1 (data)                                           ◆10 ║
- ║           s1 sub_agent diagnose (toolsets: backend.logs, backend.code)  ║
- ║           s2 draft report                                               ║
+ ║           phase 1 agent backend.diagnose (backend.logs + backend.code)  ║
+ ║           phase 2 draft report                                          ║
  ║ 7. GATEPLAN                                                        ◆11 ║
  ║      schema · within contract · no escalation · budget → freeze + hash  ║
  ║      (fails → re-plan, over N → HandOver)                               ║
  ║ 8. RUN (WorkflowRunner, each step memoized by DBOS)                ◆13 ║
- ║      s1 diagnose agent loop ✓: read_log → L1..Ln, read_code,            ║
+ ║      phase 1 diagnose agent loop ✓: read_log → L1..Ln, read_code,       ║
  ║         what_code_means → ends with one of:                             ║
  ║           Diagnosis (cause, refs [L12,L13], conclusive, alternatives)  ║
  ║           Ask (ask_reporter) ─────────────────────┐                    ║
@@ -84,7 +84,7 @@ Done when every thread is decided and a build board exists. Decided, not built.
  ║      · goal gone → abort · over max_replans → HandOver                 ║
  ║ 9. CHECK THE RESULT (the-task-contract)                            ✓/◆ ║
  ║      code: every ref resolves in what was read; judge runs shadow      ║
- ║ 10. DRAFT ✓  s2 → operator brief + the reporter's reply                ║
+ ║ 10. DRAFT ✓  phase 2 → operator brief + the reporter's reply           ║
  ╚═══════════════════════════╪═══════════════════╪══════╪══════════════════╝
                              ▼                   │      │
  11. APPROVAL ✓   the Reply waits for the operator on the board
@@ -119,15 +119,14 @@ without approval; an answer that states a cause always waits for the operator.
   actions, memory kinds and agents; the action folder name equals the action name.
 - **The spine, not per-action graphs** (Q17): every task runs on one durable
   spine — Intake → Plan → GatePlan → Run → Draft → Approval → Outbox. A plugin no
-  longer contributes a graph; it contributes **step types** and the capabilities
-  they use; a **Planner** composes the run's `Plan` (data, over a closed step
-  vocabulary), `GatePlan` validates and freezes it, a `WorkflowRunner` executes
-  it. Customising *how steps combine* is prompt/declaration; a *new capability*
-  is still a coded step type or toolset — Friday never runs model-written code.
+  longer contributes a graph; it contributes **agents and toolsets**; a
+  **Planner** writes the run's main-flow `Plan` (data), `GatePlan` validates and
+  freezes it, a `WorkflowRunner` runs its phases. Customising *how the work
+  flows* is prompt/declaration; a *new capability* is still a coded agent or
+  toolset — Friday never runs model-written code.
 - **An action is an intent + a contract** (Q18): triage picks an action; the
-  action carries no graph but a contract — allowed step types and toolsets,
-  model tier, budget, acceptance criteria, intake enricher. The Planner plans
-  **inside** that contract. (Joins `the-task-contract`: the contract is the Plan's
+  action carries no graph but a contract (detail: the action-contract ticket).
+  The Planner plans **inside** that contract. (Joins `the-task-contract`: the contract is the Plan's
   frame.)
 - **Triage is assembled, not written**: the core keeps only the domain-agnostic
   reasoning; **each action declares its own recognition reasoning and a few
@@ -165,6 +164,16 @@ without approval; an answer that states a cause always waits for the operator.
 - **Files**: Python modules snake_case, long descriptive names; **200 lines is a
   soft target** — split by responsibility. `development-rules.md` corrected at
   build time.
+
+- [The action contract under the spine](issues/01-is-the-action-spec-the-task-contract.md):
+  an `Action` = name + recognition + an `ActionContract` (allowed step types /
+  agents / toolsets, constraints, approval policy, acceptance template, total
+  time + max replans); only the contract travels with the frozen `Plan`. The Plan
+  is a **main-flow plan** (goal, hypotheses, what to check first, done-criteria,
+  which agent owns each phase) — every data access happens inside a named,
+  plugin-registered **agent** that drives itself; steps shrink to `agent / ask /
+  hand_over / draft`. Budget lives on the agent; the enricher on the domain.
+  Names: `Action`, `ActionContract`, `Task`, `Plan`, `Outcome`.
 
 ## Not yet specified
 

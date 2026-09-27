@@ -1,6 +1,6 @@
 Type: grilling
 Status: open
-Blocked by: 01, 02, 04
+Blocked by: 02, 04
 
 # Designing `backend.answer_question`
 

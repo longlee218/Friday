@@ -1,6 +1,6 @@
 Type: prototype
 Status: open
-Blocked by: 01
+Blocked by:
 
 # The recognition reasoning and the assembled triage prompt
 

@@ -1,6 +1,6 @@
 Type: prototype
 Status: open
-Blocked by: 01
+Blocked by:
 
 # Core intake and the domain enricher
 

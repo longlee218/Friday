@@ -2,14 +2,16 @@ Type: prototype
 Status: open
 Blocked by:
 
-# The plan schema and the step-type vocabulary
+# The plan schema and the step vocabulary
 
 ## Question
 
-The first thing to nail (durable-spine §13): the `Plan` schema (goal, budget,
-on_obstacle, versioned steps with ids, inputs-from, needs) and the **closed
-step-type vocabulary** — each type's input, output, `needs` and side-effect
-class. Starting set to react to: `read_source`, `call_tool`, `sub_agent`,
-`gather`, `branch`, `assert`, `ask` / `hand_over`, `draft`, `write_memory`
-(→ candidate). Which are core, which a plugin may add, and how a step type is
-registered. Stub it in `sdk` shape with one worked plan.
+Stub the `Plan` as decided in the action-contract ticket: a **main-flow plan**,
+not a program — goal, opening hypotheses, what to check first, done-criteria
+(per-case acceptance), and ordered **phases**, each owned by a named agent with
+the toolsets it is granted and the phases it reads from. The step vocabulary is
+small and core-owned: `agent`, `ask`, `hand_over`, `draft`.
+
+Decide each step type's fields and output, how a phase's result feeds the next,
+how the plan carries its `ActionContract`, versioning (`plan_version`) and what
+gets frozen + hashed. Show one worked plan for `backend.trace_problem`.
