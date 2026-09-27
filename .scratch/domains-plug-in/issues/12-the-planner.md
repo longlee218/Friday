@@ -17,3 +17,8 @@ planner guidance? And for a one-phase case, does the Planner still run?
 > Note from "The plan schema and the step vocabulary" (10): the Plan has no
 > hypotheses and no per-case done-criteria; a step result is keyed by
 > `(task_id, step_key)` (content hash), not `(plan_version, phase_id)`.
+
+> Note from "GatePlan" (11): a refused plan comes back with every gate error
+> as text; the Planner gets 2 rewrites (core constant, not `max_replans`),
+> then `HandOver` with the last plan + errors. How it uses the errors is this
+> ticket's call. A replan's time is checked against the time left.

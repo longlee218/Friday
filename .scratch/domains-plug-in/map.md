@@ -198,6 +198,13 @@ without approval; an answer that states a cause always waits for the operator.
   `draft` = core responder model, fixed prompt. **Amends 01**: no hypotheses,
   no per-case done-criteria. Hash = whole plan; results keyed by content
   `step_key`, so a replan reuses identical steps.
+- [GatePlan — what a plan must pass before it runs](issues/11-gateplan.md):
+  plain code, per version: schema+shape (stop) → contract (refuse, never clip)
+  → limits (`max_steps`, new in `contract.limits` — **amends 01**; unfinished
+  steps' time ≤ time left) → freeze+hash. Sensitivity/egress deferred to its
+  trigger, lands in the gate. Refusal → all errors to the Planner, 2 rewrites
+  (core constant, not `max_replans`) → `HandOver`. Operator sees plans on the
+  board, never approves them; one plan line on the approval card.
 
 ## Not yet specified
 

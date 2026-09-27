@@ -12,3 +12,6 @@ spine's durable boundary: one workflow per task from Intake to Draft? What the
 pool still does (claim, concurrency, help-wanted). How `Ask` pauses from any
 step and how a reporter's reply resumes it — Intake re-run, `placement_identity`
 diff, continue vs re-plan — and whether this subsumes `build-the-loop` ticket 4.
+
+> Note from "GatePlan" (11): every plan version — refused ones with their gate
+> errors included — must be stored where the board can read it.
