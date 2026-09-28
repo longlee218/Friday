@@ -1,5 +1,5 @@
 Type: prototype
-Status: open
+Status: claimed
 Blocked by: 10
 
 # The plugin API surface
@@ -34,3 +34,9 @@ what the boot refuses (duplicate names, unknown tier / toolset / agent).
   `friday/kernel/harness/auth.py` (refresh-token rotation, early refresh,
   one 401 retry) for both devops-generic and db-generic. Nothing to decide
   beyond wiring it through whatever `api.toolset` becomes.
+
+## Carried in from ticket 15 (2026-09-28)
+
+- **`Action` gains an optional `acknowledge(IntakeContext) -> str | None`**,
+  outside the contract like `recognition` / `planning`. Absent or `None` →
+  the spine sends no acknowledgement for that action.

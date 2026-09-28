@@ -1,5 +1,5 @@
 Type: grilling
-Status: open
+Status: claimed
 Blocked by: 04, 13
 
 # The durable spine workflow and pause/resume
@@ -27,3 +27,8 @@ diff, continue vs re-plan — and whether this subsumes `build-the-loop` ticket 
 > for its step to re-run and see the reply. A reply-driven replan counts
 > toward `max_replans`. Code-authored `HandOver` reasons: `step_failed`,
 > `replans_exhausted`, `out_of_time`.
+
+> Note from "`trace_problem`'s graph becomes the first plan" (15): the
+> acknowledgement is a spine step between Intake and the Planner — the
+> action's `acknowledge` hook, queued once per task without approval; a
+> reply's Intake re-run never sends a second one.
