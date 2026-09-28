@@ -603,52 +603,9 @@ async def test_one_unreadable_message_does_not_stop_the_others(db):
     )
 
 
-async def test_a_mention_is_never_lost_to_a_spent_budget(db, provider, inbox):
-    """A refusal is not a discard.
-
-    The ceiling stops a call from happening; it must not stop the mention from
-    being anybody's problem. `docs/DESIGN.md`'s never-drop rule has no
-    exception for running out of money — an unclassified mention that nobody
-    is told about is indistinguishable from correct operation, which is the
-    failure this whole system is shaped against.
-    """
-    from dataclasses import replace as _replace
-
-    from friday.sdk.testing import FunctionModel
-
-    from friday.kernel.config import AgentConfig
-    from friday.kernel.triage import Triage
-    from friday.kernel.triage.runner import NEEDS_HUMAN, TriageRunner
-
-    def _never(messages, info):
-        raise AssertionError("the provider was called despite the ceiling")
-
-    never_reached = FunctionModel(_never, model_name="test-model")
-
-    config = AgentConfig(
-        name="triage", api_key="k", base_url="https://example.invalid/v1",
-        model="test-model", daily_token_budget=10,
-    )
-    provider.emit(make_event(message_id="10", text="checkout is 500ing"))
-    await captured(inbox)
-
-    await TriageRunner(
-        db=db,
-        triage=Triage(
-            config=config, model=never_reached, spent=lambda agent: _spent(999)
-        ),
-        confidence_threshold=0.7,
-    ).run_once()
-
-    (task,) = await db.tasks_in_state(NEEDS_HUMAN, 10)
-    assert "tokens today" in task.params["reason"]
-
-
-async def _spent(n: int) -> int:
-    return n
-
-
-async def test_giving_up_on_a_provider_still_reaches_a_person(db, provider, inbox):
+async def test_giving_up_on_a_provider_still_reaches_a_person(
+    db, provider, inbox, monkeypatch
+):
     """Retrying changes when a mention becomes somebody's problem, never
     whether it does.
 
@@ -657,14 +614,15 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(db, provider, inbo
     *eventually* — a provider that is down all afternoon must surface, and the
     reason has to say the moment lasted rather than reading like one blip.
     """
-    from dataclasses import replace as _replace
-
     from friday.sdk.testing import FunctionModel
 
     from friday.kernel.config import AgentConfig
+    from friday.kernel.harness import harness as harness_module
     from friday.kernel.triage import Triage
     from friday.kernel.triage.runner import NEEDS_HUMAN, TriageRunner
     from tests.test_harness import _rate_limited
+
+    monkeypatch.setattr(harness_module, "PROVIDER_BACKOFF_SECONDS", 0.0)
 
     def _busy(messages, info):
         raise _rate_limited()
@@ -679,7 +637,7 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(db, provider, inbo
         triage=Triage(
             config=AgentConfig(
                 name="triage", api_key="k", base_url="https://example.invalid/v1",
-                model="test-model", max_attempts=3, retry_backoff_seconds=0.0,
+                model="test-model",
             ),
             model=always_busy,
         ),
@@ -687,7 +645,10 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(db, provider, inbo
     ).run_once()
 
     (task,) = await db.tasks_in_state(NEEDS_HUMAN, 10)
-    assert "gave up after 3 attempts" in task.params["reason"]
+    assert (
+        f"gave up after {harness_module.PROVIDER_ATTEMPTS} attempts"
+        in task.params["reason"]
+    )
 
 
 # --- too old to answer (board `work-that-has-gone-cold`, ticket 01) ----------

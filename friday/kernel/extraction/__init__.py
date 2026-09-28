@@ -34,7 +34,8 @@ import logging
 from dataclasses import fields
 from typing import TYPE_CHECKING
 
-from friday.kernel.harness.harness import Harness, Refused
+from friday.sdk.agent import AgentDeclaration
+from friday.kernel.harness.harness import Harness
 from friday.kernel.extraction.answer import Clarify, answer_shape, params_and_clarify
 from friday.kernel.extraction.context import FullContext
 from friday.kernel.domain.models import MODEL_AUTHORED, Params
@@ -50,7 +51,17 @@ if TYPE_CHECKING:
     # the whole time.
     from friday.kernel.config import Config
 
+#: Lifts a task's parameters out of the reporter's messages; one declaration
+#: for every task type. Three turns: the answer, and two for the skill tools
+#: (search, then fetch) — what it had when tool turns were added on top.
+#: 30s a request: the slowest measured was 10.2s.
+EXTRACTOR = AgentDeclaration(
+    name="extractor", tier="flash", temperature=0.0, max_turns=3,
+    tokens=100_000, request_timeout_seconds=30.0,
+)
+
 __all__ = [
+    "EXTRACTOR",
     "input_fingerprint",
     "Clarify",
     "Extractor",
@@ -123,30 +134,16 @@ class Extractor:
         also asked about a field is independent of that — one extra
         turn covers the tool call landing before or after the field text.
 
-        The turn budget is entirely the harness's now: one turn to answer,
-        one that `run_structured` adds for the correction, and `tool_turns`
-        for the skill tools where this extractor has any. Nothing is asked for
+        The turn budget is `EXTRACTOR.max_turns`, skill tool turns included,
+        and the one correction is `run_structured`'s own. Nothing is asked for
         here, which is what stops this line and the harness both adding one.
         """
-        # No `extra_turns`: the one correction is `run_structured`'s own, and
-        # the turns a skill fetch needs come from the harness, which is the
-        # only thing that knows whether it wired any. This line used to add
-        # one on top of both, which bought a second correction nobody decided
-        # on.
         answered = await self._harness.run_structured(
             await self.would_ask(context),
             task_id=task_id,
             node=node,
         )
         if answered is None:
-            if self._harness.refusal is not None:
-                # Not "the model could not answer" — we did not ask it. The
-                # difference decides what happens next: with no fields, the
-                # structural check finds them missing and the reporter is
-                # asked for the correlationId they wrote in their first
-                # message. Nothing they say will change a ceiling, so this
-                # goes to the operator instead.
-                raise Refused(self._harness.refusal)
             # Either the model never answered, or it answered twice with
             # something that does not fit `params_cls` — and both are "no
             # extraction", which is what the caller acts on. They used to be
@@ -278,7 +275,6 @@ def register(
     #: the case this is for.
     skills=None,
     record=None,
-    spent=None,
 ) -> None:
     """Register one task type's extractor from configuration.
 
@@ -297,7 +293,7 @@ def register(
     the database already travel — so this registration only ever wires a
     model to a schema.
     """
-    from friday.kernel.harness.harness import Harness, Refused
+    from friday.kernel.harness.harness import Harness
 
     from friday.kernel.harness.instruction_prompt import SkillMeta
 
@@ -327,7 +323,6 @@ def register(
             # check it is validated by from this one class.
             answers=answer_shape(params_cls),
             record=record,
-            spent=spent,
         ),
         name=f"{task_type}_extractor",
     )
@@ -377,19 +372,16 @@ def register_extractors(
     *,
     skills=None,
     record=None,
-    spent=None,
 ) -> None:
     """Wire every extractor the configuration declares.
 
     Composition root calls this once at startup and learns nothing about any
-    individual extractor. Adding one is registering a task type (ticket 11) and a
-    block in `config.yaml`, not a change there — the types come from the registry
+    individual extractor. Adding one is registering a task type (ticket 11),
+    not a change there — the types come from the registry
     the graphs are built from, so an extractor cannot be wired to a type with no
     graph or missed for one that has.
 
-    A missing block is a warning rather than a failure, because a broken
-    install that starts and says what is wrong beats one that will not start.
-    It is a loud warning: nothing else fills those fields.
+    An undeclared tier refuses the boot (`Config.agent`).
 
     **One block for every type, not one per type.** There were three —
     `extractor_api_issue`, `extractor_access_request`, `extractor_doc_question`
@@ -408,15 +400,7 @@ def register_extractors(
     """
     from friday.kernel.dag import registry
 
-    agent_config = config.agents.get("extractor")
-    if agent_config is None:
-        log.warning(
-            "no 'extractor' agent in config.yaml — every task type will open "
-            "with no parameters and the reporter will be asked for what they "
-            "already said"
-        )
-        return
-
+    agent_config = config.agent(EXTRACTOR)
     for task_type, params_cls in registry.decision_params().items():
         register(
             task_type,
@@ -424,5 +408,4 @@ def register_extractors(
             agent_config,
             skills=skills,
             record=record,
-            spent=spent,
         )

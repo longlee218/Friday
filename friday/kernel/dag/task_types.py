@@ -32,7 +32,7 @@ class BootContext:
 
     `config` is the whole application `Config` (a plugin reads the shared
     `extractor` agent, its own model agent, and the extraction budget off it);
-    `record`/`spent` are the sink and ledger every model node shares; `servers`
+    `record` is the sink every model node shares; `servers`
     are the tool servers a run opened; `skills` is the skill library. `sender`/
     `approver` are the two identities a mid-run row is queued as. `prepare_node`
     and `make_harness` are the kernel-side builders a plugin calls rather than
@@ -41,7 +41,6 @@ class BootContext:
 
     config: Any
     record: Any = None
-    spent: Any = None
     servers: dict[str, Any] = field(default_factory=dict)
     skills: Any = None
     sender: str = DEFAULT_SENDER
@@ -62,12 +61,13 @@ class BootContext:
         investigation plugin reaches `prepare_node`/`make_harness`. Reads the
         shared `extractor` agent and node-0 budget off the config it carries."""
         from friday.kernel.dag.router import build_simple_dag
+        from friday.kernel.extraction import EXTRACTOR
 
         return build_simple_dag(
             name,
             params,
             budget_tokens=self.config.context.extraction_budget_tokens,
-            extractor=self.config.agents.get("extractor"),
+            extractor=self.config.agent(EXTRACTOR),
         )
 
     def make_harness(
@@ -82,11 +82,10 @@ class BootContext:
         #: straight to the `Harness`; see its `ends_with`.
         ends_with: list | None = None,
     ) -> Any:
-        """A model harness built from a configured agent, or `None` when the
-        agent is not configured — a fresh install, and every test that does not
-        set one up. Built here, where `record`/`spent` live, so a plugin's model
-        calls are recorded and counted against the same budget as everybody's,
-        without the plugin importing the `Harness` class."""
+        """A model harness built from a resolved agent, or `None` when a caller
+        hid the agent (replay without a model, tests). Built here, where `record` lives, so a plugin's model
+        calls are recorded like everybody's, without the plugin importing the
+        `Harness` class."""
         if agent is None:
             return None
         from friday.kernel.harness.harness import Harness
@@ -98,7 +97,6 @@ class BootContext:
             tools=tools,
             ends_with=ends_with,
             record=self.record,
-            spent=self.spent,
         )
 
 
@@ -120,11 +118,12 @@ def _register_simple(ctx: BootContext, *, name: str, params: type) -> None:
     """A type with no investigation past node 0: prepare, then ask for what is
     missing or hand over (D1). The one-node graph every simple type uses."""
     from friday.kernel.dag.router import build_simple_dag
+    from friday.kernel.extraction import EXTRACTOR
 
     dag = build_simple_dag(
         name,
         params,
         budget_tokens=ctx.config.context.extraction_budget_tokens,
-        extractor=ctx.config.agents.get("extractor"),
+        extractor=ctx.config.agent(EXTRACTOR),
     )
     registry.register_task_type(TaskTypeSpec(name=name, params=params), dag=dag)

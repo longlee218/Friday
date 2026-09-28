@@ -28,7 +28,6 @@ from friday.sdk.workflow import DAG, Deps
 from friday.sdk.plugin import TaskTypeSpec
 
 __all__ = [
-    "BUDGETS",
     "DAGS",
     "SERVERS",
     "TASK_TYPES",
@@ -54,20 +53,13 @@ DAGS: dict[str, DAG] = {}
 #: Tool servers available to every graph, by name.
 SERVERS: dict[str, Any] = {}
 
-#: How long one task of a type may hold a pool slot, when it declares a bound.
-#: Populated by the type's own registration; read by `check_graph_clocks`, so the
-#: router no longer names the one type that has a budget.
-BUDGETS: dict[str, float] = {}
-
 
 def register_task_type(spec: TaskTypeSpec, *, dag: DAG) -> None:
-    """Add one task type: its spec, its built `DAG`, and the per-task budget it
-    declares (`spec.budget`). A duplicate name refuses (the `Registry` guard). A
-    type's live handles are on the spec (`spec.deps`), built per run, not here."""
+    """Add one task type: its spec and its built `DAG`. A duplicate name
+    refuses (the `Registry` guard). A type's live handles are on the spec
+    (`spec.deps`), built per run, not here."""
     TASK_TYPES.task_type(spec)
     DAGS[spec.name] = dag
-    if spec.budget is not None:
-        BUDGETS[spec.name] = spec.budget
 
 
 def clear() -> None:
@@ -77,7 +69,6 @@ def clear() -> None:
     TASK_TYPES = Registry()
     DAGS.clear()
     SERVERS.clear()
-    BUDGETS.clear()
 
 
 def specs() -> Mapping[str, TaskTypeSpec]:

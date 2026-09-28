@@ -22,6 +22,7 @@ from dataclasses import fields as dataclass_fields, replace
 from typing import Any
 
 from friday.kernel.config import AgentConfig
+from friday.sdk.agent import AgentDeclaration
 from friday.kernel.domain.memory_guard import InstructionShaped
 from friday.kernel.domain.models import (
     FridayState,
@@ -46,6 +47,23 @@ from friday.kernel.harness.instruction_prompt import (
 from friday.kernel.harness.structured import describe
 
 __all__ = ["ContextRebuilder", "RoomSummary"]
+
+#: The tier the room summariser runs on. `None` is off — rooms are never
+#: summarised, as shipped — and naming a tier is the commit that turns it on.
+ROOM_SUMMARY_TIER: str | None = None
+#: A ceiling refuses; it does not trim (ticket 06). A summary cut mid-field
+#: says something false about the room; the previous one is merely older.
+#: Measured on the stored, structured form — the same measure the room sees,
+#: since `channel_derived` renders the summary row's fields as written.
+SUMMARY_MAX_CHARS = 6000
+
+
+def room_summary(tier: str) -> AgentDeclaration:
+    """The summariser on `tier`: one structured answer per room."""
+    return AgentDeclaration(
+        name="summary", tier=tier, temperature=0.0, max_turns=1, tokens=100_000,
+        request_timeout_seconds=30.0,
+    )
 
 log = logging.getLogger(__name__)
 
@@ -177,14 +195,16 @@ class ContextRebuilder:
     """
 
     @classmethod
-    def build(cls, config, *, db, record=None, spent=None) -> "ContextRebuilder":
+    def build(
+        cls, config, *, db, record=None, tier: str | None = ROOM_SUMMARY_TIER
+    ) -> "ContextRebuilder":
         """Which agent summarises a channel, and when, are this module's
         business. The composition root asks for a rebuilder — and that is why
         the warning below lives here rather than there: `run_agent` reads no
         agent's knobs, and a test says so.
 
         Loud for the same reason an empty `sensitive_words` is loud: nothing
-        else says so. Without the block, every room's summary stays whatever
+        else says so. Without a tier, every room's summary stays whatever
         was last written, and a room that has outgrown a prompt goes on
         handing the whole transcript to every agent that reads it.
 
@@ -192,18 +212,16 @@ class ContextRebuilder:
         channels that had a context file; with the files gone, the rooms this
         system reads are the only list there is (ticket 10).
         """
-        if config.agents.get("summary") is None:
+        if tier is None:
             log.warning(
-                "no 'summary' agent in config.yaml — rooms are never "
-                "summarised, and their summary rows keep what is in them now"
+                "ROOM_SUMMARY_TIER is None — rooms are never summarised, and "
+                "their summary rows keep what is in them now"
             )
         return cls(
             db=db,
             channels=sorted(config.ingest.watched_channels),
-            summary_config=config.agents.get("summary"),
-            summary_max_chars=config.context.summary_max_chars,
+            summary_config=None if tier is None else config.agent(room_summary(tier)),
             record=record,
-            spent=spent,
         )
 
     def __init__(
@@ -212,9 +230,8 @@ class ContextRebuilder:
         db: Database,
         channels: Iterable[str] = (),
         summary_config: AgentConfig | None = None,
-        summary_max_chars: int = 6000,
+        summary_max_chars: int = SUMMARY_MAX_CHARS,
         record=None,
-        spent=None,
         model=None,
     ) -> None:
         self._db = db
@@ -222,7 +239,6 @@ class ContextRebuilder:
         self._summary_config = summary_config
         self._summary_max_chars = summary_max_chars
         self._record = record
-        self._spent = spent
         #: Test seam, same convention as `Triage`/`Responder`: a real run
         #: never passes this, and a scripted one never touches the network.
         self._model = model
@@ -313,7 +329,6 @@ class ContextRebuilder:
             instructions=_summary_instructions(),
             model=self._model,
             record=self._record,
-            spent=self._spent,
             # The shape this agent answers, declared where it is built. The
             # harness turns it into the tool the answer arrives through and
             # into the check it is validated by, both generated from

@@ -31,7 +31,6 @@ CONFIG = AgentConfig(
     api_key="k",
     base_url="https://example.invalid/v1",
     model="test-model",
-    options={"confidence_threshold": 0.7},
 )
 
 

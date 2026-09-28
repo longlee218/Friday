@@ -37,7 +37,7 @@ class _StubCaps:
 
     def __init__(self, *, diagnose_harness=None, budget_tokens=None, diagnose_agent=None):
         self.config = SimpleNamespace(
-            agents=({"devops.diagnose": diagnose_agent} if diagnose_agent else {}),
+            agent=lambda declaration: diagnose_agent,
             context=SimpleNamespace(extraction_budget_tokens=budget_tokens),
         )
         self.servers = {}
@@ -1602,122 +1602,6 @@ def test_a_two_column_table_is_read_as_well_as_a_three(tmp_path):
     assert meanings(doc, ("ERR306",), tmp_path) == {
         "ERR306": "Content pack required"
     }
-
-
-# --- the clock (ticket 06) ---------------------------------------------------
-
-
-def test_every_node_in_the_graph_has_a_ceiling():
-    """**A node without one is not bounded by a big number, it is
-    unbounded.** Three of these had none: `resolve`, `acknowledge` and
-    `report` each reach the database, and a hung connection would hold a
-    pool slot for the life of the process — the thing ticket 13 went to some
-    trouble to prevent."""
-    dag = _dag()
-
-    assert [n.name for n in dag.nodes if n.timeout_seconds is None] == []
-
-
-def test_a_graph_that_can_outlast_its_budget_is_refused_at_boot():
-    """A clock that does not add up is a configuration mistake, and the
-    place to find one is the start — not a cancelled run on a task nobody is
-    watching."""
-    import pytest as _pytest
-
-    from friday.kernel.config import ConfigError
-    from friday.kernel.dag.router import check_graph_clocks
-
-    dag = _dag()
-    total = sum(n.timeout_seconds or 0.0 for n in dag.nodes)
-
-    check_graph_clocks([dag], {dag.name: total})
-    with _pytest.raises(ConfigError, match="over the"):
-        check_graph_clocks([dag], {dag.name: total - 1})
-
-
-def test_a_node_with_no_clock_is_refused_however_large_the_budget():
-    """The sum of a list with a hole in it is not a bound."""
-    import pytest as _pytest
-
-    from friday.kernel.config import ConfigError
-    from friday.sdk.workflow import DAG, Node
-
-    async def _nothing(state, deps):
-        return None
-
-    loose = DAG(
-        name="devops.api_issue",
-        nodes=(Node("a", _nothing, timeout_seconds=1.0), Node("b", _nothing)),
-        edges=(),
-    )
-
-    with _pytest.raises(ConfigError, match="no timeout"):
-        check_graph_clocks_for(loose)
-
-
-def check_graph_clocks_for(dag):
-    from friday.kernel.dag.router import check_graph_clocks
-
-    return check_graph_clocks([dag], {dag.name: 10_000.0})
-
-
-def test_a_graph_with_no_budget_is_not_checked():
-    """The honest default for a one-node graph: its single node's clock is
-    the bound, and inventing a budget for it would be inventing a number."""
-    from friday.sdk.workflow import DAG, Node
-
-    async def _nothing(state, deps):
-        return None
-
-    from friday.kernel.dag.router import check_graph_clocks
-
-    check_graph_clocks(
-        [DAG(name="doc_question", nodes=(Node("a", _nothing),), edges=())], {}
-    )
-
-
-def test_the_budget_is_read_as_a_number_and_must_be_positive(tmp_path):
-    """Every other setting in this block is a name or a path and is read as
-    text; `str()` on this one would compare a string to a sum."""
-    import pytest as _pytest
-
-    from plugins.devops.config import ConfigError, load_devops_config
-
-    assert load_devops_config({"timeout_seconds": 300}).timeout_seconds == 300.0
-
-    with _pytest.raises(ConfigError, match="must be a number"):
-        load_devops_config({"timeout_seconds": "soon"})
-
-    with _pytest.raises(ConfigError, match="must be positive"):
-        load_devops_config({"timeout_seconds": 0})
-
-
-def test_the_boot_actually_checks_the_graph_clocks(monkeypatch):
-    """`check_graphs` is what the composition root calls before it opens
-    anything. A check that exists and is never reached is a check nobody
-    has — and removing the call from it left the whole suite green."""
-    import pytest as _pytest
-
-    from friday.kernel.config import ConfigError
-    from friday.kernel.dag import router
-
-    def over_budget(*_a, **_k):
-        raise ConfigError("clocks do not add up")
-
-    monkeypatch.setattr(router, "check_graph_clocks", over_budget)
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-
-    from dotenv import load_dotenv
-
-    load_dotenv()
-    with _pytest.raises(ConfigError, match="do not add up"):
-        router.check_graphs(load_config_for_test())
-
-
-def load_config_for_test():
-    from friday.kernel.config import load_config
-
-    return load_config()
 
 
 # --- reading the code that is actually running (ticket 04) -------------------

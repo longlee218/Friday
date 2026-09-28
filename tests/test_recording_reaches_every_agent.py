@@ -1,4 +1,4 @@
-"""Every agent records and is bounded, and the chain that makes it so is checked.
+"""Every agent records, and the chain that makes it so is checked.
 
 D1 says the recording sink is handed over at construction so that no caller
 can forget it. That moved the forgetting one layer down: each builder now
@@ -25,7 +25,7 @@ from friday.kernel.config import AgentConfig
 
 CONFIG = AgentConfig(
     name="an-agent", api_key="k", base_url="https://example.invalid/v1",
-    model="test-model", max_turns=1, settings={}, options={},
+    model="test-model", max_turns=1, settings={},
 )
 
 
@@ -48,7 +48,7 @@ def spy(monkeypatch):
 
     class Spy(harness_module.Harness):
         def __init__(self, **kw):
-            given.append((kw.get("record"), kw.get("spent")))
+            given.append(kw.get("record"))
             super().__init__(**kw)
 
         async def run(self, *a, **kw):
@@ -69,17 +69,14 @@ def spy(monkeypatch):
 
 
 SINK = object()
-#: The other half. A ceiling that reaches three agents out of four is not a
-#: ceiling — it is a ceiling and a hole, and the hole is silent.
-LEDGER = object()
 
 
 async def test_triage_records(spy, db):
     from friday.kernel.triage.runner import TriageRunner
 
-    await TriageRunner.build(_config(triage=CONFIG), db=db, record=SINK, spent=LEDGER)
+    await TriageRunner.build(_config(), db=db, record=SINK)
 
-    assert spy == [(SINK, LEDGER)]
+    assert spy == [SINK]
 
 
 async def test_every_extractor_records(spy):
@@ -89,16 +86,16 @@ async def test_every_extractor_records(spy):
     from friday.kernel.dag import registry
     from friday.kernel.extraction import register_extractors
 
-    register_extractors(_config(extractor=CONFIG), record=SINK, spent=LEDGER)
+    register_extractors(_config(), record=SINK)
 
-    assert spy == [(SINK, LEDGER)] * len(registry.decision_params()), "one per task type"
+    assert spy == [SINK] * len(registry.decision_params()), "one per task type"
 
 
 async def test_the_responder_records(spy):
     from friday.kernel.responder import Responder
 
-    assert Responder.build(_config(responder=CONFIG), record=SINK, spent=LEDGER) is not None
-    assert spy == [(SINK, LEDGER)]
+    assert Responder.build(_config(), record=SINK) is not None
+    assert spy == [SINK]
 
 
 async def test_the_summariser_records(spy):
@@ -115,30 +112,27 @@ async def test_the_summariser_records(spy):
     from friday.kernel.memory.channel_context import ContextRebuilder
 
     rebuilder = ContextRebuilder.build(
-        _config(summary=CONFIG),
-        db=_LoudChannel(),
-        record=SINK,
-        spent=LEDGER,
+        _config(), db=_LoudChannel(), record=SINK, tier="flash"
     )
 
     await rebuilder.rebuild_all()
 
-    assert spy == [(SINK, LEDGER)]
+    assert spy == [SINK]
 
 
 # --- the least that lets each builder run ------------------------------------
 
 
-def _config(**agents):
+def _config():
+    """Every declaration resolves to `CONFIG`, whatever tier it names."""
     from types import SimpleNamespace
 
     return SimpleNamespace(
-        agents=agents,
+        agent=lambda declaration: CONFIG,
         triage_examples=[],
         sensitive_words=(),
-        ingest=SimpleNamespace(turn_seconds=0, watched_channels=frozenset({"c1"})),
+        ingest=SimpleNamespace(watched_channels=frozenset({"c1"})),
         workflows=SimpleNamespace(use_responder=True),
-        context=SimpleNamespace(summary_max_chars=6000),
     )
 
 

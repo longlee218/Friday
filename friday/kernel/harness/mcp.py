@@ -30,6 +30,7 @@ from friday.kernel.harness.harness import (
     StreamableHttpTransport,
 )
 from friday.kernel.config import ConfigError, MCPServerConfig
+from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS
 
 __all__ = ["build", "name_of"]
 
@@ -135,5 +136,8 @@ def _one(config: MCPServerConfig, allowed: frozenset[str]):
         tool_error_behavior="failed",
         # The list rarely changes and fetching it costs a round trip per run.
         cache_tools=True,
+        # A tool call an agent makes directly is bounded like one code makes
+        # through `Reads.call`.
+        read_timeout=TOOL_CALL_TIMEOUT_SECONDS,
     )
     return toolset.filtered(offered)

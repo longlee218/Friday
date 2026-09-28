@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from collections.abc import AsyncIterator
 
-from friday.kernel.config import IngestConfig, message_age_cutoff
+from friday.kernel.config import IngestConfig
 from friday.store.db import Database
 from friday.kernel.domain.models import InboundEvent, MentionType
 
@@ -26,6 +26,24 @@ _TAGGED = frozenset({MentionType.DIRECT, MentionType.ROLE})
 
 _LIVE_STREAM_ENDED = object()
 
+#: How long somebody has to be quiet — not sending, not typing — before what
+#: they said counts as finished and is read. People send one thought in three
+#: messages; this is what makes it one input instead of three. Triage reads
+#: the same number to decide a turn is over.
+TURN_SECONDS = 12.0
+#: How often the recovery sweep runs. The live connection is the fast path;
+#: this only exists to close gaps it missed (it also runs on reconnect).
+SWEEP_INTERVAL_SECONDS = 300.0
+#: How many prior messages to pull in when a conversation first mentions us.
+CONTEXT_MESSAGES = 20
+#: How old a turn may be before this system stops acting on it. **One number,
+#: two readers**: triage marks an older turn `outdated` and never sends it to a
+#: model; the recovery sweep, meeting a channel with no cursor, uses it as how
+#: far back to read (board `work-that-has-gone-cold`, ticket 02, D8). The same
+#: policy seen from two sides — "work this old is not worth starting" — so it
+#: is written once, here, and triage imports it.
+MAX_MESSAGE_AGE_SECONDS = 24 * 3600
+
 
 class Inbox:
     """The only way into the system.
@@ -42,16 +60,14 @@ class Inbox:
 
         The same shape `TriageRunner.build` uses, for the same reason: which
         knobs a step has is that step's business, and the composition root
-        must not read them. The cold-start lookback comes through
-        `message_age_cutoff`, which is the one place that knows where that
-        number lives — this module never learns that triage exists, or that
-        the number is shared with it.
+        must not read them. The cold-start lookback is
+        `MAX_MESSAGE_AGE_SECONDS`, the number triage shares.
         """
         return cls(
             provider=provider,
             db=db,
             config=config.ingest,
-            cold_start_lookback=message_age_cutoff(config),
+            cold_start_lookback=MAX_MESSAGE_AGE_SECONDS,
         )
 
     def __init__(
@@ -61,10 +77,16 @@ class Inbox:
         db: Database,
         config: IngestConfig,
         cold_start_lookback: float | None = None,
+        turn_seconds: float = TURN_SECONDS,
+        sweep_interval_seconds: float = SWEEP_INTERVAL_SECONDS,
+        context_messages: int = CONTEXT_MESSAGES,
     ) -> None:
         self._provider = provider
         self._db = db
         self._config = config
+        self._turn_seconds = turn_seconds
+        self._sweep_interval = sweep_interval_seconds
+        self._context_messages = context_messages
         #: How far back a sweep reads when a channel has no cursor, in
         #: seconds. `None` means from the beginning of the channel, which is
         #: what "no cutoff configured" already means everywhere else.
@@ -145,7 +167,7 @@ class Inbox:
             try:
                 await asyncio.wait_for(
                     self._provider.reconnected.wait(),
-                    timeout=self._config.sweep_interval_seconds,
+                    timeout=self._sweep_interval,
                 )
                 self._provider.reconnected.clear()
                 trigger = "reconnect"
@@ -227,7 +249,7 @@ class Inbox:
         if seen is None:
             return False
         age = (datetime.now(timezone.utc) - seen).total_seconds()
-        return age < self._config.turn_seconds
+        return age < self._turn_seconds
 
     def tally(self) -> str:
         """One line: what arrived, and why most of it did not stay."""
@@ -329,7 +351,7 @@ class Inbox:
         async for past in self._provider.recent(
             event.conversation,
             before=event.provider_message_id,
-            limit=self._config.context_messages,
+            limit=self._context_messages,
         ):
             await self._db.record_message(past, context_only=True)
             seeded += 1

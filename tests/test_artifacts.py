@@ -226,7 +226,6 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
         output = '{"correlation_id": "c0rr3l4t10n"}'
 
     class StubHarness(ScriptedHarness):
-        tool_turns = 0
         last_error = None
 
         async def run(self, prompt, **kwargs):
@@ -383,7 +382,6 @@ async def test_a_named_artifact_becomes_the_parameter_byte_for_byte(db):
         output = '{"curl": "%s"}' % artifact.id
 
     class StubHarness(ScriptedHarness):
-        tool_turns = 0
         last_error = None
 
         async def run(self, prompt, **kwargs):

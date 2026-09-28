@@ -120,23 +120,17 @@ def clear_graphs() -> None:
     _DELIVER = None
 
 
-def _timed_out(node: Node) -> dict[str, Any]:
-    return envelope("timed_out", f"{node.name} did not finish in {node.timeout_seconds}s")
-
-
 async def _invoke(
     dag_name: str, node: Node, state: DAGState, deps: Deps, record: Recorder | None
 ) -> Any:
-    """Run one node: its clock, its retry, and its failure as a result.
+    """Run one node: its retry, and its failure as a result.
 
-    A faithful port of the hand-written runner's `_invoke`/`_ended`: the clock
-    wraps the node alone (backoff and recording sit outside it), only the
-    runner's own clock is `timed_out`, a non-retryable or exhausted exception
-    becomes `{status: error}` scrubbed at the point it is built, and every
-    attempt is handed to the recorder as it ends.
+    A faithful port of the hand-written runner's `_invoke`/`_ended`, less its
+    clock (board `domains-plug-in`, ticket 17 — time lives only on a tool
+    call): a non-retryable or exhausted exception becomes `{status: error}`
+    scrubbed at the point it is built, and every attempt is handed to the
+    recorder as it ends.
     """
-    loop = asyncio.get_running_loop()
-    deadline = None if node.timeout_seconds is None else loop.time() + node.timeout_seconds
 
     async def ended(attempt: int, started: float, result: Any) -> Any:
         if record is not None:
@@ -162,11 +156,8 @@ async def _invoke(
         attempt += 1
         started = time.monotonic()
         try:
-            async with asyncio.timeout_at(deadline) as clock:
-                result = await node.run(state, deps)
+            result = await node.run(state, deps)
         except Exception as exc:  # noqa: BLE001 - becomes the result
-            if clock.expired():
-                return await ended(attempt, started, _timed_out(node))
             reason = scrub(f"{type(exc).__name__}: {exc}")
             retryable = isinstance(exc, node.retry_on)
             if not retryable or attempt >= node.max_attempts:
@@ -178,12 +169,7 @@ async def _invoke(
         else:
             return await ended(attempt, started, result)
 
-        wait = node.retry_backoff_seconds * 2 ** (attempt - 1)
-        if deadline is not None:
-            wait = min(wait, max(0.0, deadline - loop.time()))
-        await asyncio.sleep(wait)
-        if deadline is not None and loop.time() >= deadline:
-            return _timed_out(node)
+        await asyncio.sleep(node.retry_backoff_seconds * 2 ** (attempt - 1))
 
 
 @DBOS.step()

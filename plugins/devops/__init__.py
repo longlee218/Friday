@@ -67,7 +67,6 @@ def register(api: Any) -> None:
             graph=lambda _deps: build_devops_dag(api),
             deps=lambda base: _enrich_deps(base, api),
             needs=frozenset({"source:loki", "devops.service"}),
-            budget=float(api.config.timeout_seconds),
         )
     )
 

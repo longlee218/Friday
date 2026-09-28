@@ -47,11 +47,9 @@ __all__ = ["Evidence", "investigate_tools"]
 
 log = logging.getLogger(__name__)
 
-#: How many reads one investigation may make. Not a cost control: with a
-#: fixed pipeline the clock was the sum of a known list of nodes, and a model
-#: that can loop turns `api_issue.timeout_seconds` and the token budget from
-#: arithmetic into a hope. A run that has looked twelve times and not found
-#: it is a run that should say so.
+#: How many reads one investigation may make. Not a cost control — that is
+#: the agent's turns and tokens: a run that has looked twelve times and not
+#: found it is a run that should say so.
 MAX_READS = 12
 
 #: Lines one `read_log` may return, before `distil` cuts. The ceiling the

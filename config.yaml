@@ -2,73 +2,21 @@
 # everything else is a reviewable value. See docs/DESIGN.md for the reasoning.
 database_path: ./data/friday.db
 
-# ── Agents ───────────────────────────────────────────────────────────────────
-# One block per step that calls a model. ${VAR} reads .env (unset = error).
-# Everything speaks Chat Completions; `provider:` is shorthand for base_url —
-# openrouter · openai · deepseek · minimax (or set base_url directly).
-# All agents run on DeepSeek V4.1 Flash via OpenRouter: cheap ($0.099/$0.60 per
-# 1M, $0.06 cache-read), 1M context, native tool + JSON-schema structured
-# output. The responder is the one to watch — if its Vietnamese reads stiff,
-# switch just that block to `model: google/gemini-3.7-flash`.
-# Knobs (all optional): settings.max_tokens bounds one answer; timeout_seconds
-# bounds one run (default 60); max_attempts (3) / retry_backoff_seconds (1,
-# doubling) handle a hiccup; daily_token_budget caps a day's spend (unset = no
-# cap, the default — the heartbeat reports spend either way).
-agents:
-  # Runs on every mention. Must extract params and classify — the firehose,
-  # so the cheapest tool-capable model with cache pricing.
-  triage:
+# ── Model tiers ──────────────────────────────────────────────────────────────
+# Named model tiers; code picks one by name, and an undeclared tier refuses the
+# boot. ${VAR} reads .env (unset = error). Everything speaks Chat Completions;
+# `provider:` is shorthand for base_url — openrouter · openai · deepseek ·
+# minimax (or set base_url directly). `settings` are provider settings
+# (max_tokens); temperature, turns and tokens are declared in code beside each
+# agent (board domains-plug-in, tickets 07 and 17).
+# DeepSeek V4.1 Flash via OpenRouter: cheap ($0.099/$0.60 per 1M, $0.06
+# cache-read), 1M context, native tool + JSON-schema structured output. Triage,
+# the responder, the extractor and devops.diagnose all run on it.
+tiers:
+  flash:
     api_key: ${OPENROUTER_API_KEY}
     provider: openrouter
     model: "deepseek/deepseek-v4.1-flash"
-    settings:
-      temperature: 0
-    max_turns: 1
-    confidence_threshold: 0.7   # escalate to a human below this
-    max_message_age: '24h'      # older turns are marked outdated, not answered
-    examples: 8                 # how many hand-marked classifications to show
-
-  # Runs only on tasks that reach a reply. Low volume, goes out under your name.
-  # If the Vietnamese reads stiff, this is the block to move to a Gemini Flash.
-  responder:
-    api_key: ${OPENROUTER_API_KEY}
-    provider: openrouter
-    model: "deepseek/deepseek-v4.1-flash"
-    settings:
-      temperature: 0.7
-    max_turns: 1
-    timeout_seconds: 150        # writes prose, not a label — the slow one
-    tone_examples: 8            # how many of your past replies to show as tone
-
-  # Lifts a task's parameters out of the reporter's messages. Without it, every
-  # type opens tasks with no parameters. One block covers all types.
-  extractor:
-    api_key: ${OPENROUTER_API_KEY}
-    provider: openrouter
-    model: "deepseek/deepseek-v4.1-flash"
-    settings:
-      temperature: 0
-    max_turns: 1
-
-  # The api_issue graph's one model node. Comment it out and the graph still
-  # runs — Diagnose skips and says so. Reads logs + code, so 1M context helps.
-  devops.diagnose:
-    api_key: ${OPENROUTER_API_KEY}
-    provider: openrouter
-    model: "deepseek/deepseek-v4.1-flash"
-    settings:
-      temperature: 0
-    max_turns: 1
-    timeout_seconds: 150
-
-  # Optional: summarises a room once it has said anything new, so later prompts
-  # carry a few facts instead of a growing transcript. Without it, no summaries.
-  # summary:
-  #   api_key: ${OPENROUTER_API_KEY}
-  #   provider: openrouter
-  #   model: "deepseek/deepseek-v4.1-flash"
-  #   settings: { temperature: 0 }
-  #   max_turns: 1
 
 # ── The api_issue investigation ────────────────────────────────────────────
 # What it reaches outside this process with; each is optional (a node with no
@@ -78,7 +26,6 @@ devops:
   loki_server: "devops-generic"   # which mcp_servers block carries Loki
   loki_tool: "loki_query_range"   # its range-query tool
   reports_dir: "./data/reports"   # where a run's report is written
-  timeout_seconds: 420            # longest one task may hold a pool slot
 
 # ── Operator & board ─────────────────────────────────────────────────────────
 operator_id: 482447107983147039   # who approves replies, by DM from the bot
@@ -88,14 +35,8 @@ board_port: 8086
 board_origins: []                 # extra CORS write origins (the Vite dev server)
 repo_root: "~/Documents/Apero"    # where the project repo-picker may look; empty = off
 
-heartbeat_seconds: 60
-down_after_seconds: 300           # how long Discord may be down before you're told
-summary_at_hour: 9                # hour of the daily "still alive" summary; null = none
-keep_model_calls_days: 14         # how long to keep prompts/outputs
-
-# Daily two-file backup (§12.1): both SQLite files, kept this many days.
+# Daily two-file backup (§12.1): both SQLite files (kept KEEP_BACKUPS days).
 backup_dir: "data/backups"
-keep_backups: 7                   # 0 turns the backup off
 
 # ── Tool servers (MCP) ─────────────────────────────────────────────────────
 # Which tools may be called is declared in code, not here (no `allow:` key).
@@ -110,11 +51,7 @@ mcp_servers:
     transport: http
     auth: {}
 
-# ── Delivery & workflows ───────────────────────────────────────────────────
-outbox:
-  max_attempts: 3                 # tries before a message becomes a person's job
-  backoff_seconds: 30             # doubling from here
-
+# ── Workflows ───────────────────────────────────────────────────────────────
 workflows:
   max_asks: 3                     # times to ask for the same detail before handover
   concurrency: 2                  # tasks worked at once
@@ -127,9 +64,6 @@ workflows:
 ingest:
   # direct — someone @s the account · role — a role it holds is @d · dm — a 1:1 DM
   mention_types: ["direct", "role"]
-  turn_seconds: 12                # silence before a burst counts as one input
-  sweep_interval_seconds: 300     # recovery sweep cadence (also runs on reconnect)
-  context_messages: 20            # history pulled in on a conversation's first mention
 
   # Channels to watch. Threads are covered automatically; 1:1 DMs are always
   # watched and need no entry; group chats must be listed. Uncomment to enable.
@@ -154,7 +88,6 @@ ingest:
 # ── What the operator writes down ──────────────────────────────────────────
 context:
   skills_directory: skills        # one Markdown file per skill; add a file, no list
-  summary_max_chars: 6000         # a room summary ceiling refuses; it does not trim
   # extraction_budget_tokens: 2000  # node-0 transcript budget (est. tokens); unset = no compaction
 
 # ── What never reaches the model ────────────────────────────────────────────

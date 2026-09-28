@@ -154,8 +154,8 @@ async def _build_triage(config: Config) -> Triage:
     """`build_triage`, against whichever database `FRIDAY_DB` names — or
     `config.database_path` — closed once the `Triage` it returns no longer
     needs it (examples are read once, at build time, same as production).
-    No `record=` sink and no `spent=` ledger: this reports confidence, it
-    does not act on a budget or keep an audit trail of its own.
+    No `record=` sink: this reports confidence, it does not keep an audit
+    trail of its own.
     """
     # Fill the task-type registry the way the composition root does (ticket 11):
     # triage's closed set is built from it, so it must be populated before the

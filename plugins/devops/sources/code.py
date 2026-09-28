@@ -25,6 +25,8 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
+from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS
+
 __all__ = ["excerpt", "meanings", "original", "repo_file"]
 
 log = logging.getLogger(__name__)
@@ -96,7 +98,8 @@ def at_ref(repo_path: str, path: Path, ref: str) -> str | None:
     try:
         done = subprocess.run(
             ["git", "-C", str(root), "show", f"{ref}:{relative.as_posix()}"],
-            capture_output=True, text=True, timeout=20.0, check=False,
+            capture_output=True, text=True, timeout=TOOL_CALL_TIMEOUT_SECONDS,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         # The docstring above promises `None` for "git not on PATH", and it

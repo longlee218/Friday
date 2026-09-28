@@ -379,7 +379,6 @@ async def test_extraction_runs_when_a_message_is_linked(db):
         #: — the validation and its correction turn — is the real one. A
         #: stub that supplied its own would let this pass while skipping the
         #: mechanism the extraction actually goes through.
-        tool_turns = 0
 
         async def run(self, prompt, **kwargs):
             prompts_seen.append(prompt)

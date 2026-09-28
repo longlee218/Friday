@@ -17,7 +17,7 @@ from friday.kernel.responder import Draft, Responder
 
 CONFIG = AgentConfig(
     name="responder", api_key="k", base_url="https://example.invalid/v1",
-    model="test-model", options={}, settings={},
+    model="test-model", settings={},
 )
 
 TONE = [

@@ -69,7 +69,6 @@ __all__ = [
     "Hooks",
     "MCPToolset",
     "ModelRetry",
-    "Refused",
     "SSETransport",
     "StdioTransport",
     "StreamableHttpTransport",
@@ -86,21 +85,22 @@ log = logging.getLogger(__name__)
 #: itself is `ctx.deps`.
 ToolContext = RunContext
 
-
-class Refused(Exception):
-    """We declined to make a call, rather than making one that failed.
-
-    Two outcomes that both leave a caller with no answer, and they are worth
-    telling apart. "The model could not answer" is worth asking the reporter
-    for more; "we did not ask it" is worth telling the operator why, because
-    nothing the reporter does will change it.
-
-    `Harness` never raises this — the rule that no exception escapes it is
-    older and more load-bearing than this distinction. It reports a refusal on
-    `refusal` and a caller that has somewhere better to send it raises this
-    itself; `friday/kernel/extraction` is the one that does, because the alternative
-    there is asking a reporter for what they already wrote.
-    """
+#: Attempts — a repeat of the same failed thing, never progress (board
+#: `domains-plug-in`, ticket 17). The same for every agent, so core constants.
+#:
+#: How many times to call the provider for one run before giving up, and how
+#: long to wait between two attempts — the same wait every time, no doubling
+#: (the operator's call, 2026-09-28). A request is bounded by its agent's
+#: `request_timeout_seconds`, and a timed-out request is an attempt like a 429,
+#: so the worst run is `PROVIDER_ATTEMPTS` × that timeout plus nine waits —
+#: 690s for a 60s agent. The pool works only `workflows.concurrency` tasks at
+#: once, so that is how long a stalled provider can hold a slot.
+PROVIDER_ATTEMPTS = 10
+PROVIDER_BACKOFF_SECONDS = 10.0
+#: How many goes an answer that does not fit its shape gets at fixing itself.
+#: A model that cannot get its own schema right twice will not on the third
+#: go, and every attempt is billed.
+OUTPUT_CORRECTIONS = 1
 
 
 def tool(func=None, **options):
@@ -189,13 +189,6 @@ class Harness:
         #: `run()` (D1): a seam a caller can forget is one that will be
         #: forgotten. `None` records nothing, which is for tests.
         record=None,
-        #: What this agent has already spent today, as an async callable of the
-        #: agent's name. Separate from `record` because they are different
-        #: capabilities over the same table — one writes, one reads — and a test
-        #: that cares about one should not have to supply the other. Only asked
-        #: when a budget is configured, so an install that has not set one pays
-        #: nothing for the ceiling it does not have.
-        spent=None,
         model=None,
         #: The skill library this agent may reach, or `None`. Given it, the
         #: harness wires the four skill tools itself — a thing every agent needs
@@ -221,13 +214,8 @@ class Harness:
     ) -> None:
         self._config = config
         self._record = record
-        self._spent = spent
         self._instructions = instructions
         self.last_error: str | None = None
-        #: Set when this run did not happen at all, rather than happening and
-        #: failing. `last_error` carries the same words; this lets a caller
-        #: branch on it without reading them.
-        self.refusal: str | None = None
         #: Set when the model answered and the answer did not fit `answers`:
         #: why, and which of the shape's fields said so. Read immediately after
         #: `run_structured` returned `None`, and nowhere else (D20).
@@ -253,11 +241,6 @@ class Harness:
         self.skills: list[str] = (
             list(skills.catalogue()) if skills is not None and len(skills) else []
         )
-        #: The budget for the tools this harness wires itself, added to
-        #: `max_turns` in `run`. Two, not one: an agent that recognises a
-        #: catalogue line fetches and answers (one turn); one that does not is
-        #: told to search *and then* fetch (two).
-        self.tool_turns = 2 if self.skills else 0
         tool_list = list(tools or [])
         if self.skills:
             from friday.kernel.tools.describe_skill import describe_skill_tool
@@ -293,7 +276,7 @@ class Harness:
             # **Two things a caller may not override**, because they are the
             # mechanism, not a default: the output tool is what forces a
             # structured answer (Pydantic AI forces the output tool when no text
-            # output is allowed), and the `{'output': 1}` retry is the one
+            # output is allowed), and the `OUTPUT_CORRECTIONS` retry is the one
             # correction turn. A caller passing `output_type`, `retries`, or a
             # `tool_choice` in `model_settings` is asking for something that
             # cannot work — a `tool_choice` other than the forced output tool
@@ -318,7 +301,7 @@ class Harness:
                     f"fields:\n{describe(answers)}"
                 ),
             )
-            retries = {"output": 1}
+            retries = {"output": OUTPUT_CORRECTIONS}
             if ends_with:
                 # Each terminal tool is a second output tool: Pydantic AI ends
                 # the run when the model calls any output tool, so calling
@@ -411,7 +394,7 @@ class Harness:
         names the field but quotes none of the arguments (an extractor's
         arguments are reporter-controlled text). On a bad call it raises
         `ModelRetry(problem.why)`, which reaches the model as the tool's own
-        correction; `retries={'output': 1}` decides how many goes it gets.
+        correction; `OUTPUT_CORRECTIONS` decides how many goes it gets.
 
         **`_refused` is how the harness hears about a turned-down call**, and it
         exists because the run may never get back to tell it: a model that
@@ -431,7 +414,7 @@ class Harness:
 
     def _refused(self, problem: Unfit) -> None:
         """The answer tool turned a call down, and why. On the instance beside
-        `last_error` and `refusal`, and safe there for the same reason: one run
+        `last_error`, and safe there for the same reason: one run
         of a harness at a time, and the caller reads the flag before anything
         awaits."""
         self.unfit = problem
@@ -461,7 +444,6 @@ class Harness:
         prompt: str,
         *,
         context: Any = None,
-        extra_turns: int = 0,
         message_id: str | None = None,
         task_id: int | None = None,
         node: str | None = None,
@@ -473,8 +455,8 @@ class Harness:
         `.output`; a non-answer is turned into `None` and a reason in
         `last_error`, scrubbed, so no caller has to catch anything.
 
-        `extra_turns` is for an agent whose answer arrives as a tool call: the
-        call and its result are two turns where a written answer is one.
+        The run stops at the declaration's `max_turns` — every request, tool
+        turns included — or its `tokens`, whichever comes first.
 
         `message_id`, `task_id` and `node` are what this call was *about*. A
         caller supplies whichever it knows; a `FridayState` as `context` already
@@ -484,7 +466,7 @@ class Harness:
         return await self._settle(
             prompt,
             context=context,
-            max_turns=self._config.max_turns + self.tool_turns + extra_turns,
+            max_turns=self._config.max_turns,
             about=_About.of(
                 context, message_id=message_id, task_id=task_id, node=node
             ),
@@ -495,7 +477,6 @@ class Harness:
         prompt: str,
         *,
         context: Any = None,
-        extra_turns: int = 0,
         message_id: str | None = None,
         task_id: int | None = None,
         node: str | None = None,
@@ -514,7 +495,7 @@ class Harness:
 
         **One correction, and it is the retry budget** (D4): a call that does
         not fit comes back to the model as the tool's own output, naming the
-        field, and `retries={'output': 1}` is the single go at fixing it. No
+        field, and `OUTPUT_CORRECTIONS` is the single go at fixing it. No
         second run.
 
         **A written answer is still read** (D13): forcing is not a guarantee —
@@ -534,7 +515,6 @@ class Harness:
             said = await self.run(
                 prompt,
                 context=context,
-                extra_turns=extra_turns,
                 message_id=message_id,
                 task_id=task_id,
                 node=node,
@@ -583,7 +563,7 @@ class Harness:
             return None
 
         # No fitting tool answer and no written object. The run itself set the
-        # reason it did not answer — a provider failure, a timeout, a refusal,
+        # reason it did not answer — a provider failure, a spent budget,
         # or the forced tool exhausting its correction — and that reason is the
         # true one; only replace it when the run left none.
         if self.last_error is None:
@@ -604,9 +584,7 @@ class Harness:
         otherwise have to catch identically.
 
         The one place a model call happens, so the one place it can be bounded
-        and written down (D2). One at a time per harness — see `_one_run`. The
-        wait for it is outside `timeout_seconds`, which bounds the run and not
-        the queue for it.
+        and written down (D2). One at a time per harness — see `_one_run`.
         """
         async with self._one_run:
             return await self._settle_alone(
@@ -626,15 +604,10 @@ class Harness:
         from friday.kernel.harness.llm_log import LogHooks
 
         self.last_error = None
-        self.refusal = None
         # Cleared here rather than in `run_structured`: `_settle` is the one
         # place every run begins, so a harness with an `answers=` shape called
         # through plain `run()` cannot read a flag left by the run before it.
         self.unfit = None
-        if (refusal := await self._over_budget()) is not None:
-            self.last_error = self.refusal = refusal
-            log.warning("%s not called: %s", self._config.name, refusal)
-            return None
 
         calls: list = []
         reached: list = []
@@ -643,22 +616,18 @@ class Harness:
         )
         progress = _Progress()
         try:
-            # The timeout bounds the whole run, retries included, rather than
-            # each try: what has to stay bounded is how long a run can hold a
-            # slot and this harness, not each attempt.
-            return await asyncio.wait_for(
-                self._attempts(prompt, context, max_turns, hooks, calls, progress),
-                timeout=self._config.timeout_seconds,
+            # No clock on the run (board `domains-plug-in`, ticket 17): it stops
+            # on turns or tokens, and a tool call carries its own timeout.
+            return await self._attempts(
+                prompt, context, max_turns, hooks, calls, progress
             )
         except Exception as exc:  # noqa: BLE001 - every failure becomes work
-            self.last_error = _why(
-                exc, self._config.timeout_seconds, progress.attempt
-            )
+            self.last_error = _why(exc, progress.attempt)
             log.warning("%s failed: %s", self._config.name, self.last_error)
             return None
         finally:
             # In `finally` because a call that failed still cost what it cost. A
-            # timeout cancels the run inside the provider request, so the hook
+            # cancelled run stops inside the provider request, so the hook
             # that builds a `ModelCall` never fires — `unfinished()` is what the
             # run managed to send.
             progress.flush(hooks, calls)
@@ -672,65 +641,45 @@ class Harness:
         `_chat_model`: `AsyncOpenAI` retries by default and says nothing, so the
         provider bills three calls where the record holds one.
         """
-        # Room for the one output correction on top of the turn budget, so the
-        # request limit is never what stops a structured answer from being
-        # fixed — that is the retry budget's job, and it is capped at one.
-        request_limit = max_turns + (1 if self.answers is not None else 0)
+        # Room for the output correction on top of the turn budget: a
+        # correction is an attempt, not a turn, so the request limit is never
+        # what stops a structured answer from being fixed.
+        request_limit = max_turns + (
+            OUTPUT_CORRECTIONS if self.answers is not None else 0
+        )
+        # Counted per `agent.run`, so each provider attempt starts its own
+        # count: a run with hiccups can spend up to `PROVIDER_ATTEMPTS` times
+        # `tokens`. Accepted while the caps are placeholders (ticket 01).
+        limits = UsageLimits(
+            request_limit=request_limit, total_tokens_limit=self._config.tokens
+        )
         last: Exception | None = None
-        for attempt in range(1, self._config.max_attempts + 1):
+        for attempt in range(1, PROVIDER_ATTEMPTS + 1):
             progress.attempt = attempt
             try:
                 result = await self.agent.run(
                     prompt,
                     deps=context,
-                    usage_limits=UsageLimits(request_limit=request_limit),
+                    usage_limits=limits,
                     capabilities=[hooks.capability],
                 )
             except Exception as exc:  # noqa: BLE001 - decided by _transient
                 progress.flush(hooks, calls)
                 last = exc
-                if not _transient(exc) or attempt == self._config.max_attempts:
+                if not _transient(exc) or attempt == PROVIDER_ATTEMPTS:
                     raise
                 log.info(
                     "%s: attempt %d of %d failed (%s), trying again",
                     self._config.name,
                     attempt,
-                    self._config.max_attempts,
+                    PROVIDER_ATTEMPTS,
                     type(exc).__name__,
                 )
-                await asyncio.sleep(
-                    self._config.retry_backoff_seconds * 2 ** (attempt - 1)
-                )
+                await asyncio.sleep(PROVIDER_BACKOFF_SECONDS)
             else:
                 progress.flush(hooks, calls)
                 return result
         raise last  # unreachable: the loop either returns or raises
-
-    async def _over_budget(self) -> str | None:
-        """Why this call is not being made, or `None` to make it.
-
-        Before `agent.run` rather than inside a hook, which is the whole of D2:
-        a hook fires once the decision to spend has been made. A breach is a
-        refusal, not a truncation — it routes to a person the way every other
-        limit here does.
-        """
-        budget = self._config.daily_token_budget
-        if budget is None or self._spent is None:
-            return None
-        try:
-            spent = await self._spent(self._config.name)
-        except Exception:  # noqa: BLE001 - this runs outside the clause below
-            # Fails open, and the direction is a decision: this check sits before
-            # `agent.run` and so outside the `except` that turns every other
-            # failure into a `last_error`. Left bare it would be the one path
-            # that raises past every caller.
-            log.exception(
-                "could not read %s's budget; going ahead", self._config.name
-            )
-            return None
-        if spent < budget:
-            return None
-        return f"{self._config.name} has spent {spent} of its {budget} tokens today"
 
     async def _write_down(self, calls: list, about: "_About | None") -> None:
         """Hand each call to the sink. A sink that fails costs a row, not a run.
@@ -829,18 +778,12 @@ class _Progress:
         self.claimed = len(calls)
 
 
-def _why(exc: Exception, timeout: float, attempts: int = 0) -> str:
-    """The reason, in a form somebody can act on.
-
-    A timeout is the case this exists for: `asyncio.wait_for` raises a
-    `TimeoutError` whose `str()` is empty. Everything else is scrubbed, because
-    it is stored against a task and a provider exception can quote an
-    Authorization header.
-    """
+def _why(exc: Exception, attempts: int = 0) -> str:
+    """The reason, in a form somebody can act on — scrubbed, because it is
+    stored against a task and a provider exception can quote an Authorization
+    header."""
     from friday.kernel.ops.redact import scrub
 
-    if isinstance(exc, asyncio.TimeoutError):
-        return f"no answer within {timeout:g}s"
     if attempts > 1:
         return f"gave up after {attempts} attempts: {scrub(str(exc))}"
     return scrub(str(exc))
@@ -867,14 +810,13 @@ def _chat_model(config: AgentConfig) -> OpenAIChatModel:
 
     The client is built here rather than left to the provider's default so its
     retries can be switched off (retrying is `_attempts`'s job, where it can be
-    seen and counted) and its per-request timeout set to a share of the run's
-    budget — given the whole of it, the run-level timer always tripped first,
-    and it cancels, so a hung provider spent the entire budget on one attempt.
+    seen and counted). Its timeout is the client's own default — the one
+    unbounded wait left, and the operator's call (board `domains-plug-in`,
+    ticket 17).
     """
     client = AsyncOpenAI(
         base_url=config.base_url,
         api_key=config.api_key,
-        timeout=config.timeout_seconds / max(config.max_attempts, 1),
         max_retries=0,
     )
     return OpenAIChatModel(config.model, provider=OpenAIProvider(openai_client=client))

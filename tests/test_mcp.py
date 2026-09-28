@@ -20,7 +20,7 @@ def test_a_server_is_configuration_not_code(tmp_path):
     (tmp_path / "config.yaml").write_text(
         """
 database_path: ./x.db
-agents: {}
+tiers: {}
 mcp_servers:
   loki:
     command: npx
@@ -47,7 +47,7 @@ def test_an_allow_list_in_the_file_is_refused_and_says_where_it_went(tmp_path):
     (tmp_path / "config.yaml").write_text(
         """
 database_path: ./x.db
-agents: {}
+tiers: {}
 mcp_servers:
   loki:
     command: npx
@@ -63,7 +63,7 @@ def test_a_server_reached_over_http_needs_no_command(tmp_path):
     (tmp_path / "config.yaml").write_text(
         """
 database_path: ./x.db
-agents: {}
+tiers: {}
 mcp_servers:
   loki:
     url: https://mcp.example.invalid/sse
@@ -78,7 +78,7 @@ def test_a_server_that_is_neither_is_refused(tmp_path):
     """Half a connection is worse than none: it fails at the first tool call,
     inside an agent run, hours after anyone edited the file."""
     (tmp_path / "config.yaml").write_text(
-        "database_path: ./x.db\nagents: {}\nmcp_servers:\n  loki: {}\n"
+        "database_path: ./x.db\ntiers: {}\nmcp_servers:\n  loki: {}\n"
     )
 
     with pytest.raises(ConfigError, match="loki"):

@@ -352,7 +352,6 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
 
 def diagnose_node(
     *, agent: str | None = None,
-    timeout_seconds: float | None = None,
     #: Build a harness per run, with this run's tools — the tools carry this
     #: run's placement and numbering, so a harness built once at boot would
     #: read the previous case's service. `None` when no `diagnose` agent is
@@ -376,5 +375,5 @@ def diagnose_node(
         return await _reading(state, deps, make_harness)
 
     return Node(
-        "diagnose", _diagnose, agent=agent, timeout_seconds=timeout_seconds  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py
+        "diagnose", _diagnose, agent=agent  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py
     )

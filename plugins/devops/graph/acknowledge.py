@@ -63,7 +63,7 @@ def ack_text(placement: Placement) -> str:
     return "Đang xử lý — mình đang xem lại vụ này, sẽ báo lại khi có kết quả."
 
 
-def acknowledge_node(*, timeout_seconds: float | None = None) -> Node:
+def acknowledge_node() -> Node:
     """Build node 2a.
 
     Queues rather than sends: the outbox is the only module that delivers,
@@ -106,4 +106,4 @@ def acknowledge_node(*, timeout_seconds: float | None = None) -> Node:
     # The adapter hands every api_issue node an `ApiIssueDeps`; `Node.run` is
     # typed `[Deps]` (not generic over the subtype), so the narrower parameter is
     # a known, safe variance gap.
-    return Node("acknowledge", _acknowledge, timeout_seconds=timeout_seconds)  # type: ignore[arg-type]
+    return Node("acknowledge", _acknowledge)  # type: ignore[arg-type]

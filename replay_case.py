@@ -59,7 +59,7 @@ from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
 from friday.sdk.workflow import DAG, Deps as DAGDeps, NodeRun
 from plugins.devops.config import load_devops_config
-from plugins.devops.graph import build_devops_dag, build_log_sources
+from plugins.devops.graph import DIAGNOSE, build_devops_dag, build_log_sources
 from plugins.devops.graph.deps import ApiIssueDeps
 from plugins.devops.params import ApiIssueParams
 from plugins.devops.sources.logs import LokiSource, SshKubectlSource
@@ -70,6 +70,20 @@ from friday.kernel.dag import adapter
 from dataclasses import replace as _dc_replace
 
 
+class _WithoutDiagnose:
+    """The config, with the diagnose agent hidden: `agent(DIAGNOSE)` is `None`,
+    so the node skips the way it does with no model."""
+
+    def __init__(self, config) -> None:
+        self._config = config
+
+    def __getattr__(self, name: str):
+        return getattr(self._config, name)
+
+    def agent(self, declaration):
+        return None if declaration == DIAGNOSE else self._config.agent(declaration)
+
+
 def _replay_dag(config, *, with_model, reports):
     """The `devops.api_issue` DAG, built through the plugin against a boot
     context — the composition root's job, done here for one replayed case. The
@@ -78,10 +92,7 @@ def _replay_dag(config, *, with_model, reports):
         load_devops_config((config.plugin_blocks or {}).get("devops")),
         reports_dir=str(reports),
     )
-    whole = config if with_model else _dc_replace(
-        config,
-        agents={k: v for k, v in config.agents.items() if k != "devops.diagnose"},
-    )
+    whole = config if with_model else _WithoutDiagnose(config)
     api = TaskTypeAPI(caps=BootContext(config=whole, servers={}), config=devops_cfg)
     return build_devops_dag(api), devops_cfg
 

@@ -25,12 +25,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from friday.sdk.agent import AgentDeclaration
 from friday.sdk.sources import Reads
 from friday.sdk.workflow import (
     DAG,
     DAGState,
     Edge,
-    NODE_CLOCK_MARGIN_SECONDS,
     Ask,
     HandOver,
     Reply,
@@ -60,12 +60,14 @@ log = logging.getLogger(__name__)
 
 TASK_TYPE = "devops.api_issue"
 
-#: The three nodes that only read a row or write one. **Bounded because nothing
-#: is**, not because they are slow: `intake`, `acknowledge` and `report` all
-#: reach the database, and a node with no ceiling waits on a hung connection for
-#: as long as the process lives — holding a pool slot. Generous enough that a
-#: busy SQLite write never trips it, small enough to be a bound.
-ROW_TIMEOUT_SECONDS = 20.0
+#: The graph's one model node. Reads logs and code, so the widest token
+#: budget; one turn plus its correction, what it had before turns counted tool
+#: calls (board `domains-plug-in`, ticket 17 — the loop's real budget comes
+#: with the spine). 60s a request: it reads logs and code, the largest prompt.
+DIAGNOSE = AgentDeclaration(
+    name="devops.diagnose", tier="flash", temperature=0.0, max_turns=1,
+    tokens=500_000, request_timeout_seconds=60.0,
+)
 
 
 def _ran_ok(node: str):
@@ -103,19 +105,21 @@ def build_devops_dag(api: Any) -> DAG:
     it reads the task's own text rather than a set of extracted parameters,
     so there is nothing here for `caps.prepare_node` to fill in first.
 
-    The diagnose model is `caps.make_harness`, `None` when no `devops.diagnose`
-    agent is configured — a fresh install, and every test that does not set one
-    up. The node then skips, with a reason, and the graph still reaches `Report`.
+    The diagnose model is `caps.make_harness`. In production `whole.agent`
+    always resolves `DIAGNOSE` (an undeclared tier refuses the boot); it is
+    `None` only where a caller hides it — `replay_case.py` without a model, and
+    tests. The node then skips, with a reason, and the graph still reaches
+    `Report`.
     """
     caps = api.caps
     cfg = api.config  # DevopsConfig (the plugin's own block)
     whole = caps.config  # the full application Config, for the shared agent
-    diagnose_agent = whole.agents.get("devops.diagnose")
+    diagnose_agent = whole.agent(DIAGNOSE)
 
     # A factory, because the tools carry this run's placement and numbering —
     # one harness built at boot would read the previous case's service.
-    # `caps.make_harness` is itself `None` when `diagnose_agent` is `None`, so
-    # this needs no separate gate for "no agent configured".
+    # `caps.make_harness` is itself `None` when `diagnose_agent` is `None`
+    # (replay without a model, tests), so this needs no separate gate.
     make_diagnose_harness = lambda *, tools: caps.make_harness(
         agent=diagnose_agent,
         instructions=build_instructions(reads=bool(tools)),
@@ -129,21 +133,13 @@ def build_devops_dag(api: Any) -> DAG:
     return DAG(
         name=TASK_TYPE,
         nodes=(
-            intake_node(timeout_seconds=ROW_TIMEOUT_SECONDS),
-            acknowledge_node(timeout_seconds=ROW_TIMEOUT_SECONDS),
+            intake_node(),
+            acknowledge_node(),
             diagnose_node(
                 make_harness=make_diagnose_harness,
                 agent=None if diagnose_agent is None else "devops.diagnose",
-                timeout_seconds=(
-                    ROW_TIMEOUT_SECONDS
-                    if diagnose_agent is None
-                    else diagnose_agent.timeout_seconds + NODE_CLOCK_MARGIN_SECONDS
-                ),
             ),
-            report_node(
-                reports_dir=Path(cfg.reports_dir),
-                timeout_seconds=ROW_TIMEOUT_SECONDS,
-            ),
+            report_node(reports_dir=Path(cfg.reports_dir)),
         ),
         edges=(
             Edge("intake", "acknowledge", when=_ran_ok("intake")),

@@ -21,7 +21,6 @@ from dataclasses import asdict, fields, replace
 from typing import Any, get_args, get_type_hints
 
 from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node
-from friday.kernel.harness.harness import Refused
 from friday.sdk.actions import Action, Ask, HandOver
 from friday.kernel.domain.models import MODEL_AUTHORED, ExtractionMark, Params
 from friday.sdk.validation import Problem, asked_as, validate
@@ -53,11 +52,10 @@ def prepare_node(
     *,
     on_ready: Callable[[Params], Params | Action] | None = None,
     budget_tokens: int | None = None,
-    #: The configured agent this node calls, and its clock — see
-    #: `Node.agent`. Set by `build_simple_dag` from the `extractor` block;
-    #: `None` for both when there is none, and node 0 is code alone.
+    #: The configured agent this node calls — see `Node.agent`. Set by
+    #: `build_simple_dag` from the extractor; `None` when there is none, and
+    #: node 0 is code alone.
     agent: str | None = None,
-    timeout_seconds: float | None = None,
 ) -> Node:
     """Node 0: everything the reporter has said, filled in and checked.
 
@@ -122,7 +120,7 @@ def prepare_node(
             return problem
         return on_ready(filled) if on_ready else filled
 
-    return Node("prepare", _prepare, agent=agent, timeout_seconds=timeout_seconds)
+    return Node("prepare", _prepare, agent=agent)
 
 
 async def resolve_artifacts(db: Any, task_id: int, params: Params) -> Params:
@@ -183,8 +181,8 @@ async def prepare(
     context: FullContext | None = None,
     #: How the extraction is obtained. Injected so node 0 can hand in one that
     #: remembers, without this function growing a second path — there is one
-    #: place a `Refused` becomes a hand-over and one place a fill happens, and
-    #: both stay here whether the answer came from a model or from a mark.
+    #: place a fill happens, and it stays here whether the answer came from a
+    #: model or from a mark.
     #:
     #: `None` rather than `_extract` as the default, and resolved at the call:
     #: a default argument binds once at definition, so naming the function here
@@ -224,16 +222,9 @@ async def prepare(
     """
     clarify: Clarify | None = None
     if context is not None and context.transcript is not None:
-        try:
-            extracted, clarify = await (extract or _extract)(
-                task_type, context, task_id=task_id, node=node,
-            )
-        except Refused as refusal:
-            # A ceiling, not a failure. Falling through would leave the fields
-            # unfilled, and the code floor below would then ask the reporter
-            # for what they already wrote — the exact failure CLAUDE.md names
-            # for a task type with no extractor at all.
-            return params, HandOver(str(refusal))
+        extracted, clarify = await (extract or _extract)(
+            task_type, context, task_id=task_id, node=node,
+        )
         if extracted is not None:
             params = _fill(params, extracted)
 
@@ -275,9 +266,8 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
     on the next pass, because the fields it asks about are usually the optional
     ones no structural rule challenges.
 
-    Wrapped around the seam rather than folded into `prepare`, so a `Refused`
-    is still handled in exactly one place and a mark is never written for a
-    call that did not happen.
+    Wrapped around the seam rather than folded into `prepare`, so a mark is
+    never written for a call that did not happen.
     """
 
     async def extract(
@@ -312,9 +302,6 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
             # error into `last_error`, or output that missed the schema.
             # Marking that would turn one 502 into a task that is never read
             # again, which is the opposite of "a hiccup is retried here".
-            #
-            # `Refused` never reaches this line — it propagates to `prepare`,
-            # which hands over — so a ceiling does not write a mark either.
             log.info("task %s: nothing extracted, not marking", task_id)
             return extracted, clarify
         await db.mark_extraction(

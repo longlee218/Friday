@@ -60,9 +60,10 @@ docker compose logs -f
 ```
 
 Secrets arrive at runtime from `.env`, never baked. `config.yaml` is mounted
-read-only, so changing a model or a threshold is a restart, not a rebuild.
-The database is on a named volume — without it a redeploy loses the
-cursors, and the sweep then only recovers the last `max_message_age` of each
+read-only, so changing a model tier is a restart, not a rebuild; changing a
+knob (a threshold, a budget) is a commit. The database is on a named volume —
+without it a redeploy loses the cursors, and the sweep then only recovers the
+last `MAX_MESSAGE_AGE_SECONDS` of each
 watched channel. The board is unauthenticated by design and shows every
 captured message and every model prompt, so it is published to loopback
 only and reached with `ssh -N -L 8086:127.0.0.1:8086 <host>`.
@@ -83,8 +84,8 @@ the repo root. Every module below that is not `sdk`/`store` lives under
 | `run_agent.py` | Composition root — the only place adapters are constructed and asyncio tasks started. Reads no agent's knobs; runs `check_graphs` straight after `load_config` |
 | `serve_board.py` | The board alone, against the live database, without connecting to Discord |
 | `import_context_files.py` | One-off: import a second install's old per-channel YAML files as `origin=admin` memory rows |
-| `config.yaml` | Per-agent models and caps, channel whitelist, thresholds, `workflows.concurrency`, MCP servers, `sensitive_words` |
-| `friday/kernel/config.py` | Loads `config.yaml` and resolves `${VAR}`. Folded into the kernel in ticket 21; imports only the kernel domain, so it is safe to load early |
+| `config.yaml` | Provider keys, **named model tiers** (`tiers:`) and **install facts** only — channel whitelist, mention types, `workflows.concurrency`, MCP servers, `sensitive_words`, paths, the operator. Every **knob** is a named constant beside its user, pinned by `tests/test_knobs_are_constants.py`; a moved knob left in the file is refused at load (board `domains-plug-in`, tickets 07 and 17) |
+| `friday/kernel/config.py` | Loads `config.yaml` and resolves `${VAR}`. `Config.agent(declaration)` resolves an agent — its tier's endpoint and key, its declaration's temperature, `max_turns` and `tokens` — and **an undeclared tier refuses the boot**. Folded into the kernel in ticket 21; imports only the kernel domain and the sdk, so it is safe to load early |
 | **`friday/kernel/domain/`** | The vocabulary the kernel is written in, folded under it in **ticket 19**: `models.py` (every dataclass, the memory-kind data shapes and `RoomSummary`), `conversation.py`, `states.py` (`TaskState`/`OutboundState` transitions), `triage.py` (`Decided`/`NeedsHuman`/`make_decided` — what triage concludes), `memory_guard.py` (refuses instruction-shaped memory text). The pure, plugin-facing pieces that used to sit beside these — the workflow actions (`Ask`/`Reply`/`HandOver`), the validation DSL, the prompt primitives, `scrub`, the memory `Origin` — are the bottom of the stack now and live in `friday/sdk/`. Since ticket 12 it holds no memory-kind *catalog* — `MemoryKind` is a validated string, and the kinds register themselves (see `friday/kernel/memory/registry.py`) |
 | **`friday/store/`** | `schema.py` the mapped classes; the store is a **facade over repositories** (ticket 16): `db.py`'s `Database` composes cohesive mixins under `repositories/` (`messages`, `memory`, `outbox`, `tasks`, `calls`, `rooms`, `monitor`, `verdicts`), with `_common.py` holding the shared imports, row converters and constants. Converts at the edge — nothing above it knows SQLAlchemy exists. It does its own **data integrity** (schema-fit, the per-channel cap, referential and admin-row checks, the unique natural key) but **not the trust-boundary invariants**: the outbox approval gate and the memory-write guard (instruction-shaped, origin-may-write) live in the kernel (`friday/kernel/outbox/`, `friday/kernel/memory/write.py`), so a dumb or fake store cannot smuggle either past them (workflow state is DBOS's, excluded from the split) |
 | **`friday/kernel/harness/`** | What it takes to call a model, nothing about what to call it for: `harness.py` (only module that may import the SDK), `structured.py` (declared-shape answers), `instruction_prompt.py`, `skills.py`, `mcp.py` (servers from configuration, stdio/SSE/streamable-HTTP), `auth.py` (Friday's own Keycloak client, per request), `llm_log.py` |
@@ -96,11 +97,11 @@ the repo root. Every module below that is not `sdk`/`store` lives under
 | `friday/kernel/triage/` | Classification only, plus its sensitive-word prefilter and the untriaged-message loop. `context.py` gathers what a mention is shown; `prompt.py` renders it. The answer is a `Decided` (`type: str`, `confidence`); the **closed set the model is held to is built at boot from the registry** by `friday.kernel.domain.triage.make_decided` (ticket 11) — a `Literal` over the registered task types plus `skip`, validated exactly as the old static one, only the set is now the registry's, not a hand-maintained `DECISIONS` |
 | `friday/kernel/extraction/` | Everything a task knows, lifted out of the reporter's own words. One extractor per task type, each owning its prompt and `Params` schema; one `extractor` config block serves all of them. `context.py` is node 0's gather function: transcript, domain memories (this room and `'*'`), outstanding questions and `known`, one call, one frozen `FullContext` |
 | **`plugins/devops/sources/`** | **Decided 2026-09-28, not built** (board `domains-plug-in`, ticket 09): `sources/` folds into `plugins/backend/toolsets/` — one file per data source holds both the tools and the client that reaches out, so there is one place to control. The guard's allow-list moves to `toolsets/`; replay is unaffected, it swaps `Reads` (`CannedReads`), not the source class. Today: where facts come from, and the only place that reaches an outside read surface: `logs.py` (`LokiSource`, `SshKubectlSource`), `code.py` (a stack frame mapped into the operator's clone, and the window around it), `release.py`, `db.py`. Read-only by construction — no verb here writes — and holds no judgement: which window, which service, which frame all arrive as arguments. Implements the sdk source ports and **imports `friday.sdk` only** (ticket 14). `tests/test_sources_are_the_only_door.py` is the guard, and it reads `friday/` and `plugins/` both |
-| `friday/sdk/` | **Contracts only** — Protocols and dataclasses, no I/O, no third-party imports — what the kernel builds on and a plugin codes against. `workflow.py` is the workflow **port** (`DAG`, `Node`, `Edge`, `Deps`, `DAGState`, `envelope`, `Ask`/`Reply`/`HandOver`, `NODE_CLOCK_MARGIN_SECONDS`; no `dbos`, no `DAG.version` — recovery is DBOS's, ticket 06). `plugin.py` holds `Plugin`, `PluginAPI`, `TaskTypeSpec`; `memory.py` holds `MemoryKindSpec` (with a per-kind `key` deriver), `Origin`. **Ticket 14** added the ports a real plugin codes against: `sources.py` (`LogSource`, `CodeSource`, `Placement`, `Lines`, `Reads`), `tools.py` (`tool`/`ToolSpec`/`ToolContext`, a neutral tool the harness binds to the vendor's), `model.py` (`Model` — the `run_structured`/`last_error` surface a plugin's model node calls), `outbox.py` (`Kind`). **Ticket 19** made the sdk the true bottom of the stack: the pure logic a plugin needs lives here outright, no longer re-exported from a value layer — `actions.py` (`Ask`/`Reply`/`HandOver`, which `workflow.py` re-exports as node vocabulary), `prompt.py` (the prompt-assembly primitives), `redact.py` (`scrub`), `validation.py` (the params rule DSL) — and `memory.py` **defines** `Origin`/`MemoryOrigin`. It imports **nothing of ours** |
+| `friday/sdk/` | **Contracts only** — Protocols and dataclasses, no I/O, no third-party imports — what the kernel builds on and a plugin codes against. `workflow.py` is the workflow **port** (`DAG`, `Node`, `Edge`, `Deps`, `DAGState`, `envelope`, `Ask`/`Reply`/`HandOver`; no `dbos`, no `DAG.version` — recovery is DBOS's, ticket 06). `plugin.py` holds `Plugin`, `PluginAPI`, `TaskTypeSpec`; `memory.py` holds `MemoryKindSpec` (with a per-kind `key` deriver), `Origin`. **Ticket 14** added the ports a real plugin codes against: `sources.py` (`LogSource`, `CodeSource`, `Placement`, `Lines`, `Reads`, and `TOOL_CALL_TIMEOUT_SECONDS`, the one time limit left), `agent.py` (`AgentDeclaration` — an agent's tier, temperature and `(max_turns, tokens)` budget, build board `build-the-spine` ticket 01), `tools.py` (`tool`/`ToolSpec`/`ToolContext`, a neutral tool the harness binds to the vendor's), `model.py` (`Model` — the `run_structured`/`last_error` surface a plugin's model node calls), `outbox.py` (`Kind`). **Ticket 19** made the sdk the true bottom of the stack: the pure logic a plugin needs lives here outright, no longer re-exported from a value layer — `actions.py` (`Ask`/`Reply`/`HandOver`, which `workflow.py` re-exports as node vocabulary), `prompt.py` (the prompt-assembly primitives), `redact.py` (`scrub`), `validation.py` (the params rule DSL) — and `memory.py` **defines** `Origin`/`MemoryOrigin`. It imports **nothing of ours** |
 | `friday/kernel/` | Owns the invariants and **names no plugin**. The kernel-consolidation (tickets 19–21) folded every application module in here: `registry.py`/`plugin_host.py` (the `PluginAPI` a plugin's `register(api)` fills, and the loader that runs it), `domain/` (models, states, conversation, triage outcomes, the memory-write guard — ticket 19), `dag/` (the graph home: port callers, node 0, the registry, the router, and the DBOS `adapter.py`), `harness/` (was `agent/`), `pool/` (was `tasks/`), `memory/`, `outbox/`, `triage/`, `extraction/`, `responder/`, `inbox/`, `ops/`, `text/`, `tools/`, `providers/`, `config.py`. Imports `friday.sdk`, itself, and the concrete `friday.store` — the one standing exception the guard names, since inverting the store behind a `Store` Protocol in the sdk is DESIGN-v2 deferred work (ticket 16 split the store into repositories and moved its *invariants* into the kernel, but the kernel calls ~70 store methods, so it does not build that Protocol). `tests/test_dependency_rule.py` is the guard: sdk imports nothing of ours, kernel imports only sdk (+ the store, interim), a plugin imports sdk only, and the kernel carries no plugin import or task-type/pack-kind literal (the in-core `access_request` excepted) — **non-vacuous since ticket 14**, when `plugins/devops/` became the first real plugin |
 | `friday/kernel/plugin_host.py` | Loads the plugins named in `config.plugins` (default `plugins.devops`) and validates each one's config block against its `Plugin.config`. Two lifecycle-specific `PluginAPI` impls, so one `register(api)` serves both registration passes: `TaskTypeAPI` (in `register_all`) assembles and registers a plugin's task-type graph from the boot caps and ignores its memory kinds; `MemoryKindAPI` (in `register_all_memory_kinds`) registers its memory kinds and readers and ignores its task type. Folded into the kernel in ticket 21: it names no plugin statically (it loads them by name with `importlib`) and reaches the harness through the kernel, so both guards hold |
-| `friday/kernel/dag/` | `adapter.py` — the **DBOS adapter** beneath the port, the one module that imports `dbos`. A graph is a `@DBOS.workflow` walk, each node a memoized `@DBOS.step`; DBOS owns run persistence, step memoization and resume. The kernel chain (clock, retry, redaction, the `node_runs` record) is ported into `_invoke`, not delegated. An ast guard keeps `dbos` here |
-| `friday/kernel/dag/` | `prepare.py` builds the entry node (node 0) every graph shares. **`registry.py` is the one task-type registry** (ticket 11): a task type registers a `TaskTypeSpec` (params, graph, needs, run-deps, budget) — the map that used to be `PARAMS` + the extractor map + the router's `_graphs` — and the built DAG is stored beside it. `task_types.py` registers the one in-core simple type (`access_request`) and loads the plugins — its `BootContext` is the **caps** a plugin's graph builder reaches through (`prepare_node`, `make_harness`, and `simple_dag` for a persona whose whole graph is node 0); `router.py` is now generic — it reads the registry, builds `EDGE_ROUTER`, checks the clocks and (ticket 13) checks that every type's `deps` factory can build its run `Deps`, and **names no task type**. The `api_issue` investigation graph, its sources and its typed per-run `Deps` moved out to `plugins/devops/` in ticket 14. `adapter.py` is the **DBOS adapter** (the one module that imports `dbos`), folded in here when `dag/` and `workflow/` merged (ticket 20); the old `engine.py`/`state.py` re-export shims were deleted then, and the graph vocabulary is imported from `friday.sdk.workflow`/`friday.sdk.workflow_state` directly (the hand-written `DAGRunner` was retired onto DBOS) |
+| `friday/kernel/dag/` | `adapter.py` — the **DBOS adapter** beneath the port, the one module that imports `dbos`. A graph is a `@DBOS.workflow` walk, each node a memoized `@DBOS.step`; DBOS owns run persistence, step memoization and resume. The kernel chain (retry, redaction, the `node_runs` record) is ported into `_invoke`, not delegated. An ast guard keeps `dbos` here |
+| `friday/kernel/dag/` | `prepare.py` builds the entry node (node 0) every graph shares. **`registry.py` is the one task-type registry** (ticket 11): a task type registers a `TaskTypeSpec` (params, graph, needs, run-deps) — the map that used to be `PARAMS` + the extractor map + the router's `_graphs` — and the built DAG is stored beside it. `task_types.py` registers the one in-core simple type (`access_request`) and loads the plugins — its `BootContext` is the **caps** a plugin's graph builder reaches through (`prepare_node`, `make_harness`, and `simple_dag` for a persona whose whole graph is node 0); `router.py` is now generic — it reads the registry, builds `EDGE_ROUTER` and (ticket 13) checks that every type's `deps` factory can build its run `Deps`, and **names no task type**. The `api_issue` investigation graph, its sources and its typed per-run `Deps` moved out to `plugins/devops/` in ticket 14. `adapter.py` is the **DBOS adapter** (the one module that imports `dbos`), folded in here when `dag/` and `workflow/` merged (ticket 20); the old `engine.py`/`state.py` re-export shims were deleted then, and the graph vocabulary is imported from `friday.sdk.workflow`/`friday.sdk.workflow_state` directly (the hand-written `DAGRunner` was retired onto DBOS) |
 | **`plugins/devops/`** | The first real plugin (ticket 14), and the proof the split holds: **imports `friday.sdk` only**. `__init__.py` exposes `PLUGIN` + `register(api)`, which contributes the `devops.api_issue` task type, its pack kinds (`devops.service`/`.route`/`.environment`/`.project`/`.dependency`, in `memory.py`) and their reader routing. `params.py` (`ApiIssueParams`), `config.py` (`DevopsConfig`, incl. the container-root policy as data — box 4), `graph/` (the investigation graph `intake → acknowledge → diagnose loop → report`, its diagnose prompt and `ApiIssueDeps`), `sources/` (`LokiSource`/`SshKubectlSource`/`ReleaseSource`/`DbSource` and the code reader, implementing the sdk ports), `investigate.py` (the diagnose read tools). The heavy handle it cannot import — the diagnose `Harness` — is injected by the composition root through the boot caps; node 0 is now the plugin's own deterministic `intake` node, not the shared `prepare_node` (board `build-the-loop`) |
 | **`plugins/docs/`** | The second persona (ticket 15), and the proof G2 holds — a new persona is a new plugin added with **zero kernel diff**. `docs.doc_question` has no investigation past node 0, so the plugin is `__init__.py` (`PLUGIN` + `register`) and `params.py` (`DocQuestionParams`) alone; its whole graph is the shared simple node-0, built through `api.caps.simple_dag` so it too imports `friday.sdk` only. Configured plugins are listed in `config.plugins` (default `plugins.devops`, `plugins.docs`) |
 | `friday/kernel/pool/` | The pool: runs node 0 itself each pass, then starts or resumes each task's durable DBOS workflow (`task-<id>`) and polls it to its next boundary — the outcome, or the `Ask` it suspended on. A workflow waiting on the reporter suspends and never blocks other tasks. Decides nothing about what a graph decides |
@@ -172,7 +173,7 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
 - **A daily online backup covers both files** (`kernel/ops/backup.py`, ridden
   on the heartbeat like model-call trimming): `sqlite3`'s backup API takes a
   consistent snapshot of each while the process runs, keeping
-  `keep_backups` days under `backup_dir`; both halves of a day are kept or
+  `KEEP_BACKUPS` days under `backup_dir`; both halves of a day are kept or
   pruned together. **Restore is a stopped-process command** — with the agent
   down, `uv run python -m friday.kernel.ops.backup restore <YYYYMMDD>` copies
   that day's two files back over the live paths (it refuses a day missing
@@ -190,7 +191,7 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   Every handler must be idempotent on that key.
 - **Never drop a mention.** Low confidence, cap breaches, refusals,
   classifier errors and the sensitive-word prefilter all route to a person.
-  A turn older than `max_message_age` is recorded `outdated` — a row, a
+  A turn older than `MAX_MESSAGE_AGE_SECONDS` is recorded `outdated` — a row, a
   reason and a board entry, no reply. The same window bounds a cold cursor's
   backfill, which *is* an unrecorded drop, logged at boot.
 - **`sensitive_words`** blocks a message from reaching the model, checked
@@ -203,11 +204,22 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
 
 - **Every model call goes through Chat Completions**, not the Responses API.
   Moving providers is `base_url`/`api_key`/`model` alone.
-- **Every model call is bounded and logged at one seam.** `_settle` sets the
-  clock (`timeout_seconds` per agent, 60 s default) and hands the call to the
-  recording sink given to a `Harness` **at construction**. **One run of a
-  harness at a time** (`Harness._one_run`): the pool runs graphs side by
-  side, and `last_error`, `refusal` and `unfit` are read off the instance.
+- **Every model call is bounded and logged at one seam.** `_settle` runs it
+  under the agent's budget — `UsageLimits(request_limit=max_turns,
+  total_tokens_limit=tokens)`, `max_turns` counting every request **tool turns
+  included** (the output correction rides on top, an attempt not a turn) —
+  and hands the call to the recording sink given to a `Harness` **at
+  construction**. **One run of a harness at a time** (`Harness._one_run`): the
+  pool runs graphs side by side, and `last_error` and `unfit` are read off the
+  instance.
+- **No time budget anywhere** (board `domains-plug-in`, ticket 17). A run
+  stops on turns or tokens; the only clock is `TOOL_CALL_TIMEOUT_SECONDS` on
+  each tool call — `Reads.call`, the MCP toolset's `read_timeout`, SSH
+  `kubectl`, `git show` — so a hung read cannot hold a pool slot. **One model
+  request** is bounded by its agent's `request_timeout_seconds` (Pydantic AI's
+  `ModelSettings.timeout`; 30s triage/extractor/summary, 60s responder/diagnose,
+  set from measured latency on 2026-09-28); a request past it is an attempt
+  and is tried again.
 - **Structured answers.** `Harness(answers=<dataclass>)` declares the shape;
   `run_structured(prompt)` returns an instance or `None`. The model answers
   through a generated tool call — **not** `response_format: json_schema`,
@@ -220,10 +232,12 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   enforces this.
 - **A hiccup is retried here and nowhere else.** `Harness._attempts` retries
   connection errors, timeouts, 429 and 5xx — never a 400 — with the client's
-  own retry off. `timeout_seconds` bounds the whole run.
-- **`daily_token_budget` refuses; it does not trim**, counted from rows the
-  agent wrote, failing open on a store error. What a refusal becomes is the
-  caller's.
+  own retry off. **Attempts are core constants**, the same for every agent:
+  `PROVIDER_ATTEMPTS 10` with a fixed `PROVIDER_BACKOFF_SECONDS 10` (no
+  doubling — so a stalled provider can hold a slot ~690s for a 60s agent),
+  `OUTPUT_CORRECTIONS 1`, `OUTBOX_ATTEMPTS 3`. Retrying stays in our loop
+  rather than Pydantic AI's retrying transport so every attempt is recorded. There is
+  no daily token ceiling; the heartbeat reports spend.
 - **One state travels a message's whole journey, and it is read-only.**
   `FridayState` is the SDK's per-run dependency (`RunContext.deps`); every
   change is a named method returning a new state. `tests/test_run_context.py`
@@ -237,8 +251,8 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   DBOS's own SQLite system database beside the application one — so a crash
   resumes from the last incomplete step, DBOS's per-step memoization in place
   of the hand-written checkpoint and the derived `DAG.version` (both gone).
-  **Every node still runs through the adapter's `_invoke`**: its own timeout (a
-  `timed_out` envelope, not a raise), retry over an explicit exception list
+  **Every node still runs through the adapter's `_invoke`**: retry over an
+  explicit exception list
   with doubling backoff, any other exception as a `{status: error}` envelope,
   one `node_runs` row per attempt — the kernel chain the kernel keeps for
   itself rather than delegating.
@@ -249,11 +263,9 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   `HandOver` escalates to the operator out of band, so it flows on as a result
   the pool reads. A workflow's input is a serializable scope key; the live
   `Deps` (the store, the log sources) are rebuilt inside the run.
-- **A model node's clock outlasts its agent's** by
-  `NODE_CLOCK_MARGIN_SECONDS`, or a node timeout would cancel the harness
-  mid-run where its retry loop cannot see it. Node 0 is a model node (the
-  extractor). Checked at config load (`check_graphs`) and again at
-  `register_dags`.
+- **An undeclared tier refuses the boot**: `check_graphs` builds every graph
+  straight after `load_config`, which resolves the extractor's and each model
+  node's agent through `Config.agent`.
 - **Every task type is a graph. All but one get a single node** — extract,
   validate, then ask or hand over.
 - **`api_issue` has an investigation past node 0**: `Intake → Acknowledge →
@@ -492,8 +504,8 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
 
 - `pytest` + `pytest-asyncio`, `asyncio_mode = "auto"`.
 - No linter or formatter is configured; one added is wired through `uv`.
-- **Structured config in `config.yaml`**, version-controlled; `.env` holds
-  secrets only. `data/`, `*.db*` and `.env` are never committed.
+- **Install facts in `config.yaml`**, version-controlled; `.env` holds
+  secrets only; knobs are constants in code. `data/`, `*.db*` and `.env` are never committed.
 - **The Discord user token must never reach logs, tracebacks or the task
   DB.** `friday/kernel/ops/redact.py` scrubs on the way out, including from
   `sys.excepthook` and `threading.excepthook`; a node's exception text is
@@ -534,7 +546,7 @@ to keep in step.
 | **D10** | Three outputs, two of them approved | **One** is approved now, on the operator's call (2026-09-22): the acknowledgement is sent unread because it answers nothing, the operator's finding is a DM, and only the reporter's copy waits |
 | **D11** | No redaction while the agent thinks | `scrub` runs on what goes out and on what the board renders, never on the prompt or the report file |
 | **D12** | Findings are written by the agent, directly | Not built. The report file is, and it is the only output that carries the whole of a run |
-| **D13** | Time is a knob | `api_issue.timeout_seconds`, checked at boot against the sum of the graph's node clocks |
+| **D13** | Time is a knob | **Amended 2026-09-28 — no time budget.** `devops.timeout_seconds` and the node clocks are deleted; each tool call carries `TOOL_CALL_TIMEOUT_SECONDS` (board `domains-plug-in`, ticket 17) |
 | **D14** | Friday runs on the operator's machine | With what that machine has — `ssh dev`, the clones under `~/Documents/Apero/`, the MCP sessions they sign in to |
 
 **Two are amended by measurement rather than by argument**, which is the

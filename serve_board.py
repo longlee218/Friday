@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 from friday.kernel.ops.api import bind, build_api, check_exposure
 from friday.kernel.config import load_config
 from friday.store.db import Database
-from friday.kernel.triage.runner import TriageRunner
+from friday.kernel.triage.runner import CONFIDENCE_THRESHOLD
 
 
 async def main() -> None:
@@ -50,12 +50,9 @@ async def main() -> None:
         db=db,
         provider_status=status,
         origins=list(config.board_origins),
-        # Asked of the runner rather than read out of config, for the reason
-        # `run_agent.py` is held to: which knobs triage has is triage's.
+        # Triage's own constant: which knobs triage has is triage's.
         repo_root=config.repo_root or None,
-        confidence_threshold=(
-            await TriageRunner.build(config, db=db)
-        ).confidence_threshold,
+        confidence_threshold=CONFIDENCE_THRESHOLD,
     )
     sock = bind(config.board_host, config.board_port)
     server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))

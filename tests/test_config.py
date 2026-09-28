@@ -51,44 +51,6 @@ def test_an_unquoted_channel_id_still_matches(tmp_path):
     assert config.ingest.watched_channels == frozenset({"1360170800153366600"})
 
 
-# --- durations (board `work-that-has-gone-cold`, ticket 01) ------------------
-
-
-import pytest
-
-
-@pytest.mark.parametrize(
-    "written,seconds",
-    [("10s", 10), ("90s", 90), ("10m", 600), ("10h", 36000), ("24h", 86400)],
-)
-def test_a_duration_reads_as_what_it_says(written, seconds):
-    """`24h` says what it is. `max_message_age_hours: 24` puts the unit in the
-    key and the number somewhere else, and the reader has to hold both."""
-    from friday.kernel.config import duration
-
-    assert duration(written, key="max_message_age") == seconds
-
-
-@pytest.mark.parametrize("bad", ["24", 24, "24 h", "24x", "h", "", "-1h", "1.5h"])
-def test_a_duration_that_is_not_one_is_refused_at_load(bad):
-    """Refused where it is written, not where it is used. An unparsed
-    threshold reaching the triage runner means either a crash on the first
-    message or — worse — a silent zero, which would mark every message
-    outdated and read as the agent having stopped working."""
-    from friday.kernel.config import ConfigError, duration
-
-    with pytest.raises(ConfigError, match="max_message_age"):
-        duration(bad, key="max_message_age")
-
-
-def test_no_duration_at_all_is_a_real_answer():
-    """Absent means no cutoff — the behaviour that exists today. That is the
-    shipped default, for the reason `daily_token_budget` has none."""
-    from friday.kernel.config import duration
-
-    assert duration(None, key="max_message_age") is None
-
-
 # --- extraction_budget_tokens (ticket 08: the build respects a budget) -----
 
 
@@ -146,7 +108,7 @@ def test_a_pool_that_could_run_nothing_is_refused_at_load(tmp_path, bad):
 
 def test_declared_secrets_gathers_keys_env_and_tokens(tmp_path):
     """Value-based redaction (§12) needs the exact secrets this deployment
-    holds: the agent API keys, an MCP server's declared env and auth secret,
+    holds: the tiers' API keys, an MCP server's declared env and auth secret,
     and the tokens the composition root read from the environment."""
     from friday.kernel.config import declared_secrets
 
@@ -154,8 +116,8 @@ def test_declared_secrets_gathers_keys_env_and_tokens(tmp_path):
     path.write_text(
         SAMPLE
         + """
-agents:
-  triage:
+tiers:
+  flash:
     api_key: sk-agent-key
     base_url: https://api.example.invalid/v1
     model: some-model
@@ -180,16 +142,46 @@ mcp_servers:
     }
 
 
-def test_backup_knobs_have_defaults_and_are_read(tmp_path):
-    """Two-file backup (§12.1): where backups go and how many days are kept."""
+def test_the_backup_dir_has_a_default_and_is_read(tmp_path):
+    """Two-file backup (§12.1): where backups go is an install fact; how many
+    days are kept is `KEEP_BACKUPS`, a knob."""
     default_path = tmp_path / "default.yaml"
     default_path.write_text(SAMPLE)
-    default = load_config(default_path)
-    assert default.backup_dir == "data/backups"
-    assert default.keep_backups == 7
+    assert load_config(default_path).backup_dir == "data/backups"
 
     path = tmp_path / "config.yaml"
-    path.write_text(SAMPLE + "\nbackup_dir: /var/backups/friday\nkeep_backups: 3\n")
-    config = load_config(path)
-    assert config.backup_dir == "/var/backups/friday"
-    assert config.keep_backups == 3
+    path.write_text(SAMPLE + "\nbackup_dir: /var/backups/friday\n")
+    assert load_config(path).backup_dir == "/var/backups/friday"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "keep_backups: 3\n",
+        "heartbeat_seconds: 60\n",
+        "down_after_seconds: 300\n",
+        "summary_at_hour: 9\n",
+        "keep_model_calls_days: 14\n",
+        "outbox:\n  max_attempts: 3\n",
+        "context:\n  summary_max_chars: 6000\n",
+    ],
+)
+def test_a_knob_left_in_the_file_is_refused_and_says_where_it_went(tmp_path, extra):
+    """A knob the operator edits and nothing reads is a change that silently
+    does nothing — so a moved one is refused, naming its constant."""
+    path = tmp_path / "config.yaml"
+    path.write_text(SAMPLE + extra)
+
+    with pytest.raises(ConfigError, match="no longer read.*[A-Z_]{6,}"):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    "knob", ["turn_seconds: 12", "sweep_interval_seconds: 300", "context_messages: 20"]
+)
+def test_an_ingest_knob_left_in_the_file_is_refused(tmp_path, knob):
+    path = tmp_path / "config.yaml"
+    path.write_text(SAMPLE + "  " + knob + "\n")
+
+    with pytest.raises(ConfigError, match="ingest"):
+        load_config(path)

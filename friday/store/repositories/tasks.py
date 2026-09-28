@@ -402,7 +402,7 @@ class TasksRepo:
         has already shipped once, because a mark cannot be acted on: its only
         reader asks for one task by id, and a reopened task's mark is still
         true, since the same text still yields the same answer. If these ever
-        need pruning it is the same job as `keep_model_calls_days`, not a
+        need pruning it is the same job as `KEEP_MODEL_CALLS_DAYS`, not a
         cascade.
         """
         async with self._sessions() as session:

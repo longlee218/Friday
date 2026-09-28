@@ -318,44 +318,6 @@ def test_an_empty_string_counts_as_a_blank():
     ).environment == "production"
 
 
-async def test_a_refused_extractor_hands_over_instead_of_asking(monkeypatch):
-    """A ceiling must not make the reporter answer for it.
-
-    `CLAUDE.md` already names this failure — "it opens tasks with no
-    parameters and asks the reporter for what they already said" — as the
-    reason a task type without an extractor is *broken* rather than degraded.
-    A ceiling on an extractor reproduces it exactly: the model is not called,
-    no fields come back, the structural check finds them missing, and the
-    reporter is asked for the correlationId they put in their first message.
-
-    The difference between "the model could not answer" and "we declined to
-    ask it" is the whole of what decides that. The first is worth a question;
-    the second is worth telling the operator their budget stopped a task.
-    """
-    import friday.kernel.dag.prepare as wf
-    from friday.kernel.harness.harness import Refused
-    from friday.sdk.actions import HandOver
-    from plugins.devops.params import ApiIssueParams
-    from tests.test_extraction import _context
-
-    async def refused(task_type, context, *, task_id=None, node=None):
-        raise Refused("api_issue_extractor has spent 999 of its 10 tokens today")
-
-    monkeypatch.setattr(wf, "_extract", refused)
-
-    _, action = await wf.prepare(
-        "devops.api_issue",
-        ApiIssueParams(summary="checkout 500"),
-        context=_context(
-            "prod broke, correlationId abcdef01-2345-6789-abcd-ef0123456789",
-            ApiIssueParams,
-        ),
-    )
-
-    assert isinstance(action, HandOver)
-    assert "tokens today" in action.reason
-
-
 # --- node 0 pays once for one set of facts (ticket 04) --------------------
 
 

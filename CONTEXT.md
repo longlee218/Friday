@@ -136,7 +136,7 @@ is the premise each board tracks against.
   full at node 0), compaction by budget, verbatim material as artifacts,
   domain memory with candidates and instruction guard; law: every store ships
   with its producer and consumer. **Done.**
-- **`work-that-has-gone-cold`** — a message older than `max_message_age` is
+- **`work-that-has-gone-cold`** — a message older than `MAX_MESSAGE_AGE_SECONDS` is
   recorded `outdated` at triage; a cold cursor looks back only that far.
   **Done**, one open question on ticket 02.
 - **`every-answer-has-a-shape`** — every model answer is a typed dataclass
@@ -159,7 +159,8 @@ is the premise each board tracks against.
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **Not started** (opened 2026-09-28).
+  **In progress:** ticket 01 (knobs to constants, budget in three groups)
+  built on branch `feat/knobs-to-constants`, 2026-09-28.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
 
@@ -244,6 +245,11 @@ read. One table holds both.
 
 A person's consecutive messages read as one unit — the unit triage
 classifies. Computed when read, never stored.
+
+**Agent turn** is the other sense, always qualified: one request to the model
+in one agent run whose answer (or tool call) the next request builds on —
+tool turns included. `max_turns` counts agent turns; it is the only turn
+budget (board `domains-plug-in`, ticket 17). Not an **attempt**.
 
 ## Transform and prefilter
 
@@ -339,14 +345,14 @@ first that holds is taken. Deterministic Python.
 - A graph **checkpoints after every other node**, keyed on its **version** — a
   digest of node names and edges — so a changed shape never inherits old
   results.
-- **One invoke** (`DAGRunner._invoke`): the node's timeout, retries over an
-  explicit exception list with doubling backoff, any other exception turned
-  into a result. A result is an `Action` (ends the run) or an **envelope** —
-  `status` (`ok`, `empty`, `skipped`, `timed_out`, `error`) and `reason`. A
+- **One invoke** (`adapter._invoke`): retries over an explicit exception list
+  with doubling backoff, any other exception turned into a result — no clock
+  (ticket 17). A result is an `Action` (ends the run) or an **envelope** —
+  `status` (`ok`, `empty`, `skipped`, `error`; `timed_out` only on rows from
+  before node clocks went) and `reason`. A
   node that cannot do its job **skips out loud**. Each attempt is a **node
   run** row.
-- A node that calls a model names its `agent`; its clock must outlast the
-  agent's by a margin, checked at load — two equal clocks race.
+- A node that calls a model names its `agent`.
 - An agent is a node inside a graph, never the thing driving it; which agent
   and server a node gets is composition, handed in through `deps`.
 
@@ -379,11 +385,35 @@ a check on every call. Config may not widen it.
 ## Harness
 
 The one place an agent is *run*: client and `base_url`/`api_key`/`model`,
-model settings, recording hooks, turn and token caps, the clock, retries, and
-the rule that any failure becomes work for a person rather than silence. An
-**agent declaration** is only what differs: instructions, tools, output
-shape. Structured answers come back through a generated **answer tool**,
+model settings, recording hooks, the budget (agent turns and tokens),
+attempts, and the rule that any failure becomes work for a person rather than
+silence. What differs per agent is its **agent declaration** — tier,
+temperature, `(max_turns, tokens)` — and what it is built with: instructions,
+tools, output shape. Structured answers come back through a generated **answer tool**,
 checked in-process, with one correction turn.
+
+## Install fact and knob
+
+An **install fact** describes this machine — who the operator is, where the
+db lives, which servers and channels — and lives in `config.yaml`. A **knob**
+tunes how Friday behaves and is the same on every machine, so it is a named
+constant beside the code that uses it, pinned by a test; changing one is a
+commit (board `domains-plug-in`, ticket 07). A knob left in `config.yaml` is
+refused at load.
+
+## Model tier
+
+A named block under `tiers:` in `config.yaml` — provider key, endpoint, model
+and provider settings (`max_tokens`). Code picks a tier by name from an agent
+declaration (`AgentDeclaration.tier`); an undeclared tier refuses the boot.
+
+## Attempt
+
+Doing the same failed thing again: a provider 429/502, an answer of the wrong
+shape, a failed send, a model request past its `request_timeout_seconds`.
+Not progress, so not a turn. Core constants, the same
+for every agent: `PROVIDER_ATTEMPTS`, `OUTPUT_CORRECTIONS`, `OUTBOX_ATTEMPTS`
+(`STEP_ATTEMPTS` comes with the spine's steps).
 
 ## Voice
 
@@ -524,7 +554,7 @@ outbound rows out; platform mechanics stay inside.
 
 The recovery path: channel history re-read from a stored **cursor** on a
 timer and on reconnect. A channel with no cursor is a **cold cursor**, read
-back only as far as the **lookback** — `max_message_age`, the same number that
+back only as far as the **lookback** — `MAX_MESSAGE_AGE_SECONDS`, the same number that
 marks a turn `outdated`.
 
 ## SDK

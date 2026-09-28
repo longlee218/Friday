@@ -39,7 +39,6 @@ __all__ = [
     "DAGState",
     "Edge",
     "MissingNodeResult",
-    "NODE_CLOCK_MARGIN_SECONDS",
     "Node",
     "NodeFn",
     "NodeRun",
@@ -53,16 +52,6 @@ __all__ = [
     "envelope",
     "status_of",
 ]
-
-
-#: How much longer a model node's clock must run than its harness's. The harness
-#: bounds a run with `timeout_seconds` and turns its own expiry into a
-#: `last_error` the node can read; the node's clock expiring first cancels the
-#: run instead, and a cancellation is a `BaseException` nothing in the harness
-#: sees. The margin lets the inner clock fire first; equal clocks are a race.
-#: Here in the port (not the router) so a plugin that times a model node against
-#: its agent reads the same margin the kernel checks it with.
-NODE_CLOCK_MARGIN_SECONDS = 5.0
 
 
 #: A workflow's input: JSON-serializable, so DBOS can persist it and resume the
@@ -108,7 +97,8 @@ DepsFactory = Callable[[ScopeKey], Awaitable[Deps]]
 
 
 #: What a node's result may say about how it went, when it is not an `Action`.
-#: The runner writes `timed_out` and `error`; a node writes the others. One
+#: The runner writes `error`; a node writes the others. `timed_out` is what the
+#: runner wrote while nodes had clocks, kept so older rows still read. One
 #: closed set, so an edge can route on it and the board can render any node.
 STATUSES = frozenset({"ok", "empty", "skipped", "timed_out", "error"})
 
@@ -132,26 +122,21 @@ def status_of(result: Any) -> str | None:
 class Node:
     """One step. The name is the key its result is stored under.
 
-    How long it may take and what is worth trying again are declared here and
-    enforced by the runner, not by the node: a node that has to remember to
+    What is worth trying again is declared here and enforced by the runner,
+    not by the node: a node that has to remember to
     wrap itself is a node that one day does not.
     """
 
     name: str
     run: NodeFn
-    #: The whole invoke — every attempt and every backoff — in seconds. `None`
-    #: is no clock of the node's own. On expiry the node's result is
-    #: `{status: timed_out}` and the run goes on along the edges.
-    timeout_seconds: float | None = None
     #: What is worth another attempt — an explicit list, never a guess from the
     #: message. Anything else becomes `{status: error}` on its first occurrence.
     retry_on: tuple[type[Exception], ...] = ()
     max_attempts: int = 1
     #: The wait after the first failed attempt, doubling after each one.
     retry_backoff_seconds: float = 1.0
-    #: The configured agent this node runs, if it calls a model. Named so the
-    #: graph's registration can check the two clocks against each other. Model
-    #: calls keep their own retry in the harness; a model node lists nothing in
+    #: The configured agent this node runs, if it calls a model. Model calls
+    #: keep their own retry in the harness; a model node lists nothing in
     #: `retry_on`.
     agent: str | None = None
 

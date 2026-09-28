@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from friday.kernel.triage.context import build_light_context
 from friday.kernel.triage.prompt import build_input, build_instructions
 from friday.kernel.config import AgentConfig
+from friday.sdk.agent import AgentDeclaration
 from friday.kernel.harness.harness import Harness
 from friday.kernel.domain.triage import Decided, NeedsHuman, TriageOutcome, make_decided
 from friday.kernel.domain.models import FridayState, InboundEvent
@@ -19,6 +20,16 @@ log = logging.getLogger(__name__)
 #: The bare text, kept as an attribute because tests pin sentences in it.
 #: Assembly — examples and all — lives in `friday.kernel.triage.prompt`.
 INSTRUCTIONS = build_instructions()
+
+#: Runs on every mention — the firehose — so the cheapest tool-capable tier.
+#: One turn: the forced answer is the whole run (its one correction is an
+#: attempt, not a turn). Changing the tier needs `run_triage_eval` first.
+#: 30s a request: the slowest measured was 16.9s (live `model_calls`,
+#: 2026-09-28).
+TRIAGE = AgentDeclaration(
+    name="triage", tier="flash", temperature=0.0, max_turns=1, tokens=50_000,
+    request_timeout_seconds=30.0,
+)
 
 
 class Triage:
@@ -44,7 +55,6 @@ class Triage:
         examples: Sequence[tuple[str, str]] = (),
         sensitive: Sensitive | None = None,
         record=None,
-        spent=None,
         #: The `task_type -> Params` mapping the classifier's closed set is built
         #: from (ticket 11). The registry fills this at boot; `None` falls back
         #: to the current task-type catalog, so a bare test needs no registry.
@@ -73,7 +83,6 @@ class Triage:
             instructions=build_instructions(examples),
             model=model,
             record=record,
-            spent=spent,
             # The shape this agent answers, built at boot from the registry's
             # task types (ticket 11): `type` closed to those plus `skip`. The
             # harness generates the tool it arrives through, forces the call,
@@ -149,11 +158,11 @@ class Triage:
             turn=list(turn) or [event],
         )
         said = build_input(context)
-        # **No `extra_turns` here.** This line used to add one for a malformed
-        # call, and `run_structured` now adds exactly that turn itself — so
-        # asking again would buy a *second* correction on the highest-volume
-        # path in the system, which is the budget CLAUDE.md pins at one for a
-        # reason: a model that cannot get its own schema right twice will not
+        # **No extra turn here.** This line used to add one for a malformed
+        # call, and `run_structured` now adds exactly that correction itself
+        # (`OUTPUT_CORRECTIONS`) — so asking again would buy a *second* one on
+        # the highest-volume path in the system, which is the budget CLAUDE.md
+        # pins at one for a reason:a model that cannot get its own schema right twice will not
         # on the third go, and every attempt is billed.
         decided = await self._run.run_structured(
             said,

@@ -53,13 +53,6 @@ class DevopsConfig:
     #: Where a run's report is written. Beside the database, for the same
     #: reason: state this process produced, not source.
     reports_dir: str = "./data/reports"
-    #: **The longest one task may hold a pool slot**, checked at boot against
-    #: the sum of the graph's node ceilings. A budget rather than a runtime
-    #: kill: cancelling a graph half way leaves a task that has read a log,
-    #: queued an acknowledgement and written nothing. 420s because the graph's
-    #: ceilings sum to 400; the lever, if seven minutes is too long, is
-    #: `agents."devops.diagnose".timeout_seconds`, which is 150 of it.
-    timeout_seconds: float = 420.0
     #: The container source roots and vendored-path markers the code reader maps
     #: a stack frame against (box 4): data, so an operator whose images lay
     #: their source out differently corrects it in `config.yaml` rather than in
@@ -83,7 +76,6 @@ def load_devops_config(raw: object) -> DevopsConfig:
             f"devops: unknown setting(s) {unknown} (known: {sorted(known)})"
         )
     raw = dict(raw)
-    clock = raw.pop("timeout_seconds", None)
     # The two path lists are the one place a setting is a list rather than a
     # scalar, so they are taken out before the `str(v)` coercion below (which
     # would render a list as its `repr`). A single string is accepted as a
@@ -106,16 +98,5 @@ def load_devops_config(raw: object) -> DevopsConfig:
     # `"None"` — a truthy hostname that turns every dev task into a failed
     # `ssh None`. An empty setting means "not configured".
     settings: dict = {k: "" if v is None else str(v) for k, v in raw.items()}
-    if clock is not None:
-        try:
-            settings["timeout_seconds"] = float(clock)
-        except (TypeError, ValueError):
-            raise ConfigError(
-                f"devops: timeout_seconds must be a number, not {clock!r}"
-            ) from None
-        if settings["timeout_seconds"] <= 0:
-            raise ConfigError(
-                f"devops: timeout_seconds must be positive, not {clock!r}"
-            )
     settings.update(paths)
     return DevopsConfig(**settings)

@@ -92,14 +92,12 @@ async def test_a_reconnect_triggers_a_sweep_without_waiting_for_the_timer(
 ):
     """After an outage the gap should close immediately, not in five minutes."""
     import asyncio
-    import dataclasses
 
     from friday.kernel.inbox import Inbox
 
     provider.keep_open = True
     provider.emit_history("watched", make_event(message_id="100"))
-    slow = dataclasses.replace(config, sweep_interval_seconds=600)
-    inbox = Inbox(provider=provider, db=db, config=slow)
+    inbox = Inbox(provider=provider, db=db, config=config, sweep_interval_seconds=600)
 
     seen = []
 
@@ -118,14 +116,12 @@ async def test_a_reconnect_triggers_a_sweep_without_waiting_for_the_timer(
 
 async def test_the_sweep_also_runs_on_a_timer(provider, db, config):
     import asyncio
-    import dataclasses
 
     from friday.kernel.inbox import Inbox
 
     provider.keep_open = True
     provider.emit_history("watched", make_event(message_id="100"))
-    quick = dataclasses.replace(config, sweep_interval_seconds=0.01)
-    inbox = Inbox(provider=provider, db=db, config=quick)
+    inbox = Inbox(provider=provider, db=db, config=config, sweep_interval_seconds=0.01)
 
     seen = []
 

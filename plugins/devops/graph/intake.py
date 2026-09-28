@@ -172,7 +172,7 @@ async def _placement(
     return Placement(env=env, container_roots=deps.container_roots, **fields)
 
 
-def intake_node(*, timeout_seconds: float | None = None) -> Node:
+def intake_node() -> Node:
     """Build the node. No model: every field here is a rule, a row, or a
     regex."""
 
@@ -202,7 +202,7 @@ def intake_node(*, timeout_seconds: float | None = None) -> Node:
         )
         return envelope("ok", "", intake=_listed(asdict(context)))
 
-    return Node("intake", _intake, timeout_seconds=timeout_seconds)  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py
+    return Node("intake", _intake)  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py
 
 
 def intake_of(result: Any) -> IntakeContext:

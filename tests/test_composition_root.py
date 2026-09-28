@@ -70,11 +70,10 @@ def test_nothing_in_the_composition_root_is_read_before_it_is_built():
 #: not derived.** Deriving it is how the prompt-families test stopped checking
 #: anything when a module moved: a list that computes itself agrees with
 #: whatever the code happens to be.
-#: The keywords every one of them must be handed. Two now, and the second was
-#: added a ticket later and forgotten here — the test that exists precisely to
-#: catch a forgotten wire read one keyword while a second was being threaded
-#: through the same four calls, three lines away.
-SEAMS = ("record", "spent")
+#: The keywords every one of them must be handed. A tuple, because there were
+#: two — `spent` went with the daily token budget (board `domains-plug-in`,
+#: ticket 07) — and the next one belongs here, not in a second test.
+SEAMS = ("record",)
 
 AGENT_BUILDERS = (
     "register_extractors",   # the three extractors

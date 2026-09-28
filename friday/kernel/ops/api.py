@@ -675,11 +675,9 @@ def build_api(
         """Tokens spent today, in total and per agent.
 
         `Database.spent_today` has existed since ticket 03 of
-        `nothing-runs-unmeasured` and nothing could reach it: the ceiling it
-        feeds (`daily_token_budget`) is unset by default, deliberately,
-        because a number guessed before anyone knows what a normal day costs
-        makes the first busy day look like a fault. This route is how an
-        operator would ever learn what to set it to.
+        `nothing-runs-unmeasured`; there is no daily ceiling (board
+        `domains-plug-in`, ticket 07 — the heartbeat reports spend), so this
+        route is how an operator learns what a normal day costs.
 
         Per agent as well as in total, because they are different jobs against
         different models — the classifier on every mention and the responder

@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from friday.kernel.domain.models import MentionType
+from friday.sdk.agent import AgentDeclaration
 
 log = logging.getLogger(__name__)
 
@@ -27,89 +28,14 @@ class IngestConfig:
 
     watched_channels: frozenset[str]
     mention_types: frozenset[MentionType]
-    # How often the recovery sweep runs. The live connection is the fast path;
-    # this only exists to close gaps it missed.
-    sweep_interval_seconds: float = 300.0
-    # How many prior messages to pull in when a conversation first mentions us.
-    context_messages: int = 20
-    #: How long somebody has to be quiet — not sending, not typing — before
-    #: what they said counts as finished and is read. People send one thought
-    #: in three messages; this is what makes it one input instead of three.
-    turn_seconds: float = 12.0
-
-
-#: How long, written as a number and a unit: `10s`, `10m`, `10h`.
-_DURATION = re.compile(r"^(\d+)([smh])$")
-_IN_SECONDS = {"s": 1, "m": 60, "h": 3600}
-
-
-def duration(written: object, *, key: str) -> int | None:
-    """Seconds, from `10s` / `10m` / `10h`. `None` in, `None` out.
-
-    Refused here rather than where it is used, because the two ways an
-    unparsed threshold can arrive downstream are both worse than a failure to
-    start: a crash on the first message, or a silent zero — and a zero here
-    marks every message outdated, which reads as the agent having quietly
-    stopped working rather than as a typo in a file.
-
-    Strict on purpose. A bare `24` is refused rather than guessed at, because
-    the guess would have to be a unit and every unit is somebody's reasonable
-    assumption; `1.5h` is refused because the format has no fraction and
-    accepting one invites `0.5s`. `-1h` is refused because a negative age is
-    not a shorter cutoff, it is a cutoff in the future.
-
-    This is the only key in this configuration that parses. Every other time
-    here is a float with its unit in its name — `turn_seconds`,
-    `heartbeat_seconds`, `backoff_seconds`. That inconsistency is accepted
-    deliberately: converting the rest is a separate change nobody has asked
-    for, and doing it as a side effect would put six behaviour-carrying
-    numbers through a new parser for tidiness.
-    """
-    if written is None:
-        return None
-    found = _DURATION.match(written) if isinstance(written, str) else None
-    if found is None:
-        raise ConfigError(
-            f"{key}: {written!r} is not a duration. Write a whole number and a "
-            "unit — 10s, 10m, 10h — or leave it out for no limit."
-        )
-    return int(found.group(1)) * _IN_SECONDS[found.group(2)]
-
-
-def message_age_cutoff(config) -> int | None:
-    """How old a turn may be before this system stops acting on it, in
-    seconds. `None` means no cutoff.
-
-    **One number, two readers, and this is the only place that knows where it
-    lives.** Triage marks a turn older than this `outdated` and never sends it
-    to a model; the recovery sweep, meeting a channel with no cursor, uses it
-    as how far back to read (board `work-that-has-gone-cold`, ticket 02, D8).
-    Those are the same policy seen from two sides — "work this old is not
-    worth starting" — and a second key under `ingest:` would be that policy
-    written twice, which is the drift this repo keeps paying for.
-
-    It sits under `agents.triage` because that is where it was born and moving
-    it would be a config migration for every deployment, to no end. Neither
-    reader is told that: `friday/kernel/inbox/` never learns triage exists, and the
-    composition root never reads an agent's knobs — the rule
-    `test_composition_root_reads_no_agent_config` exists to keep.
-
-    Ticket 02's own "How B is wired" section said the composition root would
-    read this and hand it on. That was written without checking, and it is
-    exactly what that guard forbids.
-    """
-    triage = config.agents.get("triage")
-    if triage is None:
-        return None
-    return duration(triage.options.get("max_message_age"), key="max_message_age")
 
 
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
-_REQUIRED_AGENT_FIELDS = ("api_key", "base_url", "model")
+_REQUIRED_TIER_FIELDS = ("api_key", "base_url", "model")
 
 #: Shorthand for the `base_url` of the OpenAI-compatible providers Friday's
-#: first version runs on. A `provider:` in an agent block fills the `base_url`
+#: first version runs on. A `provider:` in a tier block fills the `base_url`
 #: from this, so config names the provider instead of pasting a URL — nothing
 #: in `harness.py` changes, because all three speak Chat Completions and the
 #: only thing that varies is where the request goes. An explicit `base_url`
@@ -119,18 +45,19 @@ PROVIDER_BASE_URLS = {
     "minimax": "https://api.minimax.io/v1",
     "deepseek": "https://api.deepseek.com",
     # One key, every model. OpenRouter is OpenAI-compatible, so `provider:
-    # openrouter` + a `deepseek/…` or `google/…` model id is all an agent needs.
+    # openrouter` + a `deepseek/…` or `google/…` model id is all a tier needs.
     "openrouter": "https://openrouter.ai/api/v1",
 }
 
 
 @dataclass(frozen=True, slots=True)
-class AgentConfig:
-    """One step that calls a model, and everything it needs to do so.
+class TierConfig:
+    """A named model tier: where a model lives and which key reaches it.
 
-    Self-contained on purpose: reading this tells you where the model lives,
-    which key reaches it, and how it should behave, without following a
-    reference somewhere else.
+    Named freely in `config.yaml` (`flash`, `strong`); code picks one by name
+    (board `domains-plug-in`, ticket 07). `settings` are provider settings
+    (`max_tokens`), not behaviour — temperature is per job and sits on the
+    agent declaration.
     """
 
     name: str
@@ -138,48 +65,23 @@ class AgentConfig:
     base_url: str
     model: str
     settings: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class AgentConfig:
+    """One step that calls a model, and everything it needs to do so: its
+    tier's endpoint and key, and its declaration's budget and temperature,
+    resolved by `Config.agent`."""
+
+    name: str
+    api_key: str
+    base_url: str
+    model: str
+    settings: dict[str, Any] = field(default_factory=dict)
+    #: Every request to the model in one run, tool turns included.
     max_turns: int = 1
-    #: How much room this model has, in tokens. Providers vary, so this
-    #: cannot be hardcoded. It gated the channel summariser's call until
-    #: ticket 06 removed that gate (a room is summarised once it has said
-    #: anything new, capped by `ContextConfig.summary_max_chars` rather than
-    #: triggered by this) — kept as a fact every agent config carries, with
-    #: no reader of its own left in this repo as of that ticket.
-    context_window: int = 128_000
-    #: How many times to call the provider for one run before giving up, and
-    #: how long to wait after the first failure — doubling from there.
-    #:
-    #: Small numbers on purpose. Every attempt lives inside `timeout_seconds`,
-    #: which bounds the whole run rather than each try, so a long backoff
-    #: spends the budget waiting instead of asking. The outbox retries over
-    #: minutes because a send can wait; a task cannot, since the pool works
-    #: only `workflows.concurrency` at once and one run of a harness at a
-    #: time, so a slow run holds the tasks queued behind it.
-    max_attempts: int = 3
-    retry_backoff_seconds: float = 1.0
-    #: What this agent may spend in a day, in tokens in and out. `None` is no
-    #: ceiling, which is the shipped default and deliberate: `docs/DESIGN.md`
-    #: says the first weeks are data collection, so the *measurement* is
-    #: always on — the heartbeat reports it either way — and the ceiling is
-    #: something an operator turns on once they know what a normal day costs.
-    #: Guessing a number for them would make the first busy day look like a
-    #: fault.
-    daily_token_budget: int | None = None
-    #: How long one run of this agent may take before it becomes work for a
-    #: person, in seconds.
-    #:
-    #: A number chosen here rather than inherited. The OpenAI client defaults
-    #: to ten minutes and retries, so an unbounded run could hold the pool for
-    #: half an hour while the heartbeat went on saying "alive" — the pool works
-    #: only `workflows.concurrency` tasks at once and one run of each harness
-    #: at a time, so that is every task behind it, not one. Sixty seconds is
-    #: long for a classification and short enough that a stall surfaces the
-    #: same day.
-    timeout_seconds: float = 60.0
-    #: Step-specific knobs the model layer does not care about, e.g. the
-    #: confidence threshold for triage or the tone-example count for the
-    #: responder.
-    options: dict[str, Any] = field(default_factory=dict)
+    #: Input + output tokens summed over one run; `None` is no ceiling.
+    tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,43 +146,19 @@ class MCPServerConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class OutboxConfig:
-    #: How many times to try one message before handing it to a person.
-    max_attempts: int = 3
-    #: Doubling from here. Retrying a rate-limited send at once is how a rate
-    #: limit becomes a ban.
-    backoff_seconds: float = 30.0
-
-
-@dataclass(frozen=True, slots=True)
 class ContextConfig:
-    """What a room's summary and a task's transcript may cost, and where the
-    skills live. A channel's knowledge lived here too, as a directory of YAML
+    """What a task's transcript may cost, and where the skills live. A channel's knowledge lived here too, as a directory of YAML
     files; it is rows in the database now (board
     `read-it-the-way-the-operator-does`, ticket 10)."""
 
     #: Where the operator's skills live. One Markdown file per skill; adding
     #: one is adding a file, with no list to edit.
     skills_directory: str = "skills"
-    #: A ceiling refuses; it does not trim (ticket 06). A summary cut mid-field
-    #: says something false about the room; the previous one is merely older.
-    #: Measured on the stored, structured form — the same measure the room
-    #: sees, since `channel_derived` renders the summary row's fields as
-    #: written.
-    #:
-    #: Replaces `summary_share`, which gated the *call* on a fraction of the
-    #: model's context window — the layer that made every room's derived
-    #: context stay `{}`, because a summary was never worth its own cost until
-    #: a room had said enough to make the raw transcript expensive. Ticket 06
-    #: removed that gate: a room is summarised once it has said anything new,
-    #: and this caps what the result may be, not whether the call happens.
-    summary_max_chars: int = 6000
     #: Node 0's own budget, in *estimated* tokens — characters divided by
     #: four (D5): the configured provider is MiniMax, for which there is no
     #: tokenizer, and a tokenizer for a different vendor would be
     #: confidently wrong rather than roughly right. `None` means no
-    #: compaction at all (D7), the same doctrine `AgentConfig.
-    #: daily_token_budget` follows: the measurement runs from the first day
+    #: compaction at all (D7): the measurement runs from the first day
     #: and the ceiling is something the operator sets once a normal task's
     #: cost is known. Board `what-the-room-already-knows`, ticket 08.
     extraction_budget_tokens: int | None = None
@@ -290,9 +168,10 @@ class ContextConfig:
 class Config:
     database_path: str
     ingest: IngestConfig
-    agents: dict[str, AgentConfig] = field(default_factory=dict)
+    #: The named model tiers, by name. Code picks one by name through
+    #: `agent`; there is no per-agent block.
+    tiers: dict[str, TierConfig] = field(default_factory=dict)
     workflows: WorkflowConfig = field(default_factory=WorkflowConfig)
-    outbox: OutboxConfig = field(default_factory=OutboxConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     mcp_servers: tuple[MCPServerConfig, ...] = ()
     #: The plugins this build loads, by import path (`friday.kernel.plugin_host` reads
@@ -312,9 +191,6 @@ class Config:
     #: this as they notice things, so it is a line in `config.yaml` and a
     #: restart rather than a commit.
     sensitive_words: tuple[str, ...] = ()
-    #: How often to say the process is alive and what it is holding. A
-    #: working agent on a quiet day is otherwise indistinguishable from a
-    #: dead one.
     #: Who is asked to approve a reply. The bot direct-messages them; it
     #: needs no shared server, verified against the live account.
     operator_id: int = 0
@@ -329,40 +205,53 @@ class Config:
     #: The route resolves under this and refuses anything landing outside,
     #: the same guard a stack frame meets.
     repo_root: str = ""
-    heartbeat_seconds: float = 60.0
-    #: How long the gateway may be down before the operator is told. Discord
-    #: drops and resumes constantly; alerting on a blip trains you to ignore
-    #: the alert that matters.
-    down_after_seconds: float = 300.0
-    #: Hour of the day for the 'still alive' summary. None to not send one.
-    summary_at_hour: int | None = 9
-    #: How long to keep model calls. Prompts are large and nobody reads old
-    #: ones; a container that never restarts would fill its volume.
-    keep_model_calls_days: float = 14.0
     #: Where the daily backup writes both SQLite files (§12.1). Under `data/`
     #: by default (already git-ignored), in its own subdirectory so a backup is
     #: never mistaken for the live db a restore would overwrite.
     backup_dir: str = "data/backups"
-    #: How many days of backups to keep. `0` turns the daily backup off — the
-    #: operator's call on a machine already backed up another way.
-    keep_backups: int = 7
+
+    def agent(self, declaration: AgentDeclaration) -> AgentConfig:
+        """The declared agent on its tier. An undeclared tier refuses the
+        boot: every agent is built at boot, and a name code picks that
+        `config.yaml` does not carry is a typo or a missing block, never a
+        reason to run without the model."""
+        tier = self.tiers.get(declaration.tier)
+        if tier is None:
+            declared = ", ".join(sorted(self.tiers)) or "none"
+            raise ConfigError(
+                f"Agent {declaration.name!r} runs on tier {declaration.tier!r}, "
+                f"which config.yaml does not declare (tiers: {declared})"
+            )
+        return AgentConfig(
+            name=declaration.name,
+            api_key=tier.api_key,
+            base_url=tier.base_url,
+            model=tier.model,
+            settings={
+                **tier.settings,
+                "temperature": declaration.temperature,
+                "timeout": declaration.request_timeout_seconds,
+            },
+            max_turns=declaration.max_turns,
+            tokens=declaration.tokens,
+        )
 
 
 def declared_secrets(config: Config, *tokens: str | None) -> set[str]:
     """Every secret this deployment was configured with, for value-based
     redaction (DESIGN-v2 §12).
 
-    The agent API keys, each MCP server's declared env values and any auth
+    The tiers' API keys, each MCP server's declared env values and any auth
     client secret, plus whatever tokens the caller holds (the Discord user and
     bot tokens, read from the environment by the composition root). Here rather
-    than in the composition root because reading `config.agents` is this module's
+    than in the composition root because reading `config.tiers` is this module's
     job, not the root's (`test_composition_root_reads_no_agent_config`). Blank
     and one-character values are dropped by `register_secret_values`.
     """
     secrets: set[str] = {t for t in tokens if t}
-    for agent in config.agents.values():
-        if agent.api_key:
-            secrets.add(agent.api_key)
+    for tier in config.tiers.values():
+        if tier.api_key:
+            secrets.add(tier.api_key)
     for server in config.mcp_servers:
         secrets.update(str(v) for v in server.env.values())
         if server.auth:
@@ -381,9 +270,10 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
     except yaml.YAMLError as exc:
         raise ConfigError(f"Could not parse {path}: {exc}") from exc
 
+    _refuse_moved_knobs(raw)
     ingest = raw.get("ingest") or {}
     return Config(
-        agents=_agents(_expand(raw.get("agents") or {})),
+        tiers=_tiers(_expand(raw.get("tiers") or {})),
         workflows=WorkflowConfig(
             max_asks=int((raw.get("workflows") or {}).get("max_asks", 3)),
             use_responder=bool(
@@ -394,18 +284,9 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             ),
             concurrency=_slots((raw.get("workflows") or {}).get("concurrency", 2)),
         ),
-        outbox=OutboxConfig(
-            max_attempts=int((raw.get("outbox") or {}).get("max_attempts", 3)),
-            backoff_seconds=float(
-                (raw.get("outbox") or {}).get("backoff_seconds", 30.0)
-            ),
-        ),
         context=ContextConfig(
             skills_directory=str(
                 (raw.get("context") or {}).get("skills_directory", "skills")
-            ),
-            summary_max_chars=int(
-                (raw.get("context") or {}).get("summary_max_chars", 6000)
             ),
             extraction_budget_tokens=_positive_or_none(
                 (raw.get("context") or {}).get("extraction_budget_tokens"),
@@ -421,15 +302,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
         board_port=int(raw.get("board_port", 8086)),
         board_origins=tuple(raw.get("board_origins") or ()),
         repo_root=str(raw.get("repo_root") or ""),
-        heartbeat_seconds=float(raw.get("heartbeat_seconds", 60.0)),
-        down_after_seconds=float(raw.get("down_after_seconds", 300.0)),
-        summary_at_hour=(
-            None if raw.get("summary_at_hour", 9) is None
-            else int(raw.get("summary_at_hour", 9))
-        ),
-        keep_model_calls_days=float(raw.get("keep_model_calls_days", 14.0)),
         backup_dir=str(raw.get("backup_dir") or "data/backups"),
-        keep_backups=int(raw.get("keep_backups", 7)),
         plugins=tuple(raw.get("plugins") or ("plugins.devops", "plugins.docs")),
         # Raw, so `friday.kernel.plugin_host` can read each plugin's own block by id
         # and validate it against the plugin's own schema — the core does not
@@ -448,11 +321,6 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
             mention_types=frozenset(
                 _mention_type(value) for value in ingest.get("mention_types") or ()
             ),
-            sweep_interval_seconds=float(
-                ingest.get("sweep_interval_seconds", 300.0)
-            ),
-            context_messages=int(ingest.get("context_messages", 20)),
-            turn_seconds=float(ingest.get("turn_seconds", 12.0)),
         ),
     )
 
@@ -483,8 +351,40 @@ def _expand(value: Any) -> Any:
     return value
 
 
-def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
-    agents = {}
+#: Keys `config.yaml` used to carry and no longer reads, and where each went.
+#: Refused rather than ignored: a knob the operator edits and nothing reads is
+#: a change that silently does nothing (board `domains-plug-in`, ticket 07).
+_MOVED_KNOBS = {
+    ("agents",): "named model tiers under `tiers:`; each agent's budget and "
+    "temperature are a declaration in code",
+    ("outbox",): "`OUTBOX_ATTEMPTS` / `OUTBOX_BACKOFF_SECONDS` in friday/kernel/outbox",
+    ("heartbeat_seconds",): "`HEARTBEAT_SECONDS` in friday/kernel/ops/liveness.py",
+    ("down_after_seconds",): "`DOWN_AFTER_SECONDS` in friday/kernel/ops/liveness.py",
+    ("summary_at_hour",): "`SUMMARY_AT_HOUR` in friday/kernel/ops/liveness.py",
+    ("keep_model_calls_days",): "`KEEP_MODEL_CALLS_DAYS` in friday/kernel/ops/liveness.py",
+    ("keep_backups",): "`KEEP_BACKUPS` in friday/kernel/ops/backup.py",
+    ("ingest", "turn_seconds"): "`TURN_SECONDS` in friday/kernel/inbox",
+    ("ingest", "sweep_interval_seconds"): "`SWEEP_INTERVAL_SECONDS` in friday/kernel/inbox",
+    ("ingest", "context_messages"): "`CONTEXT_MESSAGES` in friday/kernel/inbox",
+    ("context", "summary_max_chars"): "`SUMMARY_MAX_CHARS` in "
+    "friday/kernel/memory/channel_context.py",
+}
+
+
+def _refuse_moved_knobs(raw: Mapping[str, Any]) -> None:
+    for keys, where in _MOVED_KNOBS.items():
+        block: Any = raw
+        for key in keys[:-1]:
+            block = block.get(key) if isinstance(block, Mapping) else None
+        if isinstance(block, Mapping) and keys[-1] in block:
+            raise ConfigError(
+                f"{'.'.join(keys)} is no longer read from config.yaml — it is "
+                f"{where}. Remove it from the file."
+            )
+
+
+def _tiers(raw: dict[str, Any]) -> dict[str, TierConfig]:
+    tiers = {}
     for name, spec in raw.items():
         spec = dict(spec or {})
         # `provider: minimax` is shorthand for its `base_url`. An explicit
@@ -493,38 +393,33 @@ def _agents(raw: dict[str, Any]) -> dict[str, AgentConfig]:
         if provider is not None and not spec.get("base_url"):
             if provider not in PROVIDER_BASE_URLS:
                 raise ConfigError(
-                    f"Agent {name!r}: provider {provider!r} is not one of "
+                    f"Tier {name!r}: provider {provider!r} is not one of "
                     f"{', '.join(sorted(PROVIDER_BASE_URLS))} — set `base_url` "
                     f"directly for anything else"
                 )
             spec["base_url"] = PROVIDER_BASE_URLS[provider]
-        missing = [f for f in _REQUIRED_AGENT_FIELDS if not spec.get(f)]
+        missing = [f for f in _REQUIRED_TIER_FIELDS if not spec.get(f)]
         if missing:
             hint = (
                 " (or a `provider:` shorthand)" if "base_url" in missing else ""
             )
             raise ConfigError(
-                f"Agent {name!r} is missing: {', '.join(missing)}{hint}"
+                f"Tier {name!r} is missing: {', '.join(missing)}{hint}"
             )
-        agents[name] = AgentConfig(
+        tiers[name] = TierConfig(
             name=name,
             api_key=spec.pop("api_key"),
             base_url=spec.pop("base_url"),
             model=spec.pop("model"),
             settings=spec.pop("settings", None) or {},
-            max_turns=int(spec.pop("max_turns", 1)),
-            context_window=int(spec.pop("context_window", 128_000)),
-            timeout_seconds=float(spec.pop("timeout_seconds", 60.0)),
-            max_attempts=int(spec.pop("max_attempts", 3)),
-            retry_backoff_seconds=float(spec.pop("retry_backoff_seconds", 1.0)),
-            daily_token_budget=(
-                int(budget)
-                if (budget := spec.pop("daily_token_budget", None)) is not None
-                else None
-            ),
-            options=spec,  # whatever is left is step-specific
         )
-    return agents
+        if spec:
+            raise ConfigError(
+                f"Tier {name!r}: {', '.join(sorted(spec))} is not a tier key — "
+                f"a tier is api_key, provider/base_url, model and settings; "
+                f"behaviour is declared in code beside the agent"
+            )
+    return tiers
 
 
 def _slots(value: Any) -> int:

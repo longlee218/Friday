@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done (awaiting operator review/commit)
 Blocked by:
 
 # Knobs to constants, budget in three groups
@@ -34,11 +34,15 @@ every other knob becomes a named constant beside its user; time budgets go.
 
 ## Acceptance
 
-- [ ] `config.yaml` / `config.example.yaml` hold only keys, tiers, install facts.
-- [ ] Each moved knob is a named constant pinned by a test.
-- [ ] No time budget left (grep: `timeout_seconds`, `check_*_clocks`,
+- [x] `config.yaml` / `config.example.yaml` hold only keys, tiers, install facts.
+      (`config.example.yaml` does not exist — n/a. Still read until 13/16:
+      `triage_examples`, `workflows.max_asks/use_responder/auto_ask_for_details`,
+      `context.extraction_budget_tokens`.)
+- [x] Each moved knob is a named constant pinned by a test.
+- [x] No time budget left (grep: `timeout_seconds`, `check_*_clocks`,
       `context_window`, `daily_token_budget` — none outside history).
-- [ ] A hung tool call is cut by the per-call timeout (test).
-- [ ] `max_turns` counts tool turns (test).
-- [ ] `CONTEXT.md` § Vocabulary: *install fact*, *knob*, *turn*, *attempt*.
-- [ ] Whole suite green; `code-review` done; guard watched red.
+- [x] A hung tool call is cut by the per-call timeout (test).
+- [x] `max_turns` counts tool turns (test).
+- [x] `CONTEXT.md` § Vocabulary: *install fact*, *knob*, *turn*, *attempt*.
+      (*turn* already meant a person's messages; the model sense is *agent turn*.)
+- [x] Whole suite green; `code-review` done; guard watched red.

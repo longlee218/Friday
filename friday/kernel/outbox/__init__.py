@@ -18,6 +18,13 @@ from friday.kernel.domain.states import OutboundState, TaskState
 from friday.sdk.outbox import Kind
 
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN
+
+#: How many times to try one message before handing it to a person — an
+#: attempt, a repeat of the same failed send (board `domains-plug-in`, ticket 17).
+OUTBOX_ATTEMPTS = 3
+#: Doubling from here. Retrying a rate-limited send at once is how a rate
+#: limit becomes a ban.
+OUTBOX_BACKOFF_SECONDS = 30.0
 DISPATCHING = OutboundState.DISPATCHING
 DELIVERY_UNKNOWN = OutboundState.DELIVERY_UNKNOWN
 
@@ -140,8 +147,8 @@ class Outbox:
         *,
         db,
         senders: dict,
-        max_attempts: int = 3,
-        backoff_seconds: float = 30.0,
+        max_attempts: int = OUTBOX_ATTEMPTS,
+        backoff_seconds: float = OUTBOX_BACKOFF_SECONDS,
         batch_size: int = 20,
         durable: Callable[[int, int], Awaitable[object]] | None = None,
     ) -> None:

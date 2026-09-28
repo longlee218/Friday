@@ -227,7 +227,7 @@ def _said(m: InboundEvent) -> str:
     everything this system asserts about the message goes in it. The clock was
     already there — without it the model saw a list with no time at all, so
     "vẫn còn lỗi" could be a minute or a week after the report it follows, and
-    it matters more since `max_message_age`, which can judge a turn too old to
+    it matters more since `MAX_MESSAGE_AGE_SECONDS`, which can judge a turn too old to
     answer using a fact the agent reading that turn could not see.
 
     **The mark is `is_own`, which knows one of this system's two identities.**

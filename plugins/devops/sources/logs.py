@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from friday.sdk.sources import Lines, Placement
+from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS, Lines, Placement
 
 __all__ = ["LokiSource", "SshKubectlSource"]
 
@@ -43,7 +43,6 @@ class SshKubectlSource:
 
     name: str = "kubectl"
     host: str = "dev"
-    timeout_seconds: float = 30.0
 
     async def lines(
         self,
@@ -134,7 +133,7 @@ class SshKubectlSource:
         )
         try:
             out, err = await asyncio.wait_for(
-                proc.communicate(), timeout=self.timeout_seconds
+                proc.communicate(), timeout=TOOL_CALL_TIMEOUT_SECONDS
             )
         except (TimeoutError, asyncio.TimeoutError):
             proc.kill()

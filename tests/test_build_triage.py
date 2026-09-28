@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import pytest
 
-from friday.kernel.config import AgentConfig, Config, IngestConfig
+from friday.kernel.config import Config, ConfigError, IngestConfig, TierConfig
 from friday.kernel.triage import Triage
-from friday.kernel.triage.runner import build_triage
+from friday.kernel.triage.runner import EXAMPLES, build_triage
 
 
 class StubDb:
@@ -27,43 +27,36 @@ class StubDb:
         return self._confirmed
 
 
-def _config(**agents) -> Config:
+def _config(**tiers) -> Config:
     return Config(
         database_path=":memory:",
         ingest=IngestConfig(watched_channels=frozenset(), mention_types=frozenset()),
-        agents=agents,
+        tiers=tiers,
     )
 
 
-def _triage_agent(**options) -> AgentConfig:
-    return AgentConfig(
-        name="triage",
-        api_key="k",
-        base_url="https://example.invalid/v1",
-        model="test-model",
-        options=options,
-    )
+FLASH = TierConfig(
+    name="flash", api_key="k", base_url="https://example.invalid/v1", model="test-model"
+)
 
 
 async def test_it_builds_a_real_triage_wired_with_confirmed_examples():
     db = StubDb(confirmed=[("the api is down", "devops.api_issue")])
-    config = _config(triage=_triage_agent())
 
-    triage = await build_triage(config, db=db)
+    triage = await build_triage(_config(flash=FLASH), db=db)
 
     assert isinstance(triage, Triage)
     assert "the api is down" in triage._run.instructions
 
 
-async def test_it_asks_for_the_configured_number_of_examples():
+async def test_it_asks_for_the_declared_number_of_examples():
     db = StubDb()
-    config = _config(triage=_triage_agent(examples=3))
 
-    await build_triage(config, db=db)
+    await build_triage(_config(flash=FLASH), db=db)
 
-    assert db.limit_asked == 3
+    assert db.limit_asked == EXAMPLES
 
 
-async def test_a_missing_triage_agent_is_a_clear_exit_not_a_key_error():
-    with pytest.raises(SystemExit, match="No 'triage' agent"):
+async def test_a_missing_triage_tier_refuses_by_name():
+    with pytest.raises(ConfigError, match="'triage' runs on tier 'flash'"):
         await build_triage(_config(), db=StubDb())

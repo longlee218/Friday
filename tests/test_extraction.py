@@ -19,7 +19,7 @@ import asyncio
 import pytest
 
 from conftest import ScriptedHarness
-from friday.kernel.harness.harness import Harness, Refused
+from friday.kernel.harness.harness import Harness
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -67,7 +67,6 @@ def test_extractor_decorator_registers_under_task_type():
         #: What a real `Harness` with no skill library has. A stub with
         #: fewer attributes than the type it stands in for passes and is
         #: describing itself.
-        tool_turns = 0
 
         async def run(self, *a, **kw):
             return None
@@ -136,7 +135,6 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
         output = '{"environment": "production"}'
 
     class StubHarness(ScriptedHarness):
-        tool_turns = 0
 
         last_error = None
 
@@ -161,12 +159,8 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
 
 def test_an_extractor_returns_none_when_harness_fails():
     class FailingHarness(ScriptedHarness):
-        tool_turns = 0
 
         last_error = "boom"
-        #: The model was asked and could not answer, which is not the same as
-        #: not asking it — see `Refused`. This is the first of the two.
-        refusal = None
 
         async def run(self, prompt, **kwargs):
             return None
@@ -193,7 +187,6 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
         output = "not even close to JSON"
 
     class StubHarness(ScriptedHarness):
-        tool_turns = 0
 
         async def run(self, prompt, **kwargs):
             return StubResult()
@@ -362,12 +355,12 @@ async def test_a_field_the_type_does_not_have_is_refused_rather_than_asked_about
 # --- triage classifies; extraction is the only producer ---------------------
 
 
-def test_one_extractor_block_serves_every_classifiable_type():
+def test_one_extractor_declaration_serves_every_classifiable_type():
     """Triage fills nothing in. A task type with no extractor opens with no
     parameters at all and the reporter is asked for what they just said — so
-    the block is not optional.
+    the shipped config must carry the extractor's tier.
 
-    **One block, not one per type.** It was `extractor_api_issue`,
+    **One declaration, not one per type.** It was `extractor_api_issue`,
     `extractor_access_request` and `extractor_doc_question`, on the argument
     that the jobs differ — reading a correlationId is not reading a repo name
     — and that a type could therefore want its own model. In practice all
@@ -385,13 +378,12 @@ def test_one_extractor_block_serves_every_classifiable_type():
         os.environ.setdefault(key, "test-key")
     from pathlib import Path
 
-    repo = Path(__file__).resolve().parents[1]
-    agents = load_config(repo / "config.yaml").agents
+    from friday.kernel.extraction import EXTRACTOR
 
-    assert "extractor" in agents, "no extractor configured at all"
+    repo = Path(__file__).resolve().parents[1]
+
+    assert load_config(repo / "config.yaml").agent(EXTRACTOR).model
     assert registry.decision_params(), "no task types registered to extract for"
-    stale = [name for name in agents if name.startswith("extractor_")]
-    assert stale == [], f"per-type extractor blocks are gone; found {stale}"
 
 
 def test_register_extractors_covers_every_registered_task_type():
@@ -531,33 +523,6 @@ def test_an_empty_string_field_is_not_treated_as_known():
     prompt = build_input(_context("API lỗi", known=known))
 
     assert "- environment:" in prompt
-
-
-async def test_a_model_that_could_not_answer_is_not_a_refusal():
-    """The two look identical from here — no result either way — and they are
-    told apart by which of them we caused. A model that failed is worth asking
-    the reporter about; a call we declined to make is not."""
-    from dataclasses import dataclass as _dataclass
-
-    from friday.kernel.extraction import build_extractor
-
-    class Refuses(ScriptedHarness):
-        tool_turns = 0
-
-        last_error = "over budget"
-        refusal = "an-agent has spent 999 of its 10 tokens today"
-
-        async def run(self, prompt, **kwargs):
-            return None
-
-    @_dataclass
-    class Params:
-        environment: str | None = None
-
-    ext = build_extractor(params_cls=Params, harness=Refuses(answers=answer_shape(Params)), name="refuses")
-
-    with pytest.raises(Refused, match="tokens today"):
-        await ext.run(_context("anything", Params))
 
 
 # --- the room reaches the extractor (ticket 01) ---------------------------
@@ -760,13 +725,14 @@ async def test_a_skill_fetch_and_a_correction_both_fit_in_one_extraction():
 
     from friday.kernel.harness.skills import SkillLibrary
     from friday.kernel.config import AgentConfig
+    from friday.kernel.extraction import EXTRACTOR
     from plugins.devops.params import ApiIssueParams
     from friday.kernel.extraction.answer import answer_shape
     from pathlib import Path
 
     library = SkillLibrary(Path(__file__).resolve().parents[1] / "skills").load()
     catalogue = list(library.catalogue())
-    assert catalogue, "this repo ships skills; without one the harness grants no turns"
+    assert catalogue, "this repo ships skills"
 
     model = ScriptedModel([
         [function_call("search_skills", {"query": "correlation"}, call_id="1")],
@@ -779,6 +745,7 @@ async def test_a_skill_fetch_and_a_correction_both_fit_in_one_extraction():
             config=AgentConfig(
                 name="api_issue_ext", api_key="k",
                 base_url="https://example.invalid/v1", model="test-model",
+                max_turns=EXTRACTOR.max_turns,
             ),
             instructions="extract",
             answers=answer_shape(ApiIssueParams),

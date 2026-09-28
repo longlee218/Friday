@@ -159,7 +159,7 @@ class NeedsHuman:
     #: Set when the model *did* answer and the answer named something outside
     #: `DECISIONS`, rather than the call failing or never happening (D20).
     #:
-    #: A flag rather than a sentence, for the reason `Harness.refusal` is one:
+    #: A flag rather than a sentence, for the reason `Harness.unfit` is one:
     #: `reason` carries the same information in words, and a caller that has to
     #: branch on it should not be reading them. Two failures that both leave no
     #: classification and lead different places — one says the model invented a

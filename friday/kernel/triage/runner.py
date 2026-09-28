@@ -16,11 +16,11 @@ import logging
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from friday.kernel.config import message_age_cutoff
+from friday.kernel.inbox import MAX_MESSAGE_AGE_SECONDS, TURN_SECONDS
 from friday.store.db import Database
 from friday.kernel.domain.states import TaskState
 from friday.kernel.domain.models import SKIP, InboundEvent, Task
-from friday.kernel.triage import Decided, NeedsHuman, Triage, TriageOutcome
+from friday.kernel.triage import TRIAGE, Decided, NeedsHuman, Triage, TriageOutcome
 from friday.kernel.triage.prefilter import Sensitive
 
 __all__ = ["PENDING", "NEEDS_HUMAN", "TriageRunner", "build_triage"]
@@ -34,6 +34,12 @@ log = logging.getLogger(__name__)
 #: `registry.decisions()`): "this was old" is a fact about the clock, not
 #: something to learn to predict from a message's text.
 OUTDATED = "outdated"
+
+#: Escalate to a human below this. Changes only with a `run_triage_eval`
+#: threshold table beside it (board `domains-plug-in`, ticket 07).
+CONFIDENCE_THRESHOLD = 0.7
+#: How many hand-marked classifications the classifier is shown.
+EXAMPLES = 8
 
 PENDING = TaskState.PENDING
 NEEDS_HUMAN = TaskState.NEEDS_HUMAN
@@ -58,7 +64,7 @@ def _record(outcome: TriageOutcome) -> dict:
 
 
 async def build_triage(
-    config, *, db: Database, record=None, spent=None
+    config, *, db: Database, record=None
 ) -> Triage:
     """The real classifier, assembled the one place this is done.
 
@@ -70,18 +76,13 @@ async def build_triage(
     09's review caught `MemoryScope` behind a quoted forward reference and a
     bare `8` standing in for `RESULTS`). One function, two callers, instead.
     """
-    try:
-        settings = config.agents["triage"]
-    except KeyError:
-        raise SystemExit(
-            "No 'triage' agent in config.yaml — see the agents section."
-        ) from None
+    settings = config.agent(TRIAGE)
 
     # Read once, at build time. Examples belong in the stable front of the
     # prompt, and a list that changed per call would cost the cache hit on
     # everything after it — a mark made now takes effect at the next start.
     examples = list(config.triage_examples) + await db.confirmed_classifications(
-        limit=int(settings.options.get("examples", 8))
+        limit=EXAMPLES
     )
     if examples:
         log.info("triage: %d example(s) the operator vouched for", len(examples))
@@ -106,7 +107,6 @@ async def build_triage(
         examples=examples,
         sensitive=sensitive,
         record=record,
-        spent=spent,
         # The room's summary row is read from here per call — the eval gets
         # the same reading production does, from whatever store it is given.
         summaries=db,
@@ -122,7 +122,6 @@ class TriageRunner:
         db: Database,
         still_typing=None,
         record=None,
-        spent=None,
     ) -> "TriageRunner":
         """Everything triage needs, read from configuration here.
 
@@ -133,23 +132,12 @@ class TriageRunner:
         `register_dags` already use, for the same reason: adding a knob is a
         change here, not there.
         """
-        try:
-            settings = config.agents["triage"]
-        except KeyError:
-            raise SystemExit(
-                "No 'triage' agent in config.yaml — see the agents section."
-            ) from None
-
         return cls(
             db=db,
-            triage=await build_triage(
-                config, db=db, record=record, spent=spent
-            ),
-            confidence_threshold=float(
-                settings.options.get("confidence_threshold", 0.7)
-            ),
-            max_message_age=message_age_cutoff(config),
-            turn_seconds=config.ingest.turn_seconds,
+            triage=await build_triage(config, db=db, record=record),
+            confidence_threshold=CONFIDENCE_THRESHOLD,
+            max_message_age=MAX_MESSAGE_AGE_SECONDS,
+            turn_seconds=TURN_SECONDS,
             still_typing=still_typing,
         )
 

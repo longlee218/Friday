@@ -36,7 +36,6 @@ class Model(Protocol):
         prompt: str,
         *,
         context: Any = None,
-        extra_turns: int = 0,
         message_id: str | None = None,
         task_id: int | None = None,
         node: str | None = None,

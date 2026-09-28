@@ -30,8 +30,21 @@ from friday.kernel.config import AgentConfig
 
 CONFIG = AgentConfig(
     name="an-agent", api_key="sk-secret", base_url="https://example.invalid/v1",
-    model="test-model", max_turns=1, settings={"temperature": 0}, options={},
+    model="test-model", max_turns=1, settings={"temperature": 0},
 )
+#: A tool call and its answer: two requests.
+TWO_TURNS = AgentConfig(
+    name="an-agent", api_key="sk-secret", base_url="https://example.invalid/v1",
+    model="test-model", max_turns=2, settings={"temperature": 0},
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_backoff(monkeypatch):
+    """`PROVIDER_BACKOFF_SECONDS` is a constant; a test does not wait it out."""
+    from friday.kernel.harness import harness as harness_module
+
+    monkeypatch.setattr(harness_module, "PROVIDER_BACKOFF_SECONDS", 0.0)
 
 
 def harness(*steps, config=None, **kw) -> Harness:
@@ -273,28 +286,6 @@ async def test_every_call_reaches_the_sink_it_was_built_with():
     assert "classify this" in call.prompt
 
 
-async def test_a_model_that_never_answers_becomes_work_for_a_person():
-    """A run is bounded here, and nowhere else.
-
-    A timeout is a failure like any other: `None` back, a reason in
-    `last_error`, no exception for a caller to catch. `asyncio.TimeoutError`
-    has an empty `str()`, so the reason is written rather than repeated.
-    """
-    from dataclasses import replace as _replace
-
-    async def never(messages, info):
-        await asyncio.sleep(30)
-
-    run = Harness(
-        config=_replace(CONFIG, timeout_seconds=0.05),
-        instructions="i",
-        model=FunctionModel(never, model_name="test-model"),
-    )
-
-    assert await run.run("go") is None
-    assert run.last_error == "no answer within 0.05s"
-
-
 async def test_a_sink_that_fails_costs_a_row_and_not_the_answer():
     """Recording runs after the expensive part is already done. A failed write
     loses a row; a raised write would lose an answer the provider has already
@@ -308,31 +299,36 @@ async def test_a_sink_that_fails_costs_a_row_and_not_the_answer():
 
 
 async def test_a_call_that_never_came_back_is_still_written_down():
-    """The run that times out is the one whose prompt somebody needs.
+    """The run that is cancelled mid-request is the one whose prompt somebody
+    needs.
 
-    A timeout cancels the run before the response arrives, so the ordinary
-    record path never fires — but what was known at send time (the system
-    prompt and the input) answers "what did we ask it?", which is the question.
-    What is not known is written as absent: no output, no usage.
+    A cancel stops the run before the response arrives, so the ordinary record
+    path never fires — but what was known at send time (the system prompt and
+    the input) answers "what did we ask it?", which is the question. What is
+    not known is written as absent: no output, no usage.
     """
-    from dataclasses import replace as _replace
-
     recorded: list = []
+    sent = asyncio.Event()
 
     async def sink(call) -> None:
         recorded.append(call)
 
     async def never(messages, info):
+        sent.set()
         await asyncio.sleep(30)
 
     run = Harness(
-        config=_replace(CONFIG, timeout_seconds=0.05),
+        config=CONFIG,
         instructions="you decide what a message is",
         model=FunctionModel(never, model_name="test-model"),
         record=sink,
     )
 
-    assert await run.run("classify this", message_id="m1") is None
+    task = asyncio.create_task(run.run("classify this", message_id="m1"))
+    await sent.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
     (call,) = recorded
     assert call.message_id == "m1"
@@ -366,95 +362,6 @@ async def test_a_cancelled_run_stops_rather_than_finishing_its_writes():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert written == []
-
-
-async def test_an_agent_that_has_spent_its_day_is_not_called_again():
-    """The ceiling is checked before the money is gone, which is the one thing
-    a hook cannot do. A breach is a refusal, not a truncation: it returns
-    nothing and says why, and the caller's own machinery turns that into work.
-    """
-    from dataclasses import replace as _replace
-
-    async def spent(agent: str) -> int:
-        return 12_000
-
-    run = Harness(
-        config=_replace(CONFIG, daily_token_budget=10_000),
-        instructions="i",
-        model=_raising(AssertionError("the provider was called anyway")),
-        spent=spent,
-    )
-
-    assert await run.run("go") is None
-    assert run.last_error == "an-agent has spent 12000 of its 10000 tokens today"
-
-
-async def test_an_agent_under_its_ceiling_is_left_alone():
-    """The ceiling is opt-in and the measurement is not: an agent with no
-    budget configured is never asked what it has spent."""
-    from dataclasses import replace as _replace
-
-    asked: list = []
-
-    async def spent(agent: str) -> int:
-        asked.append(agent)
-        return 1
-
-    with_budget = harness(
-        [assistant_message("done")],
-        config=_replace(CONFIG, daily_token_budget=10_000),
-        spent=spent,
-    )
-    assert (await with_budget.run("go")).output == "done"
-    assert asked == ["an-agent"]
-
-    without = harness([assistant_message("done")], spent=spent)
-    assert (await without.run("go")).output == "done"
-    assert asked == ["an-agent"], "no budget, no question"
-
-
-async def test_a_ledger_that_cannot_be_read_does_not_stop_the_work():
-    """No exception escapes the harness — including from the budget check. It
-    fails *open*: a store that cannot answer "what has this spent" is a store
-    that cannot answer anything, so refusing on it would turn a transient read
-    error into every agent refusing at once."""
-    from dataclasses import replace as _replace
-
-    async def unreadable(agent: str) -> int:
-        raise RuntimeError("database is locked")
-
-    run = harness(
-        [assistant_message("done")],
-        config=_replace(CONFIG, daily_token_budget=10),
-        spent=unreadable,
-    )
-
-    assert (await run.run("go")).output == "done"
-
-
-async def test_the_ceiling_is_reached_at_it_and_not_past_it():
-    """On the boundary, because that is where a limit is decided."""
-    from dataclasses import replace as _replace
-
-    async def spent_exactly(agent: str) -> int:
-        return 10_000
-
-    at_it = harness(
-        [assistant_message("done")],
-        config=_replace(CONFIG, daily_token_budget=10_000),
-        spent=spent_exactly,
-    )
-    assert await at_it.run("go") is None
-
-    async def one_short(agent: str) -> int:
-        return 9_999
-
-    under = harness(
-        [assistant_message("done")],
-        config=_replace(CONFIG, daily_token_budget=10_000),
-        spent=one_short,
-    )
-    assert (await under.run("go")).output == "done"
 
 
 def _flaky(*failures):
@@ -498,8 +405,6 @@ async def test_a_hiccup_is_tried_again_and_then_answers():
     """A 429 during a burst turned the expensive call — the model request — into
     a task a person has to pick up and that will never retry itself. Both
     attempts are recorded, because the provider billed for both."""
-    from dataclasses import replace as _replace
-
     recorded: list = []
 
     async def sink(call) -> None:
@@ -507,7 +412,7 @@ async def test_a_hiccup_is_tried_again_and_then_answers():
 
     model = _flaky(_rate_limited())
     run = Harness(
-        config=_replace(CONFIG, max_attempts=3, retry_backoff_seconds=0.0),
+        config=CONFIG,
         instructions="i",
         model=model,
         record=sink,
@@ -524,8 +429,6 @@ async def test_a_prompt_the_provider_rejects_is_not_paid_for_twice():
     """Terminal on the first attempt. What counts as transient is a list, not a
     guess from the message — a 400 is the provider saying the request itself is
     wrong, which trying again cannot change."""
-    from dataclasses import replace as _replace
-
     recorded: list = []
 
     async def sink(call) -> None:
@@ -533,7 +436,7 @@ async def test_a_prompt_the_provider_rejects_is_not_paid_for_twice():
 
     model = _flaky(_rejected(), _rejected(), _rejected())
     run = Harness(
-        config=_replace(CONFIG, max_attempts=3, retry_backoff_seconds=0.0),
+        config=CONFIG,
         instructions="i",
         model=model,
         record=sink,
@@ -548,8 +451,8 @@ async def test_a_prompt_the_provider_rejects_is_not_paid_for_twice():
 
 async def test_giving_up_says_it_gave_up():
     """A person reads this. "429 slow down" alone reads as a moment; "gave up
-    after 3 attempts" says the moment lasted."""
-    from dataclasses import replace as _replace
+    after 10 attempts" says the moment lasted."""
+    from friday.kernel.harness.harness import PROVIDER_ATTEMPTS
 
     recorded: list = []
 
@@ -557,16 +460,16 @@ async def test_giving_up_says_it_gave_up():
         recorded.append(call)
 
     run = Harness(
-        config=_replace(CONFIG, max_attempts=3, retry_backoff_seconds=0.0),
+        config=CONFIG,
         instructions="i",
-        model=_flaky(_rate_limited(), _rate_limited(), _rate_limited()),
+        model=_flaky(*[_rate_limited() for _ in range(PROVIDER_ATTEMPTS)]),
         record=sink,
     )
 
     assert await run.run("go") is None
-    assert run.last_error.startswith("gave up after 3 attempts:")
+    assert run.last_error.startswith(f"gave up after {PROVIDER_ATTEMPTS} attempts:")
     assert "429" in run.last_error
-    assert [c.attempt for c in recorded] == [1, 2, 3]
+    assert [c.attempt for c in recorded] == list(range(1, PROVIDER_ATTEMPTS + 1))
 
 
 async def test_a_408_is_a_hiccup_and_not_a_verdict():
@@ -574,37 +477,17 @@ async def test_a_408_is_a_hiccup_and_not_a_verdict():
     status at or above 500 arrives as `InternalServerError`; 408 Request Timeout
     falls through as a bare `APIStatusError` and is the opposite of a verdict —
     the request did not arrive in time, which is worth asking again."""
-    from dataclasses import replace as _replace
-
     from openai import APIStatusError
 
     model = _flaky(APIStatusError("408 too slow", response=_Answered(408), body=None))
     run = Harness(
-        config=_replace(CONFIG, max_attempts=3, retry_backoff_seconds=0.0),
+        config=CONFIG,
         instructions="i",
         model=model,
     )
 
     assert (await run.run("go")).output == "done"
     assert model.calls == 2
-
-
-def test_one_request_may_not_spend_the_whole_run():
-    """`APITimeoutError` is on the list of what to retry, and it could not fire:
-    the client and the run were given the same number, so the run-level timer
-    always tripped first — and it cancels, which is a `BaseException` the retry
-    loop never sees. A share each makes the claim true."""
-    from friday.kernel.harness.harness import _chat_model
-    from friday.kernel.config import AgentConfig
-
-    model = _chat_model(
-        AgentConfig(
-            name="a", api_key="k", base_url="https://example.invalid/v1",
-            model="test-model", timeout_seconds=60.0, max_attempts=3,
-        )
-    )
-
-    assert model.client.timeout == 20.0
 
 
 async def test_what_an_agent_reached_for_is_written_down_too():
@@ -631,10 +514,11 @@ async def test_what_an_agent_reached_for_is_written_down_too():
     run = harness(
         [function_call("look_up", {"name": "deploy"}, call_id="1")],
         [assistant_message("done")],
+        config=TWO_TURNS,
         tools=[look_up],
         record=sink,
     )
-    await run.run("go", extra_turns=2, task_id=7)
+    await run.run("go", task_id=7)
 
     (reached,) = [e for e in written if getattr(e, "tool", None)]
     assert reached.tool == "look_up"
@@ -670,10 +554,11 @@ async def test_a_tool_that_failed_is_recorded_as_having_failed():
     run = harness(
         [function_call("explodes", {"name": "deploy"}, call_id="1")],
         [assistant_message("done")],
+        config=TWO_TURNS,
         tools=[explodes],
         record=sink,
     )
-    await run.run("go", extra_turns=2)
+    await run.run("go")
 
     (reached,) = [e for e in written if getattr(e, "tool", None)]
     assert reached.failed is True
@@ -737,29 +622,53 @@ def test_the_catalogue_is_readable_off_the_harness():
     assert Harness(config=_config(), instructions="x").skills == []
 
 
-def test_skill_tools_do_not_eat_the_turn_that_answers():
-    """Every agent here is `max_turns: 1`. A skill tool spends a turn, so without
-    room for it a `fetch_skill` consumes the only turn and the agent never
-    classifies. The harness that hands out the tools also hands out the turns."""
-    bare = Harness(config=_config(), instructions="x")
-    withskills = Harness(config=_config(), instructions="x", skills=_Library("a"))
+def _look_up_tool():
+    @tool
+    def look_up(name: str) -> str:
+        """Find a thing.
 
-    assert withskills.tool_turns > bare.tool_turns
+        Args:
+            name: which thing.
+        """
+        return "found it"
 
-
-def test_the_two_step_reach_for_a_skill_fits_in_the_budget():
-    """The catalogue names a skill in a line, so an agent that recognises it
-    calls `fetch_skill` and answers (one tool turn). An agent that does not is
-    told to `search_skills` first and *then* fetch (two)."""
-    withskills = Harness(config=_config(), instructions="x", skills=_Library("a"))
-
-    assert withskills.tool_turns >= 2
+    return look_up
 
 
-def test_run_owns_the_turns_for_its_own_tools():
-    """The harness wires the skill tools; the caller passes `extra_turns` for its
-    own. The caller must not have to remember the harness's. Deleting the
-    addition from `run` flips this red."""
+async def test_max_turns_counts_the_tool_turns():
+    """A turn is every request to the model in one run, tool turns included
+    (board `domains-plug-in`, ticket 17) — nothing is added on top for the
+    tools. A tool call and its answer are two requests: one turn stops the
+    run, two let it finish."""
+    from dataclasses import replace as _replace
+
+    steps = (
+        [function_call("look_up", {"name": "deploy"}, call_id="1")],
+        [assistant_message("done")],
+    )
+
+    one = harness(*steps, config=_replace(CONFIG, max_turns=1), tools=[_look_up_tool()])
+    assert await one.run("go") is None
+    assert "request_limit" in one.last_error
+
+    two = harness(*steps, config=_replace(CONFIG, max_turns=2), tools=[_look_up_tool()])
+    assert (await two.run("go")).output == "done"
+
+
+async def test_a_run_over_its_tokens_stops():
+    """`tokens` is input + output summed over one run — the other half of the
+    per-agent budget — and a run past it stops, as work for a person."""
+    from dataclasses import replace as _replace
+
+    run = harness([assistant_message("done")], config=_replace(CONFIG, tokens=1))
+
+    assert await run.run("go") is None
+    assert "total_tokens_limit" in run.last_error
+
+
+def test_skill_tools_add_no_turns_of_their_own():
+    """The skill tools are wired by the harness; their turns come out of the
+    declaration's `max_turns`, which is set with them in mind."""
     budgeted = Harness(config=_config(), instructions="x", skills=_Library("a"))
     bare = Harness(config=_config(), instructions="x")
 
@@ -773,8 +682,7 @@ def test_run_owns_the_turns_for_its_own_tools():
 
     asyncio.run(budgeted.run("p"))
     asyncio.run(bare.run("p"))
-    # 1 from max_turns, +1 tool turn for the harness that wired skill tools.
-    assert asked == [3, 1]
+    assert asked == [1, 1]
 
 
 def test_an_agent_can_declare_both_a_shape_and_its_own_settings():
@@ -998,17 +906,15 @@ async def test_two_runs_of_one_harness_each_write_down_their_own_call():
 
 
 async def test_why_a_run_failed_survives_a_second_run_starting():
-    """`last_error`, `refusal` and `unfit` live on the harness and are read by
+    """`last_error` and `unfit` live on the harness and are read by
     the caller the moment the run returns. A second run of the same harness
     clears them as it begins — so one that began while the first was still
     writing its record down wiped the first's reason."""
-    from dataclasses import replace as _replace
-
     async def slow_sink(call) -> None:
         await asyncio.sleep(0.05)
 
     run = Harness(
-        config=_replace(CONFIG, max_attempts=1),
+        config=CONFIG,
         instructions="i",
         model=_flaky(_rejected()),
         record=slow_sink,
@@ -1026,3 +932,26 @@ async def test_why_a_run_failed_survives_a_second_run_starting():
 
     assert said is None
     assert why is not None and "not acceptable" in why
+
+
+async def test_every_wait_between_attempts_is_the_same(monkeypatch):
+    """`PROVIDER_BACKOFF_SECONDS` between every two attempts, never doubling
+    (the operator's call, 2026-09-28): ten doubling waits from 10s would be
+    hours."""
+    from friday.kernel.harness import harness as harness_module
+
+    monkeypatch.setattr(harness_module, "PROVIDER_BACKOFF_SECONDS", 7.0)
+    waits: list[float] = []
+
+    async def no_sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr(harness_module.asyncio, "sleep", no_sleep)
+    run = Harness(
+        config=CONFIG,
+        instructions="i",
+        model=_flaky(_rate_limited(), _rate_limited(), _rate_limited()),
+    )
+
+    assert (await run.run("go")).output == "done"
+    assert waits == [7.0, 7.0, 7.0]

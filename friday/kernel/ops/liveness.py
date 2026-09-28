@@ -24,14 +24,27 @@ __all__ = ["Heartbeat", "Liveness"]
 
 log = logging.getLogger("friday.liveness")
 
+#: How often to say the process is alive and what it is holding. A working
+#: agent on a quiet day is otherwise indistinguishable from a dead one.
+HEARTBEAT_SECONDS = 60.0
+#: How long to keep model calls. Prompts are large and nobody reads old ones;
+#: a container that never restarts would fill its volume.
+KEEP_MODEL_CALLS_DAYS = 14.0
+#: How long the gateway may be down before the operator is told. Discord
+#: drops and resumes constantly; alerting on a blip trains you to ignore the
+#: alert that matters.
+DOWN_AFTER_SECONDS = 300.0
+#: Hour of the day (UTC) for the 'still alive' summary; `None` sends none.
+SUMMARY_AT_HOUR: int | None = 9
+
 
 class Heartbeat:
     def __init__(
         self,
         *,
         db: Database,
-        interval_seconds: float = 60.0,
-        keep_model_calls_days: float | None = None,
+        interval_seconds: float = HEARTBEAT_SECONDS,
+        keep_model_calls_days: float | None = KEEP_MODEL_CALLS_DAYS,
         liveness: "Liveness | None" = None,
         context_rebuilder=None,
         backup=None,
@@ -173,8 +186,8 @@ class Liveness:
         db: Database,
         gateway,
         operator: str = "discord_bot",
-        down_after_seconds: float = 300.0,
-        summary_at_hour: int | None = 9,
+        down_after_seconds: float = DOWN_AFTER_SECONDS,
+        summary_at_hour: int | None = SUMMARY_AT_HOUR,
     ) -> None:
         self._db = db
         self._gateway = gateway

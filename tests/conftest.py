@@ -193,9 +193,9 @@ def workflow_graphs():
     that does not register them is testing the absence of a graph rather than
     a graph.
 
-    The config stand-in declares no agents, which is the state of a fresh
-    install — every node skips, and the graph's last node hands over rather
-    than investigating.
+    The config stand-in resolves no agent (`agent` answers `None`), so every
+    model node skips, and the graph's last node hands over rather than
+    investigating.
     """
     from types import SimpleNamespace
 
@@ -209,7 +209,7 @@ def workflow_graphs():
     memory_kinds.register_all_memory_kinds()
     register_dags(
         SimpleNamespace(
-            agents={},
+            agent=lambda declaration: None,
             context=SimpleNamespace(extraction_budget_tokens=None),
         ),
         servers={},
@@ -242,7 +242,10 @@ async def workflows(db):
     tmp = tempfile.mkdtemp()
     adapter.launch("friday-test", f"{tmp}/system.db")
     register_dags(
-        SimpleNamespace(agents={}, context=SimpleNamespace(extraction_budget_tokens=None)),
+        SimpleNamespace(
+            agent=lambda declaration: None,
+            context=SimpleNamespace(extraction_budget_tokens=None),
+        ),
         servers={},
         db=db,
     )
@@ -271,14 +274,12 @@ class ScriptedHarness(Harness):
 
     def __init__(self, **attrs) -> None:
         # `hasattr` rather than plain assignment, so a subclass that declares
-        # `refusal = "over budget"` as a class attribute keeps it: an
-        # instance attribute set here would shadow it, and the test asserting
-        # that a refusal is told apart from a failure would silently stop
-        # testing anything.
+        # `last_error = "boom"` as a class attribute keeps it: an instance
+        # attribute set here would shadow it.
         from friday.kernel.config import AgentConfig
 
         for name, default in (
-            ("tool_turns", 0), ("last_error", None), ("refusal", None),
+            ("last_error", None),
             ("answers", None),
             # A `Harness` has one, and the inherited code logs through it. A
             # stand-in rather than a mock: the only thing read off it here is

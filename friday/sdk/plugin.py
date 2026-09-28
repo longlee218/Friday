@@ -66,12 +66,6 @@ class TaskTypeSpec:
     #: satisfied (DESIGN-v2 §5.2). `None` for a type whose base `Deps` is enough.
     deps: Callable[[Deps], Deps] | None = None
     needs: frozenset[str] = field(default_factory=frozenset)
-    #: The longest one task of this type may hold a pool slot, checked at boot
-    #: against the sum of the graph's node ceilings (`check_graph_clocks`), or
-    #: `None` for a type with no bound of its own. On the spec now (ticket 14) so
-    #: a plugin declares its own budget rather than the composition root passing
-    #: it beside the spec.
-    budget: float | None = None
 
 
 @runtime_checkable

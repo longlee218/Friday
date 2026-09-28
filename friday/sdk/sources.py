@@ -16,6 +16,7 @@ identifiers, which service arrive as arguments.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -27,7 +28,14 @@ __all__ = [
     "LogSource",
     "Placement",
     "Reads",
+    "TOOL_CALL_TIMEOUT_SECONDS",
 ]
+
+#: How long one tool call — an SSH `kubectl`, an MCP call, a git read — may
+#: take. **The only time limit left** (board `domains-plug-in`, ticket 17): an
+#: agent run stops on turns or tokens, and this is what keeps a hung read from
+#: holding a pool slot. Measured reads take one to two seconds.
+TOOL_CALL_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +71,9 @@ class Reads:
                 f"{sorted(self.allowed)}. Add it to the class's own TOOLS if "
                 f"it is a read, and nowhere else."
             )
-        return await self.server.call_tool(tool, arguments)
+        return await asyncio.wait_for(
+            self.server.call_tool(tool, arguments), timeout=TOOL_CALL_TIMEOUT_SECONDS
+        )
 
 
 @dataclass(frozen=True, slots=True)

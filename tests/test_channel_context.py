@@ -28,7 +28,7 @@ from tests.conftest import make_event
 
 SUMMARY_CONFIG = AgentConfig(
     name="summary", api_key="sk-secret", base_url="https://example.invalid/v1",
-    model="test-model", context_window=100, options={},
+    model="test-model",
 )
 
 

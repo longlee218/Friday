@@ -18,18 +18,16 @@ import logging
 from typing import Any
 
 from friday.kernel.config import ConfigError
-from friday.sdk.workflow import DAG, NODE_CLOCK_MARGIN_SECONDS
+from friday.sdk.workflow import DAG
 from friday.kernel.dag import registry
 from friday.kernel.dag.prepare import plan_by_required_parameters, prepare_node
 from friday.kernel.domain.models import Params
 
 __all__ = [
     "EDGE_ROUTER",
-    "NODE_CLOCK_MARGIN_SECONDS",
     "build_simple_dag",
     "check_deps",
     "check_graphs",
-    "check_node_clocks",
     "dag_for",
     "register_dag",
     "register_dags",
@@ -65,85 +63,6 @@ def dag_for(task_type: str) -> DAG | None:
     return EDGE_ROUTER.get(task_type)
 
 
-# --- two clocks ---------------------------------------------------------------
-
-# `NODE_CLOCK_MARGIN_SECONDS` moved to the workflow port (`friday.sdk.workflow`)
-# in ticket 14 so a plugin times its model node against the same margin the
-# kernel checks it with; re-exported above for the callers that read it here.
-
-
-def check_node_clocks(dags: Any, agents: dict[str, Any]) -> None:
-    """Refuse a model node whose timeout does not leave its harness room.
-
-    Run by `check_graphs` straight after the configuration is loaded, and
-    again by `register_dags` on what it registers — so a misconfigured
-    timeout stops the process at boot rather than surfacing as a cancelled
-    run on a task nobody is watching. A model node
-    with no timeout of its own has one clock and nothing to check.
-    """
-    for dag in dags:
-        for node in dag.nodes:
-            if node.agent is None or node.timeout_seconds is None:
-                continue
-            agent = agents.get(node.agent)
-            if agent is None:
-                raise ConfigError(
-                    f"graph {dag.name!r}: node {node.name!r} runs agent "
-                    f"{node.agent!r}, which is not configured under agents:"
-                )
-            floor = agent.timeout_seconds + NODE_CLOCK_MARGIN_SECONDS
-            if node.timeout_seconds < floor:
-                raise ConfigError(
-                    f"graph {dag.name!r}: node {node.name!r} times out after "
-                    f"{node.timeout_seconds}s, but agent {node.agent!r} is given "
-                    f"{agent.timeout_seconds}s — the node's clock must be at "
-                    f"least {floor}s, or it cancels the run before the harness "
-                    "can say why it stopped"
-                )
-
-
-def check_graph_clocks(dags: Any, budgets: dict[str, float]) -> None:
-    """Refuse a graph whose nodes can outlast the budget for one task.
-
-    **What this is really guarding is the pool, not the graph.** Ticket 13
-    stopped one long task from holding the batch by working it side by side,
-    and rested on `api_issue` being "bounded at five minutes". That was true
-    of the one-node graph it was written against. Measured 2026-09-22, the
-    seven-node graph summed to 340s and three of its nodes had no ceiling at
-    all — so the sentence had stopped being true and nothing anywhere said
-    so. With `workflows.concurrency` at 2, two of those are both slots.
-
-    Two rules, and the first is the one that matters: **every node has a
-    ceiling.** A node without one is not bounded by a large number, it is
-    unbounded, and a sum that skips it is a sum that means nothing.
-
-    At boot, like `check_node_clocks` and for the same reason: a clock that
-    does not add up is a configuration mistake, and cancelling a run half
-    way leaves a task that has read a log, told the reporter it was working
-    and written nothing.
-    """
-    for dag in dags:
-        budget = budgets.get(dag.name)
-        if budget is None:
-            continue
-        loose = [n.name for n in dag.nodes if n.timeout_seconds is None]
-        if loose:
-            raise ConfigError(
-                f"graph {dag.name!r}: node(s) {loose} have no timeout, so the "
-                f"graph has no bound however long {dag.name}.timeout_seconds "
-                f"is — one hung read holds a pool slot for the life of the "
-                f"process"
-            )
-        total = sum(n.timeout_seconds or 0.0 for n in dag.nodes)
-        if total > budget:
-            raise ConfigError(
-                f"graph {dag.name!r}: its nodes can take {total}s together, "
-                f"over the {budget}s budget in {dag.name}.timeout_seconds. "
-                f"Raise the budget, or lower a node's clock — "
-                + ", ".join(f"{n.name} {n.timeout_seconds}s" for n in dag.nodes)
-            )
-
-
 # --- the one-node graph, for a type with no investigation --------------------
 
 
@@ -166,11 +85,9 @@ def build_simple_dag(
     board `read-it-the-way-the-operator-does`, ticket 10: the room is rows
     now, read through `deps.db` like everything else node 0 reads.)
 
-    `extractor` is the configured `extractor` agent, if there is one. Node 0
-    calls it, which makes node 0 a model node: it names the agent and gets a
-    clock that is the extractor's own plus `NODE_CLOCK_MARGIN_SECONDS` —
-    derived rather than declared, so raising the extractor's timeout in
-    config.yaml moves node 0's with it instead of slipping under it.
+    `extractor` is the resolved `EXTRACTOR` agent (`None` only from a test
+    stand-in). Node 0
+    calls it, which makes node 0 a model node: it names the agent.
     """
     return DAG(
         name=task_type,
@@ -181,25 +98,19 @@ def build_simple_dag(
                 on_ready=lambda filled: plan_by_required_parameters(task_type, filled),
                 budget_tokens=budget_tokens,
                 agent=None if extractor is None else "extractor",
-                timeout_seconds=(
-                    None
-                    if extractor is None
-                    else extractor.timeout_seconds + NODE_CLOCK_MARGIN_SECONDS
-                ),
             ),
         ),
     )
 
 
 def check_graphs(config: Any) -> None:
-    """Refuse a configuration under which a model node's clock would cut its
-    harness short — from the configuration alone, so the composition root runs
-    it straight after `load_config`, before it opens the database or builds
-    anything a graph is later handed. `register_dags` checks again what it
-    actually registers.
+    """Refuse a configuration a graph cannot be built from — an undeclared
+    tier, a `deps` factory that cannot build — from the configuration alone,
+    so the composition root runs it straight after `load_config`, before it
+    opens the database or builds anything a graph is later handed.
 
-    **Fills the registry as it goes** — the graphs are what the clocks are
-    checked on — and the composition root leans on that: it runs `check_graphs`
+    **Fills the registry as it goes** — the graphs are what is checked — and
+    the composition root leans on that: it runs `check_graphs`
     first, then `register_extractors`, which reads `registry.decision_params()`
     to know which types to wire. So this is not a throwaway side effect;
     `register_extractors` depends on it, and `register_dags` clears and refills
@@ -208,9 +119,6 @@ def check_graphs(config: Any) -> None:
     from friday.kernel.dag.task_types import BootContext, register_all
 
     register_all(BootContext(config))
-    dags = [registry.dag_of(name) for name in registry.specs()]
-    check_node_clocks(dags, config.agents)
-    check_graph_clocks(dags, registry.BUDGETS)
     check_deps()
 
 
@@ -221,8 +129,7 @@ def check_deps() -> None:
     confirms the run `Deps` it returns can be *constructed* — every field
     satisfied (§5.2). A factory that leaves a required field unset (`sender`,
     say — a row queued mid-run would then have no identity to send as) fails
-    here rather than mid-investigation on a task nobody is watching, the same
-    reason the node clocks are checked at boot. This is a structural check: it
+    here rather than mid-investigation on a task nobody is watching. This is a structural check: it
     catches a *missing* field, not a wrong or empty value — no realistic factory
     hardcodes one. A type whose base `Deps` is enough (`spec.deps is None`) has
     nothing to check.
@@ -247,12 +154,9 @@ def register_dags(
     *,
     servers: dict[str, Any] | None = None,
     skills: Any = None,
-    #: Where a node's model call is recorded, and what it has already spent —
-    #: the same two the extractors and the responder are built with. `None`
-    #: for both is a build with no `diagnose` agent, which is every test that
-    #: does not set one up.
+    #: Where a node's model call is recorded — the same sink the extractors
+    #: and the responder are built with. `None` records nothing.
     record: Any = None,
-    spent: Any = None,
     #: The store the workflow adapter rebuilds each run's `Deps` from, and
     #: writes `node_runs` through. `None` registers the graphs for the pool to
     #: read (`dag_for`) but not on the DBOS adapter — every test that drives a
@@ -278,7 +182,6 @@ def register_dags(
         BootContext(
             config=config,
             record=record,
-            spent=spent,
             servers=dict(servers or {}),
             skills=skills,
         )
@@ -287,9 +190,6 @@ def register_dags(
     EDGE_ROUTER.clear()
     for task_type in registry.specs():
         register_dag(task_type, registry.dag_of(task_type))
-
-    check_node_clocks(EDGE_ROUTER.values(), config.agents)
-    check_graph_clocks(EDGE_ROUTER.values(), registry.BUDGETS)
 
     # Register the same graphs on the DBOS adapter (ticket 06), the way the pool
     # runs them past node 0. The adapter rebuilds each run's `Deps` from a

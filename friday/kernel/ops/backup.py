@@ -49,12 +49,18 @@ def _dest(backup_dir: Path, src: Path, stamp: str) -> Path:
     return backup_dir / f"{src.stem}.{stamp}{src.suffix}"
 
 
+#: How many days of backups to keep. `0` turns the daily backup off.
+KEEP_BACKUPS = 7
+
+
 class Backup:
     """A daily online backup of a set of SQLite files, kept to a retention
     count. Built by the composition root with the application and system
     databases; the heartbeat asks it `run_if_due` each beat."""
 
-    def __init__(self, *, sources: list[str], backup_dir: str, keep: int) -> None:
+    def __init__(
+        self, *, sources: list[str], backup_dir: str, keep: int = KEEP_BACKUPS
+    ) -> None:
         #: The files to back up together — the application db and the DBOS
         #: system db. Only those that exist are copied; a system db that has
         #: not been created yet is simply skipped until it is.

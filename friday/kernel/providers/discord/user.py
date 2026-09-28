@@ -358,7 +358,7 @@ def is_credential_rejected(exc: BaseException) -> bool:
 #: own `break` bounds the cold read.
 #:
 #: **The one case with nothing bounding it is a cold cursor with no lookback**
-#: — `max_message_age` unset — and that is left exactly as it was found rather
+#: — `cold_start_lookback` of `None` — and that is left exactly as it was found rather
 #: than decided here. Reading the whole channel then is ticket 02's option C,
 #: which the operator rejected; reading nothing is option A, also rejected.
 #: Neither was chosen for this sub-case, so this ticket does not choose one.

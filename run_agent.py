@@ -99,8 +99,8 @@ async def run() -> None:
 
 async def _run(stack: AsyncExitStack) -> None:
     config = load_config()
-    # Part of loading it: a graph node whose clock would cut its model's run
-    # short is a configuration error, refused before anything is opened.
+    # Part of loading it: a graph whose agent runs on an undeclared tier is a
+    # configuration error, refused before anything is opened.
     from friday.kernel.dag.router import check_graphs
 
     check_graphs(config)
@@ -228,7 +228,6 @@ async def _run(stack: AsyncExitStack) -> None:
         db=db,
         still_typing=inbox.still_typing,
         record=record_call,
-        spent=db.spent_today,
     )
 
     # Connected here rather than by whoever uses them: a connection has a
@@ -272,7 +271,6 @@ async def _run(stack: AsyncExitStack) -> None:
         config,
         skills=skills,
         record=record_call,
-        spent=db.spent_today,
     )
 
     # Register the workflow graphs. Same shape as the extractors above and for
@@ -286,10 +284,9 @@ async def _run(stack: AsyncExitStack) -> None:
         servers={name_of(s): s for s in servers},
         skills=skills,
         # `api_issue`'s one model node is built here, the same way the
-        # extractors and the responder are — so its calls are recorded and
-        # counted against the same daily budget as everybody else's.
+        # extractors and the responder are — so its calls are recorded like
+        # everybody else's.
         record=record_call,
-        spent=db.spent_today,
         # The store the DBOS adapter rebuilds each run's Deps from and writes
         # node_runs through — which also registers the graphs on the adapter.
         db=db,
@@ -349,8 +346,6 @@ async def _run(stack: AsyncExitStack) -> None:
         # Discord clients speak into the same conversations, so these are two
         # different namespaces and the registry keys on the second.
         senders=senders,
-        max_attempts=config.outbox.max_attempts,
-        backoff_seconds=config.outbox.backoff_seconds,
         # Each delivery runs inside a DBOS workflow (ticket 07), so a crash
         # mid-send resumes exactly once — no double-post, no silent loss. The
         # adapter is the one module that names the vendor; the step calls back
@@ -372,14 +367,11 @@ async def _run(stack: AsyncExitStack) -> None:
         skills=skills,
         db=db,
         record=record_call,
-        spent=db.spent_today,
     )
     pool = Pool.build(config, db=db, responder=responder)
     liveness = Liveness(
         db=db,
         gateway=provider,
-        down_after_seconds=config.down_after_seconds,
-        summary_at_hour=config.summary_at_hour,
     )
     heartbeat = Heartbeat(
         db=db,
@@ -388,16 +380,12 @@ async def _run(stack: AsyncExitStack) -> None:
             config,
             db=db,
             record=record_call,
-            spent=db.spent_today,
-        ),
-        interval_seconds=config.heartbeat_seconds,
-        keep_model_calls_days=config.keep_model_calls_days,
+            ),
         # Both SQLite files backed up together, once a day, on the beat (§12.1,
         # ticket 09) — the application db and the DBOS system db beside it.
         backup=Backup(
             sources=databases(config.database_path),
             backup_dir=config.backup_dir,
-            keep=config.keep_backups,
         ),
         extra=inbox.tally,
     )
