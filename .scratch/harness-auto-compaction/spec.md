@@ -32,4 +32,13 @@ Numbers are hypotheses until the diagnose eval can score (memory
 
 ## Tickets
 
+**Parked until the `domains-plug-in` build is done.** Open when resuming: split
+into 01 Build + 02 Measure the threshold (blocked by `build-the-loop` ticket 7
+scoring) — recommended — or keep one ticket.
+
+Skills when building: `ai:building-pydantic-ai-agents` (the `ProcessHistory`
+API), `developer` agent or `tdd`, the whole suite, `code-reviewer`; for the
+measuring ticket, `evals-for-agents`.
+
+
 - [01 — Auto compaction in the Harness](issues/01-auto-compaction-in-the-harness.md)

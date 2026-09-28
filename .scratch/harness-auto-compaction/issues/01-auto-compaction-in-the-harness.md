@@ -1,5 +1,13 @@
 Status: ready-for-agent
 Blocked by:
+Parked: until the `domains-plug-in` build is done (operator, 2026-09-28).
+
+> **When resuming, re-check the seam.** `domains-plug-in` ticket 09 splits
+> `harness.py` (`harness / retry / model_client`) and ticket 03 builds agents
+> from `AgentSpec`, so `harness.py:392` will have moved. An early, unrequested
+> start sits uncommitted in worktree `../friday-agents-harness-auto-compaction`
+> (branch `feat/harness-auto-compaction`): 6 compaction tests green, whole
+> suite not run, not reviewed — reuse or discard.
 
 # Auto compaction in the Harness
 
