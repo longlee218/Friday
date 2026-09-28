@@ -483,6 +483,20 @@ with the reporter's reply as the brief, the run continues from it — nothing
 already read is read again, `Lnn` ids keep their meaning. Not a mid-loop
 checkpoint: a crashed step re-runs from its start.
 
+**Runner** — `run_plan` (`friday/kernel/spine/runner.py`, build-the-spine
+ticket 12) walks a frozen plan's steps in order. A step with a stored result
+is skipped and its readers get that result; else the step runs (up to
+`STEP_ATTEMPTS`, then `HandOver` `step_failed`) and its result is stored.
+`Ask`, `HandOver`, `Retriage` and the draft's `Reply` stop the plan; a fresh
+`Replan` asks the Planner for the next version until `max_replans` is spent
+(`HandOver` `replans_exhausted`).
+
+**Step result** — what one step came to, stored in `step_results` at
+`(task_id, step_key)` by the runner alone and never rewritten. A stored step
+never runs again, so a reused `Replan` is data for its readers, not a new
+signal. A stored `Ask` keeps its message history; its `Evidence` is not
+stored yet (ticket 14).
+
 ## Install fact and knob
 
 An **install fact** describes this machine — who the operator is, where the
@@ -503,8 +517,8 @@ declaration (`AgentDeclaration.tier`); an undeclared tier refuses the boot.
 Doing the same failed thing again: a provider 429/502, an answer of the wrong
 shape, a failed send, a model request past its `request_timeout_seconds`.
 Not progress, so not a turn. Core constants, the same
-for every agent: `PROVIDER_ATTEMPTS`, `OUTPUT_CORRECTIONS`, `OUTBOX_ATTEMPTS`
-(`STEP_ATTEMPTS` comes with the spine's steps).
+for every agent: `PROVIDER_ATTEMPTS`, `OUTPUT_CORRECTIONS`, `OUTBOX_ATTEMPTS`,
+`STEP_ATTEMPTS` (a whole spine step, in the runner).
 
 ## Voice
 

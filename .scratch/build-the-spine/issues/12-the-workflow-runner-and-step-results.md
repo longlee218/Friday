@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 Blocked by: 06, 10
 
 # The WorkflowRunner and `step_results`
@@ -24,8 +24,34 @@ Decisions: [The runner and adaptive replan](../../domains-plug-in/issues/13-the-
 
 ## Acceptance
 
-- [ ] Replan reuse cases from ticket 13 §6 (change direction / build on /
+- [x] Replan reuse cases from ticket 13 §6 (change direction / build on /
       stop) each tested; no loop possible.
-- [ ] `replans_exhausted`, `step_failed` tested.
-- [ ] Guard: only the runner writes `step_results`.
-- [ ] Whole suite green; `code-review` done.
+- [x] `replans_exhausted`, `step_failed` tested.
+- [x] Guard: only the runner writes `step_results`.
+- [x] Whole suite green; `code-review` done.
+
+## Done 2026-09-29
+
+Operator decision: a stored `Ask` keeps `{text, history}`; its `Evidence` is
+not stored — where it lives is 14's call.
+
+Decided while building:
+- What a step runs with — `run_agent`'s binding, the responder, the Planner —
+  is handed in as `Steps` by the pass (14), each closing over the intake context.
+- `replans_exhausted` = `HandOver("replans_exhausted: <last found>")`;
+  `RunEnd.plans` carries every version, `step_results` every result.
+- Code-made hand-overs (`step_failed`, `replans_exhausted`) are not stored at a
+  step key, so the next pass tries again. A replan counts once the Planner is
+  called, `planner_failed` included.
+- A `Replan` stored by the version being walked is still the signal (a walk
+  cut before the Planner answered); one reused by a later version is data.
+- `step_results()` returns the ORM rows (map ticket 09 §8: no runtime twin,
+  no converter), an exception to DESIGN's "converts at the edge".
+
+## Carried
+
+- **To 14:** `Ask.evidence` storage; `replans_used` is held by the caller
+  (persist it with the pass); `Replan`/`Retriage` are still outside the sdk
+  `Outcome` union (`RunEnd.outcome` names its own); a stored `result` is
+  decoded with the agent's *current* `result` type, so a changed type across
+  a deploy raises rather than hands over.

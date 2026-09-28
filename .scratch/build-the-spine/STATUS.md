@@ -17,7 +17,7 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 09 | Backend toolsets from `sources/` | ⬜ | 05, 07 |
 | 10 | The Harness runs an `AgentSpec` | ✅ done (main, 2026-09-29) | 05 |
 | 11 | The Planner and its plan-shape eval | ⬜ **takeable** | 06, 10 |
-| 12 | The WorkflowRunner and `step_results` | ⬜ **takeable** | 06, 10 |
+| 12 | The WorkflowRunner and `step_results` | ✅ done (main, 2026-09-29) | 06, 10 |
 | 13 | The assembled triage prompt | ⬜ **takeable** | 05 |
 | 14 | The spine pass; `trace_problem` moves onto it | ⬜ | 07, 08, 09, 11, 12, 13 |
 | 15 | `backend.answer_question` on the spine | ⬜ | 14 |

@@ -28,8 +28,10 @@ def test_the_attempts_are_core_constants():
         PROVIDER_BACKOFF_SECONDS,
     )
     from friday.kernel.outbox import OUTBOX_ATTEMPTS, OUTBOX_BACKOFF_SECONDS
+    from friday.kernel.spine.runner import STEP_ATTEMPTS
 
     assert (PROVIDER_ATTEMPTS, PROVIDER_BACKOFF_SECONDS) == (10, 10.0)
+    assert STEP_ATTEMPTS == 2
     assert OUTPUT_CORRECTIONS == 1
     assert (OUTBOX_ATTEMPTS, OUTBOX_BACKOFF_SECONDS) == (3, 30.0)
 

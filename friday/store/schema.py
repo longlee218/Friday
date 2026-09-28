@@ -16,7 +16,7 @@ from sqlalchemy import JSON, Index, String, TypeDecorator
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["AuditEntry", "Base", "Conversation", "Cursor", "DagState", "Memory", "MemoryCandidate", "Message", "ModelCall", "NodeRun", "Outbound", "Task", "ToolCall", "Verdict"]
+__all__ = ["AuditEntry", "Base", "Conversation", "Cursor", "DagState", "Memory", "MemoryCandidate", "Message", "ModelCall", "NodeRun", "Outbound", "StepResult", "Task", "ToolCall", "Verdict"]
 
 
 class IsoDateTime(TypeDecorator):
@@ -212,6 +212,30 @@ class NodeRun(Base):
     reason: Mapped[str] = mapped_column(default="")
     duration_ms: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
+
+
+class StepResult(Base):
+    """What one spine step came to, keyed by its content (build-the-spine
+    ticket 12; board `domains-plug-in` tickets 09 §8, 10 §8, 13 §6).
+
+    Keyed by `(task_id, step_key)`, not by plan version: a replan's identical
+    step finds its result here and is not run again. Written by the runner
+    alone (`friday/kernel/spine/runner.py`), never rewritten — a stored
+    result is the reuse rule. No runtime twin: the runner reads these rows.
+    """
+
+    __tablename__ = "step_results"
+
+    task_id: Mapped[int] = mapped_column(primary_key=True)
+    step_key: Mapped[str] = mapped_column(primary_key=True)
+    #: The step's id and plan version when it ran — for the board, not a key.
+    step_id: Mapped[str]
+    plan_version: Mapped[int]
+    #: `result | reply | ask | hand_over | replan | retriage`.
+    kind: Mapped[str]
+    #: The result as JSON data; an `Ask` without its `Evidence` (ticket 14).
+    body: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(IsoDateTime)
 
 
 class Cursor(Base):

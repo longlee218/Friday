@@ -29,6 +29,7 @@ from friday.store.repositories.memory_candidates import MemoryCandidatesRepo
 from friday.store.repositories.messages import MessagesRepo
 from friday.store.repositories.monitor import MonitorRepo
 from friday.store.repositories.outbox import OutboxRepo
+from friday.store.repositories.plans import PlansRepo
 from friday.store.repositories.rooms import RoomsRepo
 from friday.store.repositories.task_conversation import TaskConversationRepo
 from friday.store.repositories.tasks import TasksRepo
@@ -62,6 +63,7 @@ class Database(
     MemoryCandidatesRepo,
     OutboxRepo,
     TasksRepo,
+    PlansRepo,
     TaskConversationRepo,
     CompactionRepo,
     VerdictsRepo,
