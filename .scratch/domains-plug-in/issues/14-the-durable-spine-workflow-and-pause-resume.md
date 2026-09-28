@@ -20,3 +20,10 @@ diff, continue vs re-plan — and whether this subsumes `build-the-loop` ticket 
 > Planner conversation, so its `message_history` must persist durably between
 > the Planner step and the GatePlan step. Planner time counts toward the
 > task's elapsed time.
+
+> Note from "The WorkflowRunner and adaptive replan" (13): every result,
+> `Ask` included, is stored at `(task_id, step_key)` and reused when the key
+> matches — so on a reply, the stored `Ask` must be dropped (or keyed apart)
+> for its step to re-run and see the reply. A reply-driven replan counts
+> toward `max_replans`. Code-authored `HandOver` reasons: `step_failed`,
+> `replans_exhausted`, `out_of_time`.

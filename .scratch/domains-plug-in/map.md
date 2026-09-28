@@ -213,6 +213,15 @@ without approval; an answer that states a cause always waits for the operator.
   conversation; failure → `HandOver` `planner_failed`; replan → fresh
   conversation. Code-graded plan-shape eval on synthetic fixtures.
 
+- [The WorkflowRunner and adaptive replan](issues/13-the-runner-and-adaptive-replan.md):
+  runner walks steps, skipping any with a stored result at `(task_id, step_key)`;
+  agents get a core terminal tool `replan(reason, found)`; the Planner runs only
+  on a signal; step failure → 2 retries (core constant) → `HandOver`
+  `step_failed`; crash resume per step; a `Replan` is stored and reused like any
+  result, so abort is just a plan ending in `draft`; `max_replans` counts every
+  replan (reply-driven too) → `replans_exhausted`; time check before each step →
+  `out_of_time`.
+
 ## Not yet specified
 
 - **Getting smarter** — plan exemplars (stored, retrieved, scored by outcome),
