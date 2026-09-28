@@ -1,4 +1,4 @@
-Status: ready-for-human
+Status: done
 Blocked by: 01
 
 # Rename actions and plugins, wipe the db
@@ -32,6 +32,8 @@ Runs on the old DAG machinery; only names and packages change.
       tests, web, evals: only old migrations and history.
 - [x] Live db wiped with a backup on disk; `alembic current` = head.
 - [ ] `run_triage_eval` run and reported (labels changed in the prompt).
+      **Deferred by the operator (2026-09-28):** no OpenRouter account yet;
+      run it once `OPENROUTER_API_KEY` is in `.env`.
 - [x] Web renders tags from the API list; `npm run build` passes.
 - [x] `test_dependency_rule.py` G1 still holds with `plugins/ops`.
 - [x] Whole suite green; `code-review` done.
@@ -52,6 +54,7 @@ Runs on the old DAG machinery; only names and packages change.
 - Remaining grep hits are history (`extractor_access_request` in two
   docstrings, old migrations) and `devops.json`, the external MCP server's
   token file in `test_mcp_auth.py`.
-- **Open — waiting on the operator:** `run_triage_eval` not run.
+- **Deferred (operator, 2026-09-28):** `run_triage_eval` not run — no
+  OpenRouter account yet.
   `config.yaml` references `OPENROUTER_API_KEY`, which `.env` does not set.
   The prompt now names the full labels (`ops.request_permission`, …).

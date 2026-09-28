@@ -159,9 +159,9 @@ is the premise each board tracks against.
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **In progress:** ticket 01 done (2026-09-28); 02 built on
-  `feat/build-the-spine-02` (live db wiped, names are `backend.*`/`ops.*`),
-  its triage eval waits on `OPENROUTER_API_KEY` in `.env`.
+  **In progress:** tickets 01 and 02 done (2026-09-28; names are
+  `backend.*`/`ops.*`, live db wiped); 03 and 04 are next. The triage eval
+  is deferred until the operator has an OpenRouter key.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
 
