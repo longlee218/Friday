@@ -25,6 +25,9 @@ Decision: [The plugin API surface](../../domains-plug-in/issues/03-the-plugin-ap
 - [ ] One test per refusal class; an off-list command writes an
       `audit_log` row.
 - [ ] A path escaping the workspace root is refused (test).
+- [ ] Boot refusal 9, carried from ticket 05: a `core.shell` host not
+      declared in `config.yaml` refuses the boot (in
+      `friday/kernel/boot_refusals.py`, test watched red).
 - [ ] Guard: only one module imports `pydantic_ai_harness`.
 - [ ] `docs/DESIGN.md` D6 corrected in this commit (world read-only by an
       allowlist in code; Friday writes only its workspace).

@@ -256,11 +256,14 @@ def register_all_memory_kinds(config: Any = None) -> None:
     register_reader("triage", frozenset({SUMMARY}))
     register_reader("code", frozenset({PERSON}))
 
-    from friday.kernel.plugin_host import MemoryKindAPI, configured_plugins
+    from friday.kernel.plugin_host import load_plugins
 
     class _DefaultConfig:
         plugins = ("plugins.backend",)
         plugin_blocks: dict = {}
 
-    for plugin, cfg in configured_plugins(config if config is not None else _DefaultConfig()):
-        plugin.register(MemoryKindAPI(cfg))
+    loaded = load_plugins(config if config is not None else _DefaultConfig())
+    for spec in loaded.registry.memory_kinds().values():
+        register_memory_kind(spec)
+    for reader, kinds in loaded.registry.readers().items():
+        register_reader(reader, kinds)

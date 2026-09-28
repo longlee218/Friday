@@ -14,11 +14,11 @@ where the real `RunContext` lives.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["ToolContext", "ToolSpec", "tool"]
+__all__ = ["RunContext", "ToolContext", "ToolSpec", "ToolsetSpec", "tool"]
 
 #: A plugin tool that reads per-run state does so off `ctx.deps`; typed `Any`
 #: here so a plugin never names the vendor's run-context type. The app-layer
@@ -51,3 +51,37 @@ def tool(func=None, **options):
         return ToolSpec(fn, options)
 
     return make(func) if func is not None else make
+
+
+@dataclass(frozen=True, slots=True)
+class RunContext:
+    """What the core hands a toolset factory, once per run.
+
+    `domain` is the domain's enricher output (e.g. `Placement`), `None` for a
+    domain with no enricher. `evidence` is what the run has read — refs resolve
+    against it. `mcp` maps each server the toolset declared to its `Reads`,
+    narrowed to exactly the tools the toolset listed.
+    """
+
+    task_id: int
+    domain: Any
+    evidence: list[Any]
+    mcp: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolsetSpec:
+    """A named set of tools a plugin registers (`api.toolset`).
+
+    `description` is for the Planner. `factory` builds the tools per run from
+    a `RunContext`. `mcp` is the read allowlist per server, `{server: TOOLS}`
+    — the core holds the raw servers and never hands a factory a tool outside
+    it. `domain_type` is the type the factory expects in `run.domain`; `None`
+    when it reads no domain.
+    """
+
+    name: str
+    description: str
+    factory: Callable[[RunContext], list[Any]]
+    mcp: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    domain_type: type | None = None

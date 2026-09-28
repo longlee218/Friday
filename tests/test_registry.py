@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from friday.kernel import DuplicateRegistration, Registry
+from friday.kernel.registry import PluginRegistration
 from friday.sdk import MemoryKindSpec, Origin, Plugin, PluginAPI, TaskTypeSpec
 
 
@@ -31,10 +32,11 @@ def test_a_plugin_registers_its_contributions_through_the_api():
     assert set(registry.memory_kinds()) == {"demo.kind"}
 
 
-def test_the_registry_satisfies_the_plugin_api_protocol():
+def test_what_a_plugin_is_handed_satisfies_the_plugin_api_protocol():
     """A plugin registers against the Protocol, never the concrete class — the
     dependency rule in the type system."""
-    assert isinstance(Registry(), PluginAPI)
+    api = PluginRegistration(Registry(), Plugin(id="demo", register=lambda api: None))
+    assert isinstance(api, PluginAPI)
 
 
 def test_a_second_claim_on_a_task_type_id_refuses():

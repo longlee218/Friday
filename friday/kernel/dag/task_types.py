@@ -4,9 +4,9 @@ Ticket 11 gave each task type a `TaskTypeSpec` and had `register_all` fill the
 registry at boot; tickets 14 and 15 lifted the investigation type and the
 question persona out to plugins, and build-the-spine ticket 02 moved the last
 in-core type out to `plugins/ops/`, so the kernel registers none of its own
-(`skip` is not a task type). `register_all` loads every configured plugin,
-handing each a `TaskTypeAPI` built from the
-`BootContext` — which is also the **caps** a plugin's graph builder reaches for:
+(`skip` is not a task type). `register_all` loads every configured plugin (one
+`register` call each) and attaches the `BootContext` to each plugin's registration — it is also the
+**caps** a plugin's graph builder reaches for:
 its `prepare_node` (node 0, so a plugin imports none of the kernel's graph
 machinery), its `make_harness` (a model node), the run's tool servers, and the
 `sender`/`approver` identities a queued row uses.
@@ -103,9 +103,12 @@ def register_all(ctx: BootContext) -> None:
     configured plugin's. Clears first, so a second call
     (a restart in one process, a test) states the same intention rather than
     colliding with the last."""
-    from friday.kernel.plugin_host import TaskTypeAPI, configured_plugins
+    from friday.kernel.plugin_host import load_plugins
 
     registry.clear()
     registry.SERVERS.update(ctx.servers)
-    for plugin, cfg in configured_plugins(ctx.config):
-        plugin.register(TaskTypeAPI(caps=ctx, config=cfg))
+    loaded = load_plugins(ctx.config)
+    loaded.attach_caps(ctx)
+    for spec in loaded.registry.task_types().values():
+        assert spec.graph is not None, f"task type {spec.name!r} registered no graph"
+        registry.register_task_type(spec, dag=spec.graph(None))

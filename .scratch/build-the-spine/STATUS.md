@@ -10,15 +10,15 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 02 | Rename actions and plugins, wipe the db | ✅ done (branch `feat/build-the-spine-02`, `cbbcde1`); triage eval deferred until an OpenRouter key exists | 01 |
 | 03 | Split the grab-bag modules | ✅ done (main, 2026-09-28) | 02 |
 | 04 | Board card and pool line from the opening message | ⬜ **takeable** | 02 |
-| 05 | SDK declarations and boot refusals | ⬜ **takeable** | 03 |
-| 06 | Plan, `step_key` and GatePlan | ⬜ | 05 |
-| 07 | Core Intake and the backend enricher | ⬜ | 05 |
-| 08 | Core toolsets: memory, skills, shell, workspace | ⬜ | 05 |
+| 05 | SDK declarations and boot refusals | ✅ done (main, 2026-09-28); refusal 9 moved to 08 | 03 |
+| 06 | Plan, `step_key` and GatePlan | ⬜ **takeable** | 05 |
+| 07 | Core Intake and the backend enricher | ⬜ **takeable** | 05 |
+| 08 | Core toolsets: memory, skills, shell, workspace | ⬜ **takeable** | 05 |
 | 09 | Backend toolsets from `sources/` | ⬜ | 05, 07 |
-| 10 | The Harness runs an `AgentSpec` | ⬜ | 05 |
+| 10 | The Harness runs an `AgentSpec` | ⬜ **takeable** | 05 |
 | 11 | The Planner and its plan-shape eval | ⬜ | 06, 10 |
 | 12 | The WorkflowRunner and `step_results` | ⬜ | 06, 10 |
-| 13 | The assembled triage prompt | ⬜ | 05 |
+| 13 | The assembled triage prompt | ⬜ **takeable** | 05 |
 | 14 | The spine pass; `trace_problem` moves onto it | ⬜ | 07, 08, 09, 11, 12, 13 |
 | 15 | `backend.answer_question` on the spine | ⬜ | 14 |
 | 16 | `ops.request_permission` on the spine; delete the DAG path | ⬜ | 14, 15 |

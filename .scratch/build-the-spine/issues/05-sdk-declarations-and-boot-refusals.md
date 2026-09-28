@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 Blocked by: 03
 
 # SDK declarations and boot refusals
@@ -38,8 +38,22 @@ The new registration surface, pure data, registered beside the old
 
 ## Acceptance
 
-- [ ] One test per refusal, each watched red.
-- [ ] `sdk` still imports nothing of ours but itself (dependency-rule test).
-- [ ] `CONTEXT.md` § Vocabulary: *domain*, *action*, *action contract*,
+- [ ] One test per refusal, each watched red. — 1–8 and the missing
+      description: done, each watched red (`tests/test_boot_refusals.py`).
+      **9 not done**: moved to ticket 08 by the operator (2026-09-28), since
+      `core.shell` and the config host list land there.
+- [x] `sdk` still imports nothing of ours but itself (dependency-rule test).
+- [x] `CONTEXT.md` § Vocabulary: *domain*, *action*, *action contract*,
       *agent spec*, *toolset spec*, *run context*, *enricher*.
-- [ ] Whole suite green; `code-review` done.
+- [x] Whole suite green; `code-review` done.
+
+## Decided while building (operator, 2026-09-28)
+
+- `Plugin.config` stays until ticket 09 (the DAG path's backend config);
+  `Plugin.requires` is gone.
+- The reader → agent check runs only for a plugin that has registered at
+  least one `AgentSpec` (backend's `backend.diagnose` reader has none yet);
+  temporary until 16.
+- `ToolsetSpec.domain_type` added (refusal 5 needs it; from the stub).
+- A config without `tiers` / `mcp_servers` (the memory-kinds default) skips
+  those two checks.

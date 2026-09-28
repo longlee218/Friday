@@ -54,7 +54,6 @@ from dotenv import load_dotenv
 from friday.kernel.config import load_config
 from friday.kernel.dag.task_types import BootContext
 from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
-from friday.kernel.plugin_host import TaskTypeAPI
 from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
 from friday.sdk.workflow import DAG, Deps as DAGDeps, NodeRun
@@ -93,7 +92,7 @@ def _replay_dag(config, *, with_model, reports):
         reports_dir=str(reports),
     )
     whole = config if with_model else _WithoutDiagnose(config)
-    api = TaskTypeAPI(caps=BootContext(config=whole, servers={}), config=backend_cfg)
+    api = SimpleNamespace(caps=BootContext(config=whole, servers={}), config=backend_cfg)
     return build_backend_dag(api), backend_cfg
 
 

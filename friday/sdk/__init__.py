@@ -11,19 +11,26 @@ is the bottom of our own code — it imports nothing of ours — `kernel` import
 `sdk`, and a plugin imports `sdk` only.
 """
 
+from friday.sdk.action import Action, ActionContract, Limits, Recognition
+from friday.sdk.agent import AgentSpec, Budget
 from friday.sdk.memory import MemoryKindSpec, Origin
 from friday.sdk.model import Model
 from friday.sdk.outbox import Kind
 from friday.sdk.plugin import Plugin, PluginAPI, TaskTypeSpec
 from friday.sdk.redact import scrub
 from friday.sdk.sources import CodeSource, Lines, LogSource, Placement, Reads
-from friday.sdk.toolset import ToolContext, ToolSpec, tool
+from friday.sdk.toolset import RunContext, ToolContext, ToolSpec, ToolsetSpec, tool
 from friday.sdk.validation import InSet, Matches, NonEmpty, OneOf, Problem, asked_as, validate
 
 __all__ = [
+    "Action",
+    "ActionContract",
+    "AgentSpec",
+    "Budget",
     "CodeSource",
     "InSet",
     "Kind",
+    "Limits",
     "Lines",
     "LogSource",
     "Matches",
@@ -37,9 +44,12 @@ __all__ = [
     "PluginAPI",
     "Problem",
     "Reads",
+    "Recognition",
+    "RunContext",
     "TaskTypeSpec",
     "ToolContext",
     "ToolSpec",
+    "ToolsetSpec",
     "asked_as",
     "scrub",
     "tool",

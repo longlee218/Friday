@@ -8,11 +8,10 @@ becomes a call to `api.task_type(...)` / `api.memory_kind(...)`, so adding one i
 adding a plugin, not editing the core.
 
 Ticket 10 defined these types and a kernel that holds them; ticket 14 moved the
-first real task type (`backend.trace_problem`) and its pack kinds onto this API. The
-`PluginAPI` surface is what a plugin needs today — `task_type`, `memory_kind`,
-`reader`, plus the boot `caps` a graph builder reaches for. The DESIGN-v2 §4.2
-methods `toolset`/`skills`/`source`/`check` arrive each with its own ticket and
-the types it needs, rather than as empty stubs here.
+first real task type (`backend.trace_problem`) and its pack kinds onto this API.
+Build-the-spine ticket 05 added the spine's surface — `action`, `agent`,
+`toolset` (pure data, `friday.sdk.action` / `.agent` / `.toolset`) — beside
+`task_type`, which goes with `caps` in ticket 16.
 """
 
 from __future__ import annotations
@@ -21,7 +20,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from friday.sdk.action import Action
+from friday.sdk.agent import AgentSpec
 from friday.sdk.memory import MemoryKindSpec
+from friday.sdk.toolset import ToolsetSpec
 from friday.sdk.workflow import DAG, Deps
 
 __all__ = ["Plugin", "PluginAPI", "TaskTypeSpec"]
@@ -78,19 +80,18 @@ class PluginAPI(Protocol):
     block (or `None` if it takes none); the register methods are how it
     contributes a capability.
 
-    `register(api)` runs once per contribution lifecycle (memory kinds are
-    filled at one point, task-type graphs at another), so a plugin declares
-    everything each time and the host honours only the calls its lifecycle
-    serves — the others are no-ops. `caps` is the composition root's boot
-    capabilities (its `prepare_node`, `make_harness`, tool `servers`, and the
-    `sender`/`approver` identities a queued row uses); it is present only in the
-    task-type lifecycle, so a plugin reaches it only from inside a deferred
-    `graph`/`deps` builder, never eagerly at register time.
+    `register(api)` runs once per load: every call is recorded, then the host
+    cross-checks the lot and refuses the boot on a broken declaration.
+    `caps` is the composition root's boot capabilities (its `prepare_node`,
+    `make_harness`, tool `servers`, and the `sender`/`approver` identities a
+    queued row uses); it is attached after `register` returns, so a plugin
+    reaches it only from inside a deferred `graph`/`deps` builder, never
+    eagerly at register time. `caps` and `task_type` go in ticket 16.
     """
 
     config: Any
-    #: The composition root's boot capabilities, or `None` outside the
-    #: task-type lifecycle. Typed `Any` because its shape is the composition
+    #: The composition root's boot capabilities, or `None` until the task-type
+    #: graphs are built. Typed `Any` because its shape is the composition
     #: root's, not a contract the plugin should bind to — the plugin duck-types
     #: `caps.prepare_node(...)`, `caps.make_harness(...)`, `caps.servers`,
     #: `caps.sender`, `caps.approver` from inside a deferred builder.
@@ -98,6 +99,18 @@ class PluginAPI(Protocol):
 
     def task_type(self, spec: TaskTypeSpec) -> None:
         """Register one task type. A duplicate name refuses the boot."""
+        ...
+
+    def action(self, action: Action) -> None:
+        """Register one action. A duplicate name refuses the boot."""
+        ...
+
+    def agent(self, spec: AgentSpec) -> None:
+        """Register one agent spec. A duplicate name refuses the boot."""
+        ...
+
+    def toolset(self, spec: ToolsetSpec) -> None:
+        """Register one toolset spec. A duplicate name refuses the boot."""
         ...
 
     def memory_kind(self, spec: MemoryKindSpec) -> None:
@@ -114,13 +127,18 @@ class PluginAPI(Protocol):
 
 @dataclass(frozen=True)
 class Plugin:
-    """A plugin as the kernel sees it: an id it namespaces everything under, the
-    one `register` entrypoint, the plugin ids it `requires` (load order and
-    presence, never an import), and the dataclass its config block is validated
-    against (`None` if it takes none). A package exposes exactly one `PLUGIN`.
+    """A plugin as the kernel sees it: an id it namespaces everything under,
+    the one `register` entrypoint, and its domain's intake `enricher` (`None`
+    for a domain with none). The enricher's return annotation is the domain
+    type the boot checks toolsets against. A package exposes exactly one
+    `PLUGIN`.
+
+    `config` is temporary: the dataclass the old DAG path's config block is
+    validated against. Build-the-spine ticket 09 turns that block into
+    constants and deletes the field.
     """
 
     id: str
     register: Callable[[PluginAPI], None]
-    requires: tuple[str, ...] = ()
+    enricher: Callable[..., Any] | None = None
     config: type | None = None

@@ -1,25 +1,34 @@
-"""Loading the plugins a build is configured with, and the two APIs they
-register against.
+"""Loading the plugins a build is configured with into one registry.
 
-Composition, not kernel: this module imports plugin packages by path and both
-registries, which the kernel may not. A plugin's `register(api)` runs once per
-contribution lifecycle — memory kinds are filled before the database opens,
-task-type graphs when the run's tool servers exist — so there are two `PluginAPI`
-implementations, each honouring only the calls its lifecycle serves and treating
-the rest as no-ops. That is what lets one `register(api)` declare a plugin's
-kinds and its task type together without the host caring which came first.
+Composition, not kernel: this module imports plugin packages by path. Each
+plugin's `register(api)` runs once per load against its own
+`PluginRegistration`; every call is recorded, then the boot refusals run over
+the whole registry and a broken declaration refuses the boot. The memory
+registry and the task-type graphs each read what a load recorded — there is
+no per-lifecycle API whose other calls are no-ops. Boot still loads more than
+once (memory kinds before the db opens, then `check_graphs` and
+`register_dags`) until ticket 16 deletes the DAG path.
+
+The task-type graphs still need `caps`, which exist only once the run's tool
+servers do, so `attach_caps` hands them to each plugin's registration after
+`register` has returned (ticket 16 deletes `caps` with the DAG path).
 """
 
 from __future__ import annotations
 
 import importlib
+from dataclasses import dataclass
 from typing import Any
 
-__all__ = [
-    "MemoryKindAPI",
-    "TaskTypeAPI",
-    "configured_plugins",
-]
+from friday.kernel.boot_refusals import refusals
+from friday.kernel.config import ConfigError
+from friday.kernel.registry import DuplicateRegistration, PluginRegistration, Registry
+
+__all__ = ["BootRefused", "Loaded", "configured_plugins", "load_plugins"]
+
+
+class BootRefused(ConfigError):
+    """The plugins' declarations do not add up; every reason is in the message."""
 
 
 def configured_plugins(config: Any) -> list[tuple[Any, Any]]:
@@ -43,49 +52,38 @@ def configured_plugins(config: Any) -> list[tuple[Any, Any]]:
     return out
 
 
-class TaskTypeAPI:
-    """The `PluginAPI` a plugin registers task types against. Its `memory_kind`
-    and `reader` are no-ops — memory kinds are filled in their own lifecycle;
-    here a `task_type` call builds the type's `DAG` (from `caps`) and registers
-    it."""
+@dataclass(frozen=True)
+class Loaded:
+    """What one load recorded: the registry, and each plugin's registration."""
 
-    def __init__(self, caps: Any, config: Any) -> None:
-        self.caps = caps
-        self.config = config
+    registry: Registry
+    registrations: tuple[PluginRegistration, ...]
 
-    def task_type(self, spec: Any) -> None:
-        from friday.kernel.dag import registry
-
-        assert spec.graph is not None, f"task type {spec.name!r} registered no graph"
-        registry.register_task_type(spec, dag=spec.graph(None))
-
-    def memory_kind(self, spec: Any) -> None:
-        return None
-
-    def reader(self, name: str, needs: frozenset[str]) -> None:
-        return None
+    def attach_caps(self, caps: Any) -> None:
+        for api in self.registrations:
+            api.caps = caps
 
 
-class MemoryKindAPI:
-    """The `PluginAPI` a plugin registers memory kinds and reader routing
-    against. Its `task_type` is a no-op (and `caps` is `None`), so a plugin's
-    graph/deps builders never run in this lifecycle — the kinds are static and
-    need no boot capabilities."""
+def _names(servers: Any) -> list[str] | None:
+    return None if servers is None else [s.name for s in servers]
 
-    caps = None
 
-    def __init__(self, config: Any) -> None:
-        self.config = config
-
-    def memory_kind(self, spec: Any) -> None:
-        from friday.kernel.memory import registry as memory_registry
-
-        memory_registry.register_memory_kind(spec)
-
-    def reader(self, name: str, needs: frozenset[str]) -> None:
-        from friday.kernel.memory import registry as memory_registry
-
-        memory_registry.register_reader(name, needs)
-
-    def task_type(self, spec: Any) -> None:
-        return None
+def load_plugins(config: Any) -> Loaded:
+    """Run every configured plugin's `register` once, then refuse the boot on
+    anything the registry cannot run with. `config.tiers` and
+    `config.mcp_servers` are what an agent's tier and a toolset's servers are
+    checked against; a config without them (the memory-kinds default) skips
+    those two checks."""
+    registry = Registry()
+    try:
+        apis = tuple(registry.apply(plugin, cfg) for plugin, cfg in configured_plugins(config))
+    except DuplicateRegistration as exc:
+        raise BootRefused(str(exc)) from exc
+    errors = refusals(
+        registry,
+        tiers=getattr(config, "tiers", None),
+        servers=_names(getattr(config, "mcp_servers", None)),
+    )
+    if errors:
+        raise BootRefused("the plugins cannot boot:\n  " + "\n  ".join(errors))
+    return Loaded(registry, apis)

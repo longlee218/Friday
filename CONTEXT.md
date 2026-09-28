@@ -286,6 +286,13 @@ A plugin, as the catalog sees it: `backend`, `ops`. Every task type is named
 task type. The board colours a task's tag by its domain, read from
 `/api/actions` (`[{name, domain}]`). (Build-the-spine ticket 02.)
 
+A domain may carry one **enricher**: the function (`Plugin.enricher`) that
+turns a task's intake seed into the domain's own value (backend's
+`Placement`), from the DB only, no network. Its return annotation is the
+**domain type** — a toolset that reads `run.domain` declares the same type,
+and the boot refuses a contract granting one of another type. No enricher
+(`ops`) → domain `None`. (Build-the-spine ticket 05.)
+
 ## Triage
 
 Deciding what a message is — **that, and nothing else**. Produces a decision
@@ -328,7 +335,34 @@ rows. Lives in `friday/kernel/pool/`, apart from the engine.
 
 ## Action
 
-What a graph returns about a task — `Ask`, `Reply` or `HandOver` — never a
+One kind of work a domain offers, registered by its plugin
+(`api.action(Action(...))`, `friday/sdk/action.py`), named
+`<domain>.<name>`: its **recognition** (what triage reads — `means`,
+`pick_when`, `not_when`, examples) and its **action contract**. Replaces the
+task type (`TaskTypeSpec`) at build-the-spine ticket 16.
+
+**Action contract** — the ceiling the plugin author writes in code for one
+action: allowed step types, agents and toolsets, constraints, approval
+policy, acceptance template, limits (`max_replans`, `max_steps`). The Planner
+picks a subset per run and never adds; only the contract travels with a plan.
+
+**Agent spec** — a named agent a plugin registers (`AgentSpec`): description
+(for the Planner), instructions, result type, tier, toolsets (its ceiling),
+budget `(max_turns, tokens)`, temperature. A declaration, not a Pydantic AI
+agent; the core runs it through the Harness. The spine's form of the
+**agent declaration**.
+
+**Toolset spec** — a named set of tools a plugin registers (`ToolsetSpec`):
+description, a factory that builds the tools per run, the MCP reads it may
+make (`{server: TOOLS}`) and the domain type it reads.
+
+**Run context** — what the core hands a toolset factory once per run
+(`RunContext`): task id, the domain value, the evidence read so far, and each
+declared MCP server narrowed to the toolset's reads. Not Pydantic AI's
+`RunContext`, which only `harness.py` names.
+
+**Outcome** (still `Action` in `friday/sdk/actions.py` until ticket 06):
+what a graph returns about a task — `Ask`, `Reply` or `HandOver` — never a
 side effect. Every task first **fills in** what the message carries and
 **checks** it against the type's rules; then its graph decides. `Ask` goes to
 the reporter as a question; `Reply` answers the reporter in the operator's

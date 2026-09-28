@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["AgentDeclaration"]
+__all__ = ["AgentDeclaration", "AgentSpec", "Budget"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,3 +31,34 @@ class AgentDeclaration:
     max_turns: int
     tokens: int
     request_timeout_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class Budget:
+    """One run of an agent: `max_turns` counts every model request, tool turns
+    included; `tokens` is input + output summed over the run. No time."""
+
+    max_turns: int
+    tokens: int
+
+
+@dataclass(frozen=True, slots=True)
+class AgentSpec:
+    """A named agent a plugin registers (`api.agent`) — a declaration, not a
+    Pydantic AI agent. The core joins it with its tier from `config.yaml` and
+    the run's toolsets (contract ∩ `toolsets`) and runs it through the Harness.
+
+    `description` is for the Planner (1–3 sentences), separate from the
+    agent's own `instructions`. `result` is the agent's terminal output type;
+    the terminal tools (`ask_reporter`, `hand_over`, `replan`) are the core's
+    and never listed here. `toolsets` is the agent's ceiling.
+    """
+
+    name: str
+    description: str
+    instructions: str
+    result: type
+    tier: str
+    toolsets: tuple[str, ...]
+    budget: Budget
+    temperature: float
