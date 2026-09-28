@@ -1,5 +1,5 @@
 Type: grilling
-Status: open
+Status: claimed
 Blocked by:
 
 # Hand-off between actions by re-triage

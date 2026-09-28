@@ -124,3 +124,7 @@ Build consequences: `_run_graph`, `adapter.answer/pending`, `Pool._run_entry
 deleted; Alembic adds `tasks.pass_no`, `plans`, the step-results table; the
 `WAITING_FOR_DETAILS → PENDING` and `NEEDS_HUMAN → PENDING` moves bump
 `pass_no`.
+
+## Amended 2026-09-28 by ticket 16
+
+Point 7 goes: there is no `total_time`, so pass run-times are not summed; `out_of_time` leaves the hand-over reasons. See [The budget in three groups](16-the-budget-in-three-groups.md).

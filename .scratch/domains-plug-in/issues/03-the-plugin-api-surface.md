@@ -171,3 +171,7 @@ Build consequences (in addition to the above): `DevopsConfig` /
 `pydantic-ai-harness` becomes a dependency (imported in one module, per the
 reuse-before-rewrite rule). New terms for `CONTEXT.md` § Vocabulary at build
 time: *workspace*, *read-command allowlist*.
+
+## Amended 2026-09-28 by ticket 16
+
+`AgentSpec.budget` is `(max_turns, tokens)`, not (turns, tokens, seconds): `max_turns` includes tool turns, `tokens` is input + output summed over the run. See [The budget in three groups](16-the-budget-in-three-groups.md).

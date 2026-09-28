@@ -83,3 +83,7 @@ Sub-decisions:
   `Ask | Reply | HandOver` union becomes `Outcome`.
 - **Deleted from `TaskTypeSpec`**: `params`, `extractor`, `graph`, `needs`. Where
   the per-run `deps` factory lives is left to the plugin-API ticket.
+
+## Amended 2026-09-28 by ticket 16
+
+The agent's per-run budget is `(max_turns, tokens)` — no time; the contract's limits drop total time and keep max replans (and `max_steps`, ticket 11). See [The budget in three groups](16-the-budget-in-three-groups.md).

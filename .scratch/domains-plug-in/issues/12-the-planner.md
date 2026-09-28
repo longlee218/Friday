@@ -97,3 +97,7 @@ Carried: to **13** — how the runner hands the Planner a replan (input as in
 10). To **14** — the Planner's `message_history` must persist between the
 Planner and GatePlan steps for a refusal rewrite to resume. Map fog "Core
 agents' tiers" — the Planner's part is decided (strong).
+
+## Amended 2026-09-28 by ticket 16
+
+The Planner's budget is core constants `(max_turns, tokens)`; no time, nothing counts toward a `total_time`. See [The budget in three groups](16-the-budget-in-three-groups.md).
