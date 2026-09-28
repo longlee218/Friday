@@ -63,7 +63,7 @@ Done when every thread is decided and a build board exists. Decided, not built.
  ║      domain: backend enricher → env, service, cluster/namespace/app,    ║
  ║              repo, stack                                                ║
  ║      → placement_identity (env, service, clone, repo)                   ║
- ║ 5. ACKNOWLEDGE ✓ (a step or a spine concern?)                      ◆15 ║
+ ║ 5. ACKNOWLEDGE ✓ (spine, the action's hook, once per task)        ◆15 ║
  ║      → outbox, no approval: "looking at the logs of <service>…"         ║
  ║ 6. PLANNER (model, inside the action's contract)               ◆12 ◆01 ║
  ║      in:  intake context + trace_problem's contract (allowed step      ║
@@ -221,6 +221,13 @@ without approval; an answer that states a cause always waits for the operator.
   result, so abort is just a plan ending in `draft`; `max_replans` counts every
   replan (reply-driven too) → `replans_exhausted`; time check before each step →
   `out_of_time`.
+
+- [`trace_problem`'s graph becomes the first plan](issues/15-trace-problem-becomes-the-first-plan.md):
+  plan v1 = `p1 agent backend.diagnose [logs, code]` → `p2 draft`; the four
+  step types hold. Acknowledge is a **spine** step (after Intake, before the
+  Planner, once per task, no approval) driven by an optional
+  `Action.acknowledge(IntakeContext)` hook. The report file and
+  `reports_dir` go; board + draft brief replace them. No fallback, no exemplar.
 
 ## Not yet specified
 
