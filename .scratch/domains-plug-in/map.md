@@ -247,13 +247,17 @@ without approval; an answer that states a cause always waits for the operator.
   hand (boundary cases → 06). Web reads `[{name, domain}]`, colour per domain.
 
 - [The plugin API surface](issues/03-the-plugin-api-surface.md):
-  `Plugin(id, register, enricher, config)`; `register` runs once, declares
+  `Plugin(id, register, enricher)` (**amended**: `config` and `requires`
+  deleted; an action grants only its own plugin's toolsets + `core.*`;
+  new core toolsets `core.shell` — read-only allowlist over declared SSH
+  hosts, off-list refused and logged — and `core.workspace`
+  `/tmp/friday/<task_id>/`; **amends D6**); `register` runs once, declares
   only: `api.action`, `api.agent(AgentSpec)` (a declaration the core runs via
   the Harness; core adds `ask_reporter`/`hand_over`/`replan`),
   `api.toolset(ToolsetSpec(factory, mcp={server: TOOLS}))`, `memory_kind`,
   `reader` unchanged. **`deps` and `caps` deleted** — a factory builds tools
   per run from a core `RunContext` (domain, evidence, narrowed `Reads`,
-  config). Seven offline boot refusals.
+  no config). Nine offline boot refusals.
 
 - [The durable spine workflow and pause/resume](issues/14-the-durable-spine-workflow-and-pause-resume.md):
   one short DBOS workflow per **pass** (`task-<id>/pass-<n>`, `tasks.pass_no`),
@@ -281,6 +285,9 @@ without approval; an answer that states a cause always waits for the operator.
   approval once the judge is calibrated. Needs real runs first.
 - **Invalidation sophistication** — guard steps the Planner inserts vs a world
   cursor the runner checks; how much is enough before data exists.
+- **A write-capable shell in the workspace** — `core.workspace` gives file
+  tools only; running scripts (`jq`, `python`) there needs an OS-level
+  sandbox (Docker, or harness `ModalSandboxSession`). Revisit when a run needs it.
 - **The `ops` domain beyond `request_permission`.**
 - **Hand-off between actions** — a question that turns out to be a failure, or
   the reverse: re-plan inside the run, re-triage, or hand over?

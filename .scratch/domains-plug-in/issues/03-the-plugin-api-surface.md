@@ -113,3 +113,61 @@ two-lifecycle `plugin_host.py` and `plugins/devops/__init__.py`'s
 `_enrich_deps` go; `sources/*` keep their `TOOLS`; `ApiIssueDeps` dissolves
 into toolset factories. New sdk terms for `CONTEXT.md` § Vocabulary at build
 time: *agent spec* (the agent declaration), *toolset spec*, *run context*.
+
+## Amended 2026-09-28 (second grilling session)
+
+A second session grilled the same stub while the answer above was being
+committed. Where the two differ, **this section wins**.
+
+1. **No cross-plugin grants.** An action's contract may grant only its own
+   plugin's agents/toolsets plus `core.*`. A tool two domains need moves to
+   core. `Plugin.requires` is deleted.
+2. **`Plugin.config` is deleted; `RunContext` loses `config`.** After ticket
+   07 and 15 the backend block held nothing a plugin needs:
+   `timeout_seconds` / `reports_dir` were already gone; `loki_server` /
+   `loki_tool` become constants in the toolset's `mcp` declaration
+   (`mcp_servers` stays global in core config); `ssh_host` goes (alias `dev`
+   in `~/.ssh/config`, a constant); `container_roots` / `not_ours` are knobs,
+   not install facts, and become constants in `plugins/backend`.
+   `Plugin(id, register, enricher=None)`.
+3. **New core toolset `core.shell`** — run a command locally or over SSH on
+   a host the operator declares in core `config.yaml` (install fact, global
+   like `mcp_servers`; a host not listed is refused). **Read-only**:
+   - one **read-command allowlist, a core constant**, the same for every
+     plugin (`kubectl get/logs/describe/top`, `cat`, `grep`, `tail`, `head`,
+     `ls`, `ps`, `df`, `journalctl`, …); a plugin only chooses whether its
+     contract grants `core.shell`;
+   - parsed with `shlex`, never regex: `|` allowed when **every** segment is
+     on the list; `;`, `&&`, `||`, `$( )`, backticks, `>`, `<` refused;
+     known write flags refused (`sed -i`, `find -delete/-exec`, …);
+   - a command off the list is **refused, not queued for approval** — no
+     approval flow, no pause. Every refusal is written to `audit_log`
+     (task, toolset, host, command) and listed on the board, so the operator
+     widens the list by commit when it was harmless;
+   - output enters `Evidence` like `read_log` (refs resolve against it) and
+     passes the existing secret redaction; `save_to` writes it into the
+     workspace instead of the context.
+   `backend.logs`' `read_log` stays (it knows `Placement`, numbers lines);
+   `core.shell` is for everything else.
+4. **New core toolset `core.workspace`** — `/tmp/friday/<task_id>/`, a core
+   constant. Friday's own scratch space: read, write, delete freely inside it,
+   through pydantic-ai-harness `FileSystem(root_dir=…)`, which confines file
+   tools to the root. Losing it on reboot is fine; the DB, backups, skills
+   and clones stay where they are. Not a shell with full power: the harness
+   docs say a command allowlist and `cwd` are "a guardrail … rather than a
+   robust security boundary", so a write-capable shell waits for a container
+   (fog).
+5. **Boot also refuses**: 8. a contract granting another plugin's
+   agent/toolset; 9. a `core.shell` host not declared in `config.yaml`.
+
+**Amends D6** (`docs/DESIGN.md`): "every tool a graph is given is a read"
+still holds for the world outside Friday — `core.shell` is read-only by an
+allowlist enforced in code, not by prompt. The one place Friday writes is its
+own workspace. Correct D6 in the build commit that adds `core.shell`.
+
+Build consequences (in addition to the above): `DevopsConfig` /
+`load_devops_config` and the `devops:` block in `config.yaml` go;
+`SshKubectlSource.host` stays `"dev"`; core config gains a shell-host list;
+`pydantic-ai-harness` becomes a dependency (imported in one module, per the
+reuse-before-rewrite rule). New terms for `CONTEXT.md` § Vocabulary at build
+time: *workspace*, *read-command allowlist*.
