@@ -169,6 +169,12 @@
       "skillPath": "skills/in-progress/setup-ts-deep-modules/SKILL.md",
       "computedHash": "61508216ede38d8cfa712879197a76f75f4896615dbf7abc3f62571f8f5923cc"
     },
+    "skill-seekers": {
+      "source": "sickn33/agentic-awesome-skills",
+      "sourceType": "github",
+      "skillPath": "skills/skill-seekers/SKILL.md",
+      "computedHash": "b1c0619c000a55d4ac86b6fca0812def9c9e51e99e70ad0aa3126a0ace1b99ab"
+    },
     "tdd": {
       "source": "mattpocock/skills",
       "sourceType": "github",

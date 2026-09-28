@@ -118,6 +118,9 @@ PROVIDER_BASE_URLS = {
     "openai": "https://api.openai.com/v1",
     "minimax": "https://api.minimax.io/v1",
     "deepseek": "https://api.deepseek.com",
+    # One key, every model. OpenRouter is OpenAI-compatible, so `provider:
+    # openrouter` + a `deepseek/…` or `google/…` model id is all an agent needs.
+    "openrouter": "https://openrouter.ai/api/v1",
 }
 
 

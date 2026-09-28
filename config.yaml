@@ -1,403 +1,140 @@
-# Structured configuration. Secrets live in .env, never here.
+# Friday configuration. Secrets live in .env and are read here as ${VAR};
+# everything else is a reviewable value. See docs/DESIGN.md for the reasoning.
 database_path: ./data/friday.db
 
-# ── Agents ─────────────────────────────────────────────────────────────────
-# One block per step that calls a model, each self-contained: where the model
-# lives, which key reaches it, and how it should behave. They are different jobs
-# — the cheap high-volume one should not be paying for the careful one.
-#
-# ${VAR} reads from .env. An unset variable is an error, not an empty string.
-#
-# `daily_token_budget` is what an agent may spend in a day, in tokens in and
-# out, counted from the calls it actually made — so a restart does not forgive
-# it. Unset means no ceiling, which is the shipped default: the heartbeat
-# reports the day's spend either way, and a number guessed before anyone knows
-# what a normal day costs would make the first busy day look like a fault.
-# Reaching it is a refusal that becomes work for a person, never a shorter
-# answer.
-#
-# `max_tokens` goes under `settings:` and needs nothing here — that block is
-# passed to the model settings whole. It bounds one *answer*, and the two fail
-# differently: hitting it truncates a reply, hitting the daily budget refuses
-# the call.
-#
-# `max_attempts` (3) and `retry_backoff_seconds` (1, doubling) are what the
-# model layer does with a hiccup. A 429 during a burst or a 502 from the
-# provider is tried again; a 400 is not, because the provider is saying the
-# request itself is wrong and asking twice costs twice for the same answer.
-# Running out of attempts is work for a person, and the reason says so.
-#
-# Small numbers on purpose: every attempt lives inside `timeout_seconds`,
-# which bounds the whole run rather than each try — and one HTTP request is
-# given `timeout_seconds / max_attempts`, so a hung provider is cut off with
-# budget left to try again rather than spending all of it waiting once. The outbox retries over minutes
-# because a send can wait; a task cannot, since the pool works one at a time.
-#
-# `timeout_seconds` bounds one run of that agent and defaults to 60. It is a
-# number chosen here rather than inherited: the OpenAI client's own default is
-# ten minutes and it retries past that, and the pool works one task at a time,
-# so an unbounded run does not stall one task — it stalls every task, while the
-# heartbeat goes on saying the process is alive. Raise it for an agent that
-# reads logs; leave it for one that classifies a sentence.
-#
-# Everything goes through the Chat Completions API, which is why swapping
-# provider is three lines rather than a rewrite. Known endpoints:
-#   OpenAI    https://api.openai.com/v1
-#   DeepSeek  https://api.deepseek.com
-#   MiniMax   https://api.minimaxi.chat/v1
+# ── Agents ───────────────────────────────────────────────────────────────────
+# One block per step that calls a model. ${VAR} reads .env (unset = error).
+# Everything speaks Chat Completions; `provider:` is shorthand for base_url —
+# openrouter · openai · deepseek · minimax (or set base_url directly).
+# All agents run on DeepSeek V4.1 Flash via OpenRouter: cheap ($0.099/$0.60 per
+# 1M, $0.06 cache-read), 1M context, native tool + JSON-schema structured
+# output. The responder is the one to watch — if its Vietnamese reads stiff,
+# switch just that block to `model: google/gemini-3.7-flash`.
+# Knobs (all optional): settings.max_tokens bounds one answer; timeout_seconds
+# bounds one run (default 60); max_attempts (3) / retry_backoff_seconds (1,
+# doubling) handle a hiccup; daily_token_budget caps a day's spend (unset = no
+# cap, the default — the heartbeat reports spend either way).
 agents:
-  # Runs on every single mention. Verified against MiniMax: M2.7 cannot extract
-  # parameters (environment, correlationId) regardless of prompting; M3 can. The
-  # high-volume path needs the better model here, which inverts the usual
-  # assumption — do not 'optimise' this down without re-running the probe.
+  # Runs on every mention. Must extract params and classify — the firehose,
+  # so the cheapest tool-capable model with cache pricing.
   triage:
-    api_key: ${TRIAGE_API_KEY}
-    base_url: "https://api.minimax.io/v1"
-    model: "MiniMax-M3"
+    api_key: ${OPENROUTER_API_KEY}
+    provider: openrouter
+    model: "deepseek/deepseek-v4.1-flash"
     settings:
       temperature: 0
     max_turns: 1
-    # Escalate to a human below this rather than guessing. A placeholder until
-    # real decisions accumulate — do not trust this number yet.
-    confidence_threshold: 0.7
-    # How old a turn may be before it is marked `outdated` instead of
-    # answered — written as a number and a unit: 10s, 10m, 10h.
-    #
-    # Leave it out for no limit, which is what happened before this existed.
-    # Set it and a message written longer ago than this is recorded, kept and
-    # shown on the board, and never sent to a model: nothing is dropped, the
-    # reply is. The case it exists for is a restart against a cold cursor —
-    # the sweep asks each channel for everything after it, and with no cursor
-    # that is the whole history, so without this the agent works through a
-    # week of messages whose authors moved on.
-    #
-    # A turn is judged by its newest message, so somebody returning to their
-    # own thread pulls the older part back in with them. A reply to something
-    # this system asked is never outdated, however late — the task asked, and
-    # is still waiting.
-    max_message_age: '24h'
+    confidence_threshold: 0.7   # escalate to a human below this
+    max_message_age: '24h'      # older turns are marked outdated, not answered
+    examples: 8                 # how many hand-marked classifications to show
 
-    # How many past classifications the operator marked right to show as
-    # examples. Read once at startup: examples belong in the stable front of
-    # the prompt, so a mark made now takes effect on the next restart.
-    examples: 8
-
-  # Runs only on tasks that reached a reply. Low volume, and the output goes out
-  # under your name — worth a better model and some warmth.
+  # Runs only on tasks that reach a reply. Low volume, goes out under your name.
+  # If the Vietnamese reads stiff, this is the block to move to a Gemini Flash.
   responder:
-    # 150s, not the 60 every other agent takes. `timeout_seconds` bounds the
-    # whole run and each HTTP request gets `timeout_seconds / max_attempts` —
-    # so 60 with three attempts gave each try 20 seconds, and a real draft
-    # measured 20012ms and 20183ms before being cut off. Three attempts, all
-    # cut at the same wall, the run failed, the pool re-planned, and the
-    # whole extract-and-respond cycle ran again: what looked like a loop was
-    # a budget.
-    #
-    # It is the slow one on purpose. It runs on a prompt carrying the room's
-    # context and a fetched skill body, it writes prose rather than a label,
-    # and it runs on tasks that reached a reply rather than on every mention
-    # — so a longer wait costs little and a truncated one costs a reply.
-    timeout_seconds: 150
-    api_key: ${RESPONDER_API_KEY}
-    base_url: "https://api.minimax.io/v1"
-    model: "MiniMax-M3"
+    api_key: ${OPENROUTER_API_KEY}
+    provider: openrouter
+    model: "deepseek/deepseek-v4.1-flash"
     settings:
       temperature: 0.7
     max_turns: 1
-    # How many of your past replies to show it as tone examples.
-    tone_examples: 8
+    timeout_seconds: 150        # writes prose, not a label — the slow one
+    tone_examples: 8            # how many of your past replies to show as tone
 
-  # Summarises a channel once it has said anything since its last summary,
-  # so later prompts for that room carry a few structured facts instead of a
-  # growing transcript. Without this block the summary never happens and the
-  # derived section of every context file stays whatever was last written
-  # there — startup says so.
-  #
-  # It runs on the heartbeat and asks each room whether it has said anything
-  # since the summary it already has, so a quiet channel costs nothing. There
-  # is no other gate: a room that has said one thing gets a summary call for
-  # one thing, because the raw alternative — an unbounded transcript in the
-  # extractor's prompt — has already cost more than that once.
+  # Lifts a task's parameters out of the reporter's messages. Without it, every
+  # type opens tasks with no parameters. One block covers all types.
+  extractor:
+    api_key: ${OPENROUTER_API_KEY}
+    provider: openrouter
+    model: "deepseek/deepseek-v4.1-flash"
+    settings:
+      temperature: 0
+    max_turns: 1
+
+  # The api_issue graph's one model node. Comment it out and the graph still
+  # runs — Diagnose skips and says so. Reads logs + code, so 1M context helps.
+  devops.diagnose:
+    api_key: ${OPENROUTER_API_KEY}
+    provider: openrouter
+    model: "deepseek/deepseek-v4.1-flash"
+    settings:
+      temperature: 0
+    max_turns: 1
+    timeout_seconds: 150
+
+  # Optional: summarises a room once it has said anything new, so later prompts
+  # carry a few facts instead of a growing transcript. Without it, no summaries.
   # summary:
-  #   api_key: ${TRIAGE_API_KEY}
-  #   base_url: "https://api.minimax.io/v1"
-  #   model: "MiniMax-M3"
-  #   settings:
-  #     temperature: 0
+  #   api_key: ${OPENROUTER_API_KEY}
+  #   provider: openrouter
+  #   model: "deepseek/deepseek-v4.1-flash"
+  #   settings: { temperature: 0 }
   #   max_turns: 1
 
-  # ── The extractor ─────────────────────────────────────────────────────────
-  # Triage says what a message is and stops. Everything a task knows is lifted
-  # out of the message here, by the extractor for its type, reading every
-  # message the reporter has sent about it — the answer to "which environment?"
-  # arrives as an ordinary follow-up.
-  #
-  # **Without this block every type opens tasks with no parameters at all**,
-  # and the reporter is asked for what they already said. Startup warns about
-  # it; nothing else fills those fields.
-  #
-  # One block for every type. There were three — one per task type — on the
-  # argument that reading a correlationId is a different job from reading a
-  # repo name and might want a different model. All three held identical
-  # values for as long as they existed, so it was one configuration written
-  # three times. Each type still has its own prompt and its own schema; only
-  # where the model lives is shared. Split the key back out on the day a type
-  # actually needs its own.
-  #
-  # The model is allowed to hallucinate — `friday/domain/validation.py` catches what
-  # it gets wrong. Cheap models on purpose: the job is copying values out of
-  # text, not reasoning.
-  extractor:
-    api_key: ${TRIAGE_API_KEY}
-    base_url: "https://api.minimax.io/v1"
-    model: "MiniMax-M3"
-    settings:
-      temperature: 0
-    max_turns: 1
-
-  # ── The api_issue graph's one model node ──────────────────────────────────
-  # There were four blocks here once — `dag_read_logs`, `dag_find_code`,
-  # `dag_analyze`, `dag_compose` — one per node of a five-node `api_issue`
-  # investigation the operator removed on 2026-09-07 as "a workflow nobody
-  # had described, built from a guess at what investigating an API fault
-  # looks like, and every node of it skipped on every run because no tool
-  # server was ever configured".
-  #
-  # `diagnose` is not one of those coming back. The graph it belongs to
-  # (board `read-it-the-way-the-operator-does`, ticket 00) is a transcription
-  # of the operator's own routine, and it is the *only* node of that graph
-  # that calls a model: reading a domain, finding a pod, cutting a log down
-  # and opening a file are all code. One model node, one prompt, one shape it
-  # has to answer — which is also what makes it measurable (ticket 14).
-  #
-  # **Comment this block out and the graph still runs.** Every node that
-  # cannot do its job says so in its envelope, the report is still written,
-  # and `Diagnose` skips with "no diagnose agent is configured". That is the
-  # difference from the graph that was deleted: the skipping is not silent.
-  #
-  # Slow on purpose, like the responder and for the same reason: it reads a
-  # dossier and a file rather than writing a label, and a truncated run costs
-  # the whole investigation. Its node's clock is derived from this number
-  # plus five seconds, so raising it here moves the node's with it.
-  devops.diagnose:
-    timeout_seconds: 150
-    api_key: ${TRIAGE_API_KEY}
-    base_url: "https://api.minimax.io/v1"
-    model: "MiniMax-M3"
-    settings:
-      temperature: 0
-    max_turns: 1
-
-# ── The api_issue graph ────────────────────────────────────────────────────
-# What the investigation reaches outside this process with. Everything here
-# is optional: a node with no source skips and says which one it wanted.
+# ── The api_issue investigation ────────────────────────────────────────────
+# What it reaches outside this process with; each is optional (a node with no
+# source skips and says which one it wanted).
 devops:
-  # The SSH alias `kubectl` runs behind. Measured 2026-09-18: there is no
-  # kubeconfig for dev on this machine — `kubectl` runs on the dev host, so
-  # this is the only way in. Empty means dev logs are not read at all.
-  ssh_host: "dev"
-  # Which MCP server under `mcp_servers:` carries the Loki tools, and which
-  # of its tools answers a range query. Nothing is read from production until
-  # that server block exists.
-  #
-  # The tool name is the field most likely to be wrong here: the session that
-  # measured the devops MCP (ticket 16) read its catalogue without running a
-  # query through it. A wrong name is a node that says so, correctable here
-  # without a release.
-  loki_server: "devops-generic"
-  loki_tool: "loki_query_range"
-  # Where each run's report is written. Nothing in it is sent to anybody.
-  reports_dir: "./data/reports"
-  # The longest one task may hold a pool slot. Checked at boot against the
-  # sum of the graph's node clocks, which is 400s today — a graph whose nodes
-  # can outlast this refuses to start rather than discovering it on a task
-  # nobody is watching.
-  #
-  # Ticket 13 bounded the pool by working its batch side by side and rested
-  # on `api_issue` being "bounded at five minutes". That was a one-node
-  # graph. It is seven nodes now, and three of them had no clock at all —
-  # which is not "bounded by a big number", it is unbounded.
-  #
-  # `workflows.concurrency` is 2, so two slow tasks are both slots: lowering
-  # this is how you buy back triage latency, and
-  # `agents.diagnose.timeout_seconds` (150) is the biggest single term in it.
-  timeout_seconds: 420
+  ssh_host: "dev"                 # where kubectl runs for dev logs; empty = off
+  loki_server: "devops-generic"   # which mcp_servers block carries Loki
+  loki_tool: "loki_query_range"   # its range-query tool
+  reports_dir: "./data/reports"   # where a run's report is written
+  timeout_seconds: 420            # longest one task may hold a pool slot
 
-# ── Workflows ──────────────────────────────────────────────────────────────
-# How often to say the process is alive and what it is holding.
-# Who is asked to approve a reply, by direct message from the bot.
-operator_id: 482447107983147039
+# ── Operator & board ─────────────────────────────────────────────────────────
+operator_id: 482447107983147039   # who approves replies, by DM from the bot
 
-# The debug view. It shows every captured message and every model prompt, and
-# it writes the operator's own memory rows, so it stays on loopback — reach it
-# over an SSH tunnel or a loopback port mapping, never bound wide. A write must
-# carry the session's CSRF token from a loopback page; a read is open here.
-board_host: "127.0.0.1"
+board_host: "127.0.0.1"           # loopback only — the board is unauthenticated
 board_port: 8086
-# Browser origins allowed to write cross-origin — the Vite dev frontend. The
-# built bundle is served same-origin and needs no entry here.
-board_origins: []
-
-# Where the `project` form's repo picker may look (ticket 19). The board
-# answers on loopback on this machine, so listing directories is possible
-# here where it would not be on a server; the route resolves under this root
-# and refuses anything landing outside it, symlinks included.
-#
-# Empty turns the picker off and the field goes back to being typed — which
-# is the field whose typo reads exactly like a correct answer.
-repo_root: "~/Documents/Apero"
+board_origins: []                 # extra CORS write origins (the Vite dev server)
+repo_root: "~/Documents/Apero"    # where the project repo-picker may look; empty = off
 
 heartbeat_seconds: 60
+down_after_seconds: 300           # how long Discord may be down before you're told
+summary_at_hour: 9                # hour of the daily "still alive" summary; null = none
+keep_model_calls_days: 14         # how long to keep prompts/outputs
 
-# How long Discord may be down before you are told, and when the daily
-# "still alive" summary goes out.
-down_after_seconds: 300
-summary_at_hour: 9
+# Daily two-file backup (§12.1): both SQLite files, kept this many days.
+backup_dir: "data/backups"
+keep_backups: 7                   # 0 turns the backup off
 
-# How long to keep the prompts and outputs behind each decision.
-keep_model_calls_days: 14
-
-# Tool servers outside this process. Adding one is a block here, not a module.
-#
-# `allow` names the tools an agent may see. Leaving it out means every tool the
-# server offers — including its write tools, if it has any. A trace is a
-# read-only act, so name what it may use.
+# ── Tool servers (MCP) ─────────────────────────────────────────────────────
+# Which tools may be called is declared in code, not here (no `allow:` key).
+# `auth: {}` means "sign in once": `uv run authorize.py <name>`.
 mcp_servers:
-  # **Two lines each, and that is the point.** Both servers are their own
-  # authorization server and advertise everything at
-  # `<origin>/.well-known/oauth-authorization-server` (measured 2026-09-22):
-  # `authorization_code` + `refresh_token`, PKCE `S256`, a registration
-  # endpoint, and `token_endpoint_auth_methods_supported: ["none", ...]` —
-  # a public client, so there is no secret and nobody has to create a client
-  # by hand. `uv run authorize.py <name>` discovers all of it, registers this
-  # machine, and writes what the running process needs into
-  # `data/credentials/<name>.json`. Config that restated any of it would be
-  # config that goes stale silently.
-  #
-  # `auth: {}` means "this one needs signing in to". An `authorize_url`,
-  # `token_url` or `client_id` may be set to pin one, and then it wins.
-  #
-  # **There is no `allow:` here, and that is deliberate.** Which tools may be
-  # called is declared in code, on the class that calls them
-  # (`friday/sources/logs.py`'s `LokiSource.TOOLS`), and enforced twice: the
-  # server is built with a filter over those names, and every call goes
-  # through `friday.sources.Reads`, which refuses one no reader declared. A
-  # guard a file can widen is a guard the file's next editor widens by
-  # accident — on a server that also offers `release_rollback`,
-  # `release_apply`, `godaddy_dns_edit_record` and `vibecode_set_secret`.
-  # An `allow:` key here is refused at load rather than ignored.
   devops-generic:
-    # Measured 2026-09-21: streamable HTTP, not SSE. The server decides which
-    # it speaks, and an SSE client against an HTTP one fails at connect
-    # saying nothing about transports.
     url: "https://devops-generic-mcp.aperogroup.ai/mcp"
     transport: http
     auth: {}
-
   db-generic:
     url: "https://devops-dbx.aperogroup.ai/mcp"
     transport: http
     auth: {}
 
-# **Nothing declares a tool on `db-generic` yet, and that is deliberate.**
-# Its catalogue has never been read — the spec records it as "exists and was
-# not authenticated in the session; its tools and whether it is read-only
-# are ticket 05's first fact to fetch". A `DbSource` written against a
-# guessed catalogue is the mistake this board has already paid for twice:
-# `loki_query_range`'s arguments were guessed right and three other things
-# about it were wrong.
-#
-# When it is read, the shape is already decided (ticket 15): `DbSource` is
-# `lookup(check_name, key_value)` and **no SQL exists at any layer**. Friday
-# never composes a query; the operator writes a named check as a `dependency`
-# row and code passes a key into it. A database MCP that accepts raw SQL is
-# exactly why that rule is written down — the tool being able to do
-# something is not the same as this system being able to ask for it.
-
+# ── Delivery & workflows ───────────────────────────────────────────────────
 outbox:
-  # How many times to try one message before handing it to a person.
-  max_attempts: 3
-  # Doubling from here.
-  backoff_seconds: 30
+  max_attempts: 3                 # tries before a message becomes a person's job
+  backoff_seconds: 30             # doubling from here
 
 workflows:
-  # How many times to ask for the same missing detail before it becomes a
-  # person's problem.
-  max_asks: 3
-  # How many tasks the pool works at once. A pass used to await each graph
-  # in turn, so one slow graph held every other task behind it. Small on
-  # purpose: every graph shares one SQLite file and one provider's rate
-  # limit. At least 1 — zero is refused at startup.
-  concurrency: 2
-  # Let the responder phrase the ask in the operator's own voice, from the
-  # conversation and their real messages, instead of the fixed template.
-  # Still sent with no approval step (see auto_ask_for_details below): what
-  # is being asked never changes, only the wording does, and the responder
-  # falls back to the plain template if it fails to write one.
-  use_responder: true
-  # Send the missing-detail question straight away, with no approval step.
-  # This is the only reply allowed out unreviewed: which fields are missing
-  # is decided by fixed logic, not by the model, so a wrong classification
-  # costs the reporter one unnecessary question at worst. Everything else
-  # parks for a human.
-  #
-  # "Only the wording changes" is enforced, not assumed. It was assumed for
-  # months, while the responder's input carried other people's channel
-  # messages — so the one path with no human in it was also the one whose
-  # wording a model wrote from untrusted text under your name. Every draft now
-  # passes `friday/responder/check.py` first: no link, no code block, near the
-  # template's length, no promise, no work the question did not name, and —
-  # where the template named something that cannot be translated, like
-  # correlationId — it still names it. Failing sends the plain template and
-  # logs why. False refusals are expected and cost a plainer question, which
-  # is the right way round.
-  #
-  # **Off since 2026-09-15, and the floor above is why rather than why not.**
-  # Every message this ever sent — three of them, on 2026-09-14 — ended in
-  # "anh trace giúp", a promise to trace, under the operator's name, with the
-  # floor in place and passing them: it held a list of phrasings drawn from
-  # one incident, so it caught that sentence and not the promise. Ticket 12
-  # replaced the rule with one that reads the other way round, and that rule
-  # is still a heuristic — it catches an action the question did not name, not
-  # every way a sentence can commit somebody.
-  #
-  # So this is off until a person has read what it wants to send. Turning it
-  # back on is this one line; what it costs while off is that a task missing a
-  # detail waits in `needs_human` instead of asking, which is slower and is
-  # not a lost mention.
+  max_asks: 3                     # times to ask for the same detail before handover
+  concurrency: 2                  # tasks worked at once
+  use_responder: true             # phrase the ask in your voice, not the template
+  # Send the missing-detail question with no approval step. Off since 2026-09-15
+  # (see docs/DESIGN.md D10 / responder/check.py). Turning it on is this one line.
   auto_ask_for_details: false
 
+# ── Ingest ──────────────────────────────────────────────────────────────────
 ingest:
-  # Which kinds of mention create work: direct, role, dm
-  #   direct — someone @s the account
-  #   role   — a role the account holds is @d
-  #   dm     — a one-to-one DM (always watched; not subject to the list below)
-  # mention_types: ["direct", "role", "dm"]
+  # direct — someone @s the account · role — a role it holds is @d · dm — a 1:1 DM
   mention_types: ["direct", "role"]
+  turn_seconds: 12                # silence before a burst counts as one input
+  sweep_interval_seconds: 300     # recovery sweep cadence (also runs on reconnect)
+  context_messages: 20            # history pulled in on a conversation's first mention
 
-  # How long somebody has to be quiet — not sending, not typing — before what
-  # they said is read as finished. People send one thought in three messages,
-  # three seconds apart; this is what makes it one input instead of three, and
-  # one model call instead of three. Discord repeats the typing signal about
-  # every ten seconds while somebody is still writing, so twelve seconds of
-  # silence means they have actually stopped.
-  turn_seconds: 12
-
-  # How often the recovery sweep runs, in seconds. It also runs immediately
-  # whenever the connection comes back.
-  sweep_interval_seconds: 300
-
-  # How many prior messages to pull in the first time a conversation
-  # mentions you, so the first mention has history behind it.
-  context_messages: 20
-
-  # Channels to watch. Threads inside a watched channel are covered
-  # automatically — a thread reports its parent as the channel.
-  #
-  # One-to-one DMs do NOT need to be listed; they are always watched.
-  # Group chats DO need to be listed, and only count when they mention you.
+  # Channels to watch. Threads are covered automatically; 1:1 DMs are always
+  # watched and need no entry; group chats must be listed. Uncomment to enable.
   watched_channels:
-    # # ── Superminded (guild 893368757362229268) ──
+    # ── Superminded (guild 893368757362229268) ──
     # - "1360170800153366600"
     # - "1467721795770650786"
     # - "1522456774731366531"
@@ -406,53 +143,23 @@ ingest:
     # - "1387378210353709116"
     # - "1537392360630001674"
     # - "1539549225463975946"
-
     # ── TheNeo (guild 1465194563500249221) ──
     - "1544369941296189591"
-
-    # # ── Web AI IOS 3.0 — my team (guild 1326016197547790457) ──
+    # ── Web AI IOS 3.0 — my team (guild 1326016197547790457) ──
     # - "1326016276857880699"
     # - "1368808041268383914"
-
-    # # ── Group chat ──
+    # ── Group chat ──
     # - "1536991232931135488"
 
-# ── What the operator writes down ─────────────────────────────────────────
+# ── What the operator writes down ──────────────────────────────────────────
 context:
-  # What a room is known to be is rows in the database now, written on the
-  # board's memory form — not a directory of YAML files. A second install
-  # that still has one runs `uv run import_context_files.py <dir>` once.
-  # One Markdown file per skill, with `name` and `description` in its
-  # frontmatter. Adding a skill is adding a file — there is no list to edit.
-  # Agents are shown one line per skill and fetch the body only when they
-  # decide to use it, which is what keeps a hundred skills affordable.
-  skills_directory: skills
-  # A ceiling refuses; it does not trim. A summary cut mid-field says
-  # something false about the room; the previous one standing is merely
-  # older. Measured on the stored, structured summary — the four fields the
-  # summariser is asked for, not the transcript it read.
-  summary_max_chars: 6000
-  # Node 0's own budget for a task's transcript, in *estimated* tokens —
-  # characters divided by four, because the configured provider has no
-  # tokenizer. Unset (the default) means no compaction at all: the
-  # measurement runs from the first day, and this is a number to set once a
-  # normal task's cost is known, the same doctrine `daily_token_budget`
-  # follows. Board `what-the-room-already-knows`, ticket 08.
-  # extraction_budget_tokens: 2000
+  skills_directory: skills        # one Markdown file per skill; add a file, no list
+  summary_max_chars: 6000         # a room summary ceiling refuses; it does not trim
+  # extraction_budget_tokens: 2000  # node-0 transcript budget (est. tokens); unset = no compaction
 
-# ── What never reaches the model ───────────────────────────────────────────
-# A message containing any of these is not sent to the classifier. It becomes
-# work for you instead — it is **held, never dropped**: some of these words
-# turn up in ordinary reports ("token hết hạn rồi" is a bug, "cho em xin api
-# key của staging" is an access request), and skipping them would be losing
-# real mentions on the strength of one word.
-#
-# Matched on whole words, case-insensitively, with Vietnamese diacritics folded
-# away — `lương` also catches `luong`, so you do not need both spellings. A
-# phrase matches only when its words appear together and in order.
-#
-# Add to this whenever you notice something. It is read at startup, so it takes
-# a restart and no rebuild.
+# ── What never reaches the model ────────────────────────────────────────────
+# A message with any of these is held for you, never dropped. Whole-word,
+# case-insensitive, Vietnamese diacritics folded. Read at startup (restart to apply).
 sensitive_words:
   # Pay
   - lương
@@ -467,8 +174,7 @@ sensitive_words:
   - bệnh án
   - bảo hiểm
   - medical record
-  # Credentials — these also appear in real bug reports, which is exactly why
-  # the outcome is "hand it to you" and not "ignore it".
+  # Credentials
   - mật khẩu
   - password
   - xin token
@@ -478,56 +184,18 @@ sensitive_words:
   - private key
   - credential
 
-# ── Triage examples ────────────────────────────────────────────────────────
-# Classifications you wrote by hand. These are used whether or not anything
-# has been marked in Discord — a fresh install has nothing marked, and waiting
-# for the first reaction before the classifier sees any example is a worse
-# start than none.
-#
-# The other source is what you marked ✅ on in Discord. Nothing else: a
-# classification you never looked at is one nobody read, and an agent that
-# learns from its own unreviewed output drifts with no floor.
-#
-#   ✅ ☑️  — that was right, use it as an example
-#   ❌ ✖️  — that was wrong
-#   remove the reaction to take the mark back
-#
-# 👍 and 👎 are deliberately NOT marks. A thumbs-up is the most ordinary
-# reaction on Discord — "ok anh nhé" to a colleague — and every casual one
-# landing on a classified message would quietly become a training example,
-# which is the exact thing this signal exists to prevent. The marks are ones
-# nobody reaches for by habit.
-#
-# A mark takes effect on the next restart: examples belong in the stable
-# front of the prompt, and a list that changed per call would cost the cache
-# hit on everything after it. See `agents.triage.examples` for how many.
-# Worked examples, in pairs that differ by one thing — the boundaries are
-# what a list of label names cannot teach. Written in the words people
-# actually use in this channel, because that is what the classifier reads.
-#
-# **Nothing here may appear in `evals/triage.jsonl`.** Scoring the classifier
-# on a sentence it was shown the answer to measures nothing;
-# `evals/build_triage_set.py` drops any overlap on a refresh, and this list
-# is what it drops against.
-#
-# No name of the watched account either: triage is told nothing about who it
-# speaks for (`tests/test_agent_voice.py`), and each pair teaches its lesson
-# without the @-mention that carried it.
+# ── Triage examples ─────────────────────────────────────────────────────────
+# Hand-written classifications, used from a fresh install. Also learned from
+# what you mark ✅/❌ in Discord (👍/👎 are not marks). Applied on next restart.
+# Nothing here may appear in evals/triage.jsonl.
 triage_examples:
-  # Addressed to us and vague — still work. This is the pair the classifier
-  # used to get wrong: it read "short" as "nothing to do".
   - "a ơi bị lỗi api rồi": devops.api_issue
   - "a xem giúp e request này với ạ [image: postman.png]": devops.api_issue
-  # A symptom told as a story, no error code, no curl.
   - "e mua gói sub lúc 15h mà 30 phút sau vẫn chưa được cộng coin a ạ": devops.api_issue
-  # Findings offered rather than asked — still ours to act on.
   - "nguyên nhân là do request thiếu selling_region nên catalog trả rỗng a nhé": devops.api_issue
-  # What a term means, and where a document lives: the answer is writing.
   - "correlationId là cái gì a nhỉ, e ko biết": docs.doc_question
   - "a ơi tài liệu mô tả webhook của Midas nằm ở repo nào v": docs.doc_question
-  # Being let in — asked outright, and told as a complaint.
   - "cho em xin quyền vào repo BE-Midas với ạ": access_request
   - "e không mở được Grafana của dev, a add quyền giúp e với": access_request
-  # Nothing is being asked of us: a closing reply, and congratulations.
   - "ok a, e hiểu rồi ạ": skip
   - "chúc mừng a lên chức ạ": skip
