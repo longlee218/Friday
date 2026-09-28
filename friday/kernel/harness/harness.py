@@ -22,7 +22,8 @@ single place a *test* names the vendor.
 Beside it, with no vendor import: `retry.py` (which failures earn another
 attempt, and the attempts' bookkeeping) and `model_client.py` (the provider's
 client and the answer shape's JSON schema). What is left is over 200 lines
-because it is one class, the loop; build-the-spine ticket 10 reshapes it.
+because it is one class, the loop. `run_agent.py` runs an `AgentSpec`
+through it (build-the-spine ticket 10).
 """
 
 from __future__ import annotations
@@ -41,8 +42,9 @@ from pydantic_ai import (
     capture_run_messages,
 )
 from pydantic_ai.capabilities import Hooks
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.mcp import MCPToolset
-from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelResponse, TextPart
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
@@ -169,6 +171,12 @@ class Harness:
     #: subclasses this and skips `__init__`; a built harness overrides it in
     #: `__init__` with the terminal tools' result types.
     _ends_with_types: tuple[type, ...] = ()
+    #: The last run's whole message history as plain JSON data when a
+    #: terminal tool ended it, else `None`; and whether it stopped on its
+    #: budget.
+    #: Read after `run_structured` returns, like `last_error`.
+    messages: list[Any] | None = None
+    over_budget: bool = False
 
     def __init__(
         self,
@@ -442,6 +450,7 @@ class Harness:
         message_id: str | None = None,
         task_id: int | None = None,
         node: str | None = None,
+        history: list[Any] | None = None,
     ) -> Any | None:
         """Run it. `None` means it did not answer.
 
@@ -457,6 +466,9 @@ class Harness:
         caller supplies whichever it knows; a `FridayState` as `context` already
         knows the message and the task (D8), so a caller passing one need not
         name them.
+
+        `history` (a `messages` value from an earlier run) continues that run
+        with `prompt` appended as the next user turn.
         """
         return await self._settle(
             prompt,
@@ -465,6 +477,7 @@ class Harness:
             about=_About.of(
                 context, message_id=message_id, task_id=task_id, node=node
             ),
+            history=history,
         )
 
     async def run_structured(
@@ -475,6 +488,7 @@ class Harness:
         message_id: str | None = None,
         task_id: int | None = None,
         node: str | None = None,
+        history: list[Any] | None = None,
     ) -> Any | None:
         """Ask for this agent's declared shape, and hand back only an answer
         that actually fits it.
@@ -513,6 +527,7 @@ class Harness:
                 message_id=message_id,
                 task_id=task_id,
                 node=node,
+                history=history,
             )
         if said is not None and isinstance(said.output, self.answers):
             # A run that answered — corrected or not — is not an unfit run.
@@ -528,8 +543,13 @@ class Harness:
         ):
             # A terminal output tool finished the run (e.g. `hand_over`): its
             # return is the run's outcome, not an answer that failed to fit
-            # `answers`. Hand it back as-is for the caller to branch on.
+            # `answers`. Hand it back as-is for the caller to branch on, with
+            # the run's messages kept so an `Ask` can be continued — from the
+            # result, not the capture, which holds only the first attempt's.
             self.unfit = None
+            self.messages = ModelMessagesTypeAdapter.dump_python(
+                said.all_messages(), mode="json"
+            )
             return said.output
 
         # The written-answer fallback (D13). Forcing the tool is not a
@@ -573,6 +593,7 @@ class Harness:
         context: Any,
         max_turns: int,
         about: "_About | None" = None,
+        history: list[Any] | None = None,
     ) -> Any | None:
         """Run to completion or to the first thing that stops it, and turn a
         failure into `last_error` rather than an exception every caller would
@@ -583,7 +604,11 @@ class Harness:
         """
         async with self._one_run:
             return await self._settle_alone(
-                prompt, context=context, max_turns=max_turns, about=about
+                prompt,
+                context=context,
+                max_turns=max_turns,
+                about=about,
+                history=history,
             )
 
     async def _settle_alone(
@@ -593,6 +618,7 @@ class Harness:
         context: Any,
         max_turns: int,
         about: "_About | None" = None,
+        history: list[Any] | None = None,
     ) -> Any | None:
         # Deferred: `LogHooks` reaches names through this module, so importing it
         # at module load time would be a cycle.
@@ -603,6 +629,8 @@ class Harness:
         # place every run begins, so a harness with an `answers=` shape called
         # through plain `run()` cannot read a flag left by the run before it.
         self.unfit = None
+        self.over_budget = False
+        self.messages = None
 
         calls: list = []
         reached: list = []
@@ -614,9 +642,10 @@ class Harness:
             # No clock on the run (board `domains-plug-in`, ticket 17): it stops
             # on turns or tokens, and a tool call carries its own timeout.
             return await self._attempts(
-                prompt, context, max_turns, hooks, calls, progress
+                prompt, context, max_turns, hooks, calls, progress, history
             )
         except Exception as exc:  # noqa: BLE001 - every failure becomes work
+            self.over_budget = isinstance(exc, UsageLimitExceeded)
             self.last_error = _why(exc, progress.attempt)
             log.warning("%s failed: %s", self._config.name, self.last_error)
             return None
@@ -628,7 +657,9 @@ class Harness:
             progress.flush(hooks, calls)
             await self._write_down(calls + reached, about)
 
-    async def _attempts(self, prompt, context, max_turns, hooks, calls, progress):
+    async def _attempts(
+        self, prompt, context, max_turns, hooks, calls, progress, history=None
+    ):
         """Call the provider until it answers, it refuses in a way trying again
         cannot fix, or the attempts run out.
 
@@ -661,6 +692,13 @@ class Harness:
                     self.agent.run(
                         prompt,
                         deps=context,
+                        # Rebuilt per attempt, so a failed attempt
+                        # cannot leave its messages in the next one's.
+                        message_history=(
+                            None
+                            if history is None
+                            else ModelMessagesTypeAdapter.validate_python(history)
+                        ),
                         usage_limits=limits,
                         capabilities=[hooks.capability],
                     ),

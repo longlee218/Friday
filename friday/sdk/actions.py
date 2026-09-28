@@ -19,14 +19,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["Ask", "HandOver", "Outcome", "Reply"]
+__all__ = ["Ask", "HandOver", "Outcome", "Replan", "Reply", "Retriage"]
 
 
 @dataclass(frozen=True, slots=True)
 class Ask:
-    """Ask the reporter for something. The text is ready to send."""
+    """Ask the reporter for something. The text is ready to send.
+
+    An `Ask` an agent raised through `ask_reporter` is a **continuation
+    point** (board `domains-plug-in`, ticket 14 §4): `history` is the run's
+    message history as plain JSON data and `evidence` what it had read, so a
+    reply continues the run rather than restarting it. Both `None` for an
+    `Ask` written by code or the Planner.
+    """
 
     text: str
+    history: list[Any] | None = None
+    evidence: Any = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +73,26 @@ class HandOver:
 
     reason: str
     interruption: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Replan:
+    """An agent found its step pointed the wrong way (the core terminal tool
+    `replan`): same action, new direction. `found` is what it read that the
+    next plan should know (board `domains-plug-in`, ticket 13 §1)."""
+
+    reason: str
+    found: str
+
+
+@dataclass(frozen=True, slots=True)
+class Retriage:
+    """An agent found the task is another action's work (the core terminal
+    tool `retriage`): leave the contract, triage again with `found` (board
+    `domains-plug-in`, ticket 16 §1)."""
+
+    reason: str
+    found: str
 
 
 Outcome = Ask | Reply | HandOver

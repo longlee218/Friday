@@ -15,9 +15,9 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 07 | Core Intake and the backend enricher | ⬜ **takeable** | 05 |
 | 08 | Core toolsets: memory, skills, shell, workspace | ⬜ **takeable** | 05 |
 | 09 | Backend toolsets from `sources/` | ⬜ | 05, 07 |
-| 10 | The Harness runs an `AgentSpec` | ⬜ **takeable** | 05 |
-| 11 | The Planner and its plan-shape eval | ⬜ | 06, 10 |
-| 12 | The WorkflowRunner and `step_results` | ⬜ | 06, 10 |
+| 10 | The Harness runs an `AgentSpec` | ✅ done (main, 2026-09-29) | 05 |
+| 11 | The Planner and its plan-shape eval | ⬜ **takeable** | 06, 10 |
+| 12 | The WorkflowRunner and `step_results` | ⬜ **takeable** | 06, 10 |
 | 13 | The assembled triage prompt | ⬜ **takeable** | 05 |
 | 14 | The spine pass; `trace_problem` moves onto it | ⬜ | 07, 08, 09, 11, 12, 13 |
 | 15 | `backend.answer_question` on the spine | ⬜ | 14 |

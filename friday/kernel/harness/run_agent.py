@@ -1,0 +1,162 @@
+"""The one core entry that runs any declared agent (build-the-spine ticket 10).
+
+`run_agent` joins an `AgentSpec` with its tier and the run's toolsets and runs
+it through the `Harness`; no vendor import here — only `harness.py` names
+Pydantic AI. Decisions in board `domains-plug-in`: tickets 03 §3–4 (the
+declaration, the core's terminal tools), 13 §1 (`replan`), 14 §4 (a stored
+`Ask` is a continuation point), 16 §1 (`retriage`), 17 (the budget).
+
+A run ends in exactly one of: the agent's declared `result`, or an outcome
+from a **terminal tool** — `ask_reporter` → `Ask`, `hand_over` → `HandOver`,
+`replan` → `Replan`, `retriage` → `Retriage`. A run the budget stopped is a
+`HandOver` `budget_spent` (trying again with the same budget only costs
+twice); any other run that ended without one raises `AgentRunFailed`, which
+the runner treats as a failed step (operator, 2026-09-29).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from copy import deepcopy
+from dataclasses import replace
+from typing import Any
+
+from friday.kernel.config import AgentConfig, TierConfig
+from friday.kernel.harness.harness import Harness
+from friday.sdk.action import ActionContract
+from friday.sdk.actions import Ask, HandOver, Replan, Retriage
+from friday.sdk.agent import AgentSpec
+from friday.sdk.toolset import RunContext, ToolsetSpec
+
+__all__ = [
+    "AgentRunFailed",
+    "ask_reporter",
+    "hand_over",
+    "replan",
+    "retriage",
+    "run_agent",
+]
+
+
+class AgentRunFailed(Exception):
+    """The run ended with neither a result nor an outcome — the provider
+    failed past its attempts, or the answer never fit. `reason` is scrubbed."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def ask_reporter(question: str) -> Ask:
+    """Ask the reporter for something you cannot find by reading. Ends your
+    turn; you continue from here when they reply.
+
+    Args:
+        question: the question, ready to send to the reporter as written.
+    """
+    return Ask(question)
+
+
+def hand_over(reason: str) -> HandOver:
+    """Hand this task to the operator: nothing you can read settles it.
+
+    Args:
+        reason: why, for the operator (never sent to the reporter).
+    """
+    return HandOver(reason)
+
+
+def replan(reason: str, found: str) -> Replan:
+    """Your brief points the wrong way for this task: ask for a new plan.
+
+    Args:
+        reason: why this step's direction is wrong.
+        found: what you read that the next plan should know, with line ids.
+    """
+    return Replan(reason=reason, found=found)
+
+
+def retriage(reason: str, found: str) -> Retriage:
+    """This task is another kind of work than the one you were given: send it
+    back to triage.
+
+    Args:
+        reason: why it is another kind of work.
+        found: what you read that shows it, with line ids.
+    """
+    return Retriage(reason=reason, found=found)
+
+
+async def run_agent(
+    spec: AgentSpec,
+    tier: TierConfig,
+    contract: ActionContract,
+    toolsets: Sequence[ToolsetSpec],
+    context: RunContext,
+    brief: str,
+    history: Ask | None = None,
+    *,
+    model: Any = None,
+    record: Any = None,
+) -> Any:
+    """Run `spec` once and return its `result`, or an `Ask` / `HandOver` /
+    `Replan` / `Retriage`.
+
+    `toolsets` are the registered specs to choose from; the run gets those
+    named by both `contract.allowed_toolsets` and `spec.toolsets`, each built
+    by its factory from `context`. `ask_reporter` is offered only when the
+    contract allows an `ask` step.
+
+    `history` is a stored `Ask` to continue from: its messages and `Evidence`
+    are carried on and `brief` is the reporter's reply, so nothing already
+    read is read again and line ids keep their meaning. `model` (a scripted
+    transport) and `record` (the call sink) pass through to the `Harness`.
+    """
+    if history is not None and history.evidence is not None:
+        # A copy: the stored `Ask` stays as it was, so a step that crashes
+        # and re-runs from it numbers its reads from the same place.
+        context = replace(context, evidence=deepcopy(history.evidence))
+
+    granted = contract.allowed_toolsets & set(spec.toolsets)
+    tools = [
+        built
+        for toolset in toolsets
+        if toolset.name in granted
+        for built in toolset.factory(context)
+    ]
+    terminals = [hand_over, replan, retriage]
+    if "ask" in contract.allowed_step_types:
+        terminals.insert(0, ask_reporter)
+
+    harness = Harness(
+        config=AgentConfig(
+            name=spec.name,
+            api_key=tier.api_key,
+            base_url=tier.base_url,
+            model=tier.model,
+            settings={**tier.settings, "temperature": spec.temperature},
+            max_turns=spec.budget.max_turns,
+            tokens=spec.budget.tokens,
+        ),
+        instructions=spec.instructions,
+        tools=tools,
+        model=model,
+        record=record,
+        answers=spec.result,
+        ends_with=terminals,
+    )
+    # No `context=`: a factory's tools close over `context`, and the SDK's
+    # per-run slot means the `FridayState` only (`tests/test_run_context.py`).
+    got = await harness.run_structured(
+        brief,
+        task_id=context.task_id,
+        node=spec.name,
+        history=None if history is None else history.history,
+    )
+    if isinstance(got, Ask):
+        return Ask(got.text, history=harness.messages, evidence=context.evidence)
+    if got is not None:
+        return got
+    if harness.over_budget:
+        return HandOver(f"budget_spent: {harness.last_error}")
+    raise AgentRunFailed(harness.last_error or "no result")

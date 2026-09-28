@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 Blocked by: 05
 
 # The Harness runs an `AgentSpec`
@@ -27,9 +27,34 @@ Ask | HandOver | Replan | Retriage`.
 
 ## Acceptance
 
-- [ ] Each outcome reachable by a scripted transport (tests).
-- [ ] Continuing from a stored `Ask` keeps `Lnn` ids and makes no repeat
+- [x] Each outcome reachable by a scripted transport (tests).
+- [x] Continuing from a stored `Ask` keeps `Lnn` ids and makes no repeat
       read (test — carried from build-the-loop ticket 04).
-- [ ] Over `max_turns` / `tokens` stops the run (tests).
-- [ ] `CONTEXT.md`: *terminal tool*, *continuation point*.
-- [ ] Whole suite green; `code-review` done.
+- [x] Over `max_turns` / `tokens` stops the run (tests).
+- [x] `CONTEXT.md`: *terminal tool*, *continuation point*.
+- [x] Whole suite green; `code-review` done.
+
+## Decided while building (operator, 2026-09-29)
+
+- A run stopped by its budget returns `HandOver("budget_spent: …")`; any other
+  run without a result raises `AgentRunFailed` (the runner, ticket 12, counts
+  it as a failed step).
+- The signature gains `contract`:
+  `run_agent(spec, tier, contract, toolsets, context, brief, history=None)`.
+  `toolsets` are the registered `ToolsetSpec`s; `history` is the stored `Ask`
+  and, when continuing, `brief` is the reporter's reply.
+
+## Carried
+
+- **To 12/14:** `Ask.evidence` is the live `Evidence` object, not JSON;
+  storing a continuation point in `step_results` needs its serialized form.
+  `Ask.history` is already JSON (tested). `Replan`/`Retriage` are not yet in
+  the `Outcome` union.
+- **Kept as they were, both documented harness rules:** `request_limit` is
+  `max_turns + OUTPUT_CORRECTIONS` (a correction is an attempt, not a turn),
+  and `tokens` is counted per provider attempt (harness comment, ticket 01).
+- `AgentSpec` has no `request_timeout_seconds`; a `timeout` in the tier's
+  `settings` is the only bound on a request for a spec-run agent.
+- A budget-stopped run whose prose held a non-fitting object gets a
+  `budget_spent:` reason whose tail names the fit failure instead of the
+  budget. The branch taken is right; only the text is off.

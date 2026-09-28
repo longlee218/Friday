@@ -65,7 +65,7 @@ class RunContext:
 
     task_id: int
     domain: Any
-    evidence: list[Any]
+    evidence: Any
     mcp: Mapping[str, Any]
 
 

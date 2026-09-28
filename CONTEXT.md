@@ -464,6 +464,25 @@ temperature, `(max_turns, tokens)` — and what it is built with: instructions,
 tools, output shape. Structured answers come back through a generated **answer tool**,
 checked in-process, with one correction turn.
 
+**`run_agent`** (`friday/kernel/harness/run_agent.py`, build-the-spine ticket
+10) runs an **agent spec** on its tier with the toolsets contract ∩ the spec's
+ceiling, built per run from the run context. It returns the spec's result or
+an outcome from a terminal tool; a run its budget stopped is a `HandOver`
+`budget_spent`, any other failure raises `AgentRunFailed`.
+
+**Terminal tool** — a core tool that ends an agent's run with an outcome
+instead of its result: `ask_reporter` → `Ask`, `hand_over` → `HandOver`,
+`replan(reason, found)` → `Replan` (same action, new direction),
+`retriage(reason, found)` → `Retriage` (another action's work). Every agent
+gets them; the plugin declares only `result`. `ask_reporter` is dropped when
+the action contract has no `ask` step.
+
+**Continuation point** — a stored `Ask` an agent raised: it carries the run's
+message history (plain JSON) and its `Evidence`. Passed back to `run_agent`
+with the reporter's reply as the brief, the run continues from it — nothing
+already read is read again, `Lnn` ids keep their meaning. Not a mid-loop
+checkpoint: a crashed step re-runs from its start.
+
 ## Install fact and knob
 
 An **install fact** describes this machine — who the operator is, where the
