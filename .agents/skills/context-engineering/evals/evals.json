@@ -1,0 +1,17 @@
+{
+  "skill_name": "context-engineering",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Our extraction context (friday/extraction/context.py) drops the oldest messages when it's over budget instead of summarizing them with a model call. A teammate says this is a hack and we should just add an LLM summarization step like everyone else does. Is truncation actually defensible here, or should we add summarization?",
+      "expected_output": "Explains context rot and the compaction technique generally, correctly identifies that whole-message truncation is a stricter/cheaper valid subset of compaction (not a hack), names the real cost tradeoffs of model-assisted summarization (cost, prompt-cache prefix stability, risk of losing subtle context inside a bad summary), and gives a reasoned recommendation rather than a reflexive 'yes add summarization'.",
+      "files": [],
+      "expectations": [
+        "Explains context rot / context as a finite resource",
+        "Identifies whole-message truncation as a legitimate, cheaper subset of compaction rather than dismissing it as a hack",
+        "Names at least one concrete cost of model-assisted summarization (cost, prompt-cache prefix stability, or risk of losing subtle context)",
+        "Reaches a clear recommendation rather than a noncommittal 'it depends'"
+      ]
+    }
+  ]
+}

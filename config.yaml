@@ -1,0 +1,186 @@
+# Friday configuration. Secrets live in .env and are read here as ${VAR};
+# everything else is a reviewable value. See docs/DESIGN.md for the reasoning.
+database_path: ./data/friday.db
+
+# ── Agents ───────────────────────────────────────────────────────────────────
+# One block per step that calls a model. ${VAR} reads .env (unset = error).
+# Everything speaks Chat Completions; `provider:` is shorthand for base_url —
+# openrouter · openai · deepseek · minimax (or set base_url directly).
+# All agents run on DeepSeek V4.1 Flash via OpenRouter: cheap ($0.099/$0.60 per
+# 1M, $0.06 cache-read), 1M context, native tool + JSON-schema structured
+# output. The responder is the one to watch — if its Vietnamese reads stiff,
+# switch just that block to `model: google/gemini-3.7-flash`.
+# Knobs (all optional): settings.max_tokens bounds one answer; timeout_seconds
+# bounds one run (default 60); max_attempts (3) / retry_backoff_seconds (1,
+# doubling) handle a hiccup; daily_token_budget caps a day's spend (unset = no
+# cap, the default — the heartbeat reports spend either way).
+agents:
+  # Runs on every mention. Must extract params and classify — the firehose,
+  # so the cheapest tool-capable model with cache pricing.
+  triage:
+    api_key: ${OPENROUTER_API_KEY}
+    provider: openrouter
+    model: "deepseek/deepseek-v4.1-flash"
+    settings:
+      temperature: 0
+    max_turns: 1
+    confidence_threshold: 0.7   # escalate to a human below this
+    max_message_age: '24h'      # older turns are marked outdated, not answered
+    examples: 8                 # how many hand-marked classifications to show
+
+  # Runs only on tasks that reach a reply. Low volume, goes out under your name.
+  # If the Vietnamese reads stiff, this is the block to move to a Gemini Flash.
+  responder:
+    api_key: ${OPENROUTER_API_KEY}
+    provider: openrouter
+    model: "deepseek/deepseek-v4.1-flash"
+    settings:
+      temperature: 0.7
+    max_turns: 1
+    timeout_seconds: 150        # writes prose, not a label — the slow one
+    tone_examples: 8            # how many of your past replies to show as tone
+
+  # Lifts a task's parameters out of the reporter's messages. Without it, every
+  # type opens tasks with no parameters. One block covers all types.
+  extractor:
+    api_key: ${OPENROUTER_API_KEY}
+    provider: openrouter
+    model: "deepseek/deepseek-v4.1-flash"
+    settings:
+      temperature: 0
+    max_turns: 1
+
+  # The api_issue graph's one model node. Comment it out and the graph still
+  # runs — Diagnose skips and says so. Reads logs + code, so 1M context helps.
+  devops.diagnose:
+    api_key: ${OPENROUTER_API_KEY}
+    provider: openrouter
+    model: "deepseek/deepseek-v4.1-flash"
+    settings:
+      temperature: 0
+    max_turns: 1
+    timeout_seconds: 150
+
+  # Optional: summarises a room once it has said anything new, so later prompts
+  # carry a few facts instead of a growing transcript. Without it, no summaries.
+  # summary:
+  #   api_key: ${OPENROUTER_API_KEY}
+  #   provider: openrouter
+  #   model: "deepseek/deepseek-v4.1-flash"
+  #   settings: { temperature: 0 }
+  #   max_turns: 1
+
+# ── The api_issue investigation ────────────────────────────────────────────
+# What it reaches outside this process with; each is optional (a node with no
+# source skips and says which one it wanted).
+devops:
+  ssh_host: "dev"                 # where kubectl runs for dev logs; empty = off
+  loki_server: "devops-generic"   # which mcp_servers block carries Loki
+  loki_tool: "loki_query_range"   # its range-query tool
+  reports_dir: "./data/reports"   # where a run's report is written
+  timeout_seconds: 420            # longest one task may hold a pool slot
+
+# ── Operator & board ─────────────────────────────────────────────────────────
+operator_id: 0                    # who approves replies, by DM from the bot
+
+board_host: "127.0.0.1"           # loopback only — the board is unauthenticated
+board_port: 8086
+board_origins: []                 # extra CORS write origins (the Vite dev server)
+repo_root: "~/code"             # where the project repo-picker may look; empty = off
+
+heartbeat_seconds: 60
+down_after_seconds: 300           # how long Discord may be down before you're told
+summary_at_hour: 9                # hour of the daily "still alive" summary; null = none
+keep_model_calls_days: 14         # how long to keep prompts/outputs
+
+# Daily two-file backup (§12.1): both SQLite files, kept this many days.
+backup_dir: "data/backups"
+keep_backups: 7                   # 0 turns the backup off
+
+# ── Tool servers (MCP) ─────────────────────────────────────────────────────
+# Which tools may be called is declared in code, not here (no `allow:` key).
+# `auth: {}` means "sign in once": `uv run authorize.py <name>`.
+mcp_servers:
+  devops-generic:
+    url: "https://devops-mcp.example.com/mcp"
+    transport: http
+    auth: {}
+  db-generic:
+    url: "https://db-mcp.example.com/mcp"
+    transport: http
+    auth: {}
+
+# ── Delivery & workflows ───────────────────────────────────────────────────
+outbox:
+  max_attempts: 3                 # tries before a message becomes a person's job
+  backoff_seconds: 30             # doubling from here
+
+workflows:
+  max_asks: 3                     # times to ask for the same detail before handover
+  concurrency: 2                  # tasks worked at once
+  use_responder: true             # phrase the ask in your voice, not the template
+  # Send the missing-detail question with no approval step. Off since 2026-09-15
+  # (see docs/DESIGN.md D10 / responder/check.py). Turning it on is this one line.
+  auto_ask_for_details: false
+
+# ── Ingest ──────────────────────────────────────────────────────────────────
+ingest:
+  # direct — someone @s the account · role — a role it holds is @d · dm — a 1:1 DM
+  mention_types: ["direct", "role"]
+  turn_seconds: 12                # silence before a burst counts as one input
+  sweep_interval_seconds: 300     # recovery sweep cadence (also runs on reconnect)
+  context_messages: 20            # history pulled in on a conversation's first mention
+
+  # Channels to watch. Threads are covered automatically; 1:1 DMs are always
+  # watched and need no entry; group chats must be listed. Uncomment to enable.
+  watched_channels:
+    # - "<channel id>"
+
+# ── What the operator writes down ──────────────────────────────────────────
+context:
+  skills_directory: skills        # one Markdown file per skill; add a file, no list
+  summary_max_chars: 6000         # a room summary ceiling refuses; it does not trim
+  # extraction_budget_tokens: 2000  # node-0 transcript budget (est. tokens); unset = no compaction
+
+# ── What never reaches the model ────────────────────────────────────────────
+# A message with any of these is held for you, never dropped. Whole-word,
+# case-insensitive, Vietnamese diacritics folded. Read at startup (restart to apply).
+sensitive_words:
+  # Pay
+  - lương
+  - thưởng
+  - salary
+  - bonus
+  - payroll
+  - payslip
+  - compensation
+  # Health and personal records
+  - sổ y tế
+  - bệnh án
+  - bảo hiểm
+  - medical record
+  # Credentials
+  - mật khẩu
+  - password
+  - xin token
+  - xin api key
+  - api key
+  - secret key
+  - private key
+  - credential
+
+# ── Triage examples ─────────────────────────────────────────────────────────
+# Hand-written classifications, used from a fresh install. Also learned from
+# what you mark ✅/❌ in Discord (👍/👎 are not marks). Applied on next restart.
+# Nothing here may appear in evals/triage.jsonl.
+triage_examples:
+  - "a ơi bị lỗi api rồi": devops.api_issue
+  - "a xem giúp e request này với ạ [image: postman.png]": devops.api_issue
+  - "e mua gói sub lúc 15h mà 30 phút sau vẫn chưa được cộng coin a ạ": devops.api_issue
+  - "nguyên nhân là do request thiếu selling_region nên catalog trả rỗng a nhé": devops.api_issue
+  - "correlationId là cái gì a nhỉ, e ko biết": docs.doc_question
+  - "a ơi tài liệu mô tả webhook của Kestrel nằm ở repo nào v": docs.doc_question
+  - "cho em xin quyền vào repo BE-Kestrel với ạ": access_request
+  - "e không mở được Grafana của dev, a add quyền giúp e với": access_request
+  - "ok a, e hiểu rồi ạ": skip
+  - "chúc mừng a lên chức ạ": skip

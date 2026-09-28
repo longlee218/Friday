@@ -1,0 +1,3 @@
+interface:
+  display_name: "Writing Effective Tools"
+  short_description: "Designing tools built for agents, not humans"

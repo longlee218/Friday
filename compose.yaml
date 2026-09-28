@@ -1,0 +1,38 @@
+services:
+  friday:
+    build: .
+    # Killed, crashed, or rebooted: it comes back without anyone logging in.
+    # Not `always`, so a deliberate stop stays stopped.
+    restart: unless-stopped
+
+    # Supplied at runtime, never baked. The Discord user token is unscoped
+    # account access with no revocation short of a password change.
+    env_file: [.env]
+    environment:
+      # A container's loopback is unreachable from outside it. What
+      # restricts access is the publish rule below, not this.
+      FRIDAY_BOARD_HOST: "0.0.0.0"
+
+    volumes:
+      # Survives restarts and redeploys — this is where the cursors live, and
+      # without them a redeploy re-reads history or loses the gap.
+      - friday-data:/app/data
+      # Read-only and mounted rather than copied: changing a model, a threshold
+      # or the watched channels is a restart, not a rebuild.
+      - ./config.yaml:/app/config.yaml:ro
+      # What the operator wrote down: per-channel context, and the skills any
+      # reasoning agent may fetch. Editing one is a restart, not a rebuild.
+      - ./context:/app/context:ro
+      - ./skills:/app/skills:ro
+
+    # Loopback on the host too. The board is unauthenticated by design and
+    # shows every captured message and every model prompt.
+    ports: ["127.0.0.1:8086:8086"]
+
+    # A crash loop should not fill the disk with the same traceback.
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  friday-data:

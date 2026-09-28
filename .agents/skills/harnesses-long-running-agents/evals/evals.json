@@ -1,0 +1,16 @@
+{
+  "skill_name": "harnesses-long-running-agents",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Our DAG engine checkpoints state after every node so a task can resume after a restart, but we built that for a 5-node investigation graph that got deleted, and every task type is single-node now so nothing actually uses checkpoint/resume anymore. Should we keep it around just in case a future graph needs it?",
+      "expected_output": "Cites the governing principle that every harness component encodes an assumption worth stress-testing, and that assumptions should be justified or removed rather than kept 'just in case' -- gives a concrete recommendation (delete now, or name the specific future graph that needs it) rather than a noncommittal 'it depends'. Ideally references the sprint-decomposition removal precedent as an analogy.",
+      "files": [],
+      "expectations": [
+        "Cites the principle that every harness component encodes an assumption worth stress-testing/justifying",
+        "Gives a concrete recommendation (delete it, or name the future graph that needs it) rather than a noncommittal 'it depends'",
+        "References or aligns with the sprint-decomposition-removal precedent (assumptions going stale as models improve)"
+      ]
+    }
+  ]
+}

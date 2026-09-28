@@ -1,0 +1,3 @@
+interface:
+  display_name: "Anthropic Agent Cookbook"
+  short_description: "Runnable reference code for agent patterns"

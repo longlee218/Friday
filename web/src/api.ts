@@ -1,0 +1,105 @@
+// One place that knows how to reach the API, so a route change is one edit.
+//
+// No client library and no generated code: every response here is plain JSON
+// and `api-types.ts` says what shape it has. What keeps those types honest is
+// `tests/test_web_contract.py`, on the Python side, because that is the side
+// that can call the real converters.
+
+import type {
+  Board,
+  Directories,
+  Flow,
+  Memory,
+  MemoryKindForm,
+  MonitorSnapshot,
+  Room,
+  Spend,
+  TaskCalls,
+  Workflow,
+} from "./api-types";
+
+async function get<T>(path: string): Promise<T> {
+  const answer = await fetch(path);
+  if (!answer.ok) throw new Error(`${answer.status} from ${path}`);
+  return (await answer.json()) as T;
+}
+
+// The board (ticket 02) refuses a write that does not carry the session's CSRF
+// token. A GET sets it in a `SameSite=Strict` cookie the browser sends back and
+// this page can read; echoing it here proves the write came from this tab and
+// not from a cross-site page, which can neither read the cookie nor set this
+// header.
+function csrfToken(): string {
+  const match = document.cookie.match(/(?:^|;\s*)friday_csrf=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const answer = await fetch(path, {
+    method,
+    headers: {
+      "X-CSRF-Token": csrfToken(),
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!answer.ok) {
+    // The API says something useful in `detail` — a 409 on a channel that
+    // already has a file, a 422 naming the key whose value was not text.
+    // Swallowing it would leave the page saying "something went wrong".
+    const said = await answer.json().catch(() => null);
+    throw new Error(said?.detail ?? `${answer.status} from ${path}`);
+  }
+  return (await answer.json()) as T;
+}
+
+export const api = {
+  board: () => get<Board>("/api/board"),
+  monitor: () => get<MonitorSnapshot>("/api/monitor"),
+  workflows: () => get<Workflow[]>("/api/workflows"),
+  spend: () => get<Spend>("/api/spend"),
+  taskCalls: (id: number) => get<TaskCalls>(`/api/tasks/${id}/calls`),
+  conversations: () => get<Room[]>("/api/conversations"),
+  messagesIn: (limit = 200) => get<Board["messages"]>(`/api/messages?limit=${limit}`),
+  memories: (channelId: string) =>
+    get<Memory[]>(`/api/channels/${encodeURIComponent(channelId)}/memories`),
+  // The operator's own rows (board `read-it-the-way-the-operator-does`,
+  // ticket 09). The store checks each one against its kind's schema and the
+  // instruction-shape guard; a refusal arrives as `detail` and is thrown.
+  directories: (path: string) =>
+    get<Directories>(`/api/directories?path=${encodeURIComponent(path)}`),
+  memoryKinds: (channelId: string) =>
+    get<MemoryKindForm[]>(
+      `/api/channels/${encodeURIComponent(channelId)}/memory-kinds`,
+    ),
+  addMemory: (
+    channelId: string,
+    body: { kind: string; text: string; key?: string; data?: unknown },
+  ) =>
+    send<Memory>(
+      `/api/channels/${encodeURIComponent(channelId)}/memories`,
+      "POST",
+      body,
+    ),
+  updateMemory: (channelId: string, id: string, text: string, data?: unknown) =>
+    send<Memory>(
+      `/api/channels/${encodeURIComponent(channelId)}/memories/${encodeURIComponent(id)}`,
+      "PUT",
+      { text, data },
+    ),
+  deleteMemory: (channelId: string, id: string) =>
+    send<{ deleted: boolean }>(
+      `/api/channels/${encodeURIComponent(channelId)}/memories/${encodeURIComponent(id)}`,
+      "DELETE",
+    ),
+  rename: (conversation: string, name: string) =>
+    send<{ name: string | null }>(
+      // Not encoded: a conversation id carries a `/` when it names a thread,
+      // and the route's `:path` segment is what accepts it.
+      `/api/conversations/${conversation}/name`,
+      "PUT",
+      { name },
+    ),
+  flow: (provider: string, id: string) =>
+    get<Flow>(`/api/messages/${provider}/${encodeURIComponent(id)}/flow`),
+};

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Claude RAG Cookbook"
+  short_description: "Contextual Retrieval, and when RAG doesn't apply"

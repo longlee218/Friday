@@ -1,0 +1,1227 @@
+/* Friday Monitor — design tokens.
+ *
+ * Source of truth for every visual property the operator sees.
+ * Spec: `.scratch/a-monitor-on-the-whole-path/spec.md`, decisions D3, D4.
+ * Audit: 13 findings in `notes.md`. The discipline this file enforces is
+ * "no property value escapes `:root`" — guards in
+ * `tests/test_web_tokens.py` fail the build on any hex literal or
+ * `style={{ ... }}` in a component file.
+ *
+ * Swiss/terminal, dense, dark-only. Density from the data-dense-dashboard
+ * profile: 8px grid, 12px card padding, 12–14px text, 36px rows. Motion
+ * from three named transitions (ticket 02); durations live here so a
+ * redesign touches one place.
+ *
+ * Deliberately not: gradients, glassmorphism, emoji as icons, colour as
+ * the only carrier of meaning, light mode (operator chose dark-only on
+ * 2026-09-08). */
+
+:root {
+  /* ----- space ----- */
+  --grid-gap: 8px;
+  --card-padding: 12px;
+  --row-height: 36px;
+
+  /* ----- fonts ----- */
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+
+  /* One modular scale, four steps, nothing outside it. */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text: 13px;
+  --text-lg: 15px;
+
+  /* ----- colour (spec D4, dark only) -----
+   *
+   * `--bg-0` is the page, `--bg-1` is a card/row, `--bg-2` is a raised
+   * surface (dialog, popover). The names are spec-stable so an
+   * audit at any point can read them. */
+  --bg-0: #0a0e1a;
+  --bg-1: #111827;
+  --bg-2: #1f2937;
+  --line: #374151;
+  --line-strong: #475569;
+  --ink: #e5e7eb;
+  --ink-faint: #9ca3af;
+  --ink-mute: #6b7280;
+
+  --accent: #38bdf8;
+  --accent-ink: #0a0e1a;
+  --good: #10b981;
+  --warn: #f59e0b;
+  /* --bad lifted from #ef4444 (4.16:1) to #f87171 (5.4:1) — same ground,
+     same fix as the previous palette's --bad, because the failure was
+     the same: a red chosen against white, and this ground is not white. */
+  --bad: #f87171;
+
+  /* One hue per task type, kept apart from the status hues so a "green"
+     is never an answer and a state at the same time. */
+  --type-api: #38bdf8;
+  --type-access: #c084fc;
+  --type-doc: #34d399;
+  --type-other: #94a3b8;
+
+  /* ----- motion (ticket 02) -----
+   *
+   * Three named motions, one job each: fade, slide, scale. Enter is
+   * always slower than exit (audit #7). Durations read on the same
+   * token, easing on `--ease`, so a future "make it snappier" is one
+   * edit. */
+  --d-fast: 120ms;
+  --d-med: 180ms;
+  --d-slow: 240ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* `prefers-reduced-motion: reduce` collapses these to 0; the
+   * override lives in the media query at the bottom of the file. */
+}
+
+/* ----- base ----- */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-0);
+  color: var(--ink);
+  font: var(--text) / 1.5 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Focus is the only ring that ever disappears, and only when the user
+   asked it to. The audit's first listed anti-pattern. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 6px 10px;
+  min-height: 32px;
+  cursor: pointer;
+  transition: border-color var(--d-fast) var(--ease),
+              background var(--d-fast) var(--ease);
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+input[type="text"],
+textarea,
+select {
+  font: var(--text) / 1.4 var(--font-data);
+  color: inherit;
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 7px 8px;
+  min-height: 32px;
+  width: 100%;
+}
+
+code,
+pre {
+  font-family: var(--font-data);
+  font-size: var(--text-sm);
+}
+
+pre {
+  margin: 0;
+  padding: var(--card-padding);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+a {
+  color: var(--accent);
+}
+
+/* ----- chrome ----- */
+
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 var(--card-padding);
+  height: 48px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.brand {
+  font-family: var(--font-data);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--ink-faint);
+  padding: 5px 10px;
+}
+
+.tab[aria-current="page"] {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--bg-2);
+}
+
+.spacer {
+  margin-left: auto;
+}
+
+main {
+  padding: var(--card-padding);
+  display: grid;
+  gap: var(--grid-gap);
+  align-content: start;
+}
+
+/* ----- pieces ----- */
+
+.card {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: var(--card-padding);
+}
+
+.card > header {
+  display: flex;
+  align-items: center;
+  gap: var(--grid-gap);
+  margin-bottom: 6px;
+}
+
+.card > header > :last-child {
+  margin-left: auto;
+}
+
+.muted {
+  color: var(--ink-faint);
+}
+
+.faint {
+  color: var(--ink-faint);
+}
+
+.mono {
+  font-family: var(--font-data);
+  font-size: var(--text-sm);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--grid-gap);
+}
+
+.row.between {
+  justify-content: space-between;
+}
+
+.row.divider > * + * {
+  border-left: 1px solid var(--line);
+  padding-left: var(--grid-gap);
+}
+
+/* Vertical separator without affecting siblings — used inline next to a
+ * preceding `<span>`, not as a flex child. */
+.with-divider {
+  border-left: 1px solid var(--line);
+  padding-left: 8px;
+}
+
+/* `flex: 1; min-width: 0` — the children of a flex row need `min-width: 0`
+ * to be allowed to shrink below their content's natural size. Without it a
+ * `<pre>` inside this banner overflowed the row. */
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner-row + .banner-row {
+  margin-top: 8px;
+}
+
+/* ----- rooms ----- */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  gap: var(--grid-gap);
+  align-items: start;
+  min-height: calc(100vh - 96px);
+}
+
+.rooms {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  position: sticky;
+  top: 60px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.room {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--grid-gap);
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  min-height: 44px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.room:hover {
+  background: var(--bg-1);
+}
+
+.room[aria-current="true"] {
+  background: var(--bg-1);
+  border-color: var(--line-strong);
+}
+
+.room .label {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room .meta {
+  grid-column: 1 / -1;
+  color: var(--ink-faint);
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+}
+
+/* The right pane in master-detail: same gap rhythm as the rest of the
+ * page, but as a grid so the header and the thread line up under it. */
+.room-detail {
+  display: grid;
+  gap: var(--grid-gap);
+  min-width: 0;
+}
+
+/* A timestamp that opens the flow. The plain `<button>` chrome is wrong
+ * for an inline element that is also a link: the background and border
+ * hide the click target's real shape, so a hover with no focus shows
+ * nothing to click on. */
+.time-link {
+  background: none;
+  border: none;
+  padding: 0 6px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 3px;
+  min-height: 0;
+}
+
+.time-link:hover {
+  color: var(--accent);
+}
+
+.rename-input {
+  width: 260px;
+}
+
+.auto {
+  margin-left: auto;
+}
+
+/* ----- flow screen ----- */
+
+.turn-block + .turn-block {
+  margin-top: 10px;
+}
+
+.summary-line {
+  margin-top: 8px;
+}
+
+.outbound-row + .outbound-row {
+  margin-top: 8px;
+}
+
+.flow-children {
+  margin-top: 6px;
+}
+
+.wrap {
+  flex-wrap: wrap;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-size: var(--text);
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 15px;
+}
+
+/* A status never rests on colour alone — it carries its own word. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.pill.good {
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 45%, transparent);
+}
+.pill.warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+.pill.bad {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+}
+
+.empty {
+  color: var(--ink-faint);
+  padding: 24px var(--card-padding);
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+}
+
+.error {
+  border-color: color-mix(in srgb, var(--bad) 50%, var(--line));
+  color: var(--bad);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+th {
+  text-align: left;
+  color: var(--ink-faint);
+  font-weight: 500;
+  border-bottom: 1px solid var(--line);
+  padding: 6px var(--grid-gap);
+  position: sticky;
+  top: 48px;
+  background: var(--bg-1);
+}
+
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 6px var(--grid-gap);
+  height: var(--row-height);
+  vertical-align: top;
+}
+
+tbody tr:hover {
+  background: var(--bg-2);
+}
+
+details > summary {
+  cursor: pointer;
+  color: var(--ink-faint);
+  padding: 4px 0;
+}
+
+details > summary:hover {
+  color: var(--ink);
+}
+
+/* ----- primitives shared by every screen ----- */
+
+.skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--bg-1) 0%,
+    var(--bg-2) 50%,
+    var(--bg-1) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: shimmer var(--d-slow) linear infinite;
+  /* Shape defaults; use site overrides via `--sk-w` / `--sk-h` set on
+   * the element (Skeleton.tsx reads the props into CSS variables). */
+  width: var(--sk-w, 100%);
+  height: var(--sk-h, 16px);
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 600ms linear infinite;
+}
+
+.spinner-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.toast {
+  position: fixed;
+  top: calc(48px + var(--grid-gap));
+  right: var(--card-padding);
+  z-index: 50;
+  display: grid;
+  gap: 4px;
+  max-width: 360px;
+}
+
+.toast > * {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px var(--card-padding);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.4);
+  cursor: pointer;
+  animation: slide-in var(--d-med) var(--ease);
+}
+
+.toast > * + * {
+  margin-top: var(--grid-gap);
+}
+
+@keyframes slide-in {
+  from { transform: translateX(110%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ----- motion system (ticket 02) -------------------------------------------
+ *
+ *  Three named motions, one job each — `fade` for route transitions,
+ *  `slide` for panels and toasts, `scale` for dialogs and popovers.
+ *  The audit's rule: enter is always slower than exit, so the screen
+ *  feels like it is leaving as well as arriving. Durations read from
+ *  `--d-fast`, `--d-med`, `--d-slow` so a redesign touches one file.
+ *
+ *  Apply via `data-enter` / `data-exit` on whatever element changes.
+ *  CSS owns the timing; the React side just flips the attribute.
+ *
+ *  Only `opacity` and `transform` animate — `width`, `height`, `top`,
+ *  `left` would force a reflow on every frame and the screen would
+ *  not feel "mượt" the way the operator asked.
+ */
+
+.fade-enter {
+  animation: motion-fade var(--d-slow) var(--ease) both;
+}
+.fade-exit {
+  animation: motion-fade var(--d-med) var(--ease) reverse both;
+}
+
+.slide-enter {
+  animation: motion-slide var(--d-slow) var(--ease) both;
+}
+.slide-exit {
+  animation: motion-slide var(--d-med) var(--ease) reverse both;
+}
+
+.scale-enter {
+  animation: motion-scale var(--d-med) var(--ease) both;
+}
+.scale-exit {
+  animation: motion-scale var(--d-fast) var(--ease) reverse both;
+}
+
+@keyframes motion-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes motion-slide {
+  from { transform: translateX(8px); opacity: 0; }
+  to   { transform: translateX(0);   opacity: 1; }
+}
+
+@keyframes motion-scale {
+  from { transform: scale(0.96); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+.toast button.action {
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 3px 8px;
+  margin-top: 6px;
+  min-height: 0;
+}
+
+/* ----- the board ----- */
+
+.board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(200px, 1fr);
+  gap: var(--grid-gap);
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: var(--grid-gap);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 140px);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.column.quiet {
+  background: none;
+  border-style: dashed;
+}
+
+.column > header {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 10px var(--card-padding);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: inherit;
+  border-radius: 8px 8px 0 0;
+}
+
+.column.quiet > header {
+  border-bottom: none;
+}
+
+.column h2 {
+  font-size: var(--text);
+  font-weight: 600;
+}
+
+.count {
+  margin-left: auto;
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+
+.column .stack {
+  overflow-y: auto;
+  padding: var(--grid-gap);
+  display: grid;
+  gap: var(--grid-gap);
+}
+
+.card-task {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.card-task:hover {
+  border-color: var(--accent);
+  background: var(--bg-2);
+}
+
+.card-task .title {
+  font-weight: 600;
+  font-size: var(--text);
+}
+
+.card-task .summary {
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+  margin: 4px 0 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ----- conversations ----- */
+
+.thread {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 132px 1fr auto;
+}
+
+.thread > header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--grid-gap);
+  padding: 10px var(--card-padding);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.thread .msg {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 132px 1fr auto;
+  gap: var(--grid-gap);
+  padding: 8px var(--card-padding);
+  align-items: baseline;
+}
+
+.thread .msg + .msg {
+  border-top: 1px solid var(--line);
+}
+
+/* Agent row — ticket 13. The watched account sent this message;
+ * the operator reads the screen as a quick "who is talking to
+ * me". A left border + low-saturation wash + label make it visible
+ * at a glance, in colour-blindness and screenshots alike.
+ * The label survives greyscale; the colour is decoration. */
+.thread .msg.is_own {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-1));
+  border-left: 2px solid var(--accent);
+  padding-left: calc(var(--card-padding) - 2px);
+}
+
+.thread .msg.is_own .who .msg-marker,
+.thread .msg.is_own .who .pill {
+  /* Markers (audit #11) and the Agent pill (ticket 13) stay
+     visible even when the author block collapses — they are a
+     different thing from the name, and a row where the same
+     author sent three messages in a row needs to read as
+     "Agent, Agent, Agent", not "Agent, , ". */
+  visibility: visible;
+}
+
+.thread .msg:hover {
+  background: var(--bg-2);
+}
+
+.thread .msg.same-author .who {
+  visibility: hidden;
+}
+
+/* Markers ride in the author's column, on a second line under the name
+   when both task and memory apply. Colour is decoration; the label is
+   the truth. Glyph + label is the audit's rule for state that is not
+   knowable by colour alone. */
+.who .msg-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.thread .msg.same-author .who .msg-marker {
+  /* Markers stay visible even when the author block collapses — they
+     are a different thing from the name. */
+  visibility: visible;
+}
+
+.contents {
+  display: contents;
+}
+
+.dayline {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--grid-gap);
+  padding: 10px var(--card-padding) 4px;
+  color: var(--ink-faint);
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+}
+
+.dayline::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.who {
+  font-weight: 600;
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.said {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 78ch;
+}
+
+.when {
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* ----- detail ----- */
+
+.detail {
+  padding: 8px 0;
+}
+
+.detail + .detail {
+  border-top: 1px solid var(--line);
+}
+
+.detail > header {
+  margin-bottom: 6px;
+}
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--grid-gap);
+  padding: var(--card-padding);
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bad) 7%, var(--bg-1));
+}
+
+/* ----- tag ----- */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--tag);
+  background: color-mix(in srgb, var(--tag) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tag) 38%, transparent);
+  white-space: nowrap;
+}
+
+.tag::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.tag.devops-api_issue { --tag: var(--type-api); }
+.tag.access_request { --tag: var(--type-access); }
+.tag.docs-doc_question { --tag: var(--type-doc); }
+.tag.unknown, .tag.skip { --tag: var(--type-other); }
+
+/* ----- column accent ----- */
+
+.column > header::before {
+  content: "";
+  width: 3px;
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+.column.attention > header::before { background: var(--warn); }
+.column.settled > header::before { background: var(--good); }
+
+/* ----- rooms ----- */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  gap: var(--grid-gap);
+  align-items: start;
+  min-height: calc(100vh - 96px);
+}
+
+.rooms {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  position: sticky;
+  top: 60px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.room {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--grid-gap);
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  min-height: 44px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.room:hover {
+  background: var(--bg-1);
+}
+
+.room[aria-current="true"] {
+  background: var(--bg-1);
+  border-color: var(--line-strong);
+}
+
+.room .label {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room .meta {
+  grid-column: 1 / -1;
+  color: var(--ink-faint);
+  font-family: var(--font-data);
+  font-size: var(--text-xs);
+}
+
+/* ----- dialog ----- */
+
+dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: 84vh;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--bg-1);
+  color: var(--ink);
+}
+
+dialog::backdrop {
+  background: rgb(2 6 23 / 0.62);
+}
+
+dialog > header {
+  display: flex;
+  align-items: center;
+  gap: var(--grid-gap);
+  padding: var(--card-padding);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--bg-1);
+}
+
+dialog > header > :last-child {
+  margin-left: auto;
+}
+
+dialog > .body {
+  padding: var(--card-padding);
+  overflow-y: auto;
+  max-height: calc(84vh - 56px);
+  display: grid;
+  gap: var(--grid-gap);
+}
+
+/* ----- motion overrides -----
+ *
+ * Audit #7: enter is always slower than exit. The motion system (ticket
+ * 02) reads these tokens; this media query is the second of two ways to
+ * make animations disappear — the first is the token values themselves
+ * being collapsed to 0. */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --d-fast: 0ms;
+    --d-med: 0ms;
+    --d-slow: 0ms;
+  }
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ----- monitor screen (ticket 04) ----- */
+
+.monitor {
+  display: grid;
+  gap: var(--grid-gap);
+  align-content: start;
+}
+
+.monitor-grid {
+  display: grid;
+  gap: var(--grid-gap);
+  grid-template-columns: 3fr 2fr;
+}
+
+@media (max-width: 1279px) {
+  .monitor-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.feed .feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.feed .feed-row {
+  display: grid;
+  grid-template-columns: 70px 1fr auto auto auto;
+  gap: var(--grid-gap);
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.feed .feed-row:first-child {
+  border-top: none;
+}
+
+.feed .feed-row .verb {
+  color: var(--ink-faint);
+}
+
+.feed .feed-row .latency {
+  min-width: 56px;
+  text-align: right;
+}
+
+.feed .footer {
+  margin-top: var(--grid-gap);
+}
+
+.tasks .task-list {
+  display: grid;
+  gap: var(--grid-gap);
+}
+
+.task-card .room {
+  margin: 6px 0;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
+}
+
+.monitor-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--grid-gap);
+  align-items: center;
+  padding: var(--card-padding);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+/* ----- workflows (ticket 08) ----- */
+
+.workflows {
+  display: grid;
+  gap: var(--grid-gap);
+  align-content: start;
+}
+
+.workflow-buckets {
+  display: grid;
+  gap: var(--grid-gap);
+  grid-template-columns: 1fr 1fr;
+}
+
+@media (max-width: 1279px) {
+  .workflow-buckets {
+    grid-template-columns: 1fr;
+  }
+}
+
+.workflow-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.workflow-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  gap: var(--grid-gap);
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.workflow-row:first-child {
+  border-top: none;
+}
+
+/* ----- breadcrumb ----- */
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+}
+
+.breadcrumb .crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.breadcrumb .sep {
+  color: var(--ink-mute);
+}
+
+.breadcrumb a {
+  color: var(--ink-faint);
+  text-decoration: none;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.breadcrumb a:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+.breadcrumb .crumb-current {
+  color: var(--ink);
+  padding: 1px 4px;
+}
+
+/* ----- keyboard shortcut overlay ----- */
+
+.shortcuts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text);
+}
+
+.shortcuts td {
+  padding: 6px var(--grid-gap);
+  border-bottom: 1px solid var(--line);
+}
+
+.shortcuts td:first-child {
+  width: 120px;
+  white-space: nowrap;
+}
+
+.shortcuts tr:last-child td {
+  border-bottom: none;
+}
+
+.shortcuts kbd {
+  font-family: var(--font-data);
+  font-size: var(--text-sm);
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--ink);
+}
+
+/* The operator's memory form (board read-it-the-way-the-operator-does,
+   ticket 09): one labelled field per line, the label above its input. */
+.memory-form {
+  display: grid;
+  gap: var(--grid-gap);
+  margin-bottom: var(--grid-gap);
+}
+
+.memory-form label {
+  display: grid;
+  gap: 4px;
+}
