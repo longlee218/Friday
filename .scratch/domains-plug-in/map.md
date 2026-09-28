@@ -264,16 +264,31 @@ without approval; an answer that states a cause always waits for the operator.
   resets counters and re-plans; `MAX_ASKS_PER_TASK` → `asks_exhausted`; `Ask`
   sent verbatim. Subsumes build-the-loop ticket 4.
 
+- [Designing `backend.answer_question`](issues/06-designing-answer-question.md):
+  "does the running code do X, and how" — yes/no with the lines that show it;
+  code + docs (`docs_paths`) in the channel's repos, picked by a new
+  `purpose` field on the project; new agent `backend.explain` →
+  `Explanation` (`verdict`, `answer`, `refs`, `conclusive`, `next_checks`;
+  `no`+conclusive needs a ref to where it would be done); one repo per tool
+  call (`search_code` new), one agent step; running tag, prod by default;
+  `Reply` waits for approval; observed behaviour → `trace_problem`. Contract:
+  `backend.code` + `backend.docs`, 10 min, 1 replan (unmeasured).
+
 ## Not yet specified
 
 - **Getting smarter** — plan exemplars (stored, retrieved, scored by outcome),
-  a reflection step; durable-spine §8. Needs real runs first.
+  a reflection step; durable-spine §8; sending a conclusive answer without
+  approval once the judge is calibrated. Needs real runs first.
 - **Invalidation sophistication** — guard steps the Planner inserts vs a world
   cursor the runner checks; how much is enough before data exists.
 - **The `ops` domain beyond `request_permission`.**
 - **Hand-off between actions** — a question that turns out to be a failure, or
   the reverse: re-plan inside the run, re-triage, or hand over?
 - **Core agents' tiers** — triage, responder, room summary (the Planner's is decided: strong).
+- **Code vs deploy drift** — "on main but not deployed yet": compare HEAD of
+  `default_branch` with the running tag (from ticket 06).
+- **External docs** — a wiki (Confluence/Notion) as a docs source beside
+  repo markdown (from ticket 06).
 - **Guards that keep it true** — structural tests once the API shape lands.
 
 ## Out of scope
