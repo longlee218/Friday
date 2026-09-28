@@ -8,7 +8,7 @@ from typing import Optional
 
 import pytest
 
-from plugins.devops.params import ApiIssueParams
+from plugins.backend.params import ApiIssueParams
 from friday.sdk.validation import (
     InSet,
     Matches,
@@ -187,7 +187,7 @@ def test_a_params_with_no_rules_passes_validation_and_returns_no_problems():
     """`AccessRequestParams` declares no `_RULES`. `ApiIssueParams` used to be
     the example here and no longer can be: it has a cross-field rule, and a
     report with neither a correlationId nor a curl is not usable."""
-    from friday.kernel.domain.models import AccessRequestParams
+    from plugins.ops.params import AccessRequestParams
 
     good = AccessRequestParams(project="payments", permission="write", summary="x")
     assert _problems(good) == []

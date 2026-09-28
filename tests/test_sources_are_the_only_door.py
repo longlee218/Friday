@@ -21,7 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 #: Both trees a shell-out could hide in: the core, and the plugins. Ticket 14
-#: moved the concrete devops sources out to `plugins/devops/sources/`, so the
+#: moved the concrete backend sources out to `plugins/backend/sources/`, so the
 #: guard has to read there too or it would pass by looking at the wrong tree.
 PACKAGES = (ROOT / "friday", ROOT / "plugins")
 
@@ -29,9 +29,9 @@ PACKAGES = (ROOT / "friday", ROOT / "plugins")
 #: `agent/mcp.py` *builds* MCP servers from configuration and hands them on; it
 #: never calls a tool, which is the line below.
 ALLOWED = {
-    "plugins/devops/sources/logs.py",
-    "plugins/devops/sources/code.py",
-    "plugins/devops/sources/db.py",
+    "plugins/backend/sources/logs.py",
+    "plugins/backend/sources/code.py",
+    "plugins/backend/sources/db.py",
     # `Reads` is the narrowing every other call goes through — the one place
     # allowed to hold a server and pass a call on, and the place that refuses
     # a tool no reader declared. It is an sdk port now (ticket 14): the

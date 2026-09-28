@@ -180,7 +180,7 @@ HOSTILE = (
 def test_the_extractor_does_not_take_a_reporters_words_raw():
     """It is the agent most worth aiming an injection at: it decides what a
     task knows, and what it decides is written to the database."""
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
     from tests.test_extraction import _context
 
@@ -197,7 +197,7 @@ def test_a_vouched_example_cannot_carry_a_section_into_triage():
     system, where it would sit on every call until somebody unmarked it."""
     from friday.kernel.triage.prompt import build_instructions
 
-    built = build_instructions([(HOSTILE, "devops.api_issue")])
+    built = build_instructions([(HOSTILE, "backend.trace_problem")])
 
     # Asserted on the escaped form, not on the tag name being absent: triage
     # has a real `<critical_reminder>` section of its own now, and a test that
@@ -413,7 +413,7 @@ async def test_an_empty_extraction_is_not_a_successful_one():
     which is not a `Params` at all and cannot be mistaken for one.
     """
     from conftest import ScriptedHarness
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction import build_extractor
     from friday.kernel.extraction.answer import answer_shape
     from tests.test_extraction import _context
@@ -625,7 +625,7 @@ def test_extraction_was_never_wrong_and_stays_that_way():
     verbatim because one is matched by machine and the other is pasted into a
     terminal, and a value that went through two escapes no longer refers to
     anything."""
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
     from tests.test_extraction import _context
 
@@ -655,7 +655,7 @@ def test_no_family_escapes_anything_twice():
     a fourth prompt module appears, which is the part that would otherwise go
     stale silently.
     """
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input as extraction_input
     from friday.kernel.memory.channel_context import _transcript
     from friday.kernel.responder.prompt import build_input as responder_input

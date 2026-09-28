@@ -24,8 +24,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from plugins.devops.graph.deps import ApiIssueDeps
-from plugins.devops.graph.intake import intake_of
+from plugins.backend.graph.deps import ApiIssueDeps
+from plugins.backend.graph.intake import intake_of
 from friday.sdk.sources import Placement
 from friday.sdk.workflow import DAGState, Node, envelope
 from friday.sdk.outbox import Kind

@@ -28,7 +28,7 @@ def configured_plugins(config: Any) -> list[tuple[Any, Any]]:
     `PLUGIN` and, optionally, a `load_config(raw)` that validates its own block
     (read from `config.plugin_blocks` by the plugin's id)."""
     out: list[tuple[Any, Any]] = []
-    for path in getattr(config, "plugins", None) or ("plugins.devops", "plugins.docs"):
+    for path in getattr(config, "plugins", None) or ("plugins.backend", "plugins.ops"):
         module = importlib.import_module(path)
         plugin = module.PLUGIN
         raw = (getattr(config, "plugin_blocks", None) or {}).get(plugin.id)

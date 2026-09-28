@@ -164,6 +164,13 @@ export interface Board {
   messages: Message[];
 }
 
+/** One registered action. `domain` is the prefix of its namespaced name;
+ *  the tag colour is per domain. */
+export interface Action {
+  name: string;
+  domain: string;
+}
+
 /** Today's tokens. An agent that spent nothing is absent rather than zero —
  *  which agents exist is `config.yaml`'s business, so there is no list to
  *  enumerate against. */

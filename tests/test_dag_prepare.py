@@ -12,9 +12,9 @@ exactly the state a fresh install is in.
 from __future__ import annotations
 
 from friday.sdk.workflow import Deps as DAGDeps, DAGState
-from friday.kernel.domain.models import AccessRequestParams
-from plugins.docs.params import DocQuestionParams
-from plugins.devops.params import ApiIssueParams
+from plugins.ops.params import AccessRequestParams
+from plugins.backend.answer_question import DocQuestionParams
+from plugins.backend.params import ApiIssueParams
 from types import SimpleNamespace
 
 from friday.sdk.actions import Ask, HandOver
@@ -55,7 +55,7 @@ async def gate(**kw):
     with nothing to trace on never reaches a node at all. Asserting on the node
     was asserting on a path production stopped taking.
     """
-    _, problem = await prepare("devops.api_issue", params(**kw))
+    _, problem = await prepare("backend.trace_problem", params(**kw))
     return problem
 
 
@@ -112,11 +112,11 @@ async def test_staging_is_not_an_environment_this_room_serves():
 # ---- the other task types --------------------------------------------------
 
 
-async def test_an_access_request_without_a_project_asks_for_one():
+async def test_a_request_permission_without_a_project_asks_for_one():
     """Same gap as api_issue had: a task that cannot be acted on has to say so,
     not sit in a queue nobody is watching."""
     action = await _decide(
-        "access_request", AccessRequestParams(project="", permission="write",
+        "ops.request_permission", AccessRequestParams(project="", permission="write",
                                               summary="needs access")
     )
 
@@ -125,7 +125,7 @@ async def test_an_access_request_without_a_project_asks_for_one():
 
 
 async def test_a_doc_question_without_a_question_asks_for_one():
-    action = await _decide("doc_question", DocQuestionParams(question="", doc_ref=None))
+    action = await _decide("backend.answer_question", DocQuestionParams(question="", doc_ref=None))
 
     assert isinstance(action, Ask)
 
@@ -133,7 +133,7 @@ async def test_a_doc_question_without_a_question_asks_for_one():
 async def test_an_optional_parameter_is_never_asked_for():
     """`doc_ref` is optional by its type. Asking for it would be asking for
     something we said we did not need."""
-    action = await _decide("doc_question", DocQuestionParams(question="how does X work?",
+    action = await _decide("backend.answer_question", DocQuestionParams(question="how does X work?",
                                                     doc_ref=None))
 
     assert isinstance(action, HandOver)
@@ -142,7 +142,7 @@ async def test_an_optional_parameter_is_never_asked_for():
 async def test_a_complete_request_hands_over_because_nothing_can_act_on_it_yet():
     """Nothing grants access. Handing over is honest; asking again would not be."""
     action = await _decide(
-        "access_request",
+        "ops.request_permission",
         AccessRequestParams(project="backend", permission="write", summary="s"),
     )
 
@@ -153,7 +153,7 @@ async def test_the_summary_is_never_asked_for():
     """The model writes it. Asking the reporter for a summary of their own
     message is nonsense."""
     action = await _decide(
-        "access_request", AccessRequestParams(project="backend",
+        "ops.request_permission", AccessRequestParams(project="backend",
                                               permission="write", summary="")
     )
 
@@ -172,7 +172,7 @@ async def test_api_issue_keeps_its_own_rule():
         curl=None,
     )
 
-    assert isinstance(await _decide("devops.api_issue", traceable), HandOver)
+    assert isinstance(await _decide("backend.trace_problem", traceable), HandOver)
 
 
 async def test_a_malformed_correlation_id_is_caught_by_the_rule():
@@ -184,7 +184,7 @@ async def test_a_malformed_correlation_id_is_caught_by_the_rule():
     wrong'."""
     bad = ApiIssueParams(summary="s", correlation_id="abc-123")
 
-    action = await _decide("devops.api_issue", bad)
+    action = await _decide("backend.trace_problem", bad)
 
     assert isinstance(action, Ask)
     assert "uuid" in action.text
@@ -205,7 +205,7 @@ async def _prepare_with_clarify(params_obj, clarify, *, extracted=None, monkeypa
 
     monkeypatch.setattr(wf, "_extract", stub_extract)
     return await wf.prepare(
-        "devops.api_issue", params_obj, context=_context("irrelevant", type(params_obj))
+        "backend.trace_problem", params_obj, context=_context("irrelevant", type(params_obj))
     )
 
 
@@ -263,7 +263,7 @@ async def test_plan_by_required_parameters_hands_over_once_everything_is_present
     nothing outstanding: no question left to ask, and hand-over is what
     "a human takes it from here" looks like."""
     action = await _decide(
-        "devops.api_issue", ApiIssueParams(summary="s", curl="curl https://x/y")
+        "backend.trace_problem", ApiIssueParams(summary="s", curl="curl https://x/y")
     )
 
     assert isinstance(action, HandOver)
@@ -331,7 +331,7 @@ async def _reported(db, *, text="@Lee API lỗi rồi a ơi"):
     task = await make_task(db)
     await _said(db, "m1", text, secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id="m1"), task.id, decision={"type": "devops.api_issue"}
+        make_event(message_id="m1"), task.id, decision={"type": "backend.trace_problem"}
     )
     return task
 
@@ -388,9 +388,9 @@ async def test_node_0_pays_once_when_nothing_has_changed(db):
     from tests.test_extraction import _install
 
     extractor = _CountingExtractor(ApiIssueParams(summary="checkout 500"))
-    _install("devops.api_issue", extractor)
+    _install("backend.trace_problem", extractor)
     task = await _reported(db)
-    node = prepare_node("devops.api_issue", ApiIssueParams)
+    node = prepare_node("backend.trace_problem", ApiIssueParams)
 
     first = await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
     second = await node.run(
@@ -430,9 +430,9 @@ async def test_a_field_already_filled_drops_out_of_the_next_passs_schema(db):
             seen.append(await self.would_ask(context))
             return ApiIssueParams(environment="production"), None
 
-    _install("devops.api_issue", _RecordsWhatItWasShown())
+    _install("backend.trace_problem", _RecordsWhatItWasShown())
     task = await _reported(db)
-    node = prepare_node("devops.api_issue", ApiIssueParams)
+    node = prepare_node("backend.trace_problem", ApiIssueParams)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
     await _said(db, "m2", "curl -X POST /pay trả 500, trên production", secs=3)
@@ -452,9 +452,9 @@ async def test_a_new_message_is_paid_for(db):
     from tests.test_pool import _said
 
     extractor = _CountingExtractor(ApiIssueParams(summary="checkout 500"))
-    _install("devops.api_issue", extractor)
+    _install("backend.trace_problem", extractor)
     task = await _reported(db)
-    node = prepare_node("devops.api_issue", ApiIssueParams)
+    node = prepare_node("backend.trace_problem", ApiIssueParams)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
     await _said(db, "m2", "curl -X POST /pay trả 500, trên production", secs=3)
@@ -488,9 +488,9 @@ async def test_a_question_the_extractor_raised_survives_the_skipped_call(db):
         ),
         clarify=Clarify(("environment",), "the URL says test, which is not an env"),
     )
-    _install("devops.api_issue", extractor)
+    _install("backend.trace_problem", extractor)
     task = await _reported(db)
-    node = prepare_node("devops.api_issue", ApiIssueParams)
+    node = prepare_node("backend.trace_problem", ApiIssueParams)
 
     first = await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
     second = await node.run(
@@ -583,9 +583,9 @@ async def test_a_parameter_change_the_extractor_cannot_see_is_not_paid_for(db):
     from tests.test_extraction import _install
 
     extractor = _CountingExtractor(ApiIssueParams(summary="checkout 500"))
-    _install("devops.api_issue", extractor)
+    _install("backend.trace_problem", extractor)
     task = await _reported(db)
-    node = prepare_node("devops.api_issue", ApiIssueParams)
+    node = prepare_node("backend.trace_problem", ApiIssueParams)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
     # `summary` blanked and `environment` set: two parameter changes the
@@ -626,9 +626,9 @@ async def test_a_call_that_produced_nothing_is_not_remembered_as_an_answer(db):
             return None, None
 
     extractor = _Failing()
-    _install("devops.api_issue", extractor)
+    _install("backend.trace_problem", extractor)
     task = await _reported(db)
-    node = prepare_node("devops.api_issue", ApiIssueParams)
+    node = prepare_node("backend.trace_problem", ApiIssueParams)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
     await node.run(DAGState.empty(), DAGDeps(task=await db.task(task.id), db=db))
@@ -700,9 +700,9 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
                 None,
             )
 
-    _install("devops.api_issue", _ReadsTheRoom())
+    _install("backend.trace_problem", _ReadsTheRoom())
     task = await _reported(db, text="@Lee kiểm tra cho e curl sau https://test.apero/health")
-    node = prepare_node("devops.api_issue", ApiIssueParams)
+    node = prepare_node("backend.trace_problem", ApiIssueParams)
 
     outcome = await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
 
@@ -739,9 +739,9 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
             asked.append(await self.would_ask(context))
             return ApiIssueParams(summary="service down"), None
 
-    _install("devops.api_issue", _Watching())
+    _install("backend.trace_problem", _Watching())
     task = await _reported(db)
-    node = prepare_node("devops.api_issue", ApiIssueParams)
+    node = prepare_node("backend.trace_problem", ApiIssueParams)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
     # `[channel`, not "staging": the field schema's own `doc` for
@@ -784,10 +784,10 @@ async def test_prepare_node_truncates_the_build_to_the_configured_budget(db):
             seen.append(context.transcript)
             return ApiIssueParams(summary="checkout 500"), None
 
-    _install("devops.api_issue", _RecordsTheText())
+    _install("backend.trace_problem", _RecordsTheText())
     task = await _reported(db, text="@Lee " + ("API lỗi rồi. " * 40))
     await _said(db, "m2", "correlationId là abcdef01-2345-6789-abcd-ef0123456789", secs=3)
-    node = prepare_node("devops.api_issue", ApiIssueParams, budget_tokens=20)
+    node = prepare_node("backend.trace_problem", ApiIssueParams, budget_tokens=20)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
 
@@ -811,10 +811,10 @@ async def test_an_unconfigured_budget_reaches_prepare_node_as_no_compaction(db):
             seen.append(context.transcript)
             return ApiIssueParams(summary="checkout 500"), None
 
-    _install("devops.api_issue", _RecordsTheText())
+    _install("backend.trace_problem", _RecordsTheText())
     task = await _reported(db, text="@Lee " + ("API lỗi rồi. " * 40))
     await _said(db, "m2", "correlationId là abcdef01-2345-6789-abcd-ef0123456789", secs=3)
-    node = prepare_node("devops.api_issue", ApiIssueParams)
+    node = prepare_node("backend.trace_problem", ApiIssueParams)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
 
@@ -833,10 +833,10 @@ async def test_two_ineffective_compactions_stop_a_third_from_being_attempted(db)
         async def run(self, context, *, task_id=None, node=None):
             return ApiIssueParams(summary="checkout 500"), None
 
-    _install("devops.api_issue", _AlwaysFillsSomething())
+    _install("backend.trace_problem", _AlwaysFillsSomething())
     huge = "@Lee " + ("API lỗi rồi rất là dài. " * 200)
     task = await _reported(db, text=huge)
-    node = prepare_node("devops.api_issue", ApiIssueParams, budget_tokens=5)
+    node = prepare_node("backend.trace_problem", ApiIssueParams, budget_tokens=5)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
     assert await db.compaction_ineffective_count(task.id) == 1
@@ -880,11 +880,11 @@ async def test_node_0_puts_the_artifact_back_rather_than_storing_a_retyping(db):
     )
     task = await make_task(db)
     await db.record_message(event)
-    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
     (artifact,) = await db.artifacts_for_message("fake", "m1")
 
-    _install("devops.api_issue", _CountingExtractor(ApiIssueParams(curl=artifact.id)))
-    node = prepare_node("devops.api_issue", ApiIssueParams)
+    _install("backend.trace_problem", _CountingExtractor(ApiIssueParams(curl=artifact.id)))
+    node = prepare_node("backend.trace_problem", ApiIssueParams)
 
     await node.run(DAGState.empty(), DAGDeps(task=task, db=db))
 

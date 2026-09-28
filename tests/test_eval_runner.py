@@ -26,12 +26,12 @@ CONFIG = AgentConfig(
 
 
 def test_a_decided_outcome_becomes_a_prediction_carrying_its_confidence():
-    example = Example(text="the api is down", expected="devops.api_issue")
+    example = Example(text="the api is down", expected="backend.trace_problem")
 
-    prediction = _to_prediction(example, Decided(type="devops.api_issue", confidence=0.9))
+    prediction = _to_prediction(example, Decided(type="backend.trace_problem", confidence=0.9))
 
     assert prediction == Prediction(
-        expected="devops.api_issue", predicted="devops.api_issue", confidence=0.9
+        expected="backend.trace_problem", predicted="backend.trace_problem", confidence=0.9
     )
 
 
@@ -39,12 +39,12 @@ def test_a_needs_human_outcome_becomes_a_prediction_saying_so():
     """Not a task type it guessed and got wrong — the actual outcome the row
     produced, at zero confidence, matching `TriageRunner._record`'s own
     mapping for the same case."""
-    example = Example(text="???", expected="devops.api_issue")
+    example = Example(text="???", expected="backend.trace_problem")
 
     prediction = _to_prediction(example, NeedsHuman("triage produced no classification"))
 
     assert prediction == Prediction(
-        expected="devops.api_issue", predicted="needs_human", confidence=0.0
+        expected="backend.trace_problem", predicted="needs_human", confidence=0.0
     )
 
 
@@ -55,20 +55,20 @@ async def test_run_scores_every_row_in_the_dataset(db, tmp_path):
     write_jsonl(
         dataset,
         [
-            Example(text="the api is down", expected="devops.api_issue"),
+            Example(text="the api is down", expected="backend.trace_problem"),
             Example(text="anyone want lunch", expected="skip"),
         ],
     )
 
     triage = _scripted_triage(
-        [function_call("answer", {"type": "devops.api_issue", "confidence": 0.9}, call_id="1")],
+        [function_call("answer", {"type": "backend.trace_problem", "confidence": 0.9}, call_id="1")],
         [function_call("answer", {"type": "skip", "confidence": 0.4}, call_id="1")],
     )
 
     predictions = await run(dataset_path=dataset, triage=triage)
 
     assert predictions == [
-        Prediction(expected="devops.api_issue", predicted="devops.api_issue", confidence=0.9),
+        Prediction(expected="backend.trace_problem", predicted="backend.trace_problem", confidence=0.9),
         Prediction(expected="skip", predicted="skip", confidence=0.4),
     ]
 
@@ -77,7 +77,7 @@ def test_report_names_the_dataset_size_and_the_accuracy():
     text = report(
         [
             Prediction(expected="skip", predicted="skip", confidence=0.9),
-            Prediction(expected="devops.api_issue", predicted="skip", confidence=0.5),
+            Prediction(expected="backend.trace_problem", predicted="skip", confidence=0.5),
         ]
     )
 
@@ -100,14 +100,14 @@ def test_report_lays_out_three_or_more_predicted_labels():
     two-argument form a shorter dataset happens to exercise."""
     text = report(
         [
-            Prediction(expected="devops.api_issue", predicted="devops.api_issue", confidence=0.9),
-            Prediction(expected="access_request", predicted="access_request", confidence=0.9),
-            Prediction(expected="doc_question", predicted="doc_question", confidence=0.9),
+            Prediction(expected="backend.trace_problem", predicted="backend.trace_problem", confidence=0.9),
+            Prediction(expected="ops.request_permission", predicted="ops.request_permission", confidence=0.9),
+            Prediction(expected="backend.answer_question", predicted="backend.answer_question", confidence=0.9),
             Prediction(expected="skip", predicted="needs_human", confidence=0.0),
         ]
     )
 
-    for label in ("devops.api_issue", "access_request", "doc_question", "skip", "needs_human"):
+    for label in ("backend.trace_problem", "ops.request_permission", "backend.answer_question", "skip", "needs_human"):
         assert label in text
 
 
@@ -133,7 +133,7 @@ async def test_a_multi_message_row_reaches_triage_as_a_real_turn(tmp_path):
         [
             Example(
                 text="whatever — a turn is given instead",
-                expected="devops.api_issue",
+                expected="backend.trace_problem",
                 turn=(
                     ("api lỗi rồi anh ơi", False),
                     ("correlationId nằm trong x-request-id đó em", True),
@@ -145,7 +145,7 @@ async def test_a_multi_message_row_reaches_triage_as_a_real_turn(tmp_path):
     seen_turns: list = []
 
     answering = ScriptedModel(
-        [[function_call("answer", {"type": "devops.api_issue", "confidence": 0.9})]]
+        [[function_call("answer", {"type": "backend.trace_problem", "confidence": 0.9})]]
     )
 
     class _RecordingTriage(Triage):
@@ -181,7 +181,7 @@ async def test_an_invented_type_is_reported_as_its_own_number(tmp_path):
     from friday.kernel.triage import Triage
 
     dataset = tmp_path / "triage.jsonl"
-    write_jsonl(dataset, [Example(text="the api is 500ing", expected="devops.api_issue")])
+    write_jsonl(dataset, [Example(text="the api is 500ing", expected="backend.trace_problem")])
 
     invented = {"type": "hardware_issue", "confidence": 0.9}
     triage = Triage(
@@ -211,12 +211,12 @@ async def test_a_clean_run_still_reports_the_number_as_zero(tmp_path):
     from friday.kernel.triage import Triage
 
     dataset = tmp_path / "triage.jsonl"
-    write_jsonl(dataset, [Example(text="the api is 500ing", expected="devops.api_issue")])
+    write_jsonl(dataset, [Example(text="the api is 500ing", expected="backend.trace_problem")])
 
     triage = Triage(
         config=CONFIG,
         model=ScriptedModel([
-            [function_call("answer", {"type": "devops.api_issue", "confidence": 0.9}, call_id="1")]
+            [function_call("answer", {"type": "backend.trace_problem", "confidence": 0.9}, call_id="1")]
         ]),
     )
 

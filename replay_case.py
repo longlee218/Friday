@@ -58,11 +58,11 @@ from friday.kernel.plugin_host import TaskTypeAPI
 from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
 from friday.sdk.workflow import DAG, Deps as DAGDeps, NodeRun
-from plugins.devops.config import load_devops_config
-from plugins.devops.graph import DIAGNOSE, build_devops_dag, build_log_sources
-from plugins.devops.graph.deps import ApiIssueDeps
-from plugins.devops.params import ApiIssueParams
-from plugins.devops.sources.logs import LokiSource, SshKubectlSource
+from plugins.backend.config import load_backend_config
+from plugins.backend.graph import DIAGNOSE, build_backend_dag, build_log_sources
+from plugins.backend.graph.deps import ApiIssueDeps
+from plugins.backend.params import ApiIssueParams
+from plugins.backend.sources.logs import LokiSource, SshKubectlSource
 from friday.store.db import Database
 from friday.kernel.dag import adapter
 
@@ -85,16 +85,16 @@ class _WithoutDiagnose:
 
 
 def _replay_dag(config, *, with_model, reports):
-    """The `devops.api_issue` DAG, built through the plugin against a boot
+    """The `backend.trace_problem` DAG, built through the plugin against a boot
     context — the composition root's job, done here for one replayed case. The
     diagnose model is dropped when `with_model` is false by hiding its agent."""
-    devops_cfg = _dc_replace(
-        load_devops_config((config.plugin_blocks or {}).get("devops")),
+    backend_cfg = _dc_replace(
+        load_backend_config((config.plugin_blocks or {}).get("backend")),
         reports_dir=str(reports),
     )
     whole = config if with_model else _WithoutDiagnose(config)
-    api = TaskTypeAPI(caps=BootContext(config=whole, servers={}), config=devops_cfg)
-    return build_devops_dag(api), devops_cfg
+    api = TaskTypeAPI(caps=BootContext(config=whole, servers={}), config=backend_cfg)
+    return build_backend_dag(api), backend_cfg
 
 
 async def _run_on_adapter(
@@ -421,7 +421,7 @@ def case_params(case: dict[str, Any]) -> dict[str, Any]:
     unknown = sorted(set(case) - known - CASE_KEYS)
     if unknown:
         raise ValueError(
-            f"{unknown} is not a parameter of api_issue nor part of a case. "
+            f"{unknown} is not a parameter of trace_problem nor part of a case. "
             f"Parameters: {sorted(known)}. Case: {sorted(CASE_KEYS)}."
         )
     for needed in ("id", "channel_id", "reported_at", "reads"):
@@ -488,7 +488,7 @@ async def run_captured(case: dict, *, with_model: bool, into: Path):
     db = await Database.connect(str(copy_aside(Path(config.database_path), into)))
     try:
         reports = into / "reports"
-        dag, _devops_cfg = _replay_dag(config, with_model=with_model, reports=reports)
+        dag, _backend_cfg = _replay_dag(config, with_model=with_model, reports=reports)
         params = case_params(case)
         name, source = canned_source(case)
         deps = ApiIssueDeps(
@@ -550,12 +550,12 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
         if task is None:
             print(f"no task {task_id}", file=sys.stderr)
             return 1
-        if task.type != "devops.api_issue":
-            print(f"task {task_id} is {task.type}, not devops.api_issue", file=sys.stderr)
+        if task.type != "backend.trace_problem":
+            print(f"task {task_id} is {task.type}, not backend.trace_problem", file=sys.stderr)
             return 1
 
         reports = into / "reports"
-        dag, devops_cfg = _replay_dag(config, with_model=with_model, reports=reports)
+        dag, backend_cfg = _replay_dag(config, with_model=with_model, reports=reports)
         deps = ApiIssueDeps(
             task=SimpleNamespace(
                 id=task.id,
@@ -566,7 +566,7 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
             db=db,
             sender=DEFAULT_SENDER,
             approver=DEFAULT_APPROVER,
-            log_sources=build_log_sources(devops_cfg, {}),
+            log_sources=build_log_sources(backend_cfg, {}),
         )
         final, runs, wall_s = await _run_on_adapter(
             dag,

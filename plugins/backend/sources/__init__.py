@@ -8,12 +8,12 @@ that shells out itself is a node that has to be read to know what it can
 reach.
 
 The layering the spec draws, and the reason this package sits beside the graph
-(`plugins/devops/sources/`) rather than inside it (`plugins/devops/graph/`):
+(`plugins/backend/sources/`) rather than inside it (`plugins/backend/graph/`):
 
 | Layer | What it is | Here |
 | --- | --- | --- |
 | **Source** | a capability, flat and reusable: a primitive that reads one kind of thing | this package |
-| **Check** | a *formula* over primitives — `FindRequestLog` is "the correlationId's lines, then path plus identifier" | `plugins/devops/graph/` |
+| **Check** | a *formula* over primitives — `FindRequestLog` is "the correlationId's lines, then path plus identifier" | `plugins/backend/graph/` |
 | **Node** | the frame a run is checkpointed, timed and retried in | `friday/kernel/dag/` (the shared runner) |
 
 A source is read-only by construction rather than by instruction: there is
@@ -43,9 +43,9 @@ def declared() -> frozenset[str]:
     off the classes rather than listed here: a list beside the classes is a
     list that disagrees with them.
     """
-    from plugins.devops.sources.db import DbSource
-    from plugins.devops.sources.logs import LokiSource
-    from plugins.devops.sources.release import ReleaseSource
+    from plugins.backend.sources.db import DbSource
+    from plugins.backend.sources.logs import LokiSource
+    from plugins.backend.sources.release import ReleaseSource
 
     return frozenset().union(
         *(source.TOOLS for source in (LokiSource, DbSource, ReleaseSource))

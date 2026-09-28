@@ -1,10 +1,10 @@
-"""Every task type, registered — the in-core simple ones here, the rest by plugin.
+"""Every task type, registered — all of them by plugin.
 
 Ticket 11 gave each task type a `TaskTypeSpec` and had `register_all` fill the
-registry at boot; ticket 14 lifted the one real investigation type
-(`devops.api_issue`) out to `plugins/devops/`, and ticket 15 lifted the
-`doc_question` persona out to `plugins/docs/`, leaving only `access_request`
-here. `register_all` registers it and then loads every configured plugin,
+registry at boot; tickets 14 and 15 lifted the investigation type and the
+question persona out to plugins, and build-the-spine ticket 02 moved the last
+in-core type out to `plugins/ops/`, so the kernel registers none of its own
+(`skip` is not a task type). `register_all` loads every configured plugin,
 handing each a `TaskTypeAPI` built from the
 `BootContext` — which is also the **caps** a plugin's graph builder reaches for:
 its `prepare_node` (node 0, so a plugin imports none of the kernel's graph
@@ -18,9 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from friday.kernel.dag import registry
-from friday.kernel.domain.models import AccessRequestParams
 from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
-from friday.sdk.plugin import TaskTypeSpec
 
 __all__ = ["BootContext", "register_all"]
 
@@ -56,7 +54,7 @@ class BootContext:
     def simple_dag(self, name: str, params: type) -> Any:
         """The one-node graph a type with no investigation past node 0 uses —
         prepare, then ask for what is missing or hand over (D1). Exposed here so
-        a *simple* plugin (a second persona like `docs`, its whole graph node 0)
+        a *simple* plugin (`ops.request_permission`, `backend.answer_question`: the whole graph is node 0)
         builds it without importing `friday.kernel.dag.router`, the same way an
         investigation plugin reaches `prepare_node`/`make_harness`. Reads the
         shared `extractor` agent and node-0 budget off the config it carries."""
@@ -101,29 +99,13 @@ class BootContext:
 
 
 def register_all(ctx: BootContext) -> None:
-    """Fill the registry with every task type this build knows: the in-core
-    simple types, then every configured plugin's. Clears first, so a second call
+    """Fill the registry with every task type this build knows — every
+    configured plugin's. Clears first, so a second call
     (a restart in one process, a test) states the same intention rather than
     colliding with the last."""
     from friday.kernel.plugin_host import TaskTypeAPI, configured_plugins
 
     registry.clear()
     registry.SERVERS.update(ctx.servers)
-    _register_simple(ctx, name="access_request", params=AccessRequestParams)
     for plugin, cfg in configured_plugins(ctx.config):
         plugin.register(TaskTypeAPI(caps=ctx, config=cfg))
-
-
-def _register_simple(ctx: BootContext, *, name: str, params: type) -> None:
-    """A type with no investigation past node 0: prepare, then ask for what is
-    missing or hand over (D1). The one-node graph every simple type uses."""
-    from friday.kernel.dag.router import build_simple_dag
-    from friday.kernel.extraction import EXTRACTOR
-
-    dag = build_simple_dag(
-        name,
-        params,
-        budget_tokens=ctx.config.context.extraction_budget_tokens,
-        extractor=ctx.config.agent(EXTRACTOR),
-    )
-    registry.register_task_type(TaskTypeSpec(name=name, params=params), dag=dag)

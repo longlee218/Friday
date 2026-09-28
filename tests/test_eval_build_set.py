@@ -31,13 +31,13 @@ async def _confirmed(db, message_id: str, kind: str, text: str) -> None:
 
 
 async def test_it_writes_confirmed_verdicts_plus_the_seed(db, tmp_path):
-    await _confirmed(db, "m1", "devops.api_issue", "the api is 500ing")
+    await _confirmed(db, "m1", "backend.trace_problem", "the api is 500ing")
     out = tmp_path / "triage.jsonl"
 
     frozen = await build_and_write(db, _config(), out=out)
 
     texts = {row["text"]: row["expected"] for row in _read_jsonl(out)}
-    assert texts["the api is 500ing"] == "devops.api_issue"
+    assert texts["the api is 500ing"] == "backend.trace_problem"
     assert len(frozen) == len(SEED) + 1
 
 

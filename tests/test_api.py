@@ -30,7 +30,7 @@ async def test_one_request_renders_the_whole_page(client, inbox, provider, db):
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
     await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
         confidence=0.9, params={"summary": "checkout 500"},
     )
 
@@ -38,7 +38,7 @@ async def test_one_request_renders_the_whole_page(client, inbox, provider, db):
 
     assert board["status"] == "connected"
     assert board["counts"]["messages"] == 1
-    assert board["tasks_by_state"]["pending"][0]["type"] == "devops.api_issue"
+    assert board["tasks_by_state"]["pending"][0]["type"] == "backend.trace_problem"
     assert board["messages"][0]["text"] == "checkout is 500ing"
     assert board["failed"] == []
 
@@ -80,7 +80,7 @@ async def test_a_credential_does_not_cross_the_wire(client, db):
     """`last_error` is scrubbed on the way in; this is the belt to that
     braces, because task params are model-extracted from a stranger's text."""
     task = await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.NEEDS_HUMAN,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.NEEDS_HUMAN,
         confidence=0.9, params={"summary": "token is sk-abcdefghijklmnopqrstuvwx"},
     )
     row = await db.queue_outbound(
@@ -96,7 +96,7 @@ async def test_a_credential_does_not_cross_the_wire(client, db):
 
 async def test_a_failed_send_carries_its_text_and_its_error(client, db):
     task = await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.NEEDS_HUMAN,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.NEEDS_HUMAN,
         confidence=0.9, params={},
     )
     row = await db.queue_outbound(
@@ -241,7 +241,7 @@ async def test_a_tasks_own_calls_are_reachable(client, db):
     working on it" — an extractor runs on every pass against every message the
     reporter sent, and a responder answers a task."""
     task = await db.create_task(
-        conversation=ConversationId("fake", "watched"), type="devops.api_issue",
+        conversation=ConversationId("fake", "watched"), type="backend.trace_problem",
         state=TaskState.PENDING, confidence=0.9, params={},
     )
     common = dict(model="m", system_prompt="s", output="o",
@@ -371,7 +371,7 @@ async def test_a_messages_whole_path_arrives_in_one_request(client, inbox, provi
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
     task = await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
     await db.record_model_call(
@@ -384,13 +384,13 @@ async def test_a_messages_whole_path_arrives_in_one_request(client, inbox, provi
     )
     await db.mark_triaged(
         make_event(message_id="10"), task.id,
-        decision={"type": "devops.api_issue", "confidence": 0.9, "params": {}},
+        decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}},
     )
 
     flow = client.get("/api/messages/fake/10/flow").json()
 
     assert flow["message"]["text"] == "checkout is 500ing"
-    assert flow["decision"]["type"] == "devops.api_issue"
+    assert flow["decision"]["type"] == "backend.trace_problem"
     assert flow["task"]["id"] == task.id
     assert [c["agent"] for c in flow["model_calls"]] == ["triage"]
     assert [t["tool"] for t in flow["tool_calls"]] == ["memory_search"]
@@ -544,11 +544,11 @@ async def test_each_message_says_which_task_it_belongs_to(client, inbox, provide
     provider.emit(make_event(message_id="12", text="just chatting"))
     await captured(inbox)
     first = await db.create_task(
-        conversation=WATCHED, type="doc_question", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.answer_question", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
     second = await db.create_task(
-        conversation=WATCHED, type="doc_question", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.answer_question", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
     await db.mark_triaged(make_event(message_id="10"), task_id=first.id)
@@ -579,15 +579,15 @@ async def test_a_task_carries_its_opening_message_past_the_boards_window(
         ))
     await captured(inbox)
     old = await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
     new = await db.create_task(
-        conversation=WATCHED, type="doc_question", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.answer_question", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
     bare = await db.create_task(
-        conversation=WATCHED, type="doc_question", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.answer_question", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
     await db.mark_triaged(make_event(message_id="1"), task_id=old.id)

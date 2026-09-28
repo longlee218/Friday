@@ -40,6 +40,11 @@ async def main() -> None:
     from friday.kernel.memory.registry import register_all_memory_kinds
 
     register_all_memory_kinds()
+    # `/api/actions` reads the task-type registry (build-the-spine ticket 02);
+    # fill it from the configuration alone, the same way the agent's boot does.
+    from friday.kernel.dag.router import check_graphs
+
+    check_graphs(config)
     check_exposure(config.board_host)
     db = await Database.connect(config.database_path)
     status = lambda: "not connected (board only)"  # noqa: E731

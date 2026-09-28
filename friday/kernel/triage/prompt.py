@@ -77,12 +77,12 @@ THINKING = [
     "Only then is it skip. Being short, vague or wordless is not a reason to "
     "skip: somebody who tags this desk and says little still wants something.",
     "Are they asking to be let in somewhere — a repository, an environment, a "
-    "dashboard, a channel, a key, a role? That is access_request, even when "
+    "dashboard, a channel, a key, a role? That is ops.request_permission, even when "
     "they phrase it as a problem (\"I cannot open the staging repo\").",
     "Are they asking where something is written down, or what a document or "
-    "spec says, without having run anything? That is doc_question. If they "
+    "spec says, without having run anything? That is backend.answer_question. If they "
     "ran something and it did not do what they expected, it is not.",
-    "Everything else people bring this desk is api_issue: an integration "
+    "Everything else people bring this desk is backend.trace_problem: an integration "
     "failing, a request or response to look at, an error code, a symptom with "
     "no name yet, or a question about what an endpoint is for and how its "
     "rules work.",

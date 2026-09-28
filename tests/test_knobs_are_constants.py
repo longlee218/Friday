@@ -42,13 +42,13 @@ def test_each_agent_declares_its_tier_and_budget():
     from friday.kernel.memory.channel_context import room_summary
     from friday.kernel.responder import RESPONDER
     from friday.kernel.triage import TRIAGE
-    from plugins.devops.graph import DIAGNOSE
+    from plugins.backend.graph import DIAGNOSE
 
     assert TRIAGE == AgentDeclaration("triage", "flash", 0.0, 1, 50_000, 30.0)
     assert RESPONDER == AgentDeclaration("responder", "flash", 0.7, 13, 300_000, 60.0)
     assert EXTRACTOR == AgentDeclaration("extractor", "flash", 0.0, 3, 100_000, 30.0)
     assert DIAGNOSE == AgentDeclaration(
-        "devops.diagnose", "flash", 0.0, 1, 500_000, 60.0
+        "backend.diagnose", "flash", 0.0, 1, 500_000, 60.0
     )
     assert room_summary("flash") == AgentDeclaration(
         "summary", "flash", 0.0, 1, 100_000, 30.0
@@ -129,7 +129,7 @@ def test_the_shipped_config_holds_only_tiers_and_install_facts():
     raw = yaml.safe_load((ROOT / "config.yaml").read_text())
 
     assert set(raw) <= {
-        "database_path", "tiers", "devops", "operator_id", "board_host",
+        "database_path", "tiers", "backend", "operator_id", "board_host",
         "board_port", "board_origins", "repo_root", "backup_dir", "mcp_servers",
         "workflows", "ingest", "context", "sensitive_words", "triage_examples",
     }
@@ -167,7 +167,7 @@ async def test_a_hung_tool_call_is_cut_by_the_per_call_timeout(monkeypatch):
 
 
 async def test_a_hung_ssh_read_is_cut_by_the_per_call_timeout(monkeypatch):
-    import plugins.devops.sources.logs as logs
+    import plugins.backend.sources.logs as logs
 
     monkeypatch.setattr(logs, "TOOL_CALL_TIMEOUT_SECONDS", 0.05)
 

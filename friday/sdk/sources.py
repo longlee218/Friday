@@ -9,7 +9,7 @@ the workflow port name the shape without depending on the reader (DESIGN-v2 §4,
 
 Moved here from `friday/sources/__init__.py` in ticket 14: the ports are what a
 plugin codes against, so they belong in `sdk`; the doors that actually shell out
-move into `plugins/devops/sources/`. A source is read-only by construction —
+move into `plugins/backend/sources/`. A source is read-only by construction —
 there is no verb here that writes — and holds no judgement: which window, which
 identifiers, which service arrive as arguments.
 """
@@ -79,7 +79,7 @@ class Reads:
 @dataclass(frozen=True, slots=True)
 class Placement:
     """Where one case lives — the single type, folded from `Resolve`'s old
-    `Placement` + `project` dict and `plugins.devops.graph.intake`'s own
+    `Placement` + `project` dict and `plugins.backend.graph.intake`'s own
     (ticket 6): every reader wants one place, and a reader that has to
     remember which of two shapes to read is one that one day reads the
     other.

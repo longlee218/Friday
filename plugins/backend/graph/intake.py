@@ -28,15 +28,15 @@ from typing import Any
 
 from friday.sdk.sources import Placement
 from friday.sdk.workflow import DAGState, Node, envelope
-from plugins.devops.graph.deps import ApiIssueDeps
-from plugins.devops.graph.logs import _reported_at
-from plugins.devops.graph.resolve import domain_of, environment_of
-from plugins.devops.memory import DEVOPS_ENVIRONMENT, DEVOPS_PROJECT, DEVOPS_SERVICE
+from plugins.backend.graph.deps import ApiIssueDeps
+from plugins.backend.graph.logs import _reported_at
+from plugins.backend.graph.resolve import domain_of, environment_of
+from plugins.backend.memory import BACKEND_ENVIRONMENT, BACKEND_PROJECT, BACKEND_SERVICE
 
 __all__ = ["Hints", "IntakeContext", "Placement", "intake_node", "intake_of"]
 
 #: Same pattern `ApiIssueParams._RULES["correlation_id"]` validates against
-#: (`plugins/devops/params.py`) — a uuid, unanchored here since it is being
+#: (`plugins/backend/params.py`) — a uuid, unanchored here since it is being
 #: searched for in prose rather than validated as a whole field.
 _UUID = re.compile(
     r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
@@ -123,7 +123,7 @@ def _service_match(text: str, services: list[Any]) -> Any | None:
     the host `api-reelme-v2.dev` and cannot silently resolve the wrong service.
     A name that is a prefix of another (`backend-reelme-v2` vs
     `backend-reelme-v2-mirror`) matches only its own exact token. No alias table
-    exists yet on `devops.service` (`ServiceData` in `plugins/devops/memory.py`),
+    exists yet on `backend.service` (`ServiceData` in `plugins/backend/memory.py`),
     so this matches the canonical `name` only — aliases are ticket-6 work."""
     said = text.lower()
     matched = [
@@ -140,10 +140,10 @@ async def _placement(
     channel_id: str, request_text: str, deps: ApiIssueDeps
 ) -> Placement:
     domain = domain_of(request_text)
-    known_env = await deps.db.structured_memories(channel_id, kind=DEVOPS_ENVIRONMENT)
+    known_env = await deps.db.structured_memories(channel_id, kind=BACKEND_ENVIRONMENT)
     env = environment_of(domain, known_env)
 
-    services = await deps.db.structured_memories(channel_id, kind=DEVOPS_SERVICE)
+    services = await deps.db.structured_memories(channel_id, kind=BACKEND_SERVICE)
     resolved = _service_match(request_text, services)
 
     fields: dict[str, Any] = {"service": ""}
@@ -157,7 +157,7 @@ async def _placement(
             fields["namespace"] = resolved.dev.namespace
             fields["pod_pattern"] = resolved.dev.pod_pattern
         project = await deps.db.structured_memory(
-            channel_id, kind=DEVOPS_PROJECT, key=resolved.project
+            channel_id, kind=BACKEND_PROJECT, key=resolved.project
         )
         if project is not None:
             fields["clone_path"] = project.repo_path or ""

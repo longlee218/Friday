@@ -28,13 +28,11 @@ ROOT = Path(__file__).resolve().parent.parent
 #: not carry.
 CORE_KINDS = {"fact", "constraint", "decision", "voice", "summary", "finding", "person", "skill"}
 
-#: The in-core task types — registered by the kernel itself (`kernel/dag/
-#: task_types.py`'s `register_all`), not shipped by a plugin. `access_request` is
-#: the one simple type the kernel owns, so its name legitimately appears in the
-#: kernel; only a *plugin's* task type is a literal the kernel must not carry.
-#: The parallel of `CORE_KINDS` for task types, and it keeps the guard
-#: non-vacuous — `devops.api_issue`/`docs.doc_question` stay forbidden.
-CORE_TASK_TYPES = {"access_request"}
+#: The in-core task types — none since build-the-spine ticket 02 moved the last
+#: one (`ops.request_permission`) out to `plugins/ops/`; `skip` is not a task
+#: type. Every registered task type is a plugin's, so every one is a literal the
+#: kernel must not carry. The parallel of `CORE_KINDS` for task types.
+CORE_TASK_TYPES: set[str] = set()
 
 
 def _forbidden_literals() -> set[str]:
@@ -132,12 +130,12 @@ def test_kernel_imports_only_sdk():
 def test_a_plugin_imports_sdk_only():
     """A plugin codes against `sdk` and nothing else *of ours* — the reason it is
     detachable. Its own package is not "ours": a plugin freely imports its own
-    submodules (`plugins.devops.graph.resolve` from `plugins.devops.graph`). What
+    submodules (`plugins.backend.graph.resolve` from `plugins.backend.graph`). What
     it may not reach for is the core (anything `friday.*` but `friday.sdk`) or
-    another plugin. Non-vacuous since ticket 14 landed `plugins/devops/`."""
+    another plugin. Non-vacuous since ticket 14 landed `plugins/devops/` (now `plugins/backend/`)."""
     offenders = set()
     for rel, tree in _modules(ROOT / "plugins"):
-        parts = Path(rel).parts  # ("plugins", "devops", …)
+        parts = Path(rel).parts  # ("plugins", "backend", …)
         own = ".".join(parts[:2]) if len(parts) >= 2 else "plugins"
         for mod in _friday_imports(rel, tree):
             if not _under(mod, "friday.sdk", own):

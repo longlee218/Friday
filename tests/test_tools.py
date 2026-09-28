@@ -69,8 +69,8 @@ def _factories() -> dict[str, object]:
     from friday.kernel.tools.fetch_skill import fetch_skill_tool
     from friday.kernel.tools.memory import memory_tools
     from friday.sdk.sources import Placement
-    from plugins.devops.config import DEFAULT_CONTAINER_ROOTS
-    from plugins.devops.investigate import Evidence, investigate_tools
+    from plugins.backend.config import DEFAULT_CONTAINER_ROOTS
+    from plugins.backend.investigate import Evidence, investigate_tools
     from friday.kernel.tools.read_skill_file import read_skill_file_tool
     from friday.kernel.tools.search_skills import search_skills_tool
 
@@ -313,7 +313,7 @@ def test_the_answer_is_a_run_s_output_not_a_door_an_agent_chooses():
     )
 
     from friday.kernel.harness.harness import ANSWER, _answer_params
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
 
     assert ANSWER not in _tool_objects(), (
         "the answer is a run's output, not one of the doors an agent chooses"
@@ -357,7 +357,7 @@ def test_the_field_names_an_extractor_may_ask_about_are_a_closed_set():
     """
     from friday.kernel.harness.harness import _answer_params
     from friday.kernel.domain.models import askable_fields
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.answer import answer_shape
 
     asked = _answer_params(answer_shape(ApiIssueParams))["properties"]["ask_about"]

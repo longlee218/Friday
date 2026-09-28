@@ -8,7 +8,7 @@ becomes a call to `api.task_type(...)` / `api.memory_kind(...)`, so adding one i
 adding a plugin, not editing the core.
 
 Ticket 10 defined these types and a kernel that holds them; ticket 14 moved the
-first real task type (`devops.api_issue`) and its pack kinds onto this API. The
+first real task type (`backend.trace_problem`) and its pack kinds onto this API. The
 `PluginAPI` surface is what a plugin needs today — `task_type`, `memory_kind`,
 `reader`, plus the boot `caps` a graph builder reaches for. The DESIGN-v2 §4.2
 methods `toolset`/`skills`/`source`/`check` arrive each with its own ticket and

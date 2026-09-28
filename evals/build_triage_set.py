@@ -53,18 +53,18 @@ OUT = Path(__file__).parent / "triage.jsonl"
 #: `CLAUDE.md` cites "token hết hạn rồi" as an ordinary bug report for the
 #: same reason.
 SEED: list[tuple[str, str] | tuple[str, str, tuple]] = [
-    ("the checkout api keeps returning 500 on prod, anyone seen this", "devops.api_issue"),
-    ("getting a 403 from /v2/orders since this morning, did something change", "devops.api_issue"),
-    ("api trả về lỗi 502 liên tục từ tối qua, có ai check giúp không", "devops.api_issue"),
-    ("token hết hạn rồi, gọi api báo unauthorized", "devops.api_issue"),
-    ("can I get write access to the payments repo", "access_request"),
-    ("need read access to the analytics dashboard for the new hire", "access_request"),
-    ("xin quyền truy cập vào kho staging cho dự án mới", "access_request"),
-    ("could you add me to the #incidents channel", "access_request"),
-    ("where's the spec for the refund flow", "docs.doc_question"),
-    ("do we have docs on how retries are configured for the outbox", "docs.doc_question"),
-    ("tài liệu về luồng duyệt task ở đâu vậy", "docs.doc_question"),
-    ("is there a runbook for rotating the discord token", "docs.doc_question"),
+    ("the checkout api keeps returning 500 on prod, anyone seen this", "backend.trace_problem"),
+    ("getting a 403 from /v2/orders since this morning, did something change", "backend.trace_problem"),
+    ("api trả về lỗi 502 liên tục từ tối qua, có ai check giúp không", "backend.trace_problem"),
+    ("token hết hạn rồi, gọi api báo unauthorized", "backend.trace_problem"),
+    ("can I get write access to the payments repo", "ops.request_permission"),
+    ("need read access to the analytics dashboard for the new hire", "ops.request_permission"),
+    ("xin quyền truy cập vào kho staging cho dự án mới", "ops.request_permission"),
+    ("could you add me to the #incidents channel", "ops.request_permission"),
+    ("where's the spec for the refund flow", "backend.answer_question"),
+    ("do we have docs on how retries are configured for the outbox", "backend.answer_question"),
+    ("tài liệu về luồng duyệt task ở đâu vậy", "backend.answer_question"),
+    ("is there a runbook for rotating the discord token", "backend.answer_question"),
     ("anyone want lunch", "skip"),
     ("happy friday everyone", "skip"),
     ("lol nice one", "skip"),
@@ -79,7 +79,7 @@ SEED: list[tuple[str, str] | tuple[str, str, tuple]] = [
     # once rendered — the line-forgery defence `conversation()` builds.
     (
         "api lỗi rồi, đây là 3 tin nhắn liên tiếp",
-        "devops.api_issue",
+        "backend.trace_problem",
         (
             ("api lỗi rồi anh ơi", False),
             ("curl -X GET /v2/orders trả về 500", False),
@@ -99,7 +99,7 @@ SEED: list[tuple[str, str] | tuple[str, str, tuple]] = [
     # measure.
     (
         "kiểm tra api hộ em với, mọi tin đều là is_own",
-        "devops.api_issue",
+        "backend.trace_problem",
         (
             ("a ơi kiểm tra api hộ em với", True),
             ("Hi a, em là Nhím, e đang ghép API của a nhưng đang bị lỗi", True),
@@ -127,40 +127,40 @@ SEED: list[tuple[str, str] | tuple[str, str, tuple]] = [
     # without the evidence. Left that way deliberately until the real `curl`
     # bodies can be pasted in, because inventing one would be putting traffic
     # in a reporter's mouth to make a number look better.
-    ("e đang gen template mà toàn bị failed, a check giúp e với", "devops.api_issue"),
-    ("lỗi này là sao a nhỉ", "devops.api_issue"),
-    ("a ơi check e với model inhouse có vấn đề ạ", "devops.api_issue"),
-    ("request success mà trên app báo fail ạ", "devops.api_issue"),
-    ("e check api content pack chưa thấy có countdown thời gian a ạ", "devops.api_issue"),
-    ("có vấn đề như sau", "devops.api_issue"),
-    ("a ơi service qwen bị limit á a", "devops.api_issue"),
-    ("a check hộ e cái này là sao nhỉ", "devops.api_issue"),
+    ("e đang gen template mà toàn bị failed, a check giúp e với", "backend.trace_problem"),
+    ("lỗi này là sao a nhỉ", "backend.trace_problem"),
+    ("a ơi check e với model inhouse có vấn đề ạ", "backend.trace_problem"),
+    ("request success mà trên app báo fail ạ", "backend.trace_problem"),
+    ("e check api content pack chưa thấy có countdown thời gian a ạ", "backend.trace_problem"),
+    ("có vấn đề như sau", "backend.trace_problem"),
+    ("a ơi service qwen bị limit á a", "backend.trace_problem"),
+    ("a check hộ e cái này là sao nhỉ", "backend.trace_problem"),
     (
         "SOS, check giúp a Về lỗi 400 Aspect ratio for file ... is invalid "
         "khi tạo đơn Printful (cốc + áo)",
-        "devops.api_issue",
+        "backend.trace_problem",
     ),
     (
         "em init order bằng ảnh user tự up, không phải bằng runId thì bị lỗi "
         "như này",
-        "devops.api_issue",
+        "backend.trace_problem",
     ),
-    ("a ơi check gấp cho e tại sao node asset fail với ạ", "devops.api_issue"),
-    ("a check hộ e cái này với", "devops.api_issue"),
-    ("api catalog bị rỗng a ơi", "devops.api_issue"),
+    ("a ơi check gấp cho e tại sao node asset fail với ạ", "backend.trace_problem"),
+    ("a check hộ e cái này với", "backend.trace_problem"),
+    ("api catalog bị rỗng a ơi", "backend.trace_problem"),
     (
         "nguyên nhân thật - bẫy region interfence của API v2: GET "
         "/v2/catalog-vartians/{id}/avaibility mà không truyền "
         "selling_region_name thì Printful tự suy region theo nơi gọi request",
-        "devops.api_issue",
+        "backend.trace_problem",
     ),
-    ("hình như có bug khác a ơi", "devops.api_issue"),
+    ("hình như có bug khác a ơi", "backend.trace_problem"),
     (
         "e đang gọi animate image thấy log thế này cho một số template thì là "
         "chưa có workflow hả a",
-        "devops.api_issue",
+        "backend.trace_problem",
     ),
-    ("cứu th em", "devops.api_issue"),
+    ("cứu th em", "backend.trace_problem"),
 ]
 
 

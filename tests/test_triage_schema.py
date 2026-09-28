@@ -14,29 +14,29 @@ from typing import Literal, get_args, get_type_hints
 import pytest
 
 from friday.kernel.domain.triage import Decided, make_decided
-from friday.kernel.domain.models import AccessRequestParams
-from plugins.docs.params import DocQuestionParams
-from plugins.devops.params import ApiIssueParams
+from plugins.ops.params import AccessRequestParams
+from plugins.backend.answer_question import DocQuestionParams
+from plugins.backend.params import ApiIssueParams
 
 CATALOG = {
-    "devops.api_issue": ApiIssueParams,
-    "access_request": AccessRequestParams,
-    "docs.doc_question": DocQuestionParams,
+    "backend.trace_problem": ApiIssueParams,
+    "ops.request_permission": AccessRequestParams,
+    "backend.answer_question": DocQuestionParams,
 }
 
 
 def test_decided_is_a_plain_value_type():
     """The value type carries a bare string — no static Literal, so it needs no
     task-type catalog at import."""
-    d = Decided(type="devops.api_issue", confidence=0.9)
-    assert d.type == "devops.api_issue" and d.confidence == 0.9
+    d = Decided(type="backend.trace_problem", confidence=0.9)
+    assert d.type == "backend.trace_problem" and d.confidence == 0.9
     assert get_type_hints(Decided)["type"] is str
 
 
 def test_make_decided_closes_the_type_to_the_registry_plus_skip():
     cls = make_decided(CATALOG)
     allowed = set(get_args(get_type_hints(cls)["type"]))
-    assert allowed == {"devops.api_issue", "access_request", "docs.doc_question", "skip"}
+    assert allowed == {"backend.trace_problem", "ops.request_permission", "backend.answer_question", "skip"}
 
 
 def test_make_decided_carries_each_types_own_description():

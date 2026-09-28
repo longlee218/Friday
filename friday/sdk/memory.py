@@ -45,7 +45,7 @@ Origin = MemoryOrigin
 class MemoryKindSpec:
     """One memory kind, as its plugin declares it.
 
-    `name` is the kind's id (`fact` for a core kind, `devops.service` for a pack
+    `name` is the kind's id (`fact` for a core kind, `backend.service` for a pack
     kind). `data` is the structured payload's type, validated with `fits` on
     write, or `None` for prose. `writers` are the origins allowed to write it —
     a model-origin call may not write a kind reserved for the operator.
@@ -57,7 +57,7 @@ class MemoryKindSpec:
     `key` derives a structured kind's natural key from its `(data, given)` — the
     one row a `one-per-key` kind holds. It moved onto the spec in ticket 14 so a
     plugin ships its kinds' key derivation with the plugin, rather than the
-    kernel carrying a per-kind branch that names `devops.service` (DESIGN-v2 §9.2,
+    kernel carrying a per-kind branch that names `backend.service` (DESIGN-v2 §9.2,
     the trigger the memory registry anticipated). `None` for a prose kind, or a
     kind whose row carries no natural key.
     """

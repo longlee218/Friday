@@ -6,6 +6,7 @@
 // that can call the real converters.
 
 import type {
+  Action,
   Board,
   Directories,
   Flow,
@@ -58,6 +59,7 @@ export const api = {
   monitor: () => get<MonitorSnapshot>("/api/monitor"),
   workflows: () => get<Workflow[]>("/api/workflows"),
   spend: () => get<Spend>("/api/spend"),
+  actions: () => get<Action[]>("/api/actions"),
   taskCalls: (id: number) => get<TaskCalls>(`/api/tasks/${id}/calls`),
   conversations: () => get<Room[]>("/api/conversations"),
   messagesIn: (limit = 200) => get<Board["messages"]>(`/api/messages?limit=${limit}`),

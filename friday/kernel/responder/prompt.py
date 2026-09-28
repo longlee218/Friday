@@ -175,7 +175,7 @@ explanation of what went wrong.
 Never translated:
 
 - field names and enum values — `environment` stays `production` / `staging` /
-  `dev`, a task type stays `api_issue`, never `sự_cố_api`
+  `dev`, a task type stays `trace_problem`, never `truy_vết_lỗi`
 - identifiers — correlation ids, request ids, repository and project names
 - code, log lines, stack traces, file paths, diffs, curl commands
 

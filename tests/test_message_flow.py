@@ -102,13 +102,13 @@ async def test_a_path_reaches_through_the_task_to_what_it_reached_for(db):
     event = await _seen(db)
     task = await db.create_task(
         conversation=event.conversation,
-        type="devops.api_issue",
+        type="backend.trace_problem",
         state=TaskState.PENDING,
         confidence=0.9,
         params={},
     )
     await db.mark_triaged(
-        event, task.id, decision={"type": "devops.api_issue", "confidence": 0.9, "params": {}}
+        event, task.id, decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}}
     )
     await db.record_model_call(
         message_id=None,
@@ -143,13 +143,13 @@ async def test_a_path_ends_at_what_was_sent(db):
     event = await _seen(db)
     task = await db.create_task(
         conversation=event.conversation,
-        type="devops.api_issue",
+        type="backend.trace_problem",
         state=TaskState.PENDING,
         confidence=0.9,
         params={},
     )
     await db.mark_triaged(
-        event, task.id, decision={"type": "devops.api_issue", "confidence": 0.9, "params": {}}
+        event, task.id, decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}}
     )
     await db.queue_outbound(
         task_id=task.id,
@@ -195,13 +195,13 @@ async def test_calls_from_before_and_after_the_task_read_as_one_sequence(db):
     )
     task = await db.create_task(
         conversation=event.conversation,
-        type="devops.api_issue",
+        type="backend.trace_problem",
         state=TaskState.PENDING,
         confidence=0.9,
         params={},
     )
     await db.mark_triaged(
-        event, task.id, decision={"type": "devops.api_issue", "confidence": 0.9, "params": {}}
+        event, task.id, decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}}
     )
     await db.record_model_call(
         message_id=None,
@@ -227,7 +227,7 @@ async def test_another_conversations_work_is_not_in_this_path(db):
     event = await _seen(db)
     other = await db.create_task(
         conversation=ConversationId.parse("fake:elsewhere"),
-        type="devops.api_issue",
+        type="backend.trace_problem",
         state=TaskState.PENDING,
         confidence=0.9,
         params={},
@@ -267,13 +267,13 @@ async def test_a_call_naming_both_a_message_and_its_task_is_listed_once(db):
     event = await _seen(db)
     task = await db.create_task(
         conversation=event.conversation,
-        type="devops.api_issue",
+        type="backend.trace_problem",
         state=TaskState.PENDING,
         confidence=0.9,
         params={},
     )
     await db.mark_triaged(
-        event, task.id, decision={"type": "devops.api_issue", "confidence": 0.9, "params": {}}
+        event, task.id, decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}}
     )
     await db.record_model_call(
         message_id="m1",

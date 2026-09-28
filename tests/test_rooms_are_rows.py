@@ -163,7 +163,7 @@ async def test_the_extractor_reads_operator_rows_here_and_everywhere_labelled(db
     labelled by provenance — `origin` now, where it was a layer's name."""
     from friday.kernel.extraction.context import build_full_context
     from friday.kernel.extraction.prompt import build_input
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
 
     await _operator_wrote(db, "watched", "test.apero is\nthe staging host")
     await _operator_wrote(db, "*", "the company is apero", kind="constraint")
@@ -195,7 +195,7 @@ async def test_the_extractor_reads_operator_rows_here_and_everywhere_labelled(db
 async def test_a_room_with_no_rows_leaves_the_extractors_prompt_as_it_was(db):
     from friday.kernel.extraction.context import FullContext, build_full_context
     from friday.kernel.extraction.prompt import build_input
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
 
     gathered = await build_full_context(
         db, channel_id="watched", task_id=None, known=ApiIssueParams(),

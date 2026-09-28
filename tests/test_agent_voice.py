@@ -39,7 +39,7 @@ def _every_node_built():
     from types import SimpleNamespace
 
     from friday.kernel.config import AgentConfig
-    from plugins.devops.graph.graph import NODES, build_agents
+    from plugins.backend.graph.graph import NODES, build_agents
 
     config = SimpleNamespace(
         agents={

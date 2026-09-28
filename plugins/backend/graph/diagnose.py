@@ -1,7 +1,7 @@
 """Node 4: say what caused it, and say what was not checked.
 
 **The reads loop is the only diagnose mode** (ticket 05): the model fetches
-its own evidence through `plugins.devops.investigate`'s tools rather than
+its own evidence through `plugins.backend.investigate`'s tools rather than
 being handed a fixed dossier. The two fixed pre-fetch nodes that used to
 build one — `FindRequestLog`, `ReadFailingCode` — are gone; `_reading` below
 is what is left.
@@ -26,7 +26,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from plugins.devops.graph.deps import ApiIssueDeps
+from plugins.backend.graph.deps import ApiIssueDeps
 from friday.sdk.tools import tool
 from friday.sdk.workflow import Ask, DAGState, HandOver, Node, envelope
 
@@ -290,10 +290,10 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
     checked against what this run was actually shown rather than against a
     dossier built in advance.
     """
-    from plugins.devops.graph.intake import intake_of
-    from plugins.devops.graph.logs import _reported_at
-    from plugins.devops.graph.prompt import build_reads_input
-    from plugins.devops.investigate import Evidence, investigate_tools
+    from plugins.backend.graph.intake import intake_of
+    from plugins.backend.graph.logs import _reported_at
+    from plugins.backend.graph.prompt import build_reads_input
+    from plugins.backend.investigate import Evidence, investigate_tools
 
     ctx = intake_of(state["intake"])
     placement = ctx.placement

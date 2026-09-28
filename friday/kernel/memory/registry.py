@@ -2,7 +2,7 @@
 
 Ticket 12 folded the hardcoded memory-kind maps and the `MemoryKind` enum into a
 `MemoryKindSpec` registry; ticket 14 moved the structured *pack* kinds
-(`devops.*`) out to the devops plugin, leaving the **core** kinds here — the ones
+(`backend.*`) out to the backend plugin, leaving the **core** kinds here — the ones
 every install has. A kind registers itself (a `MemoryKindSpec` handed to
 `register_memory_kind` at boot), and the store, the board and the injection path
 read the registry instead of a table beside the kind.
@@ -41,7 +41,7 @@ from friday.sdk.memory import MemoryKindSpec, Origin
 # ── core kind names ───────────────────────────────────────────────────────────
 # Readable aliases for the kind strings; the registry (not this list) is the
 # authority for what is valid. Core kinds stay unprefixed (every install has
-# them); the structured pack kinds are the devops plugin's (`devops.service` …).
+# them); the structured pack kinds are the backend plugin's (`backend.service` …).
 FACT = "fact"
 CONSTRAINT = "constraint"
 DECISION = "decision"
@@ -226,7 +226,7 @@ def _skill_key(_data: dict | None, given: str | None) -> str:
 def register_all_memory_kinds(config: Any = None) -> None:
     """Register the core kinds and reader routing, then every configured
     plugin's pack kinds. `config` is the application `Config` whose `plugins`
-    list says which to load; `None` loads the default set (`plugins.devops`) with
+    list says which to load; `None` loads the default set (`plugins.backend`) with
     default config, so a script or a test that only needs the kinds registered
     calls this with no argument. Idempotent via `clear` first."""
     clear()
@@ -248,8 +248,8 @@ def register_all_memory_kinds(config: Any = None) -> None:
     ):
         register_memory_kind(spec)
 
-    # Readers name their kinds (the transpose of the old `_READERS`). `devops.
-    # diagnose` and the devops kinds under `code` are the plugin's; it declares
+    # Readers name their kinds (the transpose of the old `_READERS`). `backend.
+    # diagnose` and the backend kinds under `code` are the plugin's; it declares
     # them through `register_reader`, which merges.
     register_reader("extractor", frozenset({FACT, CONSTRAINT, DECISION, FINDING}))
     register_reader("responder", frozenset({VOICE, SUMMARY}))
@@ -259,7 +259,7 @@ def register_all_memory_kinds(config: Any = None) -> None:
     from friday.kernel.plugin_host import MemoryKindAPI, configured_plugins
 
     class _DefaultConfig:
-        plugins = ("plugins.devops",)
+        plugins = ("plugins.backend",)
         plugin_blocks: dict = {}
 
     for plugin, cfg in configured_plugins(config if config is not None else _DefaultConfig()):

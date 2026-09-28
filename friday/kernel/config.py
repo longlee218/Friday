@@ -177,9 +177,9 @@ class Config:
     #: The plugins this build loads, by import path (`friday.kernel.plugin_host` reads
     #: each package's `PLUGIN`). A plugin owns its own config block, validated
     #: against its own schema — the core no longer names any of them.
-    plugins: tuple[str, ...] = ("plugins.devops", "plugins.docs")
+    plugins: tuple[str, ...] = ("plugins.backend", "plugins.ops")
     #: The raw config mapping, so `friday.kernel.plugin_host` can read a plugin's own
-    #: block by its id (`plugin_blocks["devops"]`) and hand it to the plugin's
+    #: block by its id (`plugin_blocks["backend"]`) and hand it to the plugin's
     #: validator. Kept raw because the core does not know a plugin's schema.
     plugin_blocks: Mapping[str, Any] = field(default_factory=dict)
     #: Classifications the operator wrote by hand, as `(message, task type)`.
@@ -303,7 +303,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
         board_origins=tuple(raw.get("board_origins") or ()),
         repo_root=str(raw.get("repo_root") or ""),
         backup_dir=str(raw.get("backup_dir") or "data/backups"),
-        plugins=tuple(raw.get("plugins") or ("plugins.devops", "plugins.docs")),
+        plugins=tuple(raw.get("plugins") or ("plugins.backend", "plugins.ops")),
         # Raw, so `friday.kernel.plugin_host` can read each plugin's own block by id
         # and validate it against the plugin's own schema — the core does not
         # know a plugin's config shape.
@@ -528,8 +528,8 @@ def _triage_examples(raw) -> tuple[tuple[str, str], ...]:
     rather than as configuration:
 
         triage_examples:
-          - "the checkout api is 500ing": devops.api_issue
-          - "can I get access to the payments repo": access_request
+          - "the checkout api is 500ing": backend.trace_problem
+          - "can I get access to the payments repo": ops.request_permission
 
     A malformed entry is refused rather than skipped. An example the operator
     believes they wrote, and which silently is not there, is worse than a

@@ -86,13 +86,13 @@ async def test_a_finished_node_publishes_a_workflow_event(db):
     try:
         queue, _ = await events_module.get_bus().subscribe()
         await db.record_node_run(
-            task_id=7, dag_name="devops.api_issue", node="resolve",
+            task_id=7, dag_name="backend.trace_problem", node="resolve",
             attempt=1, status="ok", reason="", duration_ms=12,
         )
         event = await asyncio.wait_for(queue.get(), 1.0)
         assert event.type == "workflow"
         assert event.payload == {
-            "task_id": 7, "dag_name": "devops.api_issue",
+            "task_id": 7, "dag_name": "backend.trace_problem",
             "node": "resolve", "status": "ok", "attempt": 1,
         }
     finally:

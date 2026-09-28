@@ -1,11 +1,11 @@
-"""The devops pack kinds — the rows this plugin's graph reads to route a report.
+"""The backend pack kinds — the rows this plugin's graph reads to route a report.
 
 Moved out of the core models (now `friday.kernel.domain.models`) + `friday.kernel.memory.registry` in ticket 14: a
-pack kind ships with the plugin that reads it, namespaced `devops.*`, and it
+pack kind ships with the plugin that reads it, namespaced `backend.*`, and it
 carries its own schema, its natural-key derivation (`MemoryKindSpec.key`) and its
 reader routing here rather than in a per-kind branch the kernel would have to
 carry. `person` and `finding` stay core (every install has them); the five
-structured devops kinds are these.
+structured backend kinds are these.
 
 `data` is checked against the schema with `friday.kernel.harness.structured.fits` at the
 one write path; every field a spec line marks optional (`?`) has a default.
@@ -19,13 +19,13 @@ from typing import Literal
 from friday.sdk import MemoryKindSpec, Origin
 
 __all__ = [
-    "DEVOPS_DEPENDENCY",
-    "DEVOPS_ENVIRONMENT",
-    "DEVOPS_KINDS",
-    "DEVOPS_MEMORY_KINDS",
-    "DEVOPS_PROJECT",
-    "DEVOPS_ROUTE",
-    "DEVOPS_SERVICE",
+    "BACKEND_DEPENDENCY",
+    "BACKEND_ENVIRONMENT",
+    "BACKEND_KINDS",
+    "BACKEND_MEMORY_KINDS",
+    "BACKEND_PROJECT",
+    "BACKEND_ROUTE",
+    "BACKEND_SERVICE",
     "DEPENDENCY_READERS",
     "DbCheck",
     "DependencyData",
@@ -38,16 +38,16 @@ __all__ = [
 ]
 
 # ── kind names ───────────────────────────────────────────────────────────────
-DEVOPS_PROJECT = "devops.project"
-DEVOPS_SERVICE = "devops.service"
-DEVOPS_ROUTE = "devops.route"
-DEVOPS_ENVIRONMENT = "devops.environment"
-DEVOPS_DEPENDENCY = "devops.dependency"
+BACKEND_PROJECT = "backend.project"
+BACKEND_SERVICE = "backend.service"
+BACKEND_ROUTE = "backend.route"
+BACKEND_ENVIRONMENT = "backend.environment"
+BACKEND_DEPENDENCY = "backend.dependency"
 
-#: Every devops pack kind, in one set — for the boot check and the
-#: dependency-rule test's "pack kinds are `devops.*`" expectation.
-DEVOPS_KINDS = frozenset(
-    {DEVOPS_PROJECT, DEVOPS_SERVICE, DEVOPS_ROUTE, DEVOPS_ENVIRONMENT, DEVOPS_DEPENDENCY}
+#: Every backend pack kind, in one set — for the boot check and the
+#: dependency-rule test's "pack kinds are `backend.*`" expectation.
+BACKEND_KINDS = frozenset(
+    {BACKEND_PROJECT, BACKEND_SERVICE, BACKEND_ROUTE, BACKEND_ENVIRONMENT, BACKEND_DEPENDENCY}
 )
 
 
@@ -83,10 +83,10 @@ class DevPlacement:
 class ServiceData:
     name: str
     #: **`names` is a foreign key, declared where the field is.** The store
-    #: matches this against a `devops.project` row's own key by string
+    #: matches this against a `backend.project` row's own key by string
     #: equality. Declared here so the form offers the rows that exist and a
     #: later check can refuse one that does not, from one statement.
-    project: str = field(metadata={"names": DEVOPS_PROJECT})
+    project: str = field(metadata={"names": BACKEND_PROJECT})
     prod: ProdPlacement
     dev: DevPlacement
 
@@ -106,14 +106,14 @@ class EnvironmentData:
 
 @dataclass(frozen=True, slots=True)
 class RouteData:
-    #: The exact host. `devops.environment` answers "ours, and which" for a
+    #: The exact host. `backend.environment` answers "ours, and which" for a
     #: family of hosts; this answers "which service" for one. `env` is carried
     #: here too, and the redundancy is deliberate: `Resolve` refuses when the
     #: two rows disagree rather than picking.
     domain: str
     env: Literal["dev", "production"]
     #: The same foreign key as `ServiceData.project`, and the same reason.
-    service: str = field(metadata={"names": DEVOPS_SERVICE})
+    service: str = field(metadata={"names": BACKEND_SERVICE})
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,36 +147,36 @@ def _dependency_key(data, _given):
     return f"{d.get('from_service')}->{d.get('to_service')}"
 
 
-DEVOPS_MEMORY_KINDS = (
+BACKEND_MEMORY_KINDS = (
     MemoryKindSpec(
-        name=DEVOPS_PROJECT, data=ProjectData, writers=_ADMIN,
+        name=BACKEND_PROJECT, data=ProjectData, writers=_ADMIN,
         cardinality="one-per-key", injected=False, key=_by("name"),
     ),
     MemoryKindSpec(
-        name=DEVOPS_SERVICE, data=ServiceData, writers=_ADMIN,
+        name=BACKEND_SERVICE, data=ServiceData, writers=_ADMIN,
         cardinality="one-per-key", injected=False, key=_by("name"),
     ),
     MemoryKindSpec(
-        name=DEVOPS_ROUTE, data=RouteData, writers=_ADMIN,
+        name=BACKEND_ROUTE, data=RouteData, writers=_ADMIN,
         cardinality="one-per-key", injected=False, key=_by("domain"),
     ),
     MemoryKindSpec(
-        name=DEVOPS_ENVIRONMENT, data=EnvironmentData, writers=_ADMIN,
+        name=BACKEND_ENVIRONMENT, data=EnvironmentData, writers=_ADMIN,
         cardinality="one-per-key", injected=False, key=_by("suffix"),
     ),
     MemoryKindSpec(
-        name=DEVOPS_DEPENDENCY, data=DependencyData, writers=_ADMIN,
+        name=BACKEND_DEPENDENCY, data=DependencyData, writers=_ADMIN,
         cardinality="one-per-key", injected=False, key=_dependency_key,
     ),
 )
 
-#: The reader routing this plugin adds: `code` reads every devops kind (a
-#: tool call is parameterised by them), and the `devops.diagnose` agent reads
+#: The reader routing this plugin adds: `code` reads every backend kind (a
+#: tool call is parameterised by them), and the `backend.diagnose` agent reads
 #: the core prose kinds plus `skill`. Merged with the core routing at boot, so
-#: a devops kind names its readers without the kernel naming a devops kind.
+#: a backend kind names its readers without the kernel naming a backend kind.
 DEPENDENCY_READERS = {
-    "code": DEVOPS_KINDS,
-    "devops.diagnose": frozenset(
+    "code": BACKEND_KINDS,
+    "backend.diagnose": frozenset(
         {"fact", "constraint", "decision", "finding", "skill"}
     ),
 }

@@ -63,7 +63,7 @@ async def test_counts_do_not_require_loading_the_rows(inbox, provider, db):
     provider.emit(make_event(message_id="1"))
     await captured(inbox)
     await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
 
@@ -79,7 +79,7 @@ async def test_a_provider_error_is_scrubbed_before_it_is_stored(db):
     """The one path by which a provider exception reaches the database, and
     `friday/redact.py` was written claiming to cover it."""
     task = await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
     row = await db.queue_outbound(

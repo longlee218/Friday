@@ -150,12 +150,12 @@ async def test_the_current_tasks_own_build_still_sees_the_curl_whole(db):
     the person who will run it exactly as typed (the ticket's own words)."""
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="devops.api_issue", state="pending",
+        conversation=conversation, type="backend.trace_problem", state="pending",
         confidence=0.9, params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
-    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
 
     said = await db.original_text_for(task.id)
 
@@ -180,12 +180,12 @@ async def test_every_other_reader_of_text_is_unaffected(db):
 async def test_a_correlation_id_reaches_the_extractor_character_for_character(db):
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="devops.api_issue", state="pending",
+        conversation=conversation, type="backend.trace_problem", state="pending",
         confidence=0.9, params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
-    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
 
     said = await db.original_text_for(task.id)
 
@@ -199,19 +199,19 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
     instance, the same seam `tests/test_extraction.py` drives its own
     end-to-end tests through."""
     from conftest import ScriptedHarness
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction import build_extractor
     from friday.kernel.extraction.answer import answer_shape
     from tests.test_extraction import _context
 
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="devops.api_issue", state="pending",
+        conversation=conversation, type="backend.trace_problem", state="pending",
         confidence=0.9, params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
-    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
     text = await db.original_text_for(task.id)
 
     seen_prompts: list[str] = []
@@ -328,12 +328,12 @@ async def test_the_extractor_is_shown_each_span_under_its_artifact_id(db):
     """
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="devops.api_issue", state="pending",
+        conversation=conversation, type="backend.trace_problem", state="pending",
         confidence=0.9, params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
-    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
     (artifact,) = await db.artifacts_for_message("fake", "m1")
 
     said = await db.original_text_for(task.id)
@@ -346,12 +346,12 @@ async def test_the_extractor_is_shown_each_span_under_its_artifact_id(db):
 async def test_the_artifact_a_task_carries_is_reachable_by_its_id(db):
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="devops.api_issue", state="pending",
+        conversation=conversation, type="backend.trace_problem", state="pending",
         confidence=0.9, params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
-    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
 
     held = await db.artifacts_for_task(task.id)
 
@@ -361,7 +361,7 @@ async def test_the_artifact_a_task_carries_is_reachable_by_its_id(db):
 async def test_a_named_artifact_becomes_the_parameter_byte_for_byte(db):
     """The end this ticket exists for: what the model names, code copies."""
     from conftest import ScriptedHarness
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction import build_extractor
     from friday.kernel.extraction.answer import answer_shape
     from friday.kernel.dag.prepare import resolve_artifacts
@@ -369,12 +369,12 @@ async def test_a_named_artifact_becomes_the_parameter_byte_for_byte(db):
 
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="devops.api_issue", state="pending",
+        conversation=conversation, type="backend.trace_problem", state="pending",
         confidence=0.9, params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
-    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
     (artifact,) = await db.artifacts_for_message("fake", "m1")
     said = await db.original_text_for(task.id)
 
@@ -401,12 +401,12 @@ async def test_a_named_artifact_becomes_the_parameter_byte_for_byte(db):
 async def test_a_parameter_that_names_no_artifact_is_left_alone(db):
     """A reporter who typed their curl inline rather than in a fence has no
     artifact, and what the model copied is all there is."""
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
     from friday.kernel.dag.prepare import resolve_artifacts
 
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="devops.api_issue", state="pending",
+        conversation=conversation, type="backend.trace_problem", state="pending",
         confidence=0.9, params={},
     )
 
@@ -455,16 +455,16 @@ async def test_the_token_reaches_neither_the_prompt_nor_the_parameters(db):
     """The two places finding C names that `scrub` did not cover: the prompt
     sent to the provider, and the task's stored parameters."""
     from friday.kernel.dag.prepare import resolve_artifacts
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
 
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="devops.api_issue", state="pending",
+        conversation=conversation, type="backend.trace_problem", state="pending",
         confidence=0.9, params={},
     )
     event = _tokened_event(message_id="m1")
     await db.record_message(event)
-    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
     (artifact,) = await db.artifacts_for_message("fake", "m1")
 
     shown = await db.original_text_for(task.id)
@@ -480,12 +480,12 @@ async def test_a_token_typed_inline_with_no_fence_is_covered_too(db):
     artifact, so the artifact path cannot be the only place this runs."""
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="devops.api_issue", state="pending",
+        conversation=conversation, type="backend.trace_problem", state="pending",
         confidence=0.9, params={},
     )
     event = make_event(message_id="m1", text=f"em gọi thế này: {TOKENED}")
     await db.record_message(event)
-    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
 
     shown = await db.original_text_for(task.id)
 

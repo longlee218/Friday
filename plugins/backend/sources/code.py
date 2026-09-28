@@ -48,7 +48,7 @@ def repo_file(
     them apart and does not need to: neither is a file this node opens.
 
     `container_roots` is the image's source-root policy, passed in as data
-    (box 4: `DevopsConfig.container_roots`, carried on the run's `Deps`) rather
+    (box 4: `BackendConfig.container_roots`, carried on the run's `Deps`) rather
     than read off a module constant here — the one thing on this path shaped by
     the deployment, so the one thing an operator corrects without a release.
     """

@@ -177,10 +177,10 @@ def test_an_approved_task_carries_its_approval_onto_its_reply_rows(tmp_path):
                   created_at="2026-09-01T00:00:00+00:00", sender="discord_user")
     with engine.begin() as connection:
         connection.execute(tasks.insert(), [
-            dict(id=1, conversation_id="discord:1", type="devops.api_issue", state="review",
+            dict(id=1, conversation_id="discord:1", type="backend.trace_problem", state="review",
                  confidence=0.9, params={}, created_at="2026-09-01T00:00:00+00:00",
                  approved_at="2026-09-02T00:00:00+00:00", approved_by="longle_"),
-            dict(id=2, conversation_id="discord:1", type="devops.api_issue", state="review",
+            dict(id=2, conversation_id="discord:1", type="backend.trace_problem", state="review",
                  confidence=0.9, params={}, created_at="2026-09-01T00:00:00+00:00",
                  approved_at=None, approved_by=None),
         ])
@@ -228,7 +228,7 @@ def _insert_task(path, id: int, params) -> None:
     live.reflect(bind=engine)
     with engine.begin() as connection:
         connection.execute(live.tables["tasks"].insert(), [
-            dict(id=id, conversation_id="discord:1", type="devops.api_issue",
+            dict(id=id, conversation_id="discord:1", type="backend.trace_problem",
                  state="needs_human", confidence=0.9, params=params,
                  created_at="2026-09-01T00:00:00+00:00"),
         ])

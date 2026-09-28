@@ -1,4 +1,4 @@
-"""`devops.api_issue`'s parameters — the plugin's own, against the sdk.
+"""`backend.trace_problem`'s parameters — the plugin's own, against the sdk.
 
 Moved out of the core models (now `friday.kernel.domain.models`) in ticket 14: a task type's parameter
 dataclass ships with the plugin that owns it, and it declares its validation
@@ -26,7 +26,7 @@ class ApiIssueParams:
     question about what an endpoint is for, which one fits their case, and
     how its rules behave — an API is business logic reachable over HTTP, so
     a question about that logic belongs here rather than in
-    doc_question."""
+    answer_question."""
 
     #: Every field has a default, because nothing fills them in at
     #: construction time any more. Triage classifies and stops; the task is
@@ -59,7 +59,7 @@ class ApiIssueParams:
             # send `Resolve` looking for logs of somewhere that does not
             # exist. `external` is deliberately absent too — it is what the
             # `environment` rows *conclude* about a domain (see
-            # `plugins/devops/graph/resolve.py`), never something a reporter
+            # `plugins/backend/graph/resolve.py`), never something a reporter
             # names about themselves.
             "doc": "Which environment they named: production or dev. 'prod' "
             "is production. null if none is named.",

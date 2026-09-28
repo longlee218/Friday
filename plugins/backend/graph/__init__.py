@@ -1,4 +1,4 @@
-"""The `devops.api_issue` graph — the one type with an investigation past node 0.
+"""The `backend.trace_problem` graph — the one type with an investigation past node 0.
 
 `Intake → Acknowledge → Diagnose → Report` (ticket 06). `Prepare`/`Resolve` —
 the extractor and the table-lookup node that used to sit ahead of
@@ -7,7 +7,7 @@ deterministic node (ticket 03), so there is no extraction pass and no
 separate resolve step left to run. The two fixed pre-fetch nodes the diagram
 used to name here — `FindRequestLog`, `ReadFailingCode` — were already gone
 (ticket 05): `Diagnose` reads the log and the code itself, through
-`plugins.devops.investigate`'s tools, so there is nothing left to fetch in
+`plugins.backend.investigate`'s tools, so there is nothing left to fetch in
 advance of it.
 
 **Built against the sdk, and the caps the composition root hands in.** A plugin
@@ -15,7 +15,7 @@ imports `friday.sdk` only, so this builder never reaches for the kernel's
 `Harness` class directly: it asks `caps.make_harness(...)` for the model
 behind `Diagnose`. `caps` also carries the tool servers a run opened and the
 `sender`/`approver` identities a queued row uses. Ticket 14 lifted this
-package out of `friday/kernel/dag/api_issue/` into `plugins/devops/` unchanged
+package out of `friday/kernel/dag/api_issue/` into `plugins/backend/` unchanged
 in shape, only in where it reaches for things.
 """
 
@@ -36,36 +36,36 @@ from friday.sdk.workflow import (
     Reply,
     status_of,
 )
-from plugins.devops.graph.acknowledge import acknowledge_node
-from plugins.devops.graph.diagnose import (
+from plugins.backend.graph.acknowledge import acknowledge_node
+from plugins.backend.graph.diagnose import (
     Diagnosis,
     ask_reporter,
     diagnose_node,
     hand_over,
 )
-from plugins.devops.graph.intake import intake_node
-from plugins.devops.graph.prompt import build_instructions
-from plugins.devops.graph.report import report_node
-from plugins.devops.sources.logs import LokiSource, SshKubectlSource
-from plugins.devops.sources.release import ReleaseSource
+from plugins.backend.graph.intake import intake_node
+from plugins.backend.graph.prompt import build_instructions
+from plugins.backend.graph.report import report_node
+from plugins.backend.sources.logs import LokiSource, SshKubectlSource
+from plugins.backend.sources.release import ReleaseSource
 
 __all__ = [
     "TASK_TYPE",
-    "build_devops_dag",
+    "build_backend_dag",
     "build_log_sources",
     "build_release_source",
 ]
 
 log = logging.getLogger(__name__)
 
-TASK_TYPE = "devops.api_issue"
+TASK_TYPE = "backend.trace_problem"
 
 #: The graph's one model node. Reads logs and code, so the widest token
 #: budget; one turn plus its correction, what it had before turns counted tool
 #: calls (board `domains-plug-in`, ticket 17 — the loop's real budget comes
 #: with the spine). 60s a request: it reads logs and code, the largest prompt.
 DIAGNOSE = AgentDeclaration(
-    name="devops.diagnose", tier="flash", temperature=0.0, max_turns=1,
+    name="backend.diagnose", tier="flash", temperature=0.0, max_turns=1,
     tokens=500_000, request_timeout_seconds=60.0,
 )
 
@@ -97,7 +97,7 @@ def _did_not_decide(node: str):
     return when
 
 
-def build_devops_dag(api: Any) -> DAG:
+def build_backend_dag(api: Any) -> DAG:
     """The whole graph, built from the plugin's config and the composition
     root's boot capabilities (`api.caps`).
 
@@ -112,7 +112,7 @@ def build_devops_dag(api: Any) -> DAG:
     `Report`.
     """
     caps = api.caps
-    cfg = api.config  # DevopsConfig (the plugin's own block)
+    cfg = api.config  # BackendConfig (the plugin's own block)
     whole = caps.config  # the full application Config, for the shared agent
     diagnose_agent = whole.agent(DIAGNOSE)
 
@@ -137,7 +137,7 @@ def build_devops_dag(api: Any) -> DAG:
             acknowledge_node(),
             diagnose_node(
                 make_harness=make_diagnose_harness,
-                agent=None if diagnose_agent is None else "devops.diagnose",
+                agent=None if diagnose_agent is None else "backend.diagnose",
             ),
             report_node(reports_dir=Path(cfg.reports_dir)),
         ),
@@ -174,7 +174,7 @@ def build_log_sources(cfg: Any, servers: dict[str, Any]) -> dict[str, Any]:
         )
     if not sources:
         log.info(
-            "devops: no log source configured — set devops.ssh_host for dev, "
+            "backend: no log source configured — set backend.ssh_host for dev, "
             "or an mcp_servers entry named %r for production",
             cfg.loki_server,
         )

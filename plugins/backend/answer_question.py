@@ -1,18 +1,19 @@
-"""`docs.doc_question`'s parameters — the plugin's own, against the sdk.
+"""`backend.answer_question` — its task type name and its parameters.
 
-Moved out of the core models (now `friday.kernel.domain.models`) in ticket 15, the same way `api_issue`'s
-params moved in ticket 14: a persona owns its own parameter shape, and the core
-`Params` union no longer names it. A plain frozen dataclass whose field metadata
-(`doc`, `ask`) the extractor and the ask-renderer read — no import of anything
-but the stdlib, so the plugin stays `friday.sdk`-only (it needs no sdk symbol
-here at all).
+Was the `docs` plugin's (ticket 15) until build-the-spine ticket 02 folded that
+plugin into `backend`. Its whole graph is the shared node-0 (extract, then ask
+for what is missing or hand over), built through `api.caps.simple_dag`. The
+params are a plain frozen dataclass whose field metadata (`doc`, `ask`) the
+extractor and the ask-renderer read — stdlib only.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-__all__ = ["DocQuestionParams"]
+__all__ = ["TASK_TYPE", "DocQuestionParams"]
+
+TASK_TYPE = "backend.answer_question"
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +22,7 @@ class DocQuestionParams:
     spec or runbook says: the answer is a pointer to writing, or a line out
     of it. They have not run anything and are reporting no behaviour. If
     they tried something and it did not do what they expected, or they ask
-    what an endpoint is for and how its rules work, that is `devops.api_issue`."""
+    what an endpoint is for and how its rules work, that is `backend.trace_problem`."""
 
     question: str = field(
         default="",

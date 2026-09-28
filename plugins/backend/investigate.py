@@ -39,9 +39,9 @@ from datetime import timedelta
 from typing import Any
 
 from friday.sdk.tools import tool
-from plugins.devops.graph.distil import distil
+from plugins.backend.graph.distil import distil
 from friday.sdk.sources import Placement
-from plugins.devops.sources.code import at_ref, meanings, numbered, original, repo_file
+from plugins.backend.sources.code import at_ref, meanings, numbered, original, repo_file
 
 __all__ = ["Evidence", "investigate_tools"]
 

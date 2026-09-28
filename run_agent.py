@@ -233,7 +233,7 @@ async def _run(stack: AsyncExitStack) -> None:
     # Connected here rather than by whoever uses them: a connection has a
     # lifetime, and something has to close it. The stack unwinds with the run.
     # Before the agents, because one of them is handed this list.
-    from plugins.devops.sources import DECLARED
+    from plugins.backend.sources import DECLARED
 
     servers = []
     for server in build_mcp(config.mcp_servers, allowed=DECLARED):

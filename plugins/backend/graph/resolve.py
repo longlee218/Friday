@@ -19,7 +19,7 @@ exception is one more row that wins by being longer.
 
 **Node 1 itself is gone (ticket 6).** `Resolve` used to also read "where it
 runs" from rows the operator wrote (D3) and hand over on a missing row; that
-is now `Intake`'s job (`plugins/devops/graph/intake.py`), which imports
+is now `Intake`'s job (`plugins/backend/graph/intake.py`), which imports
 `domain_of`/`environment_of` from here rather than duplicating them.
 """
 

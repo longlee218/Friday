@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 01
 
 # Rename actions and plugins, wipe the db
@@ -28,10 +28,30 @@ Runs on the old DAG machinery; only names and packages change.
 
 ## Acceptance
 
-- [ ] `grep -rn "devops\.\|docs\.doc_question\|access_request"` over code,
+- [x] `grep -rn "devops\.\|docs\.doc_question\|access_request"` over code,
       tests, web, evals: only old migrations and history.
-- [ ] Live db wiped with a backup on disk; `alembic current` = head.
+- [x] Live db wiped with a backup on disk; `alembic current` = head.
 - [ ] `run_triage_eval` run and reported (labels changed in the prompt).
-- [ ] Web renders tags from the API list; `npm run build` passes.
-- [ ] `test_dependency_rule.py` G1 still holds with `plugins/ops`.
-- [ ] Whole suite green; `code-review` done.
+- [x] Web renders tags from the API list; `npm run build` passes.
+- [x] `test_dependency_rule.py` G1 still holds with `plugins/ops`.
+- [x] Whole suite green; `code-review` done.
+
+## Built (2026-09-28)
+
+- Branch `feat/build-the-spine-02`. Suite 1579 passed, 1 skipped (baseline
+  1578 + the `/api/actions` contract test); `code-review` (standards + spec)
+  done, its findings fixed.
+- Live db backed up to `data/friday.db.bak-pre-build-the-spine-02`, deleted,
+  `alembic upgrade head` → `eb2f1050f114 (head)`. `friday.system.db` kept (no
+  pending workflows).
+- Operator memory: `import_context_files.py` reads a `context/` YAML directory
+  that no longer exists and writes only `fact`/`person`, so the 9 active admin
+  rows were exported and written back through `memory.write.add` with
+  `devops.*` → `backend.*` (order: environment, project, service, route,
+  fact). Diff against the backup: identical.
+- Remaining grep hits are history (`extractor_access_request` in two
+  docstrings, old migrations) and `devops.json`, the external MCP server's
+  token file in `test_mcp_auth.py`.
+- **Open — waiting on the operator:** `run_triage_eval` not run.
+  `config.yaml` references `OPENROUTER_API_KEY`, which `.env` does not set.
+  The prompt now names the full labels (`ops.request_permission`, …).

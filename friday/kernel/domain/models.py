@@ -202,51 +202,17 @@ proceed without.
 
 
 
-@dataclass(frozen=True, slots=True)
-class AccessRequestParams:
-    """Someone wants to be let in somewhere: a repository, an environment, a
-    dashboard, a channel, an API key, a role, a permission — for themselves
-    or for somebody joining. Asked outright ("can I get write access to the
-    payments repo") or told as a complaint ("I cannot open the staging
-    repo"); either way what unblocks them is being granted something, not
-    something being fixed."""
-
-    project: str = field(
-        default="",
-        metadata={
-            "doc": "The project, repository or system they want access to, "
-            "named as they named it. Empty if they did not say.",
-            "ask": "which project you need access to",
-        },
-    )
-    permission: str = field(
-        default="",
-        metadata={
-            "doc": "What kind of access: read, write, admin, or their own "
-            "words for it. Empty if they did not say.",
-            "ask": "what access you need",
-        },
-    )
-    summary: str = field(
-        default="",
-        metadata={
-            "doc": "One line saying who wants what, in Vietnamese, in your "
-            "own words."
-        },
-    )
-
-
 #: Note there is no `SkipParams`. A skip opens no task, so it has no
 #: parameters to carry — triage says `skip` and the message is recorded as
 #: having been looked at. There was one, holding a `reason`, until triage
 #: stopped producing anything but a type and a confidence.
 #:
-#: One member now: `ApiIssueParams` moved to `plugins/devops` (ticket 14) and
-#: `DocQuestionParams` to `plugins/docs` (ticket 15). A plugin's params are not
-#: in this alias but are structurally `Params` — every consumer (extraction,
-#: validation, the prompt renderer) works off the dataclass fields, not the
-#: union — so this names only what the core still owns (`access_request`).
-Params = AccessRequestParams
+#: No member now: every task type's params are a plugin's own (`plugins/backend`,
+#: `plugins/ops`; build-the-spine ticket 02), and the kernel may not import one.
+#: Each is a frozen dataclass whose fields every consumer (extraction,
+#: validation, the prompt renderer) reads directly, so the alias names the role,
+#: not a type.
+Params = Any
 
 #: The one decision that opens no work. Everything a task type names is work;
 #: this names the absence of one, and it is not a task type — so it lives here,

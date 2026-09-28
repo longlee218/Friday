@@ -535,12 +535,12 @@ async def test_a_structured_row_comes_back_as_its_own_type(db):
     await _project(db, "p")
     await _service(db, "be", "p")
     await db.memory_add(
-        ROOM, "ReelMe on dev", kind="devops.route", origin=MemoryOrigin.ADMIN,
+        ROOM, "ReelMe on dev", kind="backend.route", origin=MemoryOrigin.ADMIN,
         data={"domain": "api.dev.aperogroup.ai", "env": "dev", "service": "be"},
     )
 
     found = await db.structured_memory(
-        "c1", kind="devops.route", key="api.dev.aperogroup.ai"
+        "c1", kind="backend.route", key="api.dev.aperogroup.ai"
     )
 
     assert (found.env, found.service) == ("dev", "be")
@@ -561,13 +561,13 @@ async def test_this_rooms_row_wins_over_the_one_written_for_every_room(db):
     await _service(db, "this-room", "p")
     for state, service in ((everywhere, "shared"), (ROOM, "this-room")):
         await db.memory_add(
-            state, "route", kind="devops.route", origin=MemoryOrigin.ADMIN,
+            state, "route", kind="backend.route", origin=MemoryOrigin.ADMIN,
             data={"domain": "api.aperogroup.ai", "env": "production",
                   "service": service},
         )
 
     found = await db.structured_memory(
-        "c1", kind="devops.route", key="api.aperogroup.ai"
+        "c1", kind="backend.route", key="api.aperogroup.ai"
     )
 
     assert found.service == "this-room"
@@ -588,7 +588,7 @@ async def _project(db, name: str, channel: str = "c1"):
 
     return await db.memory_add(
         FridayState(channel_id=channel, agent="operator"), f"repo {name}",
-        kind="devops.project", origin=MemoryOrigin.ADMIN,
+        kind="backend.project", origin=MemoryOrigin.ADMIN,
         data={"name": name, "repo_path": f"~/{name}",
               "default_branch": "main", "stack": "NestJS"},
     )
@@ -599,7 +599,7 @@ async def _service(db, name: str, project: str, channel: str = "c1"):
 
     return await db.memory_add(
         FridayState(channel_id=channel, agent="operator"), f"service {name}",
-        kind="devops.service", origin=MemoryOrigin.ADMIN,
+        kind="backend.service", origin=MemoryOrigin.ADMIN,
         data={
             "name": name, "project": project,
             "prod": {"cluster": "c", "namespace": "n", "app": name},
@@ -754,7 +754,7 @@ async def test_a_shared_row_cannot_be_removed_while_one_room_names_it(db):
     await _service(db, "c1-service", "shared", channel="c1")
     shared = [
         m for m in await db.memories_for_channel("*")
-        if m.kind == "devops.project"
+        if m.kind == "backend.project"
     ][0]
 
     with pytest.raises(MemoryRefused, match="c1-service"):

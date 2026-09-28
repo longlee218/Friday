@@ -19,9 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from plugins.devops.graph.diagnose import diagnosis_of
-from plugins.devops.graph.intake import intake_of
-from plugins.devops.graph.deps import ApiIssueDeps
+from plugins.backend.graph.diagnose import diagnosis_of
+from plugins.backend.graph.intake import intake_of
+from plugins.backend.graph.deps import ApiIssueDeps
 from friday.sdk.workflow import DAGState, HandOver, Node, Reply
 from friday.sdk.outbox import Kind
 from friday.sdk.redact import scrub
@@ -57,7 +57,7 @@ def render(state: DAGState, *, task_id: int, at: datetime) -> str:
         where = "- nothing was resolved"
 
     lines = [
-        f"# api_issue #{task_id}",
+        f"# trace_problem #{task_id}",
         "",
         f"Written {at.isoformat(timespec='seconds')} by Friday. "
         "Nothing here was sent to anybody.",
@@ -127,7 +127,7 @@ def report_node(*, reports_dir: Path) -> Node:
     is the one output that answers.
 
     `reports_dir` is required rather than defaulted, because there was a
-    default here *and* one on `DevopsConfig.reports_dir`, spelled
+    default here *and* one on `BackendConfig.reports_dir`, spelled
     differently — two answers to one question, which is how a report goes
     missing from the directory somebody is watching.
     """

@@ -49,6 +49,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from friday.kernel.dag import registry as task_registry
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.memory_guard import InstructionShaped
 from friday.store.db import Database
@@ -669,6 +670,17 @@ def build_api(
         )
         openings = await db.opening_messages(t.id for t in found)
         return _clean([_task(t, openings.get(t.id)) for t in found])
+
+    @api.get("/api/actions")
+    async def actions() -> list[dict]:
+        """Every registered action and the domain it belongs to — the prefix
+        of its namespaced name (`backend.trace_problem` is `backend`'s). The
+        page colours a tag by domain from this list rather than from one of
+        its own (build-the-spine ticket 02)."""
+        return [
+            {"name": name, "domain": name.partition(".")[0]}
+            for name in task_registry.specs()
+        ]
 
     @api.get("/api/spend")
     async def spend() -> dict:

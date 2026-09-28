@@ -31,7 +31,7 @@ async def test_the_beat_reports_what_is_actually_stored(inbox, provider, db):
 async def test_a_message_nobody_could_deliver_is_shouted_about(db):
     """The only way anyone learns about it is by being told."""
     task = await db.create_task(
-        conversation=ConversationId("fake", "watched"), type="devops.api_issue",
+        conversation=ConversationId("fake", "watched"), type="backend.trace_problem",
         state="needs_human", confidence=0.9, params={},
     )
     row = await db.queue_outbound(

@@ -55,11 +55,10 @@
      the same: a red chosen against white, and this ground is not white. */
   --bad: #f87171;
 
-  /* One hue per task type, kept apart from the status hues so a "green"
+  /* One hue per domain, kept apart from the status hues so a "green"
      is never an answer and a state at the same time. */
-  --type-api: #38bdf8;
-  --type-access: #c084fc;
-  --type-doc: #34d399;
+  --domain-backend: #38bdf8;
+  --domain-ops: #c084fc;
   --type-other: #94a3b8;
 
   /* ----- motion (ticket 02) -----
@@ -895,10 +894,11 @@ details > summary:hover {
   background: currentColor;
 }
 
-.tag.devops-api_issue { --tag: var(--type-api); }
-.tag.access_request { --tag: var(--type-access); }
-.tag.docs-doc_question { --tag: var(--type-doc); }
-.tag.unknown, .tag.skip { --tag: var(--type-other); }
+/* Neutral unless the tag's domain has a hue: `skip`, an unknown type, and a
+   domain nobody gave a colour all read grey rather than unstyled. */
+.tag { --tag: var(--type-other); }
+.tag.domain-backend { --tag: var(--domain-backend); }
+.tag.domain-ops { --tag: var(--domain-ops); }
 
 /* ----- column accent ----- */
 

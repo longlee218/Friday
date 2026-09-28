@@ -34,10 +34,10 @@ async def test_it_only_appends(db):
     assert not hasattr(db, "delete_audit")
 
     await audit.plugin_loaded(plugin_id="core-memory", tier="contribution")
-    await audit.plugin_loaded(plugin_id="devops", tier="contribution")
+    await audit.plugin_loaded(plugin_id="backend", tier="contribution")
 
     entries = await db.audit_entries(event="plugin_load")
-    assert [e.detail["plugin"] for e in entries] == ["core-memory", "devops"]
+    assert [e.detail["plugin"] for e in entries] == ["core-memory", "backend"]
     assert all(e.detail["tier"] == "contribution" for e in entries)
 
 

@@ -19,20 +19,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from plugins.devops.graph import build_devops_dag, build_log_sources
-from plugins.devops.config import DevopsConfig, load_devops_config
-from plugins.devops.config import DEFAULT_CONTAINER_ROOTS
-from plugins.devops.graph.diagnose import (
+from plugins.backend.graph import build_backend_dag, build_log_sources
+from plugins.backend.config import BackendConfig, load_backend_config
+from plugins.backend.config import DEFAULT_CONTAINER_ROOTS
+from plugins.backend.graph.diagnose import (
     Diagnosis,
     diagnose_node,
     unresolved_refs,
 )
-from plugins.devops.graph.report import render, report_node
-from plugins.devops.sources.code import repo_file
+from plugins.backend.graph.report import render, report_node
+from plugins.backend.sources.code import repo_file
 
 
 class _StubCaps:
-    """A stand-in for the composition root's boot caps, for building the devops
+    """A stand-in for the composition root's boot caps, for building the backend
     DAG in a test without a live process (ticket 14)."""
 
     def __init__(self, *, diagnose_harness=None, budget_tokens=None, diagnose_agent=None):
@@ -51,25 +51,25 @@ class _StubCaps:
 
 
 def _dag(*, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnose_agent=None):
-    """The `devops.api_issue` DAG, built through the plugin's own builder."""
+    """The `backend.trace_problem` DAG, built through the plugin's own builder."""
     api = SimpleNamespace(
         caps=_StubCaps(
             diagnose_harness=diagnose_harness,
             budget_tokens=budget_tokens,
             diagnose_agent=diagnose_agent,
         ),
-        config=DevopsConfig(reports_dir=str(reports_dir) if reports_dir else "./data/reports"),
+        config=BackendConfig(reports_dir=str(reports_dir) if reports_dir else "./data/reports"),
     )
-    return build_devops_dag(api)
+    return build_backend_dag(api)
 
-from plugins.devops.graph.deps import ApiIssueDeps
-from plugins.devops.graph.intake import intake_of
+from plugins.backend.graph.deps import ApiIssueDeps
+from plugins.backend.graph.intake import intake_of
 from friday.sdk.workflow import DAGState, status_of
 from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
 from friday.sdk.memory import MemoryOrigin
 from friday.kernel.domain.models import FridayState
-from plugins.devops.params import ApiIssueParams
+from plugins.backend.params import ApiIssueParams
 
 CURL = (
     'curl -X POST -H "Content-Type: application/json" '
@@ -118,7 +118,7 @@ async def write_environment_rows(db, channel_id: str = "watched"):
     state = FridayState(channel_id=channel_id, agent="admin")
     for suffix, env in (("aperogroup.ai", "production"), ("dev.aperogroup.ai", "dev")):
         await db.memory_add(
-            state, f"{suffix} is {env}", kind="devops.environment",
+            state, f"{suffix} is {env}", kind="backend.environment",
             origin=MemoryOrigin.ADMIN, data={"suffix": suffix, "env": env},
         )
 
@@ -139,7 +139,7 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
         else "api-reelme-v2.aperogroup.ai"
     )
     await db.memory_add(
-        state, "the ReelMe repository", kind="devops.project",
+        state, "the ReelMe repository", kind="backend.project",
         origin=MemoryOrigin.ADMIN,
         data={
             "name": "reelme", "repo_path": repo or "/nowhere",
@@ -147,7 +147,7 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
         },
     )
     await db.memory_add(
-        state, "the ReelMe v2 backend", kind="devops.service",
+        state, "the ReelMe v2 backend", kind="backend.service",
         origin=MemoryOrigin.ADMIN,
         data={
             "name": "backend-reelme-v2",
@@ -157,7 +157,7 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
         },
     )
     await db.memory_add(
-        state, "ReelMe v2 on dev", kind="devops.route", origin=MemoryOrigin.ADMIN,
+        state, "ReelMe v2 on dev", kind="backend.route", origin=MemoryOrigin.ADMIN,
         data={"domain": domain, "env": env, "service": "backend-reelme-v2"},
     )
 
@@ -244,7 +244,7 @@ async def test_one_row_for_one_host_beats_the_convention_it_breaks(db):
     """The 2026-09-18 survey found `api-mobile-spec-reviewer.aperogroup.ai`
     served from `dev` with no `.dev` in it. Longest suffix wins, so the
     exception is one more row rather than a branch."""
-    from plugins.devops.graph.resolve import environment_of
+    from plugins.backend.graph.resolve import environment_of
 
     rows = [
         SimpleNamespace(suffix="aperogroup.ai", env="production"),
@@ -268,7 +268,7 @@ def test_the_kubectl_window_is_clipped_by_the_runtimes_own_stamps():
     what makes the upper bound possible, and it is the container runtime's
     stamp rather than the line's own field, because dev is JSON today and a
     Python traceback tomorrow."""
-    from plugins.devops.sources.logs import _within
+    from plugins.backend.sources.logs import _within
 
     since = datetime(2026, 9, 20, 4, 10, tzinfo=timezone.utc)
     until = datetime(2026, 9, 20, 4, 45, tzinfo=timezone.utc)
@@ -351,7 +351,7 @@ async def test_an_ungrounded_diagnosis_is_not_reported(db):
             cause="the database is down", confidence="certain",
             conclusive=True, refs=["L99"],
         ),
-        agent="devops.diagnose",
+        agent="backend.diagnose",
     ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "empty"
@@ -371,7 +371,7 @@ async def test_a_conclusive_answer_that_points_at_nothing_is_not_reported(db):
                 {"hypothesis": "mạng chập", "why": "không có timeout nào"}
             ],
         ),
-        agent="devops.diagnose",
+        agent="backend.diagnose",
     ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "empty"
@@ -459,7 +459,7 @@ async def test_the_reporter_is_told_it_is_being_worked_on(db):
     do about silence is ask again."""
     from conftest import make_event
 
-    from plugins.devops.graph.acknowledge import ack_text, acknowledge_node
+    from plugins.backend.graph.acknowledge import ack_text, acknowledge_node
     from friday.kernel.outbox import DEFAULT_SENDER, Kind
 
     await db.record_message(make_event(message_id="m1"))
@@ -484,7 +484,7 @@ async def test_the_acknowledgement_does_not_wait_for_approval(db):
     """The operator's call, 2026-09-22. It promises no finding, quotes no
     log line and names no fault — and one that waits for a person arrives
     after the reply it was meant to precede."""
-    from plugins.devops.graph.acknowledge import acknowledge_node
+    from plugins.backend.graph.acknowledge import acknowledge_node
     from friday.kernel.outbox import DEFAULT_SENDER, Kind
 
     await acknowledge_node().run(
@@ -499,7 +499,7 @@ async def test_a_resumed_graph_does_not_acknowledge_twice(db):
     """A graph re-runs from its checkpoint after the reporter answers a
     question. A second "đang xử lý" three minutes after the first reads as a
     stuck robot."""
-    from plugins.devops.graph.acknowledge import acknowledge_node
+    from plugins.backend.graph.acknowledge import acknowledge_node
     from friday.kernel.outbox import DEFAULT_SENDER
 
     deps = deps_for(db, extra={"sender": DEFAULT_SENDER})
@@ -539,7 +539,7 @@ def test_ack_text_names_the_service_or_stays_generic():
     loop reads code/docs, not only logs). Operator's fog-item call, 2026-09-27."""
     from friday.sdk.sources import Placement
 
-    from plugins.devops.graph.acknowledge import ack_text
+    from plugins.backend.graph.acknowledge import ack_text
 
     named = ack_text(Placement(env="production", service="backend-reelme-v2"))
     assert "backend-reelme-v2" in named and "log của backend-reelme-v2" in named
@@ -555,7 +555,7 @@ def test_the_reads_input_names_the_stack_when_known():
     Placement (2026-09-27). Absent when the placement carries no stack."""
     from friday.sdk.sources import Placement
 
-    from plugins.devops.graph.prompt import build_reads_input
+    from plugins.backend.graph.prompt import build_reads_input
 
     with_stack = build_reads_input(
         report="loi 500",
@@ -573,7 +573,7 @@ def test_the_reads_input_names_the_stack_when_known():
 async def test_a_run_with_no_sender_investigates_anyway(db):
     """Nothing here is worth failing an investigation over — and a run that
     says why it stayed quiet beats one that is quiet about being quiet."""
-    from plugins.devops.graph.acknowledge import acknowledge_node
+    from plugins.backend.graph.acknowledge import acknowledge_node
 
     result = await acknowledge_node().run(DAGState.empty(), deps_for(db))
 
@@ -642,7 +642,7 @@ def test_the_brief_carries_the_cause_and_not_the_evidence():
     says more about this machine than they need, and `next_checks` is what
     *this* investigation would do next — to a reporter it reads as a list of
     things they have been asked to do."""
-    from plugins.devops.graph.report import brief
+    from plugins.backend.graph.report import brief
 
     said = brief(Diagnosis(
         cause="categoryId rỗng", confidence="certain", conclusive=True,
@@ -653,7 +653,7 @@ def test_the_brief_carries_the_cause_and_not_the_evidence():
 
 
 def test_a_brief_that_is_not_conclusive_says_so_in_words():
-    from plugins.devops.graph.report import brief
+    from plugins.backend.graph.report import brief
 
     said = brief(Diagnosis(
         cause="có thể do cache", confidence="likely", conclusive=False, refs=["L1"],
@@ -705,20 +705,20 @@ def test_a_blank_setting_means_not_configured_rather_than_the_word_none():
     a truthy `"None"` — which built a source pointing at a host called None
     and turned every dev task into a failed subprocess."""
     
-    assert load_devops_config({"ssh_host": None}).ssh_host == ""
+    assert load_backend_config({"ssh_host": None}).ssh_host == ""
     assert build_log_sources(
-        load_devops_config({"ssh_host": None}), {}
+        load_backend_config({"ssh_host": None}), {}
     ) == {}
 
 
 def test_log_sources_are_only_built_for_what_is_configured():
     
-    none = build_log_sources(DevopsConfig(), {})
+    none = build_log_sources(BackendConfig(), {})
     dev = build_log_sources(
-        DevopsConfig(ssh_host="dev"), {}
+        BackendConfig(ssh_host="dev"), {}
     )
     prod = build_log_sources(
-        DevopsConfig(loki_server="devops"), {"devops": object()},
+        BackendConfig(loki_server="backend"), {"backend": object()},
     )
 
     assert none == {}
@@ -733,7 +733,7 @@ async def test_a_complete_report_is_investigated_rather_than_handed_back(db, wor
     — and the answer was "everything needed is here, and there is no
     investigation past this point". `Intake` (ticket 06) makes no such call
     at all: it never hands over, so every report reaches `Diagnose`. With no
-    `devops.diagnose` agent configured (every test that does not set one up),
+    `backend.diagnose` agent configured (every test that does not set one up),
     that node skips and `Report` hands the case to the operator rather than
     asserting a cause it has none for.
     """
@@ -787,9 +787,9 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
     source = FakeSource(answers=[["ERROR ERR19 POST /v1/pod/orders/init 500"]])
     api = SimpleNamespace(
         caps=HonestCaps(),
-        config=DevopsConfig(reports_dir=str(reports_dir)),
+        config=BackendConfig(reports_dir=str(reports_dir)),
     )
-    dag = build_devops_dag(api)
+    dag = build_backend_dag(api)
     final, runs, _ = await _run_on_adapter(
         dag,
         deps=ApiIssueDeps(
@@ -820,7 +820,7 @@ def test_a_captured_case_runs_through_the_real_source():
     import asyncio
 
     from friday.sdk.sources import Placement
-    from plugins.devops.sources.logs import LokiSource
+    from plugins.backend.sources.logs import LokiSource
     from replay_case import CannedReads
 
     answer = {
@@ -871,7 +871,7 @@ def test_the_parameters_are_read_off_the_dataclass_not_the_class_body():
     a base class."""
     import dataclasses
 
-    from plugins.devops.params import ApiIssueParams
+    from plugins.backend.params import ApiIssueParams
     from replay_case import case_params
 
     kept = case_params({
@@ -949,7 +949,7 @@ def test_a_superset_capture_serves_any_needle_the_loop_chooses():
     import asyncio
 
     from friday.sdk.sources import Placement
-    from plugins.devops.sources.logs import LokiSource
+    from plugins.backend.sources.logs import LokiSource
     from replay_case import CannedReads
 
     superset = [
@@ -983,7 +983,7 @@ def test_a_superset_read_is_capped_at_the_limit_and_says_truncated():
     import asyncio
 
     from friday.sdk.sources import Placement
-    from plugins.devops.sources.logs import LokiSource
+    from plugins.backend.sources.logs import LokiSource
     from replay_case import CannedReads
 
     superset = [f"2026-09-21T10:35:0{i}Z ERROR boom {i}" for i in range(5)]
@@ -1070,7 +1070,7 @@ def test_a_node_that_ended_the_run_does_not_read_as_one_that_passed_it_on():
     from replay_case import answers
 
     run = NodeRun(
-        dag_name="devops.api_issue", node="resolve", attempt=1,
+        dag_name="backend.trace_problem", node="resolve", attempt=1,
         status="ok", reason="", duration_ms=6,
     )
     final = DAGState.empty().with_result("resolve", HandOver("no service row"))
@@ -1089,7 +1089,7 @@ def test_a_node_that_failed_is_named_as_a_seam_that_broke():
 
     def run(node, status, reason=""):
         return NodeRun(
-            dag_name="devops.api_issue", node=node, attempt=1,
+            dag_name="backend.trace_problem", node=node, attempt=1,
             status=status, reason=reason, duration_ms=1,
         )
 
@@ -1124,7 +1124,7 @@ def test_lokis_streams_are_merged_into_one_line_of_time():
     whatever order they arrived is one whose surrounding lines belong to a
     different process than the line they surround — and `distil` keeps ±2
     lines around what it finds."""
-    from plugins.devops.sources.logs import _streams
+    from plugins.backend.sources.logs import _streams
 
     found = _streams(LOKI_ANSWER)
 
@@ -1134,7 +1134,7 @@ def test_lokis_streams_are_merged_into_one_line_of_time():
 
 
 def test_the_timestamp_comes_off_and_the_cap_is_reported():
-    from plugins.devops.sources.logs import _streams
+    from plugins.backend.sources.logs import _streams
 
     found = _streams(LOKI_ANSWER)
 
@@ -1145,7 +1145,7 @@ def test_the_timestamp_comes_off_and_the_cap_is_reported():
 def test_an_answer_loki_never_gave_is_empty_rather_than_a_crash():
     """A changed shape should read as "Loki said nothing I understood",
     which the node reports, not as a graph that died."""
-    from plugins.devops.sources.logs import _streams
+    from plugins.backend.sources.logs import _streams
 
     assert _streams("not json").lines == ()
     assert _streams('{"streams": null}').lines == ()
@@ -1162,7 +1162,7 @@ def _kubectl_returning(count: int):
     import asyncio
 
     from friday.sdk.sources import Placement
-    from plugins.devops.sources.logs import SshKubectlSource
+    from plugins.backend.sources.logs import SshKubectlSource
 
     class Source(SshKubectlSource):
         async def _run(self, remote):
@@ -1200,7 +1200,7 @@ def test_both_parsers_say_which_span_they_handed_over():
     """`newest` is what lets the capped sentence name a span. A parser that
     populated only `oldest` would leave it saying "an unknown part", which
     is the sentence it replaced."""
-    from plugins.devops.sources.logs import _streams, _within
+    from plugins.backend.sources.logs import _streams, _within
 
     parsed = _streams(
         '{"streams":[{"labels":{},"lines":['
@@ -1225,7 +1225,7 @@ def test_loki_asks_its_back_end_for_the_lines_that_carry_the_needle():
     import asyncio
 
     from friday.sdk.sources import Placement, Reads
-    from plugins.devops.sources.logs import LokiSource
+    from plugins.backend.sources.logs import LokiSource
 
     class Server:
         asked: dict = {}
@@ -1255,7 +1255,7 @@ def test_a_needle_carrying_a_quote_is_escaped_rather_than_ending_the_filter():
     """LogQL's filter is a Go quoted string. A needle with a `"` in it would
     otherwise close the literal and change the query instead of being
     searched for."""
-    from plugins.devops.sources.logs import _logql
+    from plugins.backend.sources.logs import _logql
 
     assert _logql('a"b') == 'a\\"b'
     assert _logql("a\\b") == "a\\\\b"
@@ -1269,7 +1269,7 @@ def test_kubectl_searches_the_whole_window_rather_than_its_tail():
     import asyncio
 
     from friday.sdk.sources import Placement
-    from plugins.devops.sources.logs import SshKubectlSource
+    from plugins.backend.sources.logs import SshKubectlSource
 
     ran: list[str] = []
 
@@ -1296,7 +1296,7 @@ def test_a_needle_reaches_the_shell_quoted():
     import asyncio
 
     from friday.sdk.sources import Placement
-    from plugins.devops.sources.logs import SshKubectlSource
+    from plugins.backend.sources.logs import SshKubectlSource
 
     ran: list[str] = []
 
@@ -1338,7 +1338,7 @@ def test_a_failing_kubectl_is_not_hidden_by_the_pipe_that_narrows_it():
     import asyncio
 
     from friday.sdk.sources import Placement
-    from plugins.devops.sources.logs import SshKubectlSource
+    from plugins.backend.sources.logs import SshKubectlSource
 
     ran: list[str] = []
 
@@ -1365,7 +1365,7 @@ async def test_a_reader_may_not_call_a_tool_it_did_not_declare():
     `release_rollback` and `godaddy_dns_edit_record` — and a guard a file can
     widen is one the file's next editor widens by accident."""
     from friday.sdk.sources import Reads
-    from plugins.devops.sources.logs import LokiSource
+    from plugins.backend.sources.logs import LokiSource
 
     class Server:
         async def call_tool(self, tool, arguments):
@@ -1390,10 +1390,10 @@ def test_a_raw_server_cannot_be_handed_to_a_reader_by_mistake():
 def test_what_a_server_is_filtered_to_is_read_off_the_readers():
     """A list beside the classes is a list that disagrees with them — so the
     set grows when a reader is added and by no other means."""
-    from plugins.devops.sources import declared
-    from plugins.devops.sources.db import DbSource
-    from plugins.devops.sources.logs import LokiSource
-    from plugins.devops.sources.release import ReleaseSource
+    from plugins.backend.sources import declared
+    from plugins.backend.sources.db import DbSource
+    from plugins.backend.sources.logs import LokiSource
+    from plugins.backend.sources.release import ReleaseSource
 
     assert declared() == LokiSource.TOOLS | DbSource.TOOLS | ReleaseSource.TOOLS
     assert "execute_mongo_query" not in declared(), "no caller yet"
@@ -1439,7 +1439,7 @@ def test_a_compiled_frame_is_translated_back_to_the_source(tmp_path):
     is `workflow-credit.service.ts:109`, forty-nine lines away. Mapping the
     file and keeping the line would hand `Diagnose` the wrong place and call
     it the throw site."""
-    from plugins.devops.sources.code import original
+    from plugins.backend.sources.code import original
 
     _built(tmp_path, js_line=3, ts_line=11)
 
@@ -1450,7 +1450,7 @@ def test_a_compiled_frame_is_translated_back_to_the_source(tmp_path):
 
 def test_a_compiled_file_with_no_map_beside_it_is_not_translated(tmp_path):
     """`None` means "read the built file and say so", never "guess"."""
-    from plugins.devops.sources.code import original
+    from plugins.backend.sources.code import original
 
     _built(tmp_path)
     (tmp_path / "dist" / "x.js.map").unlink()
@@ -1459,7 +1459,7 @@ def test_a_compiled_file_with_no_map_beside_it_is_not_translated(tmp_path):
 
 
 def test_a_map_that_does_not_parse_is_not_translated(tmp_path):
-    from plugins.devops.sources.code import original
+    from plugins.backend.sources.code import original
 
     _built(tmp_path)
     (tmp_path / "dist" / "x.js.map").write_text("{ not json")
@@ -1474,7 +1474,7 @@ def test_a_map_naming_a_file_outside_the_clone_is_refused(tmp_path):
     applied to the function added under it — found by review."""
     import json
 
-    from plugins.devops.sources.code import original
+    from plugins.backend.sources.code import original
 
     _built(tmp_path, js_line=3, ts_line=11)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -1490,7 +1490,7 @@ def test_a_map_whose_sources_hold_null_is_not_followed(tmp_path):
     `TypeError` out of the graph node rather than answering `None`."""
     import json
 
-    from plugins.devops.sources.code import original
+    from plugins.backend.sources.code import original
 
     _built(tmp_path)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -1513,7 +1513,7 @@ def test_a_map_with_a_character_that_is_not_vlq_is_rejected_whole(tmp_path):
     """
     import json
 
-    from plugins.devops.sources.code import original
+    from plugins.backend.sources.code import original
 
     _built(tmp_path, js_line=3, ts_line=11)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -1550,7 +1550,7 @@ def test_only_the_codes_that_turned_up_are_read_out_of_the_doc(tmp_path):
     """Ticket 16 measured 2,104 of 2,104 HTTP 500s carrying `ERR19` — the
     generic code — so the doc is what turns a code into an answer. The whole
     doc is 271 lines; a run needs the three lines it saw."""
-    from plugins.devops.sources.code import meanings
+    from plugins.backend.sources.code import meanings
 
     doc = tmp_path / "docs" / "error-codes.md"
     doc.parent.mkdir(parents=True)
@@ -1565,7 +1565,7 @@ def test_only_the_codes_that_turned_up_are_read_out_of_the_doc(tmp_path):
 
 
 def test_a_code_the_doc_does_not_list_is_absent_rather_than_invented(tmp_path):
-    from plugins.devops.sources.code import meanings
+    from plugins.backend.sources.code import meanings
 
     doc = tmp_path / "error-codes.md"
     doc.write_text(CODES_DOC)
@@ -1576,7 +1576,7 @@ def test_a_code_the_doc_does_not_list_is_absent_rather_than_invented(tmp_path):
 def test_a_doc_outside_the_clone_is_not_read(tmp_path):
     """`error_codes_doc` is a path from a row somebody typed, and this module
     checks a path before it opens it — the same rule as a stack frame."""
-    from plugins.devops.sources.code import meanings
+    from plugins.backend.sources.code import meanings
 
     outside = tmp_path / "outside" / "error-codes.md"
     outside.parent.mkdir(parents=True)
@@ -1590,7 +1590,7 @@ def test_a_two_column_table_is_read_as_well_as_a_three(tmp_path):
     """The real document has both — 130 rows of `code | name | meaning` and
     69 of `code | meaning`. Wanting three silently dropped every Midas code,
     `ERR306` among them, which ticket 16 counted 3,455 times in 30 days."""
-    from plugins.devops.sources.code import meanings
+    from plugins.backend.sources.code import meanings
 
     doc = tmp_path / "error-codes.md"
     doc.write_text(
@@ -1614,7 +1614,7 @@ def test_the_running_tag_is_read_out_of_the_release_answer():
     import asyncio
     import json
 
-    from plugins.devops.sources.release import ReleaseSource
+    from plugins.backend.sources.release import ReleaseSource
 
     class Server:
         async def call(self, tool, arguments):
@@ -1636,7 +1636,7 @@ def test_not_knowing_which_version_runs_is_an_answer_not_a_failure():
     runs" into a failed investigation."""
     import asyncio
 
-    from plugins.devops.sources.release import ReleaseSource
+    from plugins.backend.sources.release import ReleaseSource
 
     class Broken:
         async def call(self, tool, arguments):
@@ -1656,7 +1656,7 @@ def test_reading_at_a_ref_never_moves_the_operators_clone(tmp_path):
     disk, cleanup and a failure mode for a read that needs none of it."""
     import subprocess
 
-    from plugins.devops.sources.code import at_ref
+    from plugins.backend.sources.code import at_ref
 
     root = tmp_path / "clone"
     root.mkdir()
@@ -1687,7 +1687,7 @@ def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monke
     Asserts git is never *invoked*, not that the call returned `None` — a
     bad ref makes `git show` fail and return `None` too, so the weaker
     assertion passed with the guard deleted."""
-    from plugins.devops.sources import code as code_source
+    from plugins.backend.sources import code as code_source
 
     ran = []
     monkeypatch.setattr(
@@ -1769,7 +1769,7 @@ async def test_conclusive_without_a_rejected_alternative_is_refused(db):
         make_harness=_answered_after_reading(
             cause="x", confidence="certain", conclusive=True, refs=["L1"],
         ),
-        agent="devops.diagnose",
+        agent="backend.diagnose",
     ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "empty"
@@ -1785,7 +1785,7 @@ async def test_an_alternative_with_no_reason_does_not_satisfy_the_gate(db):
             cause="x", confidence="certain", conclusive=True, refs=["L1"],
             alternatives_rejected=[{"hypothesis": "   ", "why": ""}, "not a dict"],
         ),
-        agent="devops.diagnose",
+        agent="backend.diagnose",
     ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "empty"
@@ -1806,7 +1806,7 @@ async def test_the_reading_loop_can_hand_over_instead_of_answering(db):
             return HandOver("this needs a migration I may not run")
 
     node = diagnose_node(
-        make_harness=lambda *, tools: HandsOver(), agent="devops.diagnose"
+        make_harness=lambda *, tools: HandsOver(), agent="backend.diagnose"
     )
     state = _intake_state(
         env="production", service="s", cluster="c", namespace="n", app="a",
@@ -1842,7 +1842,7 @@ def test_a_hand_over_from_diagnose_ends_the_walk_instead_of_reaching_report():
 def test_ask_reporter_returns_an_ask_action():
     """The terminal tool the reads loop calls when a missing piece blocks it —
     maps to `Action=Ask`, whose text is sent to the reporter (ticket 04)."""
-    from plugins.devops.graph.diagnose import ask_reporter
+    from plugins.backend.graph.diagnose import ask_reporter
 
     # `@tool` wraps it in a ToolSpec; `.fn` is the underlying function.
     result = ask_reporter.fn("Ban gui giup correlationId duoc khong?")
@@ -1865,7 +1865,7 @@ async def test_the_reading_loop_can_ask_the_reporter_instead_of_answering(db):
             return Ask("Ban dung moi truong nao, production hay dev?")
 
     node = diagnose_node(
-        make_harness=lambda *, tools: Asks(), agent="devops.diagnose"
+        make_harness=lambda *, tools: Asks(), agent="backend.diagnose"
     )
     state = _intake_state(
         env="production", service="s", cluster="c", namespace="n", app="a",
@@ -1896,7 +1896,7 @@ async def test_a_weighed_conclusive_answer_is_reported(db):
                  "ref": "L1"}
             ],
         ),
-        agent="devops.diagnose",
+        agent="backend.diagnose",
     ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "ok"
@@ -1913,7 +1913,7 @@ async def test_an_alternative_pointing_at_a_line_it_was_not_shown_voids_it(db):
             cause="x", confidence="certain", conclusive=True, refs=["L1"],
             alternatives_rejected=[{"hypothesis": "y", "why": "z", "ref": "L99"}],
         ),
-        agent="devops.diagnose",
+        agent="backend.diagnose",
     ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "empty"
@@ -1928,7 +1928,7 @@ async def test_a_tentative_answer_needs_no_alternative(db):
             cause="có thể do cache", confidence="likely", conclusive=False,
             refs=["L1"],
         ),
-        agent="devops.diagnose",
+        agent="backend.diagnose",
     ).run(_reads_state(), _reading_deps(db))
 
     assert status_of(result) == "ok"
@@ -1942,7 +1942,7 @@ def test_the_model_is_told_both_to_fill_it_and_what_happens_if_it_does_not():
     alternative, and the warning that claiming `conclusive` without one is
     refused. Asserting only the field name passed with the warning deleted,
     because the instruction mentions it too."""
-    from plugins.devops.graph.prompt import build_instructions
+    from plugins.backend.graph.prompt import build_instructions
 
     said = build_instructions()
 
@@ -1960,7 +1960,7 @@ def test_git_failing_is_no_ref_rather_than_an_exception(tmp_path, monkeypatch):
     function misled — `read_code` was exactly that caller."""
     import subprocess
 
-    from plugins.devops.sources import code as code_source
+    from plugins.backend.sources import code as code_source
 
     def explode(*_a, **_k):
         raise FileNotFoundError("git")
@@ -2018,7 +2018,7 @@ async def _task_with_text(
 
     conversation = ConversationId("fake", channel_id)
     task = await db.create_task(
-        conversation=conversation, type="devops.api_issue", state="pending",
+        conversation=conversation, type="backend.trace_problem", state="pending",
         confidence=0.9, params={},
     )
     event = replace(
@@ -2026,14 +2026,14 @@ async def _task_with_text(
         code=code,
     )
     await db.record_message(event)
-    await db.mark_triaged(event, task.id, decision={"type": "devops.api_issue"})
+    await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
     return task.id
 
 
 async def test_intake_makes_no_model_call():
     """No `agent`, no harness parameter — a model call is not something this
     node's construction can even make."""
-    from plugins.devops.graph.intake import intake_node
+    from plugins.backend.graph.intake import intake_node
 
     import inspect
 
@@ -2044,7 +2044,7 @@ async def test_intake_makes_no_model_call():
 
 
 async def test_intake_resolves_a_named_service_and_its_placement(db):
-    from plugins.devops.graph.intake import intake_node
+    from plugins.backend.graph.intake import intake_node
 
     await write_rows(db, env="dev", repo="/clone/reelme")
     task_id = await _task_with_text(
@@ -2074,7 +2074,7 @@ async def test_intake_resolves_a_named_service_and_its_placement(db):
 async def test_intake_never_guesses_a_vague_service(db):
     """Zero matches — the room's candidate set, not a guess (the (c)->(a)
     hybrid fork, ticket 03)."""
-    from plugins.devops.graph.intake import intake_node
+    from plugins.backend.graph.intake import intake_node
 
     await write_rows(db, env="dev")
     task_id = await _task_with_text(db, "co loi 500 nhung khong biet service nao")
@@ -2091,7 +2091,7 @@ async def test_intake_never_guesses_a_vague_service(db):
 async def _add_mirror_service(db):
     state = FridayState(channel_id="watched", agent="admin")
     await db.memory_add(
-        state, "the ReelMe v2 backend, mirrored", kind="devops.service",
+        state, "the ReelMe v2 backend, mirrored", kind="backend.service",
         origin=MemoryOrigin.ADMIN,
         data={
             "name": "backend-reelme-v2-mirror",
@@ -2107,7 +2107,7 @@ async def _add_mirror_service(db):
 async def test_intake_never_guesses_when_several_services_match(db):
     """Two services named as distinct tokens in the same text is as much a
     guess as none — the candidate set, not whichever sorted first."""
-    from plugins.devops.graph.intake import intake_node
+    from plugins.backend.graph.intake import intake_node
 
     await write_rows(db, env="dev")
     await _add_mirror_service(db)
@@ -2131,7 +2131,7 @@ async def test_intake_resolves_the_more_specific_name_over_its_prefix(db):
     `…-mirror`) must not force the candidate set: naming the mirror as a whole
     token resolves the mirror, not both. Guards the token-boundary match — a
     substring match would resolve neither (both would match) and go red."""
-    from plugins.devops.graph.intake import intake_node
+    from plugins.backend.graph.intake import intake_node
 
     await write_rows(db, env="dev")
     await _add_mirror_service(db)
@@ -2151,12 +2151,12 @@ async def test_intake_does_not_resolve_a_short_name_inside_a_host(db):
     `api-reelme-v2.dev…` in a pasted URL — a substring match would silently
     resolve the wrong service (M1); the whole-token match yields the candidate
     set instead. Guard goes red if the match is a substring again."""
-    from plugins.devops.graph.intake import intake_node
+    from plugins.backend.graph.intake import intake_node
 
     await write_rows(db, env="dev")
     state = FridayState(channel_id="watched", agent="admin")
     await db.memory_add(
-        state, "the gateway", kind="devops.service", origin=MemoryOrigin.ADMIN,
+        state, "the gateway", kind="backend.service", origin=MemoryOrigin.ADMIN,
         data={
             "name": "api",
             "project": "reelme",
@@ -2179,7 +2179,7 @@ async def test_intake_does_not_resolve_a_short_name_inside_a_host(db):
 
 
 async def test_intake_context_carries_reported_at_and_container_roots_and_hints(db):
-    from plugins.devops.graph.intake import intake_node
+    from plugins.backend.graph.intake import intake_node
 
     task_id = await _task_with_text(
         db,
@@ -2204,7 +2204,7 @@ def test_placement_identity_is_stable_when_memory_or_skills_change():
     """Only env/service/clone/repo/tag invalidate a running investigation
     (ticket 01's checkpoint discard key) — memory and skills changing must
     not."""
-    from plugins.devops.graph.intake import Hints, IntakeContext, Placement
+    from plugins.backend.graph.intake import Hints, IntakeContext, Placement
 
     placement = Placement(env="dev", service="backend-reelme-v2", repo_path="/r")
     hints = Hints()
@@ -2220,7 +2220,7 @@ def test_placement_identity_is_stable_when_memory_or_skills_change():
 
 
 async def test_intake_retrieval_lands_matched_skills_and_facts(db):
-    from plugins.devops.graph.intake import intake_node
+    from plugins.backend.graph.intake import intake_node
 
     await write_rows(db, env="dev")
     state = FridayState(channel_id="watched", agent="admin")
@@ -2247,7 +2247,7 @@ async def test_intake_retrieval_lands_matched_skills_and_facts(db):
 
 
 async def test_intake_of_round_trips_the_envelope_with_tuples_not_lists(db):
-    from plugins.devops.graph.intake import IntakeContext, Placement, intake_node, intake_of
+    from plugins.backend.graph.intake import IntakeContext, Placement, intake_node, intake_of
 
     await write_rows(db, env="dev", repo="/clone/reelme")
     task_id = await _task_with_text(
@@ -2277,7 +2277,7 @@ async def test_intake_result_survives_dagstate_storage_round_trip(db):
     tuple->list pass — a raw tuple field would fail the equality and go red."""
     from friday.sdk.workflow_state import UNSTORABLE
 
-    from plugins.devops.graph.intake import intake_node
+    from plugins.backend.graph.intake import intake_node
 
     await write_rows(db, env="dev", repo="/clone/reelme")
     task_id = await _task_with_text(db, "service backend-reelme-v2 loi 500")

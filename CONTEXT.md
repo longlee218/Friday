@@ -159,7 +159,9 @@ is the premise each board tracks against.
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **In progress:** ticket 01 done (2026-09-28); 02 is next.
+  **In progress:** ticket 01 done (2026-09-28); 02 built on
+  `feat/build-the-spine-02` (live db wiped, names are `backend.*`/`ops.*`),
+  its triage eval waits on `OPENROUTER_API_KEY` in `.env`.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
 
@@ -276,6 +278,14 @@ A conversation has at most one open task; later messages are follow-ups.
 **Parameters matter more than the type** — the commonest real action is
 noticing an `api_issue` arrived without what makes it findable.
 
+## Domain
+
+A plugin, as the catalog sees it: `backend`, `ops`. Every task type is named
+`<domain>.<name>` (`backend.trace_problem`, `backend.answer_question`,
+`ops.request_permission`); the kernel owns none besides `skip`, which is not a
+task type. The board colours a task's tag by its domain, read from
+`/api/actions` (`[{name, domain}]`). (Build-the-spine ticket 02.)
+
 ## Triage
 
 Deciding what a message is — **that, and nothing else**. Produces a decision
@@ -324,7 +334,7 @@ side effect. Every task first **fills in** what the message carries and
 the reporter as a question; `Reply` answers the reporter in the operator's
 name and **waits for approval**; `HandOver` goes to the operator only and
 never reaches the reporter. A task missing something it cannot work without
-has to say so: for a **single-node type** (e.g. `access_request`) required-ness
+has to say so: for a **single-node type** (e.g. `ops.request_permission`) required-ness
 is read off the parameter type and a precondition belongs in that gate, not in
 the last node's else branch. **`api_issue` is no longer gated on findability**
 (board `build-the-loop`, 2026-09-27; ADR 0002): its diagnose loop reads log,
@@ -368,7 +378,7 @@ Introduced on board `the-graph-becomes-a-loop` (ticket 01) and wired on
 
 ## Source, check, node
 
-Three layers. A **source** (`plugins/devops/sources/`) reads one kind of thing and
+Three layers. A **source** (`plugins/backend/sources/`) reads one kind of thing and
 decides nothing — the only package that reaches an outside read surface. A
 **check** is a formula over sources (being withdrawn by v3.3 in favour of
 distilling tools). A **node** is the frame a run is checkpointed, timed and

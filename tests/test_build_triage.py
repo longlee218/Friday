@@ -41,7 +41,7 @@ FLASH = TierConfig(
 
 
 async def test_it_builds_a_real_triage_wired_with_confirmed_examples():
-    db = StubDb(confirmed=[("the api is down", "devops.api_issue")])
+    db = StubDb(confirmed=[("the api is down", "backend.trace_problem")])
 
     triage = await build_triage(_config(flash=FLASH), db=db)
 

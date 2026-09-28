@@ -16,8 +16,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from friday.sdk.sources import Lines, Placement
-from plugins.devops.config import DEFAULT_CONTAINER_ROOTS
-from plugins.devops.investigate import MAX_READS, Evidence, investigate_tools
+from plugins.backend.config import DEFAULT_CONTAINER_ROOTS
+from plugins.backend.investigate import MAX_READS, Evidence, investigate_tools
 
 AT = datetime(2026, 9, 21, 10, 40, tzinfo=timezone.utc)
 
@@ -315,7 +315,7 @@ def test_the_window_reaches_past_the_report():
 def test_a_window_wider_than_anything_is_kept_is_brought_back_to_it():
     """Not distrust: thirty days is what Loki keeps, and a search that says
     it covered a year covered a month."""
-    from plugins.devops.investigate import MAX_MINUTES_BACK
+    from plugins.backend.investigate import MAX_MINUTES_BACK
 
     source = Log(["ERROR abc"])
     _, tools = built(source)
@@ -451,8 +451,8 @@ class Answering:
 async def test_the_model_is_given_the_reads_and_told_where_things_live(db):
     """`Gather` gathers metadata under v3.3 — where the service runs, which
     clone holds its code — and nothing is read in advance."""
-    from plugins.devops.graph.diagnose import Diagnosis, diagnose_node
-    from plugins.devops.graph.deps import ApiIssueDeps
+    from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
+    from plugins.backend.graph.deps import ApiIssueDeps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="x", confidence="likely", conclusive=False, refs=[])
@@ -478,9 +478,9 @@ async def test_an_answer_written_without_reading_anything_is_refused(db):
     from evidence, which is the whole reason the gates exist. Under the old
     pipeline the node checked there was a dossier; here nothing was fetched
     at all."""
-    from plugins.devops.graph.diagnose import Diagnosis, diagnose_node
+    from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
     from friday.sdk.workflow import status_of
-    from plugins.devops.graph.deps import ApiIssueDeps
+    from plugins.backend.graph.deps import ApiIssueDeps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="chắc là do cache", confidence="likely",
@@ -503,7 +503,7 @@ async def test_answering_passes_through_one_copy_of_the_gates(db):
     worth keeping legible on its own even with one caller."""
     import inspect
 
-    from plugins.devops.graph import diagnose as module
+    from plugins.backend.graph import diagnose as module
 
     source = inspect.getsource(module)
 
@@ -516,7 +516,7 @@ def test_the_instructions_change_when_the_model_fetches_its_own_evidence():
     """A prompt saying "the lines you were shown" to a model that was shown
     nothing is a prompt it cannot obey. Asserted on the instructions, not on
     the run's input — deleting the reads half left every other test green."""
-    from plugins.devops.graph.prompt import build_instructions
+    from plugins.backend.graph.prompt import build_instructions
 
     plain, reading = build_instructions(), build_instructions(reads=True)
 
@@ -529,8 +529,8 @@ async def test_what_a_tool_could_not_check_reaches_the_envelope(db):
     """The honest half is the tools' own, not the model's: what a read left
     out is a fact about the read, and a model asked to remember it
     reproduces it unreliably."""
-    from plugins.devops.graph.diagnose import Diagnosis, diagnose_node
-    from plugins.devops.graph.deps import ApiIssueDeps
+    from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
+    from plugins.backend.graph.deps import ApiIssueDeps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="x", confidence="likely", conclusive=False,

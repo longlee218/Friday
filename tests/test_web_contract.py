@@ -54,7 +54,7 @@ async def test_the_page_and_the_board_route_agree(client, inbox, provider, db):
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
     task = await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
     row = await db.queue_outbound(
@@ -86,7 +86,7 @@ async def test_the_page_and_the_flow_route_agree(client, inbox, provider, db):
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
     task = await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
     await db.record_model_call(
@@ -99,7 +99,7 @@ async def test_the_page_and_the_flow_route_agree(client, inbox, provider, db):
     )
     await db.mark_triaged(
         make_event(message_id="10"), task.id,
-        decision={"type": "devops.api_issue", "confidence": 0.9, "params": {}},
+        decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}},
     )
 
     flow = client.get("/api/messages/fake/10/flow").json()
@@ -216,6 +216,21 @@ async def test_an_agent_that_spent_nothing_is_simply_absent(client, db):
     )
 
     assert list(client.get("/api/spend").json()["by_agent"]) == ["triage"]
+
+
+def test_the_page_reads_the_actions_and_their_domains(client):
+    """The tag colour is per domain, and the page learns the domains from the
+    registry rather than from a list of its own (build-the-spine ticket 02):
+    `web/src/ui/Tag.tsx` hard-coded the task types, so a rename or a new
+    plugin fell to grey until someone edited the page."""
+    got = client.get("/api/actions").json()
+
+    assert {(a["name"], a["domain"]) for a in got} == {
+        ("backend.trace_problem", "backend"),
+        ("backend.answer_question", "backend"),
+        ("ops.request_permission", "ops"),
+    }
+    assert all(set(a) == declared("Action") for a in got)
 
 
 # --- the catch-all does not hand out the filesystem --------------------------
@@ -340,7 +355,7 @@ async def test_a_tasks_tool_calls_are_reachable_beside_its_prompts(client, db):
     all, so nothing on that screen had ever shown a tool call. Two ticked
     criteria, one missing route."""
     task = await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
     await db.record_model_call(
@@ -366,7 +381,7 @@ async def test_a_stuck_tasks_compaction_state_is_reachable(client, db):
     task whose own transcript truncation could not bring it under budget,
     but a log is not the operator's own view of it — this route is."""
     task = await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=TaskState.PENDING,
+        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
         confidence=0.9, params={},
     )
 
@@ -419,28 +434,28 @@ def test_a_field_that_names_another_row_offers_the_rows_that_exist(client):
     typed proved it."""
     for name in ("reelme-v2", "midas"):
         client.post("/api/channels/c1/memories", json={
-            "kind": "devops.project", "text": f"repo {name}",
+            "kind": "backend.project", "text": f"repo {name}",
             "data": {"name": name, "repo_path": f"~/{name}",
                      "default_branch": "main", "stack": "NestJS"},
         })
 
     field = _field(client.get("/api/channels/c1/memory-kinds").json(),
-                   "devops.service", "project")
+                   "backend.service", "project")
 
     assert field["type"] == "choice"
-    assert field["names"] == "devops.project"
+    assert field["names"] == "backend.project"
     assert field["choices"] == ["midas", "reelme-v2"]
 
 
 def test_the_choices_are_this_rooms_rows_and_not_another_rooms(client):
     client.post("/api/channels/c1/memories", json={
-        "kind": "devops.project", "text": "repo", "data": {
+        "kind": "backend.project", "text": "repo", "data": {
             "name": "reelme-v2", "repo_path": "~/x",
             "default_branch": "main", "stack": "NestJS"},
     })
 
     field = _field(client.get("/api/channels/c2/memory-kinds").json(),
-                   "devops.service", "project")
+                   "backend.service", "project")
 
     assert field["choices"] == []
 
@@ -451,8 +466,8 @@ def test_no_rows_yet_is_told_apart_from_nothing_to_choose(client):
     page say which kind is missing instead."""
     kinds = client.get("/api/channels/c1/memory-kinds").json()
 
-    names = _field(kinds, "devops.service", "project")
-    literal = _field(kinds, "devops.route", "env")
+    names = _field(kinds, "backend.service", "project")
+    literal = _field(kinds, "backend.route", "env")
 
-    assert (names["names"], names["choices"]) == ("devops.project", [])
+    assert (names["names"], names["choices"]) == ("backend.project", [])
     assert (literal["names"], literal["choices"]) == ("", ["dev", "production"])

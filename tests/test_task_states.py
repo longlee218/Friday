@@ -17,7 +17,7 @@ WATCHED = ConversationId("fake", "watched")
 
 async def task(db, state=TaskState.PENDING):
     return await db.create_task(
-        conversation=WATCHED, type="devops.api_issue", state=state,
+        conversation=WATCHED, type="backend.trace_problem", state=state,
         confidence=0.9, params={"summary": "s"},
     )
 

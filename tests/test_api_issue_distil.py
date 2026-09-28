@@ -10,7 +10,7 @@ line they say decided it, and a pure-code test asserts the rule keeps it.
 
 from __future__ import annotations
 
-from plugins.devops.graph.distil import distil, frames
+from plugins.backend.graph.distil import distil, frames
 
 
 def log(*lines: str) -> list[str]:
