@@ -1,0 +1,1 @@
+- [Harness retry vs pydantic_ai error mapping](harness-retry-vs-pydantic-ai-error-mapping.md) — openai errors get wrapped before `_transient` sees them; retry tests skip the wrapping
