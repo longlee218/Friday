@@ -159,8 +159,7 @@ is the premise each board tracks against.
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **In progress:** ticket 01 (knobs to constants, budget in three groups)
-  built on branch `feat/knobs-to-constants`, 2026-09-28.
+  **In progress:** ticket 01 done (2026-09-28); 02 is next.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
 

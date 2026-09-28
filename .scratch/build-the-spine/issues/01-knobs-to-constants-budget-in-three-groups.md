@@ -1,4 +1,4 @@
-Status: done (awaiting operator review/commit)
+Status: done
 Blocked by:
 
 # Knobs to constants, budget in three groups

@@ -6,8 +6,8 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 
 | # | Ticket | State | Blocked by |
 | --- | --- | --- | --- |
-| 01 | Knobs to constants, budget in three groups | 🧑 built, awaiting operator review/commit (`feat/knobs-to-constants`) | — |
-| 02 | Rename actions and plugins, wipe the db | ⬜ | 01 |
+| 01 | Knobs to constants, budget in three groups | ✅ done (main `aa0dd9d`, `2a98a2d`) | — |
+| 02 | Rename actions and plugins, wipe the db | ⬜ **takeable** | 01 |
 | 03 | Split the grab-bag modules | ⬜ | 02 |
 | 04 | Board card and pool line from the opening message | ⬜ | 02 |
 | 05 | SDK declarations and boot refusals | ⬜ | 03 |
