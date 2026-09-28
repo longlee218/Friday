@@ -20,7 +20,7 @@ crosses a fixed threshold. Two stages, both core constants:
 2. Still ≥ `SUMMARISE_AT` ≈ 150K → summarise the older part of the history.
 
 The threshold is **not a budget** and not a % of the context window
-(`domains-plug-in` ticket 16: the budget is `(max_turns, tokens)` only).
+(`domains-plug-in` ticket 17: the budget is `(max_turns, tokens)` only).
 Numbers are hypotheses until the diagnose eval can score (memory
 `build-the-loop-scoring-deferred`): then compare 50K / 100K / 200K.
 

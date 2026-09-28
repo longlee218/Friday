@@ -88,6 +88,6 @@ Carried: to **14** — an agent step ending in `Ask` is stored at its
 keyed apart) for the step to re-run and see the reply; how is 14's call. A
 reply-driven replan counts toward `max_replans`.
 
-## Amended 2026-09-28 by ticket 16
+## Amended 2026-09-28 by ticket 17
 
-Point 9 goes: no time check before a step and no `out_of_time` hand-over. `STEP_ATTEMPTS = 2` stays. See [The budget in three groups](16-the-budget-in-three-groups.md).
+Point 9 goes: no time check before a step and no `out_of_time` hand-over. `STEP_ATTEMPTS = 2` stays. See [The budget in three groups](17-the-budget-in-three-groups.md).

@@ -98,6 +98,6 @@ Carried: to **13** — how the runner hands the Planner a replan (input as in
 Planner and GatePlan steps for a refusal rewrite to resume. Map fog "Core
 agents' tiers" — the Planner's part is decided (strong).
 
-## Amended 2026-09-28 by ticket 16
+## Amended 2026-09-28 by ticket 17
 
-The Planner's budget is core constants `(max_turns, tokens)`; no time, nothing counts toward a `total_time`. See [The budget in three groups](16-the-budget-in-three-groups.md).
+The Planner's budget is core constants `(max_turns, tokens)`; no time, nothing counts toward a `total_time`. See [The budget in three groups](17-the-budget-in-three-groups.md).

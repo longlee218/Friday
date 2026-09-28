@@ -201,7 +201,7 @@ without approval; an answer that states a cause always waits for the operator.
 - [GatePlan — what a plan must pass before it runs](issues/11-gateplan.md):
   plain code, per version: schema+shape (stop) → contract (refuse, never clip)
   → limits (`max_steps`, new in `contract.limits` — **amends 01**; time check
-  dropped by 16) → freeze+hash. Sensitivity/egress deferred to its
+  dropped by 17) → freeze+hash. Sensitivity/egress deferred to its
   trigger, lands in the gate. Refusal → all errors to the Planner, 2 rewrites
   (core constant, not `max_replans`) → `HandOver`. Operator sees plans on the
   board, never approves them; one plan line on the approval card.
@@ -209,7 +209,7 @@ without approval; an answer that states a cause always waits for the operator.
   sees intake context (incl. memory/skills), the contract, a new short
   `description` per agent/toolset, optional `Action.planning` (outside the
   contract). Tools `core.memory`/`core.skills` only; strong tier and budget
-  `(max_turns, tokens)` as core constants (no time, 16). Gate refusal → same
+  `(max_turns, tokens)` as core constants (no time, 17). Gate refusal → same
   conversation; failure → `HandOver` `planner_failed`; replan → fresh
   conversation. Code-graded plan-shape eval on synthetic fixtures.
 
@@ -220,7 +220,7 @@ without approval; an answer that states a cause always waits for the operator.
   `step_failed`; crash resume per step; a `Replan` is stored and reused like any
   result, so abort is just a plan ending in `draft`; `max_replans` counts every
   replan (reply-driven too) → `replans_exhausted`; time check / `out_of_time`
-  dropped by 16.
+  dropped by 17.
 
 - [`trace_problem`'s graph becomes the first plan](issues/15-trace-problem-becomes-the-first-plan.md):
   plan v1 = `p1 agent backend.diagnose [logs, code]` → `p2 draft`; the four
@@ -264,7 +264,7 @@ without approval; an answer that states a cause always waits for the operator.
   Intake → acknowledge → plan (Planner+gate, one step) → run → `deliver`
   (outbox + state); `Ask` ends the pass, nothing waits. A stored `Ask` is a
   continuation point (history + `Evidence`, reply appended); `step_key`
-  includes `placement_identity`; no `total_time` (16); operator hand-back
+  includes `placement_identity`; no `total_time` (17); operator hand-back
   resets counters and re-plans; `MAX_ASKS_PER_TASK` → `asks_exhausted`; `Ask`
   sent verbatim. Subsumes build-the-loop ticket 4.
 
@@ -276,7 +276,7 @@ without approval; an answer that states a cause always waits for the operator.
   `no`+conclusive needs a ref to where it would be done); one repo per tool
   call (`search_code` new), one agent step; running tag, prod by default;
   `Reply` waits for approval; observed behaviour → `trace_problem`. Contract:
-  `backend.code` + `backend.docs`, 1 replan (unmeasured; "10 min" dropped by 16).
+  `backend.code` + `backend.docs`, 1 replan (unmeasured; "10 min" dropped by 17).
 
 - [The target module layout](issues/09-the-target-module-layout.md):
   `kernel/spine/` one file per stage; one-file packages fold to modules;
@@ -291,7 +291,7 @@ without approval; an answer that states a cause always waits for the operator.
   they use today (behaviour unchanged); changing one needs its eval first. The
   Planner's stays strong (ticket 12). Six fog patches ruled out of scope (below).
 
-- [The budget in three groups](issues/16-the-budget-in-three-groups.md):
+- [The budget in three groups](issues/17-the-budget-in-three-groups.md):
   `AgentSpec.budget = (max_turns, tokens)` — turns include tool turns,
   tokens = in+out summed per run; **no time budget anywhere** (only a
   per-tool-call timeout constant); attempts are core constants (provider 3,

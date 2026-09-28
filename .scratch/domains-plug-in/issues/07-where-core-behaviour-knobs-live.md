@@ -59,6 +59,6 @@ ingest / ops sections and every per-agent behaviour field; the `agents:` block
 becomes tiers. New term for `CONTEXT.md` § Vocabulary at build time:
 *install fact* (and *knob* if the build keeps using it).
 
-## Amended 2026-09-28 by ticket 16
+## Amended 2026-09-28 by ticket 17
 
-Per-agent `timeout_seconds` is deleted, not moved to the agent declaration; `devops.timeout_seconds` is deleted without becoming `total_time`; `context_window` is deleted. Time lives only as a per-tool-call timeout constant. See [The budget in three groups](16-the-budget-in-three-groups.md).
+Per-agent `timeout_seconds` is deleted, not moved to the agent declaration; `devops.timeout_seconds` is deleted without becoming `total_time`; `context_window` is deleted. Time lives only as a per-tool-call timeout constant. See [The budget in three groups](17-the-budget-in-three-groups.md).

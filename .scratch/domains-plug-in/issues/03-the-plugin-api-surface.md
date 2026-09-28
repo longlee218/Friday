@@ -172,6 +172,6 @@ Build consequences (in addition to the above): `DevopsConfig` /
 reuse-before-rewrite rule). New terms for `CONTEXT.md` § Vocabulary at build
 time: *workspace*, *read-command allowlist*.
 
-## Amended 2026-09-28 by ticket 16
+## Amended 2026-09-28 by ticket 17
 
-`AgentSpec.budget` is `(max_turns, tokens)`, not (turns, tokens, seconds): `max_turns` includes tool turns, `tokens` is input + output summed over the run. See [The budget in three groups](16-the-budget-in-three-groups.md).
+`AgentSpec.budget` is `(max_turns, tokens)`, not (turns, tokens, seconds): `max_turns` includes tool turns, `tokens` is input + output summed over the run. See [The budget in three groups](17-the-budget-in-three-groups.md).

@@ -100,6 +100,6 @@ To the fog: compare HEAD of `default_branch` with the running tag ("on main,
 not deployed yet"); an external wiki (Confluence/Notion) as a docs source;
 sending a conclusive answer without approval once the judge is calibrated.
 
-## Amended 2026-09-28 by ticket 16
+## Amended 2026-09-28 by ticket 17
 
-The contract's `total_time 10 min` goes: there is no time limit; `max_replans 1` and `max_steps 3` stay. See [The budget in three groups](16-the-budget-in-three-groups.md).
+The contract's `total_time 10 min` goes: there is no time limit; `max_replans 1` and `max_steps 3` stay. See [The budget in three groups](17-the-budget-in-three-groups.md).

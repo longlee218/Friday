@@ -3,7 +3,7 @@ Blocked by:
 
 # Auto compaction in the Harness
 
-Decisions: [The budget in three groups](../../domains-plug-in/issues/16-the-budget-in-three-groups.md).
+Decisions: [The budget in three groups](../../domains-plug-in/issues/17-the-budget-in-three-groups.md).
 Research: [research-ideal-context-size.md](../research-ideal-context-size.md).
 
 ## Goal
@@ -25,7 +25,7 @@ exists). `compact(ctx, messages) -> messages` lives in its own module,
 The provider-reported `input_tokens` of the latest `ModelResponse` in
 `messages` — no extra call. `ctx.context_window_used` is `None` here: the model
 is built with `OpenAIProvider(openai_client=…)` (`harness.py:880`), so Pydantic
-AI does not know the window, and ticket 16 decided not to depend on it. The
+AI does not know the window, and ticket 17 decided not to depend on it. The
 request that crossed the line has already been sent; acceptable, since 100K is
 far under the 1M window.
 

@@ -69,6 +69,6 @@ every replan). Checks, in order:
 Carried: to **12** — how the Planner uses the gate's errors to rewrite. To
 **14** — where plans and refused versions are stored (the board reads them).
 
-## Amended 2026-09-28 by ticket 16
+## Amended 2026-09-28 by ticket 17
 
-The time check goes (no `total_time`): the limits step checks `max_steps` only. See [The budget in three groups](16-the-budget-in-three-groups.md).
+The time check goes (no `total_time`): the limits step checks `max_steps` only. See [The budget in three groups](17-the-budget-in-three-groups.md).
