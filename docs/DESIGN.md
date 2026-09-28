@@ -218,8 +218,9 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   `kubectl`, `git show` — so a hung read cannot hold a pool slot. **One model
   request** is bounded by its agent's `request_timeout_seconds` (Pydantic AI's
   `ModelSettings.timeout`; 30s triage/extractor/summary, 60s responder/diagnose,
-  set from measured latency on 2026-09-28); a request past it is an attempt
-  and is tried again.
+  set from measured latency on 2026-09-28). The HTTP client reads that number
+  as a limit on silence between bytes, so `_attempts` also bounds each attempt
+  at timeout × the requests it may make; an attempt past it is tried again.
 - **Structured answers.** `Harness(answers=<dataclass>)` declares the shape;
   `run_structured(prompt)` returns an instance or `None`. The model answers
   through a generated tool call — **not** `response_format: json_schema`,

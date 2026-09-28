@@ -955,3 +955,36 @@ async def test_every_wait_between_attempts_is_the_same(monkeypatch):
 
     assert (await run.run("go")).output == "done"
     assert waits == [7.0, 7.0, 7.0]
+
+
+async def test_a_request_past_its_timeout_is_an_attempt_and_is_tried_again():
+    """The per-request timeout bounds the whole request, not only silence on
+    the wire: a model that hangs is cut, and the next attempt answers."""
+    from dataclasses import replace as _replace
+
+    calls: list[int] = []
+
+    async def hangs_once(messages, info):
+        calls.append(1)
+        if len(calls) == 1:
+            await asyncio.sleep(30)
+        return ModelResponse(parts=[TextPart("done")])
+
+    run = Harness(
+        config=_replace(CONFIG, settings={"timeout": 0.05}),
+        instructions="i",
+        model=FunctionModel(hangs_once, model_name="test-model"),
+    )
+
+    assert (await run.run("go")).output == "done"
+    assert len(calls) == 2
+
+
+async def test_a_provider_timeout_is_tried_again():
+    from openai import APITimeoutError
+
+    model = _flaky(APITimeoutError(request=None))  # type: ignore[arg-type]
+    run = Harness(config=CONFIG, instructions="i", model=model)
+
+    assert (await run.run("go")).output == "done"
+    assert model.calls == 2

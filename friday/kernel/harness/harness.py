@@ -91,9 +91,9 @@ ToolContext = RunContext
 #: How many times to call the provider for one run before giving up, and how
 #: long to wait between two attempts — the same wait every time, no doubling
 #: (the operator's call, 2026-09-28). A request is bounded by its agent's
-#: `request_timeout_seconds`, and a timed-out request is an attempt like a 429,
-#: so the worst run is `PROVIDER_ATTEMPTS` × that timeout plus nine waits —
-#: 690s for a 60s agent. The pool works only `workflows.concurrency` tasks at
+#: `request_timeout_seconds` (each attempt at that × its requests), and a
+#: timed-out attempt is retried like a 429, so a one-request 60s agent's worst
+#: run is `PROVIDER_ATTEMPTS` × 60s plus nine waits — 690s. The pool works only `workflows.concurrency` tasks at
 #: once, so that is how long a stalled provider can hold a slot.
 PROVIDER_ATTEMPTS = 10
 PROVIDER_BACKOFF_SECONDS = 10.0
@@ -653,15 +653,23 @@ class Harness:
         limits = UsageLimits(
             request_limit=request_limit, total_tokens_limit=self._config.tokens
         )
+        # `settings["timeout"]` reaches the HTTP client as a limit on silence
+        # between bytes, not on a whole request, so the attempt itself is
+        # bounded too: each of its requests may take the full timeout.
+        timeout = self._config.settings.get("timeout")
+        attempt_timeout = None if timeout is None else timeout * request_limit
         last: Exception | None = None
         for attempt in range(1, PROVIDER_ATTEMPTS + 1):
             progress.attempt = attempt
             try:
-                result = await self.agent.run(
-                    prompt,
-                    deps=context,
-                    usage_limits=limits,
-                    capabilities=[hooks.capability],
+                result = await asyncio.wait_for(
+                    self.agent.run(
+                        prompt,
+                        deps=context,
+                        usage_limits=limits,
+                        capabilities=[hooks.capability],
+                    ),
+                    timeout=attempt_timeout,
                 )
             except Exception as exc:  # noqa: BLE001 - decided by _transient
                 progress.flush(hooks, calls)
@@ -742,7 +750,11 @@ class _About:
 #: What is worth calling again. A list rather than a guess from the message: a
 #: 400 is the provider saying the request itself is wrong, and paying to ask it
 #: a second time buys nothing.
-_TRANSIENT = (APIConnectionError, APITimeoutError, RateLimitError, InternalServerError)
+_TRANSIENT = (
+    APIConnectionError, APITimeoutError, RateLimitError, InternalServerError,
+    # An attempt past its bound (`_attempts`).
+    TimeoutError,
+)
 
 #: Statuses the SDK gives no class of its own, and that are still worth another
 #: call. Only 408 today.
@@ -784,9 +796,13 @@ def _why(exc: Exception, attempts: int = 0) -> str:
     header."""
     from friday.kernel.ops.redact import scrub
 
+    # `asyncio.wait_for` raises a `TimeoutError` whose `str()` is empty.
+    said = "no answer within the request timeout" if isinstance(
+        exc, TimeoutError
+    ) else scrub(str(exc))
     if attempts > 1:
-        return f"gave up after {attempts} attempts: {scrub(str(exc))}"
-    return scrub(str(exc))
+        return f"gave up after {attempts} attempts: {said}"
+    return said
 
 
 def _last_text(messages: list) -> str:
