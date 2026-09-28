@@ -246,6 +246,15 @@ without approval; an answer that states a cause always waits for the operator.
   `backend.diagnose`); operator memory re-imported. Eval relabelled 1:1 by
   hand (boundary cases → 06). Web reads `[{name, domain}]`, colour per domain.
 
+- [The plugin API surface](issues/03-the-plugin-api-surface.md):
+  `Plugin(id, register, enricher, config)`; `register` runs once, declares
+  only: `api.action`, `api.agent(AgentSpec)` (a declaration the core runs via
+  the Harness; core adds `ask_reporter`/`hand_over`/`replan`),
+  `api.toolset(ToolsetSpec(factory, mcp={server: TOOLS}))`, `memory_kind`,
+  `reader` unchanged. **`deps` and `caps` deleted** — a factory builds tools
+  per run from a core `RunContext` (domain, evidence, narrowed `Reads`,
+  config). Seven offline boot refusals.
+
 ## Not yet specified
 
 - **Getting smarter** — plan exemplars (stored, retrieved, scored by outcome),
