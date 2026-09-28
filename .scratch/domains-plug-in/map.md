@@ -229,6 +229,14 @@ without approval; an answer that states a cause always waits for the operator.
   `Action.acknowledge(IntakeContext)` hook. The report file and
   `reports_dir` go; board + draft brief replace them. No fallback, no exemplar.
 
+- [Renaming the actions and relabelling history](issues/08-renaming-and-relabelling-history.md):
+  no data migration — back up, wipe `friday.db`, `upgrade head` on empty (never
+  ran for real); chain kept + one schema migration dropping `tasks.params`.
+  All names at once, no legacy alias (`backend.trace_problem`,
+  `backend.answer_question`, `ops.request_permission`, `backend.<kind>`,
+  `backend.diagnose`); operator memory re-imported. Eval relabelled 1:1 by
+  hand (boundary cases → 06). Web reads `[{name, domain}]`, colour per domain.
+
 ## Not yet specified
 
 - **Getting smarter** — plan exemplars (stored, retrieved, scored by outcome),
