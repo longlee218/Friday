@@ -381,7 +381,7 @@ def test_one_extractor_block_serves_every_classifiable_type():
     from friday.kernel.config import load_config
     from friday.kernel.dag import registry
 
-    for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY"):
+    for key in ("OPENROUTER_API_KEY",):
         os.environ.setdefault(key, "test-key")
     from pathlib import Path
 
@@ -405,7 +405,7 @@ def test_register_extractors_covers_every_registered_task_type():
     from friday.kernel.dag import registry
     from friday.kernel.extraction import register_extractors, registered
 
-    for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY", "EXTRACTOR_API_KEY"):
+    for key in ("OPENROUTER_API_KEY",):
         os.environ.setdefault(key, "test-key")
     config = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
 

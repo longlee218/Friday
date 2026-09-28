@@ -1705,6 +1705,7 @@ def test_the_boot_actually_checks_the_graph_clocks(monkeypatch):
         raise ConfigError("clocks do not add up")
 
     monkeypatch.setattr(router, "check_graph_clocks", over_budget)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
 
     from dotenv import load_dotenv
 

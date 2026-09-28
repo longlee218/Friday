@@ -30,7 +30,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def _shipped():
-    for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY"):
+    for key in ("OPENROUTER_API_KEY",):
         os.environ.setdefault(key, "test-key")
     return load_config(REPO / "config.yaml")
 

@@ -130,7 +130,7 @@ def test_the_configured_list_is_reachable_and_not_empty():
     from friday.kernel.config import load_config
     from friday.kernel.triage.prefilter import Sensitive
 
-    for key in ("TRIAGE_API_KEY", "RESPONDER_API_KEY"):
+    for key in ("OPENROUTER_API_KEY",):
         os.environ.setdefault(key, "test-key")
     words = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
 
