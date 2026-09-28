@@ -22,6 +22,8 @@ phases to plugin-registered agents. Five threads:
 5. **Code standard** — class vs function, file size, one type per concept.
 
 Done when every thread is decided and a build board exists. Decided, not built.
+**Done 2026-09-28**: every ticket resolved; build board
+[`build-the-spine`](../build-the-spine/spec.md).
 
 ## Notes
 

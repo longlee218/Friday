@@ -155,6 +155,11 @@ is the premise each board tracks against.
   measurement says the new way is not worse.** Revision v4 in the same spec
   is *proposed* additions to v3.3, not a competing design (see the open item
   in the tracking file).
+- **`build-the-spine`** — builds the `domains-plug-in` map: a plugin is a
+  domain registering actions (intent + contract), agents and toolsets; every
+  task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
+  run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
+  **Not started** (opened 2026-09-28).
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
 
