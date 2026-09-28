@@ -278,6 +278,14 @@ without approval; an answer that states a cause always waits for the operator.
   `Reply` waits for approval; observed behaviour → `trace_problem`. Contract:
   `backend.code` + `backend.docs`, 10 min, 1 replan (unmeasured).
 
+- [The target module layout](issues/09-the-target-module-layout.md):
+  `kernel/spine/` one file per stage; one-file packages fold to modules;
+  plugin = `__init__`/`placement`/`memory` + `actions/<name>/`, `agents/`,
+  `toolsets/` — **`sources/` folds into `toolsets/`** (amends D6 "three
+  layers", noted in DESIGN.md); the four grab-bags split by responsibility;
+  `DAGState`+`DagState` → one `StepResult` ORM row, `NodeRun` goes; `sdk/`
+  only what a plugin imports (`model.py` deleted, `Kind`/`Ask`… to kernel).
+
 ## Not yet specified
 
 - **Getting smarter** — plan exemplars (stored, retrieved, scored by outcome),
@@ -297,6 +305,8 @@ without approval; an answer that states a cause always waits for the operator.
 - **External docs** — a wiki (Confluence/Notion) as a docs source beside
   repo markdown (from ticket 06).
 - **Guards that keep it true** — structural tests once the API shape lands.
+- **`kernel/ops/api.py` (1108 lines)** and the other files over 200 lines —
+  split when the build touches them (from ticket 09).
 
 ## Out of scope
 
