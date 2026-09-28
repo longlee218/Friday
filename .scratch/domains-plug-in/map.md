@@ -155,7 +155,7 @@ without approval; an answer that states a cause always waits for the operator.
   `answer_question`: code + docs), so a tool is written once and shared.
 - **Plugins are discovered, in one place**: every package under `plugins/` with
   a `PLUGIN` loads; `config.yaml` only switches one off.
-- **`config.yaml` holds only provider keys and named model tiers** (named freely,
+- **`config.yaml` holds only provider keys and named model tiers** (+ install facts, see ticket 07) (named freely,
   e.g. `sonnet-fast`, `super-strong`). Code picks a tier by name; an undeclared
   tier refuses the boot.
 - **Class vs function**: a class when it holds a long-lived resource or state; a
@@ -228,6 +228,15 @@ without approval; an answer that states a cause always waits for the operator.
   Planner, once per task, no approval) driven by an optional
   `Action.acknowledge(IntakeContext)` hook. The report file and
   `reports_dir` go; board + draft brief replace them. No fallback, no exemplar.
+
+- [Where the core's behaviour knobs live](issues/07-where-core-behaviour-knobs-live.md):
+  `config.yaml` = provider keys + tiers + **install facts** (incl.
+  `mention_types`, `concurrency`) — **amends** the config decision above. No
+  board settings. Every other knob is a named constant beside its user (agent
+  budget/temperature on the agent declaration; `confidence_threshold` changes
+  only with a triage-eval table); `daily_token_budget`, `devops.timeout_seconds`,
+  `max_asks`, `auto_ask_for_details`, `use_responder`,
+  `extraction_budget_tokens` deleted.
 
 - [Renaming the actions and relabelling history](issues/08-renaming-and-relabelling-history.md):
   no data migration — back up, wipe `friday.db`, `upgrade head` on empty (never
