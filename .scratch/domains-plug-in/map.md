@@ -286,24 +286,13 @@ without approval; an answer that states a cause always waits for the operator.
   `DAGState`+`DagState` → one `StepResult` ORM row, `NodeRun` goes; `sdk/`
   only what a plugin imports (`model.py` deleted, `Kind`/`Ask`… to kernel).
 
+- **Fog review (2026-09-28)** — core agents' tiers: triage, responder and room
+  summary each name a tier by a core constant, set at build time to the model
+  they use today (behaviour unchanged); changing one needs its eval first. The
+  Planner's stays strong (ticket 12). Six fog patches ruled out of scope (below).
+
 ## Not yet specified
 
-- **Getting smarter** — plan exemplars (stored, retrieved, scored by outcome),
-  a reflection step; durable-spine §8; sending a conclusive answer without
-  approval once the judge is calibrated. Needs real runs first.
-- **Invalidation sophistication** — guard steps the Planner inserts vs a world
-  cursor the runner checks; how much is enough before data exists.
-- **A write-capable shell in the workspace** — `core.workspace` gives file
-  tools only; running scripts (`jq`, `python`) there needs an OS-level
-  sandbox (Docker, or harness `ModalSandboxSession`). Revisit when a run needs it.
-- **The `ops` domain beyond `request_permission`.**
-- **Hand-off between actions** — a question that turns out to be a failure, or
-  the reverse: re-plan inside the run, re-triage, or hand over?
-- **Core agents' tiers** — triage, responder, room summary (the Planner's is decided: strong).
-- **Code vs deploy drift** — "on main but not deployed yet": compare HEAD of
-  `default_branch` with the running tag (from ticket 06).
-- **External docs** — a wiki (Confluence/Notion) as a docs source beside
-  repo markdown (from ticket 06).
 - **Guards that keep it true** — structural tests once the API shape lands.
 - **`kernel/ops/api.py` (1108 lines)** and the other files over 200 lines —
   split when the build touches them (from ticket 09).
@@ -314,3 +303,12 @@ without approval; an answer that states a cause always waits for the operator.
   rendering a frozen plan.
 - Friday writing code (a separate charter).
 - Plugins living outside the repo, packaging, entry-point discovery.
+- Getting smarter — plan exemplars, a reflection step, sending a conclusive
+  answer without approval: needs real runs and a calibrated judge first.
+- Invalidation sophistication (guard steps vs a world cursor): needs data first.
+- A write-capable shell in the workspace: needs an OS-level sandbox; no run
+  needs it yet.
+- The `ops` domain beyond `request_permission`: no such request yet.
+- Code vs deploy drift ("on main but not deployed"): not needed by either
+  backend action yet.
+- External docs (Confluence/Notion) as a docs source: repo markdown only for now.
