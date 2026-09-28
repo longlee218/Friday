@@ -54,7 +54,7 @@ Done when every thread is decided and a build board exists. Decided, not built.
         → backend.trace_problem @ 0.9   (nothing clear → low → operator)
         ▼
  3. TASK + POOL ✓      task of type backend.trace_problem; pool claims it
-        → starts the durable spine workflow task-<id> (DBOS)             ◆14
+        → starts pass n of the spine: DBOS workflow task-<id>/pass-<n>   ◆14
         ▼
  ╔═ DURABLE SPINE — every step durable, resumes after a crash ═════════════╗
  ║ 4. INTAKE (no model)                                               ◆04 ║
@@ -255,6 +255,15 @@ without approval; an answer that states a cause always waits for the operator.
   per run from a core `RunContext` (domain, evidence, narrowed `Reads`,
   config). Seven offline boot refusals.
 
+- [The durable spine workflow and pause/resume](issues/14-the-durable-spine-workflow-and-pause-resume.md):
+  one short DBOS workflow per **pass** (`task-<id>/pass-<n>`, `tasks.pass_no`),
+  Intake → acknowledge → plan (Planner+gate, one step) → run → `deliver`
+  (outbox + state); `Ask` ends the pass, nothing waits. A stored `Ask` is a
+  continuation point (history + `Evidence`, reply appended); `step_key`
+  includes `placement_identity`; `total_time` = work time; operator hand-back
+  resets counters and re-plans; `MAX_ASKS_PER_TASK` → `asks_exhausted`; `Ask`
+  sent verbatim. Subsumes build-the-loop ticket 4.
+
 ## Not yet specified
 
 - **Getting smarter** — plan exemplars (stored, retrieved, scored by outcome),
@@ -266,8 +275,6 @@ without approval; an answer that states a cause always waits for the operator.
   the reverse: re-plan inside the run, re-triage, or hand over?
 - **Core agents' tiers** — triage, responder, room summary (the Planner's is decided: strong).
 - **Guards that keep it true** — structural tests once the API shape lands.
-- **What happens to `build-the-loop` ticket 4** (resume) — likely subsumed by
-  the spine's pause/resume ticket.
 
 ## Out of scope
 

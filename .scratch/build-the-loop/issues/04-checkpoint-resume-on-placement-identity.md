@@ -1,7 +1,12 @@
-Status: ready-for-agent
+Status: wontfix
 Blocked by: 06
 
 # Checkpoint / resume on placement identity
+
+> **Superseded 2026-09-28** by [The durable spine workflow and pause/resume](../../domains-plug-in/issues/14-the-durable-spine-workflow-and-pause-resume.md):
+> resume becomes the spine's continuation point (a stored `Ask` carries the
+> agent's history + `Evidence`) and `placement_identity` joins `step_key`.
+> The acceptance below moves to the spine's build board.
 
 Decision: [The reply that both resumes and invalidates](../../the-graph-becomes-a-loop/issues/01-the-reply-that-both-resumes-and-invalidates.md).
 
