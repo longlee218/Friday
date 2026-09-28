@@ -74,7 +74,7 @@ class Database(
     #: name them `Database.MEMORY_PER_CHANNEL` stay accurate.
     MEMORY_PER_CHANNEL = 200
     TEXT_CHARS = 500
-    DIAGNOSE_FINDINGS = 5
+    CASE_FINDINGS = 5
     COMPACTION_COOLDOWN_AFTER = 2
 
     def __init__(self, engine, sessions: async_sessionmaker[AsyncSession]) -> None:

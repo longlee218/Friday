@@ -130,7 +130,7 @@ def test_kernel_imports_only_sdk():
 def test_a_plugin_imports_sdk_only():
     """A plugin codes against `sdk` and nothing else *of ours* — the reason it is
     detachable. Its own package is not "ours": a plugin freely imports its own
-    submodules (`plugins.backend.graph.resolve` from `plugins.backend.graph`). What
+    submodules (`plugins.backend.resolve` from `plugins.backend.placement`). What
     it may not reach for is the core (anything `friday.*` but `friday.sdk`) or
     another plugin. Non-vacuous since ticket 14 landed `plugins/devops/` (now `plugins/backend/`)."""
     offenders = set()

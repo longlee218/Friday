@@ -33,8 +33,8 @@ class BootContext:
     `record` is the sink every model node shares; `servers`
     are the tool servers a run opened; `skills` is the skill library. `sender`/
     `approver` are the two identities a mid-run row is queued as. `prepare_node`
-    and `make_harness` are the kernel-side builders a plugin calls rather than
-    imports.
+    `make_harness` and `intake` are the kernel-side builders a plugin calls
+    rather than imports.
     """
 
     config: Any
@@ -50,6 +50,13 @@ class BootContext:
         from friday.kernel.dag.prepare import prepare_node
 
         return prepare_node(*args, **kwargs)
+
+    async def intake(self, *args: Any, **kwargs: Any) -> Any:
+        """Core Intake (`friday.kernel.spine.intake`), exposed so the backend
+        DAG's node 0 runs it without importing the kernel (ticket 07)."""
+        from friday.kernel.spine.intake import intake
+
+        return await intake(*args, **kwargs)
 
     def simple_dag(self, name: str, params: type) -> Any:
         """The one-node graph a type with no investigation past node 0 uses —

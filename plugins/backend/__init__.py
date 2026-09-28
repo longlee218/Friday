@@ -28,6 +28,7 @@ from plugins.backend.graph import (
 from plugins.backend.graph.deps import ApiIssueDeps
 from plugins.backend.memory import DEPENDENCY_READERS, BACKEND_MEMORY_KINDS
 from plugins.backend.params import ApiIssueParams
+from plugins.backend.placement import enrich
 
 __all__ = ["PLUGIN", "register"]
 
@@ -83,4 +84,4 @@ def register(api: Any) -> None:
     )
 
 
-PLUGIN = Plugin(id="backend", register=register, config=BackendConfig)
+PLUGIN = Plugin(id="backend", register=register, enricher=enrich, config=BackendConfig)

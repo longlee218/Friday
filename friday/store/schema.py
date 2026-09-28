@@ -408,8 +408,8 @@ class Memory(Base):
     #: `finding` is left out. Its key is `service:error_code`, which names
     #: the fault rather than the finding: every diagnosis of a known fault
     #: writes its own, and several saying the same thing are the spec's
-    #: signal that a runbook is owed. The key stays on the row because
-    #: `Database.diagnose_memories` matches on it.
+    #: signal that a runbook is owed. `Database.case_memories` matches a
+    #: finding on its data (`service`), not on this key.
     __table_args__ = (
         Index(
             "uq_memories_active_key",

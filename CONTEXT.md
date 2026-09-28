@@ -159,8 +159,10 @@ is the premise each board tracks against.
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **In progress:** tickets 01, 02 and 03 done (2026-09-28; names are
-  `backend.*`/`ops.*`, live db wiped; grab-bag modules split); 04 and 05 are next. The triage eval
+  **In progress:** tickets 01, 02, 03, 05, 06, 07, 10 and 12 done
+  (2026-09-29; names are `backend.*`/`ops.*`, live db wiped; core Intake and
+  the backend enricher live through the DAG's intake node); 04, 08, 09, 11
+  and 13 are takeable (`.scratch/build-the-spine/STATUS.md`). The triage eval
   is deferred until the operator has an OpenRouter key.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
@@ -428,16 +430,45 @@ first that holds is taken. Deterministic Python.
 - An agent is a node inside a graph, never the thing driving it; which agent
   and server a node gets is composition, handed in through `deps`.
 
+## Core Intake
+
+`intake()` (`friday/kernel/spine/intake.py`), the same three steps for every
+action, no model, no network: **seed** (`IntakeSeed`: `request_text` over every
+reporter turn, `reported_at`, raw `Hints` — every uuid, every `ArtifactRef`)
+→ the domain's **enricher** → **retrieve** (memory + skills by the
+*retrieval keys*). Its output, `IntakeContext` (`friday/sdk/intake.py`), is
+what every agent in a run receives, with the enricher's value as `domain`.
+What a hint *means* (the curl, the correlationId) is the domain's call.
+The seed also keeps the turns apart (`db.original_turns_for`): backend takes
+the env from the newest turn that pastes a URL, so a reply moving dev → prod
+is another case.
+(Build-the-spine ticket 07.)
+
 ## Placement identity
 
-`api_issue`'s staleness key: the tuple `(env, service, clone, repo, tag)` on the
-`Intake` node's `Placement`. `Intake` runs fresh every pass and is never
-checkpointed; when the reporter answers an `Ask`, the graph resumes only if the
-placement identity is unchanged, and discards the running investigation if it
-differs (a reply that moves env/service is a different case, not a continuation).
-Memory/skills changing does **not** invalidate — only these five fields do.
+A task's staleness key: the domain type's `IDENTITY` fields, read in order by
+`IntakeContext.identity`. Backend's is `(env, service, clone_path, repo_path)`
+on `Placement` (`plugins/backend/placement.py`); `release_tag` left it in
+build-the-spine ticket 07 (it was never filled). A domain with no enricher
+(`ops`) has identity `()`, so a reply always continues. Intake runs fresh every
+pass and is never checkpointed; when the reporter answers an `Ask`, the run
+resumes only if the identity is unchanged, and discards the running
+investigation if it differs (a reply that moves env/service is a different
+case, not a continuation). Memory, skills and the hints (a correlationId, the
+curl's artifact) changing do **not** invalidate — they sit outside `IDENTITY`.
 Introduced on board `the-graph-becomes-a-loop` (ticket 01) and wired on
 `build-the-loop`.
+
+## Retrieval keys
+
+What core Intake matches memory on besides the text: the named keys the domain
+type's `retrieval_keys()` returns (backend: `{"service": …}`, empty while the
+service is unresolved). `db.case_memories(channel_id, keys, text)` matches a
+runbook whose `when` list of the same name holds the value (`when.service`),
+or whose `keywords` appear in the text, and the newest findings whose data
+carries every key with the same value. Only core `intake()` calls it; what
+Intake cannot know yet the agent fetches itself. (Build-the-spine ticket 07;
+replaced `diagnose_memories(service=, error_code=, path=)`.)
 
 ## Source, check, node
 

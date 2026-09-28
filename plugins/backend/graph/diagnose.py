@@ -296,7 +296,7 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
     from plugins.backend.investigate import Evidence, investigate_tools
 
     ctx = intake_of(state["intake"])
-    placement = ctx.placement
+    placement = ctx.domain
     evidence = Evidence()
     tools = investigate_tools(
         evidence=evidence,

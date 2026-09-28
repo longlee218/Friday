@@ -49,6 +49,9 @@ class _StubCaps:
                      ends_with=None):
         return self._harness
 
+    async def intake(self, *args, **kwargs):
+        return await core_intake(*args, **kwargs)
+
 
 def _dag(*, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnose_agent=None):
     """The `backend.trace_problem` DAG, built through the plugin's own builder."""
@@ -64,6 +67,7 @@ def _dag(*, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnos
 
 from plugins.backend.graph.deps import ApiIssueDeps
 from plugins.backend.graph.intake import intake_of
+from friday.kernel.spine.intake import intake as core_intake
 from friday.sdk.workflow import DAGState, status_of
 from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
@@ -244,7 +248,7 @@ async def test_one_row_for_one_host_beats_the_convention_it_breaks(db):
     """The 2026-09-18 survey found `api-mobile-spec-reviewer.aperogroup.ai`
     served from `dev` with no `.dev` in it. Longest suffix wins, so the
     exception is one more row rather than a branch."""
-    from plugins.backend.graph.resolve import environment_of
+    from plugins.backend.resolve import environment_of
 
     rows = [
         SimpleNamespace(suffix="aperogroup.ai", env="production"),
@@ -471,7 +475,7 @@ async def test_the_reporter_is_told_it_is_being_worked_on(db):
     assert status_of(result) == "ok"
     (row,) = await db.outbound()
     assert row.kind == Kind.ACKNOWLEDGED
-    assert row.text == ack_text(intake_of(state["intake"]).placement)
+    assert row.text == ack_text(intake_of(state["intake"]).domain)
     assert row.sender == DEFAULT_SENDER, "the reporter's channel, not a DM"
     # Hung under the message it answers, which is what keeps a busy channel
     # readable. A real mention is recorded first, or both sides of this are
@@ -537,7 +541,7 @@ def test_ack_text_names_the_service_or_stays_generic():
     """Names the service when Intake resolved one; otherwise stays generic —
     never 'log của external' (external is not a place a reporter knows, and the
     loop reads code/docs, not only logs). Operator's fog-item call, 2026-09-27."""
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
 
     from plugins.backend.graph.acknowledge import ack_text
 
@@ -553,7 +557,7 @@ def test_the_reads_input_names_the_stack_when_known():
     """The stack (e.g. NestJS) is a hint the diagnose prompt gives the model so
     it reads a trace in that framework's idiom — restored on the unified
     Placement (2026-09-27). Absent when the placement carries no stack."""
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
 
     from plugins.backend.graph.prompt import build_reads_input
 
@@ -819,7 +823,7 @@ def test_a_captured_case_runs_through_the_real_source():
     """
     import asyncio
 
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from plugins.backend.sources.logs import LokiSource
     from replay_case import CannedReads
 
@@ -891,7 +895,7 @@ def test_a_dev_case_is_captured_from_kubectl_and_replays_through_it():
     """
     import asyncio
 
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from replay_case import canned_source
 
     name, source = canned_source({
@@ -948,7 +952,7 @@ def test_a_superset_capture_serves_any_needle_the_loop_chooses():
     was captured for, and a line outside the window is not."""
     import asyncio
 
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from plugins.backend.sources.logs import LokiSource
     from replay_case import CannedReads
 
@@ -982,7 +986,7 @@ def test_a_superset_read_is_capped_at_the_limit_and_says_truncated():
     window."""
     import asyncio
 
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from plugins.backend.sources.logs import LokiSource
     from replay_case import CannedReads
 
@@ -1007,7 +1011,7 @@ def test_a_kubectl_superset_serves_the_needle_the_loop_chose():
     would miss the one environment that needs it."""
     import asyncio
 
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from replay_case import canned_source
 
     name, source = canned_source({
@@ -1036,7 +1040,7 @@ def test_a_kubectl_superset_serves_a_needle_with_spaces_and_a_quote():
     main case, not an edge."""
     import asyncio
 
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from replay_case import canned_source
 
     name, source = canned_source({
@@ -1161,7 +1165,7 @@ def _kubectl_returning(count: int):
     """
     import asyncio
 
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from plugins.backend.sources.logs import SshKubectlSource
 
     class Source(SshKubectlSource):
@@ -1224,7 +1228,8 @@ def test_loki_asks_its_back_end_for_the_lines_that_carry_the_needle():
     of it with `truncated: false`."""
     import asyncio
 
-    from friday.sdk.sources import Placement, Reads
+    from friday.sdk.sources import Reads
+    from plugins.backend.placement import Placement
     from plugins.backend.sources.logs import LokiSource
 
     class Server:
@@ -1268,7 +1273,7 @@ def test_kubectl_searches_the_whole_window_rather_than_its_tail():
     searches all of it — and `head` keeps the answer bounded."""
     import asyncio
 
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from plugins.backend.sources.logs import SshKubectlSource
 
     ran: list[str] = []
@@ -1295,7 +1300,7 @@ def test_a_needle_reaches_the_shell_quoted():
     between that and a command line."""
     import asyncio
 
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from plugins.backend.sources.logs import SshKubectlSource
 
     ran: list[str] = []
@@ -1337,7 +1342,7 @@ def test_a_failing_kubectl_is_not_hidden_by_the_pipe_that_narrows_it():
     """
     import asyncio
 
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from plugins.backend.sources.logs import SshKubectlSource
 
     ran: list[str] = []
@@ -1704,7 +1709,7 @@ def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monke
 
 def _intake_state(
     *, env="dev", service="s", cluster="", namespace="", app="",
-    pod_pattern="p", repo_path="", release_tag="", error_code_doc="",
+    pod_pattern="p", repo_path="", error_code_doc="",
     candidates=(), request_text="500 khi init đơn",
 ) -> DAGState:
     """An `intake` envelope reads-mode (and `acknowledge`/`report`) needs —
@@ -1714,21 +1719,19 @@ def _intake_state(
         "intake": {
             "request_text": request_text,
             "reported_at": REPORTED_AT.isoformat(),
-            "placement": {
+            "hints": {"uuids": [], "artifacts": []},
+            "domain": {
                 "env": env, "service": service, "cluster": cluster,
                 "namespace": namespace, "app": app, "pod_pattern": pod_pattern,
                 "clone_path": repo_path, "repo_path": repo_path,
-                "release_tag": release_tag, "error_code_doc": error_code_doc,
+                "error_code_doc": error_code_doc,
                 "container_roots": [], "dbs": [], "candidates": list(candidates),
-            },
-            "hints": {
                 "correlation_id": None, "curl_artifact_id": None,
                 "response_artifact_id": None,
             },
-            "memory": [], "skills": [], "related_tasks": [],
+            "memory": [], "skills": [],
         },
     })
-
 
 def _reads_state():
     """A placement reads-mode needs, off a real `intake` envelope."""
@@ -2037,7 +2040,7 @@ async def test_intake_makes_no_model_call():
 
     import inspect
 
-    node = intake_node()
+    node = intake_node(core_intake)
 
     assert node.agent is None
     assert list(inspect.signature(node.run).parameters) == ["state", "deps"]
@@ -2056,12 +2059,12 @@ async def test_intake_resolves_a_named_service_and_its_placement(db):
         code=(CURL,),
     )
 
-    result = await intake_node().run(
+    result = await intake_node(core_intake).run(
         DAGState.empty(), deps_for(db, task_id=task_id)
     )
 
     assert status_of(result) == "ok"
-    placement = result["intake"]["placement"]
+    placement = result["intake"]["domain"]
     assert placement["env"] == "dev"
     assert placement["service"] == "backend-reelme-v2"
     assert placement["namespace"] == "dev"
@@ -2079,11 +2082,11 @@ async def test_intake_never_guesses_a_vague_service(db):
     await write_rows(db, env="dev")
     task_id = await _task_with_text(db, "co loi 500 nhung khong biet service nao")
 
-    result = await intake_node().run(
+    result = await intake_node(core_intake).run(
         DAGState.empty(), deps_for(db, task_id=task_id)
     )
 
-    placement = result["intake"]["placement"]
+    placement = result["intake"]["domain"]
     assert placement["service"] == ""
     assert placement["candidates"] == ["backend-reelme-v2"]
 
@@ -2115,11 +2118,11 @@ async def test_intake_never_guesses_when_several_services_match(db):
         db, "backend-reelme-v2 va backend-reelme-v2-mirror deu dang tra 500"
     )
 
-    result = await intake_node().run(
+    result = await intake_node(core_intake).run(
         DAGState.empty(), deps_for(db, task_id=task_id)
     )
 
-    placement = result["intake"]["placement"]
+    placement = result["intake"]["domain"]
     assert placement["service"] == ""
     assert set(placement["candidates"]) == {
         "backend-reelme-v2", "backend-reelme-v2-mirror",
@@ -2137,11 +2140,11 @@ async def test_intake_resolves_the_more_specific_name_over_its_prefix(db):
     await _add_mirror_service(db)
     task_id = await _task_with_text(db, "backend-reelme-v2-mirror dang tra 500")
 
-    result = await intake_node().run(
+    result = await intake_node(core_intake).run(
         DAGState.empty(), deps_for(db, task_id=task_id)
     )
 
-    placement = result["intake"]["placement"]
+    placement = result["intake"]["domain"]
     assert placement["service"] == "backend-reelme-v2-mirror"
     assert placement["candidates"] == []
 
@@ -2169,11 +2172,11 @@ async def test_intake_does_not_resolve_a_short_name_inside_a_host(db):
         db, "loi 500 tren https://api-reelme-v2.dev.aperogroup.ai/v1/pod/orders/init"
     )
 
-    result = await intake_node().run(
+    result = await intake_node(core_intake).run(
         DAGState.empty(), deps_for(db, task_id=task_id)
     )
 
-    placement = result["intake"]["placement"]
+    placement = result["intake"]["domain"]
     assert placement["service"] == ""            # not "api"
     assert "api" in placement["candidates"]
 
@@ -2189,34 +2192,34 @@ async def test_intake_context_carries_reported_at_and_container_roots_and_hints(
         code=(CURL,),
     )
 
-    result = await intake_node().run(
+    result = await intake_node(core_intake).run(
         DAGState.empty(), deps_for(db, task_id=task_id)
     )
 
     intake = result["intake"]
     assert intake["reported_at"]  # non-empty ISO timestamp
-    assert intake["placement"]["container_roots"] == list(DEFAULT_CONTAINER_ROOTS)
-    assert intake["hints"]["correlation_id"] == "8f14e45f-ceea-467a-9b3a-1e0e4a1b2c3d"
-    assert intake["hints"]["curl_artifact_id"]  # the curl became an artifact
+    assert intake["domain"]["container_roots"] == list(DEFAULT_CONTAINER_ROOTS)
+    assert intake["hints"]["uuids"] == ["8f14e45f-ceea-467a-9b3a-1e0e4a1b2c3d"]
+    assert intake["domain"]["correlation_id"] == "8f14e45f-ceea-467a-9b3a-1e0e4a1b2c3d"
+    assert intake["domain"]["curl_artifact_id"]  # the curl became an artifact
 
 
 def test_placement_identity_is_stable_when_memory_or_skills_change():
-    """Only env/service/clone/repo/tag invalidate a running investigation
-    (ticket 01's checkpoint discard key) — memory and skills changing must
-    not."""
-    from plugins.backend.graph.intake import Hints, IntakeContext, Placement
+    """Only env/service/clone/repo invalidate a running investigation
+    (ticket 01's checkpoint discard key) — memory, skills and hints changing
+    must not."""
+    from friday.sdk.intake import Hints, IntakeContext
+    from plugins.backend.placement import Placement
 
     placement = Placement(env="dev", service="backend-reelme-v2", repo_path="/r")
-    hints = Hints()
-    a = IntakeContext(request_text="x", reported_at="t", placement=placement, hints=hints)
+    a = IntakeContext(request_text="x", reported_at="t", hints=Hints(), domain=placement)
     b = IntakeContext(
-        request_text="x", reported_at="t", placement=placement, hints=hints,
+        request_text="x", reported_at="t", hints=Hints(uuids=("u",)),
+        domain=replace(placement, correlation_id="u"),
         memory=("a fact",), skills=("a skill",),
     )
 
-    assert a.placement_identity == b.placement_identity == (
-        "dev", "backend-reelme-v2", "", "/r", "",
-    )
+    assert a.identity == b.identity == ("dev", "backend-reelme-v2", "", "/r")
 
 
 async def test_intake_retrieval_lands_matched_skills_and_facts(db):
@@ -2231,12 +2234,12 @@ async def test_intake_retrieval_lands_matched_skills_and_facts(db):
     await db.memory_add(
         state, "read backend-reelme-v2's queue depth first", kind="skill",
         origin=MemoryOrigin.ADMIN, key="reelme-queue",
-        data={"when": {"services": ["backend-reelme-v2"], "error_codes": [],
+        data={"when": {"service": ["backend-reelme-v2"], "error_codes": [],
                         "path_patterns": [], "keywords": []}},
     )
     task_id = await _task_with_text(db, "backend-reelme-v2 dang tra 500")
 
-    result = await intake_node().run(
+    result = await intake_node(core_intake).run(
         DAGState.empty(), deps_for(db, task_id=task_id)
     )
 
@@ -2247,27 +2250,31 @@ async def test_intake_retrieval_lands_matched_skills_and_facts(db):
 
 
 async def test_intake_of_round_trips_the_envelope_with_tuples_not_lists(db):
-    from plugins.backend.graph.intake import IntakeContext, Placement, intake_node, intake_of
+    from friday.sdk.intake import IntakeContext
+    from plugins.backend.graph.intake import intake_node, intake_of
+    from plugins.backend.placement import Placement
 
     await write_rows(db, env="dev", repo="/clone/reelme")
     task_id = await _task_with_text(
-        db, f"service backend-reelme-v2 loi\n```\n{CURL}\n```"
+        db, f"service backend-reelme-v2 loi\n```\n{CURL}\n```", code=(CURL,)
     )
 
-    result = await intake_node().run(
+    result = await intake_node(core_intake).run(
         DAGState.empty(), deps_for(db, task_id=task_id)
     )
     context = intake_of(result)
 
     assert isinstance(context, IntakeContext)
-    assert isinstance(context.placement, Placement)
-    assert isinstance(context.placement.container_roots, tuple)
-    assert isinstance(context.placement.dbs, tuple)
-    assert isinstance(context.placement.candidates, tuple)
+    assert isinstance(context.domain, Placement)
+    assert isinstance(context.domain.container_roots, tuple)
+    assert isinstance(context.domain.dbs, tuple)
+    assert isinstance(context.domain.candidates, tuple)
+    assert isinstance(context.hints.uuids, tuple)
+    assert isinstance(context.hints.artifacts, tuple)
     assert isinstance(context.memory, tuple)
     assert isinstance(context.skills, tuple)
-    assert isinstance(context.related_tasks, tuple)
-    assert context.placement.service == "backend-reelme-v2"
+    assert context.domain.service == "backend-reelme-v2"
+    assert context.domain.curl_artifact_id == context.hints.artifacts[0].id
 
 
 async def test_intake_result_survives_dagstate_storage_round_trip(db):
@@ -2282,7 +2289,7 @@ async def test_intake_result_survives_dagstate_storage_round_trip(db):
     await write_rows(db, env="dev", repo="/clone/reelme")
     task_id = await _task_with_text(db, "service backend-reelme-v2 loi 500")
 
-    result = await intake_node().run(
+    result = await intake_node(core_intake).run(
         DAGState.empty(), deps_for(db, task_id=task_id)
     )
     stored = DAGState.empty().with_result("intake", result).to_dict()

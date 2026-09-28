@@ -26,7 +26,7 @@ from typing import Any
 
 from plugins.backend.graph.deps import ApiIssueDeps
 from plugins.backend.graph.intake import intake_of
-from friday.sdk.sources import Placement
+from plugins.backend.placement import Placement
 from friday.sdk.workflow import DAGState, Node, envelope
 from friday.sdk.outbox import Kind
 
@@ -91,7 +91,7 @@ def acknowledge_node() -> Node:
         if already:
             return envelope("skipped", "this task was already acknowledged")
 
-        text = ack_text(intake_of(state["intake"]).placement)
+        text = ack_text(intake_of(state["intake"]).domain)
         await deps.db.queue_outbound(
             task_id=deps.task.id,
             conversation=deps.task.conversation,

@@ -68,7 +68,7 @@ def _factories() -> dict[str, object]:
     from friday.kernel.tools.describe_skill import describe_skill_tool
     from friday.kernel.tools.fetch_skill import fetch_skill_tool
     from friday.kernel.tools.memory import memory_tools
-    from friday.sdk.sources import Placement
+    from plugins.backend.placement import Placement
     from plugins.backend.config import DEFAULT_CONTAINER_ROOTS
     from plugins.backend.investigate import Evidence, investigate_tools
     from friday.kernel.tools.read_skill_file import read_skill_file_tool

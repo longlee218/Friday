@@ -18,7 +18,8 @@ from friday.sdk.model import Model
 from friday.sdk.outbox import Kind
 from friday.sdk.plugin import Plugin, PluginAPI, TaskTypeSpec
 from friday.sdk.redact import scrub
-from friday.sdk.sources import CodeSource, Lines, LogSource, Placement, Reads
+from friday.sdk.intake import ArtifactRef, Hints, IntakeContext, IntakeSeed
+from friday.sdk.sources import CodeSource, Lines, LogSource, Reads
 from friday.sdk.toolset import RunContext, ToolContext, ToolSpec, ToolsetSpec, tool
 from friday.sdk.validation import InSet, Matches, NonEmpty, OneOf, Problem, asked_as, validate
 
@@ -26,9 +27,13 @@ __all__ = [
     "Action",
     "ActionContract",
     "AgentSpec",
+    "ArtifactRef",
     "Budget",
     "CodeSource",
+    "Hints",
     "InSet",
+    "IntakeContext",
+    "IntakeSeed",
     "Kind",
     "Limits",
     "Lines",
@@ -39,7 +44,6 @@ __all__ = [
     "NonEmpty",
     "OneOf",
     "Origin",
-    "Placement",
     "Plugin",
     "PluginAPI",
     "Problem",

@@ -101,9 +101,10 @@ def build_backend_dag(api: Any) -> DAG:
     """The whole graph, built from the plugin's config and the composition
     root's boot capabilities (`api.caps`).
 
-    Node 0 is `intake_node()` — deterministic, no model, no `caps` involved:
-    it reads the task's own text rather than a set of extracted parameters,
-    so there is nothing here for `caps.prepare_node` to fill in first.
+    Node 0 is `intake_node(caps.intake)` — core Intake, deterministic, no
+    model: it reads the task's own text rather than a set of extracted
+    parameters, so there is nothing here for `caps.prepare_node` to fill in
+    first.
 
     The diagnose model is `caps.make_harness`. In production `whole.agent`
     always resolves `DIAGNOSE` (an undeclared tier refuses the boot); it is
@@ -133,7 +134,7 @@ def build_backend_dag(api: Any) -> DAG:
     return DAG(
         name=TASK_TYPE,
         nodes=(
-            intake_node(),
+            intake_node(api.caps.intake),
             acknowledge_node(),
             diagnose_node(
                 make_harness=make_diagnose_harness,

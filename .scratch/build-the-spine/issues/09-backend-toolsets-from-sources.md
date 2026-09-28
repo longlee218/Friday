@@ -20,6 +20,7 @@ per data source holding tools + client: `logs.py` (`backend.logs`:
   `Reads` narrowed to that toolset from `RunContext`.
 - The running version: a wrapped devops-generic read returns only the tag;
   code is read at it with `git show <tag>:<file>`, never a checkout.
+  (Since 07 `read_code` reads the clone's checkout; `at_ref` waits here.)
 - `ssh_host`, `loki_server/tool`, `container_roots`, `not_ours` become
   constants in `plugins/backend`; `DevopsConfig`/`load_devops_config` and the
   plugin's config block go.

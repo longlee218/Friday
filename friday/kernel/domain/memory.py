@@ -64,7 +64,7 @@ class FindingData:
 
 @dataclass(frozen=True, slots=True)
 class SkillWhen:
-    services: list[str] = field(default_factory=list)
+    service: list[str] = field(default_factory=list)
     error_codes: list[str] = field(default_factory=list)
     path_patterns: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)

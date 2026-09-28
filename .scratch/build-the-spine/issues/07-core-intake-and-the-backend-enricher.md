@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 Blocked by: 05
 
 # Core Intake and the backend enricher
@@ -24,10 +24,27 @@ Stub: `core_intake_and_domain_enricher_STUB.py` on its prototype branch.
 
 ## Acceptance
 
-- [ ] Intake makes no model and no network call (test).
-- [ ] Named / vague / ops cases produce the stub's three contexts (tests).
-- [ ] A reply adding a correlationId leaves identity unchanged; a reply
+- [x] Intake makes no model and no network call (test).
+- [x] Named / vague / ops cases produce the stub's three contexts (tests).
+- [x] A reply adding a correlationId leaves identity unchanged; a reply
       naming another env changes it (tests).
-- [ ] `CONTEXT.md`: *placement identity* updated (no `release_tag`),
+- [x] `CONTEXT.md`: *placement identity* updated (no `release_tag`),
       *retrieval keys*.
-- [ ] Whole suite green; `code-review` done.
+- [x] Whole suite green; `code-review` done.
+
+## Notes (2026-09-29)
+
+- Operator calls during the build: `SkillWhen.services` → `service`, so a
+  retrieval key matches the `when` list of the same name exactly (a finding
+  matches when its data carries every key); the env comes from the **newest
+  turn** with a URL (`db.original_turns_for`), so a reply pasting a prod URL
+  after a dev one changes the identity.
+- `IntakeContext.related_tasks` dropped: nothing read it, findings arrive in
+  `memory`.
+- `container_roots` stays on `Placement`, filled by the DAG node (config the
+  DB-only enricher cannot read) until 09 makes it a constant.
+- Carried to 09: `read_code` reads the clone's checkout now that
+  `release_tag` is gone; `sources/code.py:at_ref` and `CodeSource.at_ref` are
+  kept, without a production caller, for 09's tag read.
+- `SkillWhen.error_codes`/`path_patterns` are no longer matched (no domain
+  key names them); left in the schema.

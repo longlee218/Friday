@@ -30,7 +30,8 @@ else.
 
 from __future__ import annotations
 
-from friday.sdk.sources import Lines, LogSource, Placement, Reads
+from friday.sdk.sources import Lines, LogSource, Reads
+from plugins.backend.placement import Placement
 
 __all__ = ["DECLARED", "Lines", "LogSource", "Placement", "Reads", "declared"]
 

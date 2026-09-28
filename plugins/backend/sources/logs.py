@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS, Lines, Placement
+from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS, Lines
+from plugins.backend.placement import Placement
 
 __all__ = ["LokiSource", "SshKubectlSource"]
 

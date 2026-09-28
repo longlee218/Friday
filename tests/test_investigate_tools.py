@@ -15,7 +15,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from friday.sdk.sources import Lines, Placement
+from friday.sdk.sources import Lines
+from plugins.backend.placement import Placement
 from plugins.backend.config import DEFAULT_CONTAINER_ROOTS
 from plugins.backend.investigate import MAX_READS, Evidence, investigate_tools
 
@@ -37,14 +38,14 @@ class Log:
         return Lines(tuple(found), self.oldest, truncated=self.truncated)
 
 
-def built(source=None, *, repo_path="", error_code_doc="", tag=""):
+def built(source=None, *, repo_path="", error_code_doc=""):
     evidence = Evidence()
     tools = investigate_tools(
         evidence=evidence,
         placement=Placement(
             env="dev", service="s", pod_pattern="p",
             repo_path=repo_path, error_code_doc=error_code_doc,
-            release_tag=tag, container_roots=DEFAULT_CONTAINER_ROOTS,
+            container_roots=DEFAULT_CONTAINER_ROOTS,
         ),
         log_sources={} if source is None else {"kubectl": source},
         reported_at=AT,
@@ -245,29 +246,16 @@ def test_with_no_source_configured_it_says_which_one_it_wanted():
 # --- reading code -----------------------------------------------------------
 
 
-def test_code_is_read_at_the_running_tag_and_says_which(tmp_path):
-    import subprocess
-
-    root = tmp_path / "clone"
-    root.mkdir()
-    run = lambda *a: subprocess.run(  # noqa: E731
-        ["git", "-C", str(root), *a], capture_output=True, text=True, check=True
-    )
-    run("init", "-q")
-    run("config", "user.email", "t@t")
-    run("config", "user.name", "t")
-    (root / "orders.ts").write_text("released\nb\nc\nd\n")
-    run("add", "orders.ts")
-    run("commit", "-qm", "one")
-    run("tag", "1.0.0")
-    (root / "orders.ts").write_text("edited since\nb\nc\nd\n")
-
-    _, tools = built(repo_path=str(root), tag="1.0.0")
+def test_code_is_read_from_the_checkout_and_says_so(tmp_path):
+    """`release_tag` left `Placement` (build-the-spine ticket 07): until ticket
+    09 reads at the running tag, the answer names what it read."""
+    (tmp_path / "orders.ts").write_text("edited since\nb\nc\nd\n")
+    _, tools = built(repo_path=str(tmp_path))
 
     said = call(tools["read_code"], file="/app/orders.ts", line=1)
 
-    assert "released" in said and "edited since" not in said
-    assert "running tag 1.0.0" in said
+    assert "edited since" in said
+    assert "the clone's current checkout" in said
 
 
 def test_code_outside_the_clone_is_named_rather_than_opened():
@@ -389,16 +377,6 @@ def test_a_code_the_table_does_not_carry_says_so(tmp_path):
     )
 
 
-def test_a_clone_missing_the_running_tag_says_so_where_the_node_sees_it(tmp_path):
-    """Degrading is correct; degrading silently is not."""
-    (tmp_path / "a.ts").write_text("one\ntwo\n")
-    evidence, tools = built(repo_path=str(tmp_path), tag="9.9.9")
-
-    call(tools["read_code"], file="/app/a.ts", line=1)
-
-    assert any("9.9.9" in line for line in evidence.not_checked)
-
-
 # --- Diagnose reading for itself (v3.3, ticket 15) --------------------------
 
 
@@ -411,18 +389,17 @@ def _state():
         "intake": {
             "request_text": "500 khi init đơn",
             "reported_at": AT.isoformat(),
-            "placement": {
+            "hints": {"uuids": [], "artifacts": []},
+            "domain": {
                 "env": "dev", "service": "backend-reelme-v2", "cluster": "",
                 "namespace": "dev", "app": "",
                 "pod_pattern": "backend-reelme-v2", "clone_path": "",
-                "repo_path": "/nowhere", "release_tag": "", "error_code_doc": "",
+                "repo_path": "/nowhere", "error_code_doc": "",
                 "container_roots": [], "dbs": [], "candidates": [],
-            },
-            "hints": {
                 "correlation_id": None, "curl_artifact_id": None,
                 "response_artifact_id": None,
             },
-            "memory": [], "skills": [], "related_tasks": [],
+            "memory": [], "skills": [],
         },
     })
 

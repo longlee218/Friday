@@ -331,7 +331,16 @@ class TaskConversationRepo:
     async def original_text_for(
         self, task_id: int, limit: int = 20, *, budget_tokens: int | None = None
     ) -> str | None:
-        """Everything the reporter has said about this task, oldest first.
+        """`original_turns_for`, one turn per line block — what a prompt reads."""
+        turns = await self.original_turns_for(task_id, limit, budget_tokens=budget_tokens)
+        return "\n".join(turns) or None
+
+    async def original_turns_for(
+        self, task_id: int, limit: int = 20, *, budget_tokens: int | None = None
+    ) -> list[str]:
+        """Everything the reporter has said about this task, oldest first, one
+        entry per message — kept apart so a reader can ask which turn said
+        something (core Intake: the newest turn's URL names the env).
 
         Not the messages *linked* to the task — the ones they wrote. Discord
         lets you send three messages in five seconds, and people do: a mention
@@ -402,7 +411,7 @@ class TaskConversationRepo:
                 )
             ).first()
             if opening is None:
-                return None
+                return []
             conversation_id, author_id, opened_at = opening
 
             ours = select(schema.Outbound.sent_message_id).where(
@@ -435,9 +444,7 @@ class TaskConversationRepo:
                 for redacted, original in rows
                 if (redacted or original)
             ]
-        if not texts:
-            return None
         if budget_tokens is not None:
             while len(texts) > 1 and estimated_tokens("\n".join(texts)) > budget_tokens:
                 texts = texts[1:]
-        return "\n".join(texts) or None
+        return texts

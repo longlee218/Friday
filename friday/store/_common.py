@@ -11,7 +11,7 @@ import asyncio
 import logging
 import re
 import secrets
-from fnmatch import fnmatch
+from collections.abc import Mapping
 from typing import Any
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
@@ -204,18 +204,12 @@ def _memory(row: schema.Memory) -> Memory:
 
 
 def _runbook_matches(
-    data: dict[str, Any] | None,
-    service: str | None,
-    error_code: str | None,
-    path: str | None,
-    text: str,
+    data: dict[str, Any] | None, keys: Mapping[str, str], text: str
 ) -> bool:
     when = (data or {}).get("when") or {}
     said = text.lower()
     return bool(
-        (service and service in when.get("services", []))
-        or (error_code and error_code in when.get("error_codes", []))
-        or (path and any(fnmatch(path, p) for p in when.get("path_patterns", [])))
+        any(value and value in when.get(name, []) for name, value in keys.items())
         or any(k.lower() in said for k in when.get("keywords", []) if k)
     )
 
@@ -459,6 +453,7 @@ def _balanced(rows: list[tuple[str, str]], limit: int) -> list[tuple[str, str]]:
 
 __all__ = [
     'Any',
+    'Mapping',
     'Artifact',
     'AsyncSession',
     'BUSY_TIMEOUT_MS',
@@ -532,7 +527,6 @@ __all__ = [
     'estimated_tokens',
     'event',
     'fits',
-    'fnmatch',
     'func',
     'insert',
     'literal',

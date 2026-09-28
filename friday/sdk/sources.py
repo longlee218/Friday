@@ -26,7 +26,6 @@ __all__ = [
     "CodeSource",
     "Lines",
     "LogSource",
-    "Placement",
     "Reads",
     "TOOL_CALL_TIMEOUT_SECONDS",
 ]
@@ -74,54 +73,6 @@ class Reads:
         return await asyncio.wait_for(
             self.server.call_tool(tool, arguments), timeout=TOOL_CALL_TIMEOUT_SECONDS
         )
-
-
-@dataclass(frozen=True, slots=True)
-class Placement:
-    """Where one case lives — the single type, folded from `Resolve`'s old
-    `Placement` + `project` dict and `plugins.backend.graph.intake`'s own
-    (ticket 6): every reader wants one place, and a reader that has to
-    remember which of two shapes to read is one that one day reads the
-    other.
-
-    The address a `LogSource` reads from, and the reason it lives here rather
-    than beside whatever resolved it: a source that imported the graph that
-    calls it would make the capability depend on the workflow, which is the
-    direction this package exists to prevent.
-
-    Flattened out of a service's two halves on purpose — every reader wants
-    one place, and a reader that has to remember which half to read is one that
-    one day reads the other.
-    """
-
-    env: str
-    service: str = ""
-    #: Production: the Loki labels. Dev: empty.
-    cluster: str = ""
-    namespace: str = ""
-    app: str = ""
-    #: Dev: the pod name pattern to grep for. Production: empty.
-    pod_pattern: str = ""
-    #: Where the operator's clone is. `clone_path`/`repo_path` are the same
-    #: path today — kept as two fields because `Resolve`'s two halves named
-    #: them separately and nothing yet forces them to agree.
-    clone_path: str = ""
-    repo_path: str = ""
-    #: The running version, when a `CodeSource` can compare a frame against
-    #: it, or `""` when it could not be resolved.
-    release_tag: str = ""
-    #: What the repository's own error-code doc says each code means.
-    error_code_doc: str = ""
-    #: The service's tech stack (e.g. "NestJS"), a hint the diagnose prompt
-    #: gives the model so it reads a stack trace in that framework's idiom.
-    stack: str = ""
-    #: The container source roots and vendored-path markers a `CodeSource`
-    #: maps a frame against.
-    container_roots: tuple[str, ...] = ()
-    dbs: tuple[str, ...] = ()
-    #: The room's candidate services, when `service` is unresolved (vague or
-    #: no match). Empty once a service is resolved.
-    candidates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,7 +141,9 @@ class LogSource(Protocol):
 
     async def lines(
         self,
-        placement: Placement,
+        #: The domain's placement (backend: `plugins/backend/placement.py`),
+        #: typed `Any` so the sdk names no domain.
+        placement: Any,
         *,
         since: datetime,
         until: datetime,

@@ -1,7 +1,6 @@
 """The memory repository — a `Database` mixin (ticket 16): one table's reads and
 writes. Over 200 lines because the per-kind write checks are one decision; it
-shrinks when core Intake's retrieval replaces `diagnose_memories`
-(build-the-spine ticket 07). Candidates are `memory_candidates.py`."""
+its retrieval read is `case_memories`, core Intake's (build-the-spine ticket 07). Candidates are `memory_candidates.py`."""
 
 from __future__ import annotations
 
@@ -291,29 +290,26 @@ class MemoryRepo:
             )
             return found is not None
 
-    async def diagnose_memories(
-        self,
-        channel_id: str,
-        *,
-        service: str | None = None,
-        error_code: str | None = None,
-        path: str | None = None,
-        text: str = "",
+    async def case_memories(
+        self, channel_id: str, keys: Mapping[str, str], text: str = ""
     ) -> list[Memory]:
-        """What `Diagnose` reads about one case (spec, "Memory: one store,
+        """What core Intake retrieves for one case (spec, "Memory: one store,
         twelve kinds"): every active `fact`, `constraint` and `decision`; the
-        runbooks whose `when` matches the case; and the few findings on the
-        same `service:error_code`, newest first.
+        runbooks whose `when` matches the case; and the few newest findings
+        on the same keys.
+
+        `keys` are the domain type's `retrieval_keys()` (backend:
+        `{"service": …}`) — named, so core matches them without knowing the
+        domain: a runbook matches when its `when` list of the same name holds
+        the value, or one of its `keywords` is in `text`; a finding matches
+        when its data carries every key with the same value. No keys → no
+        findings. An empty `when` matches nothing — a runbook code cannot
+        pick is one nobody asked for.
 
         This room's rows and the ones written for `channel_id = '*'`, which
         is "true everywhere". Ordered the way the spec orders a prompt —
         operator rows before model rows, runbooks after the domain kinds,
         findings last — so two cases on one service share a prefix.
-
-        A runbook matches when any one of its `when` lists names the case:
-        the service, the error code, a glob over the path, or a keyword
-        found in the case's text. An empty `when` matches nothing — a
-        runbook code cannot pick is one nobody asked for.
         """
         domain = [memory_kinds.FACT, memory_kinds.CONSTRAINT, memory_kinds.DECISION]
         async with self._sessions() as session:
@@ -335,18 +331,13 @@ class MemoryRepo:
         known = sorted((r for r in rows if r.kind in domain), key=admin_first)
         runbooks = [
             r for r in rows
-            if r.kind == memory_kinds.SKILL
-            and _runbook_matches(r.data, service, error_code, path, text)
+            if r.kind == memory_kinds.SKILL and _runbook_matches(r.data, keys, text)
         ]
         findings = [
             r for r in reversed(rows)
-            if r.kind == memory_kinds.FINDING and service is not None
-            and (
-                r.key == f"{service}:{error_code}"
-                if error_code
-                else (r.key or "").startswith(f"{service}:")
-            )
-        ][: self.DIAGNOSE_FINDINGS]
+            if r.kind == memory_kinds.FINDING and keys
+            and all((r.data or {}).get(name) == value for name, value in keys.items())
+        ][: self.CASE_FINDINGS]
         return [_memory(r) for r in (*known, *runbooks, *findings)]
 
     async def memory_add(

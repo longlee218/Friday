@@ -43,7 +43,7 @@ def render(state: DAGState, *, task_id: int, at: datetime) -> str:
     diagnosis = diagnosis_of(thought)
 
     try:
-        placement = intake_of(state["intake"]).placement
+        placement = intake_of(state["intake"]).domain
         where = (
             f"- environment: `{placement.env}`\n"
             f"- service: `{placement.service}`\n"

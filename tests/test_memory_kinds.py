@@ -64,7 +64,7 @@ VALID = {
         "refs", "log:1",
     ),
     memory_kinds.SKILL: (
-        {"when": {"services": ["midas"], "error_codes": ["ERR3xx"],
+        {"when": {"service": ["midas"], "error_codes": ["ERR3xx"],
                   "path_patterns": [], "keywords": []}},
         "when", "midas",
     ),
@@ -389,20 +389,20 @@ async def test_diagnose_reads_the_domain_the_matching_runbook_and_finding(db):
                         origin=ADMIN, key="midas", data=VALID[memory_kinds.SKILL][0])
     await db.memory_add(
         OPERATOR, "read the cdn log", kind=memory_kinds.SKILL, origin=ADMIN,
-        key="cdn", data={"when": {"services": ["cdn"], "error_codes": [],
+        key="cdn", data={"when": {"service": ["cdn"], "error_codes": [],
                                   "path_patterns": [], "keywords": []}},
     )
     await db.memory_add(ROOM, "ERR301 is Midas speaking", kind=memory_kinds.FINDING,
                         data=VALID[memory_kinds.FINDING][0])
     await db.memory_add(
-        ROOM, "ERR500 is a timeout", kind=memory_kinds.FINDING,
-        data={**VALID[memory_kinds.FINDING][0], "error_code": "ERR500"},
+        ROOM, "the cdn timed out", kind=memory_kinds.FINDING,
+        data={**VALID[memory_kinds.FINDING][0], "service": "cdn"},
     )
     await parents(db, "backend.service")
     await db.memory_add(OPERATOR, "", kind="backend.service", origin=ADMIN,
                         data=SERVICE)
 
-    read = await db.diagnose_memories("c1", service="midas", error_code="ERR301")
+    read = await db.case_memories("c1", {"service": "midas"})
 
     assert [m.text for m in read] == [
         "midas is the payment provider",
@@ -416,7 +416,7 @@ async def test_findings_on_one_fault_pile_up_and_diagnose_reads_the_newest(db):
     """A finding is evidence, not a record of the fault: every diagnosis of
     `midas:ERR301` writes its own, and several saying the same thing are the
     signal that a runbook is owed. So the key does not hold one finding per
-    room — `diagnose_memories` reads the few newest, not only the first."""
+    room — `case_memories` reads the few newest, not only the first."""
     for n in range(DB_FINDINGS := 6):
         await db.memory_add(
             ROOM.for_task(100 + n), f"ERR301 was Midas, case {n}",
@@ -424,11 +424,11 @@ async def test_findings_on_one_fault_pile_up_and_diagnose_reads_the_newest(db):
             data={**VALID[memory_kinds.FINDING][0], "task_id": 100 + n},
         )
 
-    read = await db.diagnose_memories("c1", service="midas", error_code="ERR301")
+    read = await db.case_memories("c1", {"service": "midas"})
 
     assert [m.text for m in read] == [
         f"ERR301 was Midas, case {n}"
-        for n in reversed(range(DB_FINDINGS - db.DIAGNOSE_FINDINGS, DB_FINDINGS))
+        for n in reversed(range(DB_FINDINGS - db.CASE_FINDINGS, DB_FINDINGS))
     ]
 
 

@@ -59,7 +59,7 @@ class ApiIssueParams:
             # send `Resolve` looking for logs of somewhere that does not
             # exist. `external` is deliberately absent too — it is what the
             # `environment` rows *conclude* about a domain (see
-            # `plugins/backend/graph/resolve.py`), never something a reporter
+            # `plugins/backend/resolve.py`), never something a reporter
             # names about themselves.
             "doc": "Which environment they named: production or dev. 'prod' "
             "is production. null if none is named.",

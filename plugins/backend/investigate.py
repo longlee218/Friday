@@ -40,8 +40,8 @@ from typing import Any
 
 from friday.sdk.toolset import tool
 from plugins.backend.graph.distil import distil
-from friday.sdk.sources import Placement
-from plugins.backend.sources.code import at_ref, meanings, numbered, original, repo_file
+from plugins.backend.placement import Placement
+from plugins.backend.sources.code import meanings, numbered, original, repo_file
 
 __all__ = ["Evidence", "investigate_tools"]
 
@@ -138,10 +138,9 @@ def investigate_tools(
 
     Built per run rather than once, because every one of them needs the
     placement `Intake` produced — and a tool that outlived the run that made
-    it would read the previous case's service. `placement` now carries the
-    repository, the running tag and the container roots too (ticket 6), so
-    there is no separate `project` dict or `release_tag`/`container_roots`
-    argument to keep in step with it.
+    it would read the previous case's service. `placement` carries the
+    repository and the container roots too (ticket 6), so there is no separate
+    `project` dict or `container_roots` argument to keep in step with it.
     """
     return [
         _read_log(evidence, placement, log_sources, reported_at),
@@ -248,21 +247,16 @@ def _read_log(
 
 def _read_code(evidence: Evidence, placement: Placement):
     repo_path = placement.repo_path
-    release_tag = placement.release_tag
     container_roots = placement.container_roots
 
     @tool
     def read_code(file: str, line: int) -> str:
-        """Read the code around a line, as the running version has it.
+        """Read the code around a line, as the clone's checkout has it.
 
         Give the file exactly as a stack frame named it. A compiled frame —
         `dist/src/x.js:80` — is mapped back to the TypeScript before it is
         read, because line 80 of the built file is not the line anybody
         wrote.
-
-        **What comes back is the deployed version where that can be
-        resolved**, not whatever the clone is checked out at. The answer says
-        which.
 
         Args:
             file: the path from the stack frame.
@@ -287,20 +281,11 @@ def _read_code(evidence: Evidence, placement: Placement):
             here = shown.read_text(errors="replace")
         except OSError as exc:
             return f"{file} could not be read: {exc}"
-        there = at_ref(repo_path, shown, release_tag) if release_tag else None
-        if there is None:
-            text, whose = here, "the clone's current checkout"
-            if release_tag:
-                evidence.not_checked.append(
-                    f"{shown.name} does not exist at the running tag {release_tag}"
-                )
-        elif there == here:
-            text, whose = here, f"identical to the running tag {release_tag}"
-        else:
-            text, whose = there, f"as it is at the running tag {release_tag}"
+        # Not the running version: `release_tag` left `Placement` (it was
+        # never filled); ticket 09 reads code at the running tag.
         return (
-            f"--- {shown.name}:{at} ({whose})\n"
-            + evidence.show(numbered(text, at).splitlines())
+            f"--- {shown.name}:{at} (the clone's current checkout)\n"
+            + evidence.show(numbered(here, at).splitlines())
         )
 
     return read_code
