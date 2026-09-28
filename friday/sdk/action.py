@@ -6,8 +6,8 @@ rewording recognition never changes a plan's hash (board `domains-plug-in`,
 tickets 01 and 02). Registered beside the old `TaskTypeSpec` until
 build-the-spine ticket 16 deletes that.
 
-Not to be confused with `friday.sdk.actions.Action`, the `Ask | Reply |
-HandOver` union a graph returns — that one becomes `Outcome` in ticket 06.
+Not to be confused with `friday.sdk.actions.Outcome`, the `Ask | Reply |
+HandOver` union a graph returns (named `Action` until ticket 06).
 """
 
 from __future__ import annotations

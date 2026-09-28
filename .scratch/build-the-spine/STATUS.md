@@ -11,7 +11,7 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 03 | Split the grab-bag modules | ✅ done (main, 2026-09-28) | 02 |
 | 04 | Board card and pool line from the opening message | ⬜ **takeable** | 02 |
 | 05 | SDK declarations and boot refusals | ✅ done (main, 2026-09-28); refusal 9 moved to 08 | 03 |
-| 06 | Plan, `step_key` and GatePlan | ⬜ **takeable** | 05 |
+| 06 | Plan, `step_key` and GatePlan | ✅ done (main, 2026-09-28); `sdk/actions.py` file move deferred to 16 | 05 |
 | 07 | Core Intake and the backend enricher | ⬜ **takeable** | 05 |
 | 08 | Core toolsets: memory, skills, shell, workspace | ⬜ **takeable** | 05 |
 | 09 | Backend toolsets from `sources/` | ⬜ | 05, 07 |

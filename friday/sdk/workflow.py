@@ -25,7 +25,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from friday.sdk.actions import Action, Ask, HandOver, Reply
+from friday.sdk.actions import Ask, HandOver, Outcome, Reply
 from friday.sdk.workflow_state import (
     UNSTORABLE,
     DAGState,
@@ -45,7 +45,7 @@ __all__ = [
     "STATUSES",
     "ScopeKey",
     "UNSTORABLE",
-    "Action",
+    "Outcome",
     "Ask",
     "HandOver",
     "Reply",
@@ -96,7 +96,7 @@ NodeFn = Callable[[DAGState, Deps], Awaitable[Any]]
 DepsFactory = Callable[[ScopeKey], Awaitable[Deps]]
 
 
-#: What a node's result may say about how it went, when it is not an `Action`.
+#: What a node's result may say about how it went, when it is not an `Outcome`.
 #: The runner writes `error`; a node writes the others. `timed_out` is what the
 #: runner wrote while nodes had clocks, kept so older rows still read. One
 #: closed set, so an edge can route on it and the board can render any node.
@@ -158,7 +158,7 @@ class NodeRun:
     """One attempt at one node, as the runner saw it end.
 
     What `node_runs` holds a row of. `status` is the result's envelope status,
-    or `ok` for a result that is not an envelope — an `Action`, a value.
+    or `ok` for a result that is not an envelope — an `Outcome`, a value.
     """
 
     dag_name: str

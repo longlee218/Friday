@@ -26,7 +26,7 @@ from friday.kernel.dag.router import dag_for
 from friday.sdk.workflow import DAGState, Deps as DAGDeps, NodeRun, status_of
 from friday.store.db import Database
 from friday.kernel.dag import adapter
-from friday.sdk.actions import Action, Ask, HandOver, Reply
+from friday.sdk.actions import Ask, HandOver, Outcome, Reply
 from friday.kernel.domain.states import TaskState
 from friday.kernel.domain.state import FridayState
 from friday.kernel.domain.tasks import Task
@@ -221,7 +221,7 @@ class Pool:
     async def _act(self, task: Task) -> Task:
         return await self._route(task, await self._plan(task))
 
-    async def _route(self, task: Task, action: Action) -> Task:
+    async def _route(self, task: Task, action: Outcome) -> Task:
         """Given a decision, do what it says.
 
         One branch per kind, and none of them falls through to another. Each
@@ -409,7 +409,7 @@ class Pool:
         named = await self._db.knows_person(task.conversation.channel_id, author_id)
         return not named and not await self._db.has_exchanged_with(author_id)
 
-    async def _plan(self, task: Task) -> Action:
+    async def _plan(self, task: Task) -> Outcome:
         """Route to this type's graph. Every classifiable type has one — see
         `register_dags` — so there is no second way to decide what to do with
         a task any more."""
@@ -428,7 +428,7 @@ class Pool:
         assert dag is not None, f"{task.type!r} is registered but has no graph"
         return await self._run_dag(dag, task)
 
-    async def _run_dag(self, dag, task: Task) -> Action:
+    async def _run_dag(self, dag, task: Task) -> Outcome:
         """Work this task's graph on DBOS (ticket 06).
 
         Node 0 — `dag.entry`, `prepare` for every graph — is run here, once,
@@ -465,7 +465,7 @@ class Pool:
             dag.name, dag.node(dag.entry), DAGState.empty(), deps, self._recorder(task)
         )
 
-    async def _run_workflow(self, dag, task: Task, prepared: Any) -> Action:
+    async def _run_workflow(self, dag, task: Task, prepared: Any) -> Outcome:
         """Start or resume this task's durable workflow, then poll it to its
         next boundary — the action it decided, or the question it waits on."""
         wfid = _wfid(task.id)
@@ -483,7 +483,7 @@ class Pool:
                 await adapter.answer(wfid, waiting["node"], prepared)
         return await self._poll(dag, wfid)
 
-    async def _poll(self, dag, wfid: str) -> Action:
+    async def _poll(self, dag, wfid: str) -> Outcome:
         """Drive the workflow to a boundary: the outcome it reached, or the
         `Ask` it suspended on. The graph runs fast between suspensions, so this
         never blocks on a human — it returns the moment the run waits."""
@@ -521,12 +521,12 @@ class Pool:
         return record
 
     @staticmethod
-    def _outcome(dag, results: dict) -> Action:
+    def _outcome(dag, results: dict) -> Outcome:
         """What the graph decided, off the results the workflow returned.
 
-        A graph that finished without producing an `Action` has not said what
+        A graph that finished without producing an `Outcome` has not said what
         to send, and handing over is the honest answer. The results mapping is
-        in walk order, so the deciding node is the last `Action` in it.
+        in walk order, so the deciding node is the last `Outcome` in it.
         """
         final = DAGState(results=results)
         node = _deciding_node(final, list(results.keys()))
@@ -569,7 +569,7 @@ _FAILED = frozenset({"timed_out", "error"})
 
 
 def _deciding_node(final: DAGState, trail: list[str]) -> str | None:
-    """Which node in the trail produced the graph's `Action` — or, failing
+    """Which node in the trail produced the graph's `Outcome` — or, failing
     that, the failure it ended on (`timed_out`, `error`), which is the honest
     answer where an exception used to end the run and carry its reason. Reading
     backwards along the path the run actually took rather than the order the

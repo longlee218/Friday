@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 Blocked by: 05
 
 # Plan, `step_key` and GatePlan
@@ -25,10 +25,17 @@ Plain code in `friday/kernel/spine/plan.py` and `plan_gate.py`, not wired yet.
 
 ## Acceptance
 
-- [ ] Shape rules each refused by a test (dup ids, terminal not last,
+- [x] Shape rules each refused by a test (dup ids, terminal not last,
       forward `reads`, `draft` reading nothing).
-- [ ] A contract breach returns all errors, never a clipped plan.
-- [ ] Same step content → same `step_key` across versions; a changed
+- [x] A contract breach returns all errors, never a clipped plan.
+- [x] Same step content → same `step_key` across versions; a changed
       placement → a different key.
-- [ ] `CONTEXT.md` § Vocabulary: *plan*, *step*, *step key*, *GatePlan*.
-- [ ] Whole suite green; `code-review` done.
+- [x] `CONTEXT.md` § Vocabulary: *plan*, *step*, *step key*, *GatePlan*.
+- [x] Whole suite green; `code-review` done.
+
+## Done 2026-09-28
+
+Operator decision: `sdk/actions.py` stays in the sdk (DAG nodes import it
+through `sdk.workflow`; the sdk may not import the kernel); its union is
+renamed `Action` → `Outcome` now and `plan.py` re-exports all four. The file
+move is carried to ticket 16.

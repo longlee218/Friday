@@ -8,7 +8,10 @@ codes against, so a graph node reaches them by importing `sdk` only. The triage
 live in `friday.kernel.domain.triage`; they are not part of a plugin's contract.
 
 `friday.sdk.workflow` re-exports these as part of the graph vocabulary a node
-returns, so `sdk` imports nothing of ours.
+returns, so `sdk` imports nothing of ours. The union is `Outcome` (was
+`Action`, renamed in build-the-spine ticket 06 so it no longer shadows
+`friday.sdk.action.Action`); `friday.kernel.spine.plan` re-exports all four.
+The file itself moves there in ticket 16, once no DAG node imports it.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["Action", "Ask", "HandOver", "Reply"]
+__all__ = ["Ask", "HandOver", "Outcome", "Reply"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,4 +66,4 @@ class HandOver:
     interruption: dict[str, Any] | None = None
 
 
-Action = Ask | Reply | HandOver
+Outcome = Ask | Reply | HandOver

@@ -21,7 +21,7 @@ from dataclasses import asdict, fields, replace
 from typing import Any, get_args, get_type_hints
 
 from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node
-from friday.sdk.actions import Action, Ask, HandOver
+from friday.sdk.actions import Ask, HandOver, Outcome
 from friday.kernel.domain.tasks import MODEL_AUTHORED, ExtractionMark, Params
 from friday.sdk.validation import Problem, asked_as, validate
 from friday.kernel.extraction import (
@@ -50,7 +50,7 @@ def prepare_node(
     task_type: str,
     params_cls: type[Params],
     *,
-    on_ready: Callable[[Params], Params | Action] | None = None,
+    on_ready: Callable[[Params], Params | Outcome] | None = None,
     budget_tokens: int | None = None,
     #: The configured agent this node calls — see `Node.agent`. Set by
     #: `build_simple_dag` from the extractor; `None` when there is none, and
@@ -77,7 +77,7 @@ def prepare_node(
     compaction at all — `original_text_for`'s message-count cap, unchanged.
     """
 
-    async def _prepare(state: DAGState, deps: DAGDeps) -> Params | Action:
+    async def _prepare(state: DAGState, deps: DAGDeps) -> Params | Outcome:
         known = params_cls(**deps.task.params)
         # Board `what-the-room-already-knows`, ticket 15, D26: one gather.
         # `build_full_context` is the only place this node reads the
@@ -194,7 +194,7 @@ async def prepare(
     #: it runs — so this is where the two meet.
     task_id: int | None = None,
     node: str | None = None,
-) -> tuple[Params, Action | None]:
+) -> tuple[Params, Outcome | None]:
     """Fill the parameters in, then check them. Node 0 of every graph.
 
     Returns the parameters to work with, and an `Ask` when they are not fit to
@@ -318,7 +318,7 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
     return extract
 
 
-def plan_by_required_parameters(task_type: str, params: Params) -> Action:
+def plan_by_required_parameters(task_type: str, params: Params) -> Outcome:
     """Ask for whatever the type says is not optional and is not there, or
     whatever `validate` says is wrong.
 

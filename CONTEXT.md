@@ -361,7 +361,8 @@ make (`{server: TOOLS}`) and the domain type it reads.
 declared MCP server narrowed to the toolset's reads. Not Pydantic AI's
 `RunContext`, which only `harness.py` names.
 
-**Outcome** (still `Action` in `friday/sdk/actions.py` until ticket 06):
+**Outcome** (`friday/sdk/actions.py`; named `Action` until build-the-spine
+ticket 06, the file moves to `friday/kernel/spine/plan.py` in 16):
 what a graph returns about a task — `Ask`, `Reply` or `HandOver` — never a
 side effect. Every task first **fills in** what the message carries and
 **checks** it against the type's rules; then its graph decides. `Ask` goes to
@@ -376,6 +377,34 @@ code and docs and calls `ask_reporter` only when genuinely stuck, so a missing
 correlationId/curl no longer blocks opening an investigation — the reversal of
 the old "a correlationId *or* a curl makes a request findable" precondition.
 `api_issue`'s `Report` produces a `Reply` (a brief) today.
+
+## Plan
+
+What one pass of a task will do (`Plan`, `friday/kernel/spine/plan.py`):
+task, action, `plan_version` (1, +1 per replan), `replaces` (the hash of the
+version it replaced), the action contract copied in, a one-sentence goal, and
+a **straight list of steps** — no branch, no parallel; a change of direction
+is a replan. Its **plan hash** is sha256 of the canonical JSON of the whole
+plan, contract included. Built in build-the-spine ticket 06, not wired until
+14.
+
+**Step** — one entry of a plan, one of four core-owned types: `agent` (a named
+agent, the toolsets granted to it, a brief), `ask` / `hand_over` (the Planner
+deciding that up front), `draft` (the core responder writes the `Reply`).
+`reads` names the earlier steps whose stored result it is handed. Exactly the
+last step is terminal (`draft`, `ask`, `hand_over`).
+
+**Step key** — a step's memo key: hash of its fields minus `id`/`reads`, the
+keys of the steps it reads, and the task's placement identity. Results are
+stored by `(task_id, step_key)`, so a replan's identical step reuses its
+result, a changed step re-runs with everything reading it, and a changed
+placement matches nothing old.
+
+**GatePlan** — the plain-code check every plan version passes before it runs
+(`friday/kernel/spine/plan_gate.py`): shape (stops on fail), then contract
+(step types, agents, toolsets ⊆ contract ∩ the agent's ceiling) and
+`max_steps`, every error gathered — **refused, never clipped** — then frozen
+with its hash.
 
 ## Graph
 

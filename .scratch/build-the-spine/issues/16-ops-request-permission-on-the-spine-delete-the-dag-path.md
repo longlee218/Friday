@@ -19,6 +19,8 @@ map § Decisions ("The extractor is deleted outright").
   `mark_extraction`, `set_task_params`, `workflows.max_asks`,
   `auto_ask_for_details`, `use_responder`, `extraction_budget_tokens`.
   `sdk/outbox.py` (`Kind`) → `kernel/outbox.py`.
+- `sdk/actions.py` (`Ask`/`Reply`/`HandOver`/`Outcome`) → `kernel/spine/plan.py`
+  (deferred from 06: DAG nodes import it through the sdk until they go).
 - Alembic schema-only: drop `tasks.params` (and `dag_state`/`node_runs`).
 - ADR: deleting the extractor (hard to reverse) — `docs/adr/0001-*.md`.
 
