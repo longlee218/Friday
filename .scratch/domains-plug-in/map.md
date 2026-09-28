@@ -286,6 +286,15 @@ without approval; an answer that states a cause always waits for the operator.
   `DAGState`+`DagState` → one `StepResult` ORM row, `NodeRun` goes; `sdk/`
   only what a plugin imports (`model.py` deleted, `Kind`/`Ask`… to kernel).
 
+- [Hand-off between actions by re-triage](issues/16-hand-off-between-actions-by-re-triage.md):
+  agents get a fourth core terminal tool `retriage(reason, found)` (**amends
+  13**); a DBOS step before `deliver` re-triages over the whole conversation
+  + a retriage note; tried actions leave the `Literal` but stay in the prompt
+  as "Already tried", `skip` removed (**amends 02**); bound `len(actions)-1`
+  at boot, no config → `retriages_exhausted`; low → `needs_human`. Same task,
+  new type, `pass_no+1`; elapsed/replans reset, asks keep counting; no second
+  acknowledge. Board timeline line; eval rows gain `retriage_note` + `tried`.
+
 - **Fog review (2026-09-28)** — core agents' tiers: triage, responder and room
   summary each name a tier by a core constant, set at build time to the model
   they use today (behaviour unchanged); changing one needs its eval first. The
