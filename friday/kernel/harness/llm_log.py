@@ -19,7 +19,7 @@ import time
 from typing import Any
 
 from friday.kernel.harness.harness import Hooks, ModelRetry
-from friday.kernel.domain.models import ModelCall, ToolCall
+from friday.kernel.domain.monitor import ModelCall, ToolCall
 from friday.kernel.ops.redact import scrub
 
 __all__ = ["LogHooks", "UNAVAILABLE"]

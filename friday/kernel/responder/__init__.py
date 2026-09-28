@@ -26,9 +26,10 @@ from friday.kernel.config import AgentConfig
 from friday.sdk.agent import AgentDeclaration
 from friday.kernel.responder.prompt import build_input, build_instructions
 from friday.kernel.harness.harness import Harness
-from friday.kernel.domain.models import FridayState
+from friday.kernel.domain.state import FridayState
 from friday.kernel.tools.memory import memory_tools
-from friday.kernel.domain.models import Params, InboundEvent
+from friday.kernel.domain.tasks import Params
+from friday.kernel.domain.messages import InboundEvent
 
 __all__ = ["Draft", "Responder"]
 

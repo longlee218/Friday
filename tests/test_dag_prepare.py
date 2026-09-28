@@ -660,7 +660,7 @@ async def test_a_room_fact_reaches_the_extractor_and_settles_the_field(db, tmp_p
     """
     from friday.kernel.dag.prepare import prepare_node
     from friday.sdk.memory import MemoryOrigin
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
     from tests.test_extraction import _install
 
     await db.memory_add(
@@ -729,7 +729,7 @@ async def test_a_fact_written_after_the_first_pass_still_reaches_a_model(db, tmp
     """
     from friday.kernel.dag.prepare import prepare_node
     from friday.sdk.memory import MemoryOrigin
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
     from tests.test_extraction import _install
 
     asked: list[str] = []

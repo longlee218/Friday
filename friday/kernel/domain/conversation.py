@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from friday.kernel.domain.models import InboundEvent
+    from friday.kernel.domain.messages import InboundEvent
 
 __all__ = ["ConversationId", "resolve"]
 

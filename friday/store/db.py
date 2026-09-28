@@ -23,11 +23,14 @@ from __future__ import annotations
 from friday.store._common import *  # noqa: F401,F403 (shared store internals)
 from friday.store.repositories.audit import AuditRepo
 from friday.store.repositories.calls import CallsRepo
+from friday.store.repositories.compaction import CompactionRepo
 from friday.store.repositories.memory import MemoryRepo
+from friday.store.repositories.memory_candidates import MemoryCandidatesRepo
 from friday.store.repositories.messages import MessagesRepo
 from friday.store.repositories.monitor import MonitorRepo
 from friday.store.repositories.outbox import OutboxRepo
 from friday.store.repositories.rooms import RoomsRepo
+from friday.store.repositories.task_conversation import TaskConversationRepo
 from friday.store.repositories.tasks import TasksRepo
 from friday.store.repositories.verdicts import VerdictsRepo
 
@@ -56,8 +59,11 @@ class Database(
     MonitorRepo,
     CallsRepo,
     MemoryRepo,
+    MemoryCandidatesRepo,
     OutboxRepo,
     TasksRepo,
+    TaskConversationRepo,
+    CompactionRepo,
     VerdictsRepo,
     AuditRepo,
 ):

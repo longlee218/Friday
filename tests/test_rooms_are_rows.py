@@ -21,7 +21,8 @@ from friday.sdk.testing import ScriptedModel, assistant_message
 
 from friday.kernel.config import AgentConfig
 from friday.sdk.memory import MemoryOrigin
-from friday.kernel.domain.models import FridayState, MemoryStatus
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.memory import MemoryStatus
 from tests.conftest import make_event
 
 ADMIN = MemoryOrigin.ADMIN

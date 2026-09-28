@@ -53,7 +53,8 @@ import logging
 from friday.kernel.harness.harness import ToolContext, tool
 from friday.kernel.harness.instruction_prompt import memory_lines
 from friday.kernel.domain.memory_guard import InstructionShaped
-from friday.kernel.domain.models import CandidateStatus, FridayState, ModelMemoryKind
+from friday.kernel.domain.memory import CandidateStatus, ModelMemoryKind
+from friday.kernel.domain.state import FridayState
 from friday.kernel.memory import write
 
 __all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "FridayState", "memory_tools"]

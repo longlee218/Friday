@@ -27,7 +27,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 from plugins.backend.graph.deps import ApiIssueDeps
-from friday.sdk.tools import tool
+from friday.sdk.toolset import tool
 from friday.sdk.workflow import Ask, DAGState, HandOver, Node, envelope
 
 __all__ = [

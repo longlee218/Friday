@@ -69,7 +69,7 @@ def _recording(db):
     a second seam is a second thing to forget — and part paths at the store,
     which is the only place that knows there are two tables.
     """
-    from friday.kernel.domain.models import ModelCall
+    from friday.kernel.domain.monitor import ModelCall
 
     async def record(entry) -> None:
         if isinstance(entry, ModelCall):

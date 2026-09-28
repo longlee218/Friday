@@ -336,7 +336,7 @@ def test_the_answer_tool_carries_each_fields_own_meaning():
     one is an instruction to guess — the argument `classify`'s enum
     descriptions already make. The meaning lives on the field, as the same
     `doc` the prompt renders, so there is one source for both readers."""
-    from friday.kernel.harness.harness import _answer_params
+    from friday.kernel.harness.model_client import _answer_params
     from plugins.backend.params import ApiIssueParams
 
     described = _answer_params(ApiIssueParams)["properties"]
@@ -412,7 +412,7 @@ def test_the_shapes_own_docstring_does_not_go_on_the_wire():
     on every call, as tokens and as confusion. What the model needs about the
     shape as a whole is on the tool's description; what it needs about a field
     is on the field."""
-    from friday.kernel.harness.harness import _answer_params
+    from friday.kernel.harness.model_client import _answer_params
     from friday.kernel.memory.channel_context import RoomSummary
 
     described = _answer_params(RoomSummary)

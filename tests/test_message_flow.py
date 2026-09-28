@@ -256,7 +256,7 @@ async def test_another_conversations_work_is_not_in_this_path(db):
 async def test_a_call_naming_both_a_message_and_its_task_is_listed_once(db):
     """The two correlation keys were read separately and concatenated, on the
     assumption that no call carries both. Nothing enforces that: `_About` in
-    `friday/kernel/harness/harness.py` holds `message_id` and `task_id` independently
+    `friday/kernel/harness/retry.py` holds `message_id` and `task_id` independently
     and `Harness.run`'s docstring invites both — *"a caller supplies whichever
     it knows"*. Only triage passes one today, so the assumption holds by
     coincidence of the current call sites.

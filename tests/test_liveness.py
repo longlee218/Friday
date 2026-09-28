@@ -48,7 +48,7 @@ async def test_a_full_channel_is_named_in_the_beat(db):
     already refuses the write and evicts nothing — this is the operator's
     own visibility into the same condition, not only the model's refusal
     message."""
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
 
     scope = FridayState(channel_id="watched", task_id=None, agent="responder")
     for n in range(db.MEMORY_PER_CHANNEL):
@@ -60,7 +60,7 @@ async def test_a_full_channel_is_named_in_the_beat(db):
 
 
 async def test_a_room_with_headroom_is_not_named_in_the_beat(db):
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
 
     await db.memory_add(
         FridayState(channel_id="watched", task_id=None, agent="responder"),

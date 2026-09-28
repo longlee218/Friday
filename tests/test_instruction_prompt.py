@@ -61,7 +61,7 @@ def test_html_escape_closes_nothing():
 def test_conversation_section_escapes_author_name_and_text():
     """Discord nicknames are attacker-controlled. A nickname that closes
     its own message's tags is the same attack as one in text."""
-    from friday.kernel.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.messages import InboundEvent, MentionType
 
     event = InboundEvent(
         provider="fake",
@@ -227,7 +227,7 @@ def test_conversation_section_lists_each_message():
 
 def _events(texts: list[str]):
     """Tiny stand-in for InboundEvent so the bundle renders without the DB."""
-    from friday.kernel.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.messages import InboundEvent, MentionType
 
     return [
         InboundEvent(
@@ -323,7 +323,7 @@ def test_tone_section_is_separate_from_conversation():
     (current messages) sections. Without the separation, the agent sees
     one merged stream and loses the label that tells it which is which.
     """
-    from friday.kernel.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.messages import InboundEvent, MentionType
 
     event = InboundEvent(
         provider="fake",

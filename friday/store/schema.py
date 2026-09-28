@@ -426,7 +426,7 @@ class MemoryCandidate(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(IsoDateTime, default=None)
     resolved_by: Mapped[str | None] = mapped_column(default=None)
     #: Set only once accepted, and only if the write actually landed — see
-    #: `friday.kernel.domain.models.MemoryCandidate`'s own docstring for why it can
+    #: `friday.kernel.domain.memory.MemoryCandidate`'s own docstring for why it can
     #: stay `None` on an accepted row.
     memory_id: Mapped[str | None] = mapped_column(default=None)
 

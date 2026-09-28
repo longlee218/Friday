@@ -1,7 +1,7 @@
 """Board `what-the-room-already-knows`, ticket 07 — verbatim material
 becomes an artifact the build points at (D8).
 
-`friday.kernel.text.transform.transform` has always split code out of a message's
+`friday.kernel.text_transform.transform` has always split code out of a message's
 prose; what it lifted out was reinserted into `text` and then forgotten —
 `InboundEvent.code` reached `record_message` and stopped there, a producer
 with no consumer. This is the consumer: each span becomes its own
@@ -18,7 +18,7 @@ from dataclasses import replace
 
 from conftest import make_event
 from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.domain.models import MentionType
+from friday.kernel.domain.messages import MentionType
 
 
 CURL = "curl -X GET /pay -H 'x-request-id: c0rr3l4t10n'"

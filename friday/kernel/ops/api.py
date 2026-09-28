@@ -53,16 +53,12 @@ from friday.kernel.dag import registry as task_registry
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.memory_guard import InstructionShaped
 from friday.store.db import Database
-from friday.kernel.domain.models import (
-    FridayState,
-    InboundEvent,
-    Memory,
-    MemoryKeyTaken,
-    MemoryOrigin,
-    MemoryRefused,
-    Outbound,
-    Task,
-)
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.messages import InboundEvent
+from friday.kernel.domain.memory import Memory, MemoryKeyTaken, MemoryRefused
+from friday.sdk.memory import MemoryOrigin
+from friday.kernel.domain.outbound import Outbound
+from friday.kernel.domain.tasks import Task
 from friday.kernel.memory import registry as mem_registry
 from friday.kernel.memory import write
 from friday.kernel.outbox import FAILED

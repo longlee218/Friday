@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 
 from friday.kernel.config import IngestConfig
 from friday.store.db import Database
-from friday.kernel.domain.models import InboundEvent, MentionType
+from friday.kernel.domain.messages import InboundEvent, MentionType
 
 __all__ = ["Inbox"]
 

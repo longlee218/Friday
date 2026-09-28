@@ -14,7 +14,7 @@ natural key — but the *trust boundary* lives here, not inside the store:
 Every runtime producer of a new memory goes through these functions, so a store
 that skipped the checks (or a fake one in a test) could not smuggle an
 instruction-shaped line or a wrong-origin row past them — the same shape of
-guarantee the outbox's approval gate gives (`friday/kernel/outbox/`). A proposed
+guarantee the outbox's approval gate gives (`friday/kernel/outbox.py`). A proposed
 candidate is guarded here at propose time, so the store's own `memory_add` — the
 one a candidate is resolved through — can trust the text it already holds.
 """
@@ -24,8 +24,9 @@ from __future__ import annotations
 from typing import Any
 
 from friday.kernel.domain.memory_guard import check_not_instruction_shaped
-from friday.kernel.domain.models import Memory, MemoryCandidate, MemoryOrigin, MemoryRefused
-from friday.kernel.domain.models import FridayState
+from friday.kernel.domain.memory import Memory, MemoryCandidate, MemoryRefused
+from friday.sdk.memory import MemoryOrigin
+from friday.kernel.domain.state import FridayState
 from friday.kernel.memory import registry as memory_kinds
 
 __all__ = ["add", "propose", "supersede", "update"]

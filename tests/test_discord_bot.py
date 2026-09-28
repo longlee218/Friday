@@ -13,7 +13,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.domain.models import Outbound
+from friday.kernel.domain.outbound import Outbound
 from friday.kernel.outbox import Kind
 from friday.kernel.providers.discord.bot import DiscordBot
 
@@ -62,7 +62,7 @@ async def test_the_card_is_transported_verbatim():
     This adapter shows it unchanged and adds only the buttons a user account
     cannot send; it does not compose or edit the truth about a draft."""
     from friday.kernel.domain.conversation import ConversationId
-    from friday.kernel.outbox import card as card_renderer
+    from friday.kernel import outbox_card as card_renderer
 
     body = card_renderer.render(
         "cho anh xin cái correlationId",

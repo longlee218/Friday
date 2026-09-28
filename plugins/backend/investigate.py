@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
-from friday.sdk.tools import tool
+from friday.sdk.toolset import tool
 from plugins.backend.graph.distil import distil
 from friday.sdk.sources import Placement
 from plugins.backend.sources.code import at_ref, meanings, numbered, original, repo_file

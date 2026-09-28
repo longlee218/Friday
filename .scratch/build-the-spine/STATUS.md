@@ -8,9 +8,9 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | --- | --- | --- | --- |
 | 01 | Knobs to constants, budget in three groups | ✅ done (main `aa0dd9d`, `2a98a2d`) | — |
 | 02 | Rename actions and plugins, wipe the db | ✅ done (branch `feat/build-the-spine-02`, `cbbcde1`); triage eval deferred until an OpenRouter key exists | 01 |
-| 03 | Split the grab-bag modules | ⬜ **takeable** | 02 |
+| 03 | Split the grab-bag modules | ✅ done (main, 2026-09-28) | 02 |
 | 04 | Board card and pool line from the opening message | ⬜ **takeable** | 02 |
-| 05 | SDK declarations and boot refusals | ⬜ | 03 |
+| 05 | SDK declarations and boot refusals | ⬜ **takeable** | 03 |
 | 06 | Plan, `step_key` and GatePlan | ⬜ | 05 |
 | 07 | Core Intake and the backend enricher | ⬜ | 05 |
 | 08 | Core toolsets: memory, skills, shell, workspace | ⬜ | 05 |

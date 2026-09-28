@@ -38,7 +38,7 @@ from friday.kernel.providers.discord.user import DiscordUserProvider
 from friday.kernel.providers.discord.bot import DiscordBot
 from friday.kernel.responder import Responder
 from friday.kernel.harness.skills import SkillLibrary
-from friday.kernel.domain.models import ModelCall
+from friday.kernel.domain.monitor import ModelCall
 from friday.kernel.triage.runner import TriageRunner
 from friday.kernel.pool.pool import Pool
 

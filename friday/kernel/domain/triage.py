@@ -18,7 +18,7 @@ from dataclasses import dataclass, field, make_dataclass
 from functools import lru_cache
 from typing import Any, Literal
 
-from friday.kernel.domain.models import SKIP
+from friday.kernel.domain.tasks import SKIP
 
 __all__ = ["Decided", "NeedsHuman", "TriageOutcome", "make_decided"]
 

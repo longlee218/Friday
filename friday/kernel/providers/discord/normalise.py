@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from friday.kernel.domain.models import InboundEvent, MentionType
-from friday.kernel.text.transform import Attachment, render_attachments, transform
+from friday.kernel.domain.messages import InboundEvent, MentionType
+from friday.kernel.text_transform import Attachment, render_attachments, transform
 
 
 def normalise(

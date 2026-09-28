@@ -85,7 +85,7 @@ def decision_params() -> dict[str, type]:
 def decisions() -> tuple[str, ...]:
     """The closed set triage may conclude — every registered task type plus
     `skip` — the old `DECISIONS` read from the registry."""
-    from friday.kernel.domain.models import SKIP
+    from friday.kernel.domain.tasks import SKIP
 
     return (*TASK_TYPES.task_types(), SKIP)
 

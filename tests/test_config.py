@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from friday.kernel.config import ConfigError, load_config
-from friday.kernel.domain.models import MentionType
+from friday.kernel.domain.messages import MentionType
 
 SAMPLE = """
 database_path: ./data/friday.db

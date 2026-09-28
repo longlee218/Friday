@@ -19,7 +19,8 @@ from datetime import datetime, timezone
 from friday.kernel.inbox import MAX_MESSAGE_AGE_SECONDS, TURN_SECONDS
 from friday.store.db import Database
 from friday.kernel.domain.states import TaskState
-from friday.kernel.domain.models import SKIP, InboundEvent, Task
+from friday.kernel.domain.tasks import SKIP, Task
+from friday.kernel.domain.messages import InboundEvent
 from friday.kernel.triage import TRIAGE, Decided, NeedsHuman, Triage, TriageOutcome
 from friday.kernel.triage.prefilter import Sensitive
 

@@ -8,7 +8,7 @@ looking for.
 
 from __future__ import annotations
 
-from friday.kernel.text.transform import Attachment, redact, render_attachments, transform
+from friday.kernel.text_transform import Attachment, redact, render_attachments, transform
 
 
 # --- code survives exactly ---------------------------------------------------

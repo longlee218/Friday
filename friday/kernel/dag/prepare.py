@@ -22,7 +22,7 @@ from typing import Any, get_args, get_type_hints
 
 from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node
 from friday.sdk.actions import Action, Ask, HandOver
-from friday.kernel.domain.models import MODEL_AUTHORED, ExtractionMark, Params
+from friday.kernel.domain.tasks import MODEL_AUTHORED, ExtractionMark, Params
 from friday.sdk.validation import Problem, asked_as, validate
 from friday.kernel.extraction import (
     Clarify,

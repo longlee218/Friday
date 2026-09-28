@@ -1,6 +1,6 @@
 """The backend pack kinds — the rows this plugin's graph reads to route a report.
 
-Moved out of the core models (now `friday.kernel.domain.models`) + `friday.kernel.memory.registry` in ticket 14: a
+Moved out of the core models (now `friday.kernel.domain`) + `friday.kernel.memory.registry` in ticket 14: a
 pack kind ships with the plugin that reads it, namespaced `backend.*`, and it
 carries its own schema, its natural-key derivation (`MemoryKindSpec.key`) and its
 reader routing here rather than in a per-kind branch the kernel would have to

@@ -8,7 +8,8 @@ from collections.abc import AsyncIterator, Callable
 import discord_self
 
 from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.domain.models import InboundEvent, Outbound
+from friday.kernel.domain.messages import InboundEvent
+from friday.kernel.domain.outbound import Outbound
 from friday.kernel.providers import CredentialRejected
 from friday.kernel.providers.discord.normalise import normalise
 from friday.kernel.memory.verdicts import mark_for

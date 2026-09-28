@@ -10,7 +10,8 @@ from friday.kernel.config import AgentConfig
 from friday.sdk.agent import AgentDeclaration
 from friday.kernel.harness.harness import Harness
 from friday.kernel.domain.triage import Decided, NeedsHuman, TriageOutcome, make_decided
-from friday.kernel.domain.models import FridayState, InboundEvent
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.messages import InboundEvent
 from friday.kernel.triage.prefilter import Sensitive
 
 __all__ = ["Decided", "NeedsHuman", "Triage", "TriageOutcome"]

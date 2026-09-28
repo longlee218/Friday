@@ -115,7 +115,7 @@ class MonitorRepo:
         correctness fix rather than a tidiness one. The first version read the
         two keys separately and appended, on the assumption that no call
         carries both — and nothing enforces that: `_About` in
-        `friday/kernel/harness/harness.py` holds `message_id` and `task_id`
+        `friday/kernel/harness/retry.py` holds `message_id` and `task_id`
         independently, and `Harness.run`'s docstring invites both ("a caller
         supplies whichever it knows"). Only triage passes one today, so the
         assumption held by coincidence of the current call sites. The first

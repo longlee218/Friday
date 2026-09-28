@@ -16,7 +16,7 @@ class _Ctx:
 
 
 from friday.kernel.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
-from friday.kernel.domain.models import FridayState
+from friday.kernel.domain.state import FridayState
 from friday.kernel.memory import write
 
 #: Both tables the ticket asks for, asserted rather than sampled by feel.
@@ -204,7 +204,8 @@ async def test_the_kernel_write_path_guards_a_dumb_store():
     `friday.kernel.memory.write` refuses both before the store is called — the
     same guarantee the outbox's approval gate gives against a self-approving
     store."""
-    from friday.kernel.domain.models import MemoryOrigin, MemoryRefused
+    from friday.sdk.memory import MemoryOrigin
+    from friday.kernel.domain.memory import MemoryRefused
 
     class DumbStore:
         def __init__(self) -> None:

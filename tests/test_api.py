@@ -285,7 +285,7 @@ async def test_a_channels_memories_are_reachable_live_and_deleted(client, db):
     """`memory_delete` hides a line from every tool but keeps the row, and
     this is the one route that reads it back — the operator's own view, not
     scoped by agent the way the tool is."""
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
 
     scope = FridayState(channel_id="100", task_id=None, agent="responder")
     kept = await db.memory_add(scope, "checkout runs on cluster b")
@@ -305,7 +305,7 @@ async def test_a_channels_memories_are_bounded_like_every_other_list_route(clien
     purged — a channel that has churned many corrections holds an unbounded
     number of rows, and every other list route on this board is bounded."""
     from friday.store.db import Database
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
 
     scope = FridayState(channel_id="100", task_id=None, agent="responder")
     for n in range(5):
@@ -320,7 +320,7 @@ async def test_a_channels_memories_are_bounded_like_every_other_list_route(clien
 async def test_the_board_names_a_full_memory_channel(client, db):
     """Board `what-the-room-already-knows`, ticket 12, D18: the operator's
     own view of the ceiling, not only the model's refusal message."""
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
 
     scope = FridayState(channel_id="100", task_id=None, agent="responder")
     for n in range(db.MEMORY_PER_CHANNEL):
@@ -333,7 +333,8 @@ async def test_a_channels_candidates_are_reachable_pending_and_resolved(client, 
     """Board `what-the-room-already-knows`, ticket 12: the "place for a
     person to look" a pending candidate needs, since no prompt or tool reads
     it — and a rejected one stays listed rather than deleted."""
-    from friday.kernel.domain.models import CandidateStatus, FridayState
+    from friday.kernel.domain.memory import CandidateStatus
+    from friday.kernel.domain.state import FridayState
 
     scope = FridayState(
         channel_id="100", task_id=None, agent="responder", message_id="m1"
@@ -355,7 +356,7 @@ async def test_a_channels_candidates_are_reachable_pending_and_resolved(client, 
 
 
 async def test_a_channels_candidates_do_not_leak_another_ones(client, db):
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
 
     await db.propose_memory(
         FridayState(channel_id="200", task_id=None, agent="responder"), "not this room"

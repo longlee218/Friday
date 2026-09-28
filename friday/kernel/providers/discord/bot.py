@@ -28,7 +28,7 @@ from collections.abc import Callable
 
 import discord
 
-from friday.kernel.domain.models import Outbound
+from friday.kernel.domain.outbound import Outbound
 from friday.kernel.outbox import Kind
 
 __all__ = ["DiscordBot"]
@@ -141,7 +141,7 @@ def _asking(row: Outbound) -> str:
     """Plain text rather than an embed: the thing being approved is a chat
     message, and it should be read as it will be sent.
 
-    The card body is built in the kernel (`friday.kernel.outbox.card`) and carried
+    The card body is built in the kernel (`friday.kernel.outbox_card`) and carried
     verbatim in `row.text`: the exact bytes, the destination and audience, what
     each link and mention resolves to, and whether a secret was redacted. The
     truth about a draft is policy, not a Discord concern — this adapter adds only

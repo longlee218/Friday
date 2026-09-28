@@ -29,7 +29,7 @@ from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 
 from friday.kernel.config import Config, load_config
 from friday.kernel.domain.triage import Decided, TriageOutcome
-from friday.kernel.domain.models import InboundEvent, MentionType
+from friday.kernel.domain.messages import InboundEvent, MentionType
 from friday.store.db import Database
 from friday.kernel.triage import Triage
 from friday.kernel.triage.runner import build_triage

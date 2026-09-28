@@ -159,8 +159,8 @@ is the premise each board tracks against.
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **In progress:** tickets 01 and 02 done (2026-09-28; names are
-  `backend.*`/`ops.*`, live db wiped); 03 and 04 are next. The triage eval
+  **In progress:** tickets 01, 02 and 03 done (2026-09-28; names are
+  `backend.*`/`ops.*`, live db wiped; grab-bag modules split); 04 and 05 are next. The triage eval
   is deferred until the operator has an OpenRouter key.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
@@ -169,7 +169,7 @@ is the premise each board tracks against.
    board protection (ticket 02) — `BOARD_TOKEN` removed and every write checks
    Host/Origin/CSRF (`friday/kernel/ops/api.py`); approver identity (ticket 03) — a
    decision is checked against `operator_id` in `record_decision`
-   (`friday/kernel/outbox/__init__.py`), not trusted from whatever button was pressed.
+   (`friday/kernel/outbox.py`), not trusted from whatever button was pressed.
    Still to do: a single-instance lock on `run_agent.py` (ticket 04). **The
    outbox double-post fix** folded into the DBOS phase as planned (§15 step 3,
    ADR 0001) and **landed as ticket 07**: each delivery is a DBOS workflow,

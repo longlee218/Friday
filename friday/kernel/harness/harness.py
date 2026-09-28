@@ -18,24 +18,25 @@ does not mention the library, so `mcp.py` and `llm_log.py` take the vendor's
 names *through here* rather than importing it. `friday/sdk/testing/` is the one
 exception to the import rule: the test-double seam, whose whole job is to be the
 single place a *test* names the vendor.
+
+Beside it, with no vendor import: `retry.py` (which failures earn another
+attempt, and the attempts' bookkeeping) and `model_client.py` (the provider's
+client and the answer shape's JSON schema). What is left is over 200 lines
+because it is one class, the loop; build-the-spine ticket 10 reshapes it.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, fields as dataclass_fields, replace
 from typing import Any, cast, get_type_hints
 
-from pydantic import TypeAdapter
 from pydantic_ai import (
     Agent,
     ModelRetry,
     RunContext,
     Tool,
     ToolOutput,
-    UnexpectedModelBehavior,
-    UsageLimitExceeded,
     UsageLimits,
     capture_run_messages,
 )
@@ -50,19 +51,13 @@ from fastmcp.client.transports import (
     StdioTransport,
     StreamableHttpTransport,
 )
-from openai import (
-    APIConnectionError,
-    APIStatusError,
-    APITimeoutError,
-    AsyncOpenAI,
-    InternalServerError,
-    RateLimitError,
-)
 
+from friday.kernel.harness.model_client import ANSWER, _client
+from friday.kernel.harness.retry import _About, _Progress, _transient, _why
 from friday.kernel.harness.structured import Unfit, describe, find_json, fits
 from friday.kernel.config import AgentConfig
-from friday.kernel.domain.models import FridayState
-from friday.sdk.tools import ToolSpec
+from friday.kernel.domain.state import FridayState
+from friday.sdk.toolset import ToolSpec
 
 __all__ = [
     "Harness",
@@ -124,7 +119,7 @@ def tool(func=None, **options):
     it raises is turned into the "unavailable" message there.
 
     A plugin, which may not import this module, declares its tools as neutral
-    `ToolSpec`s through `friday.sdk.tools.tool` instead; `_bind_tool_spec` binds
+    `ToolSpec`s through `friday.sdk.toolset.tool` instead; `_bind_tool_spec` binds
     those to a `Tool` here, the one place that names the SDK.
     """
 
@@ -137,7 +132,7 @@ def tool(func=None, **options):
 def _bind_tool_spec(spec: Any) -> Any:
     """A vendor `Tool` from whatever a caller handed in `tools=`.
 
-    A plugin declares a tool as a neutral `ToolSpec` (`friday.sdk.tools`) so it
+    A plugin declares a tool as a neutral `ToolSpec` (`friday.sdk.toolset`) so it
     never names the SDK; this is the one place that turns each into the vendor's
     `Tool(fn, **options)`, the same call `tool` above makes — Pydantic AI then
     infers the run-context parameter and the docstring arg descriptions exactly
@@ -707,104 +702,6 @@ class Harness:
                 log.exception("could not record a call by %s", self._config.name)
 
 
-@dataclass(frozen=True, slots=True)
-class _About:
-    """What a run was about, for the rows it produces. A value rather than three
-    parameters threaded through `_settle`, because they travel together."""
-
-    message_id: str | None = None
-    task_id: int | None = None
-    node: str | None = None
-
-    @classmethod
-    def of(
-        cls,
-        context: Any,
-        *,
-        message_id: str | None = None,
-        task_id: int | None = None,
-        node: str | None = None,
-    ) -> "_About":
-        """What this call was about, read off the run's state where there is one
-        (D8) and named explicitly where there is not. An explicit argument still
-        wins, for a caller that knows better than the state it was handed.
-        `node` is never on the state — it is which step of a graph asked."""
-        if isinstance(context, FridayState):
-            message_id = message_id or context.message_id
-            task_id = task_id if task_id is not None else context.task_id
-        return cls(message_id=message_id, task_id=task_id, node=node)
-
-    def stamp(self, call):
-        """The call with what the caller knew about it, and nothing else
-        overwritten: `latency_ms` was measured by the hook and is not ours."""
-        if not (self.message_id or self.task_id or self.node):
-            return call
-        return replace(
-            call,
-            message_id=self.message_id,
-            task_id=self.task_id,
-            node=self.node,
-        )
-
-
-#: What is worth calling again. A list rather than a guess from the message: a
-#: 400 is the provider saying the request itself is wrong, and paying to ask it
-#: a second time buys nothing.
-_TRANSIENT = (
-    APIConnectionError, APITimeoutError, RateLimitError, InternalServerError,
-    # An attempt past its bound (`_attempts`).
-    TimeoutError,
-)
-
-#: Statuses the SDK gives no class of its own, and that are still worth another
-#: call. Only 408 today.
-_RETRY_STATUSES = frozenset({408})
-
-
-def _transient(exc: Exception) -> bool:
-    if isinstance(exc, (UnexpectedModelBehavior, UsageLimitExceeded)):
-        # The model exhausted its correction budget, or the run hit its turn
-        # cap. Trying again changes neither — they are the run's own verdict,
-        # not the provider's.
-        return False
-    if isinstance(exc, _TRANSIENT):
-        return True
-    return isinstance(exc, APIStatusError) and exc.status_code in _RETRY_STATUSES
-
-
-@dataclass
-class _Progress:
-    """Which attempt is in flight, and how much of the record it has claimed."""
-
-    attempt: int = 1
-    #: How many rows already carry a number. Everything after this belongs to
-    #: the attempt in flight.
-    claimed: int = 0
-
-    def flush(self, hooks, calls: list) -> None:
-        """Number every row this attempt produced, and keep what it sent."""
-        if (cut_off := hooks.unfinished()) is not None:
-            calls.append(cut_off)
-        for index in range(self.claimed, len(calls)):
-            calls[index] = replace(calls[index], attempt=self.attempt)
-        self.claimed = len(calls)
-
-
-def _why(exc: Exception, attempts: int = 0) -> str:
-    """The reason, in a form somebody can act on — scrubbed, because it is
-    stored against a task and a provider exception can quote an Authorization
-    header."""
-    from friday.kernel.ops.redact import scrub
-
-    # `asyncio.wait_for` raises a `TimeoutError` whose `str()` is empty.
-    said = "no answer within the request timeout" if isinstance(
-        exc, TimeoutError
-    ) else scrub(str(exc))
-    if attempts > 1:
-        return f"gave up after {attempts} attempts: {said}"
-    return said
-
-
 def _last_text(messages: list) -> str:
     """The last text a model wrote across the captured run, for the D13
     written-answer fallback. Empty when every turn was a tool call — which is
@@ -820,44 +717,7 @@ def _last_text(messages: list) -> str:
 
 
 def _chat_model(config: AgentConfig) -> OpenAIChatModel:
-    """Chat Completions rather than the Responses API, so `base_url`, `api_key`
-    and `model` are the whole of what it takes to use a different
-    OpenAI-compatible provider.
-
-    The client is built here rather than left to the provider's default so its
-    retries can be switched off (retrying is `_attempts`'s job, where it can be
-    seen and counted). Its timeout is the client's own default — the one
-    unbounded wait left, and the operator's call (board `domains-plug-in`,
-    ticket 17).
-    """
-    client = AsyncOpenAI(
-        base_url=config.base_url,
-        api_key=config.api_key,
-        max_retries=0,
+    """The provider's client (`model_client._client`) as the SDK's chat model."""
+    return OpenAIChatModel(
+        config.model, provider=OpenAIProvider(openai_client=_client(config))
     )
-    return OpenAIChatModel(config.model, provider=OpenAIProvider(openai_client=client))
-
-
-#: What the model calls to answer. One name for every shape, because an agent
-#: built with `answers=` has exactly one way to finish.
-ANSWER = "answer"
-
-
-def _answer_params(schema: type) -> dict[str, Any]:
-    """The answer shape as a JSON schema, with each field's own `doc` on it.
-
-    Kept as the canonical description of the shape for the model — the same
-    `doc` metadata `describe` renders into the prompt — and read by
-    `tests/test_tools.py`, which requires every field of every tool to carry a
-    description. The class's own docstring is developer prose and is dropped:
-    what the model needs about the shape as a whole is on the tool's
-    description, generated from the fields.
-    """
-    described = TypeAdapter(schema).json_schema()
-    described.pop("description", None)
-    properties = described.get("properties", {})
-    for field in dataclass_fields(schema):
-        doc = field.metadata.get("doc")
-        if doc and field.name in properties:
-            properties[field.name].setdefault("description", doc)
-    return described

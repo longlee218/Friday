@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-from friday.kernel.domain.models import MentionType
+from friday.kernel.domain.messages import MentionType
 from friday.sdk.agent import AgentDeclaration
 
 log = logging.getLogger(__name__)

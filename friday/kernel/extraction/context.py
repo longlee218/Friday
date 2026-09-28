@@ -27,7 +27,8 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, fields
 
-from friday.kernel.domain.models import Memory, Params
+from friday.kernel.domain.memory import Memory
+from friday.kernel.domain.tasks import Params
 from friday.store.db import estimated_tokens
 
 __all__ = ["FullContext", "build_full_context"]

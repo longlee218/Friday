@@ -68,7 +68,7 @@ from friday.sdk.workflow import DAGState, status_of
 from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
 from friday.sdk.memory import MemoryOrigin
-from friday.kernel.domain.models import FridayState
+from friday.kernel.domain.state import FridayState
 from plugins.backend.params import ApiIssueParams
 
 CURL = (

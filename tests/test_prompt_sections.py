@@ -1148,7 +1148,7 @@ def test_a_stored_question_cannot_forge_a_second_numbered_entry():
 def _memory(text: str, kind: str = "fact", origin: str = "model"):
     from datetime import datetime, timezone
 
-    from friday.kernel.domain.models import Memory
+    from friday.kernel.domain.memory import Memory
 
     now = datetime(2026, 9, 9, tzinfo=timezone.utc)
     return Memory(

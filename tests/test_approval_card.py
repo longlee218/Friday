@@ -10,7 +10,7 @@ same however it is delivered — the Discord adapter only transports it.
 from __future__ import annotations
 
 from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.outbox import card
+from friday.kernel import outbox_card as card
 from friday.sdk.redact import clear_secret_values, register_secret_values
 
 WHERE = ConversationId("discord", "999")

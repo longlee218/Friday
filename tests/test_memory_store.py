@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.kernel.domain.models import FridayState
+from friday.kernel.domain.state import FridayState
 from friday.kernel.memory import registry as memory_kinds
 
 ROOM = FridayState(channel_id="c1", task_id=7, agent="responder")
@@ -614,7 +614,7 @@ async def test_a_row_naming_a_row_that_does_not_exist_is_refused(db):
     by string equality, and the form asked for it as free text — a question
     whose wrong answers look exactly like its right ones. It failed on the
     first six rows ever typed."""
-    from friday.kernel.domain.models import MemoryRefused
+    from friday.kernel.domain.memory import MemoryRefused
 
     with pytest.raises(MemoryRefused, match="reelme-v2"):
         await _service(db, "backend-reelme-v2", "reelme-v2")
@@ -642,7 +642,7 @@ async def test_renaming_a_row_another_row_names_is_refused(db):
     structured row's key *is* its data, so renaming it orphans every row that
     names it — and those rows are ones nobody touched. A dropdown cannot help
     here: the operator is editing the row being named."""
-    from friday.kernel.domain.models import MemoryRefused
+    from friday.kernel.domain.memory import MemoryRefused
 
     project = await _project(db, "reelme-v2")
     await _service(db, "backend-reelme-v2", "reelme-v2")
@@ -685,7 +685,7 @@ async def test_deleting_a_row_another_row_names_is_refused(db):
     otherwise surface hours afterwards, inside a graph run, which is the
     failure this whole check exists to stop. A soft delete makes the
     work-around cheap — remove the service first."""
-    from friday.kernel.domain.models import MemoryRefused
+    from friday.kernel.domain.memory import MemoryRefused
 
     project = await _project(db, "reelme-v2")
     await _service(db, "backend-reelme-v2", "reelme-v2")
@@ -716,7 +716,7 @@ async def test_superseding_cannot_move_a_key_another_row_names(db):
     takes `data` as well, so it can move a key. Found by review rather than
     by a test — the first version checked `memory_update` and `memory_delete`
     and left this one open."""
-    from friday.kernel.domain.models import MemoryRefused
+    from friday.kernel.domain.memory import MemoryRefused
 
     project = await _project(db, "reelme-v2")
     await _service(db, "backend-reelme-v2", "reelme-v2")
@@ -748,7 +748,7 @@ async def test_a_shared_row_cannot_be_removed_while_one_room_names_it(db):
     everywhere. Scoped to `[channel_id, '*']` with `channel_id == '*'` that
     collapses to `'*'` alone, and a shared project could be removed while one
     room's service still named it. Found by review."""
-    from friday.kernel.domain.models import MemoryRefused
+    from friday.kernel.domain.memory import MemoryRefused
 
     await _project(db, "shared", channel="*")
     await _service(db, "c1-service", "shared", channel="c1")
@@ -768,7 +768,7 @@ async def test_a_row_for_every_room_may_not_name_one_room_s_row(db):
     """Ticket 19's third open question, answered in code rather than in a
     comment: "true everywhere" cannot depend on something that exists in one
     room, or it resolves for that room and nowhere else."""
-    from friday.kernel.domain.models import MemoryRefused
+    from friday.kernel.domain.memory import MemoryRefused
 
     await _project(db, "only-here", channel="c1")
 

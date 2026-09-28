@@ -25,7 +25,7 @@ from dataclasses import make_dataclass
 from functools import lru_cache
 from typing import Any, Literal, get_type_hints
 
-from friday.kernel.domain.models import Params, askable_fields
+from friday.kernel.domain.tasks import Params, askable_fields
 
 __all__ = ["Clarify", "answer_shape", "params_and_clarify"]
 

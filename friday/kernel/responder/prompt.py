@@ -34,7 +34,8 @@ from friday.kernel.harness.instruction_prompt import (
     tone_examples,
     trust_boundary,
 )
-from friday.kernel.domain.models import InboundEvent, Params
+from friday.kernel.domain.messages import InboundEvent
+from friday.kernel.domain.tasks import Params
 
 __all__ = ["build_input", "build_instructions"]
 

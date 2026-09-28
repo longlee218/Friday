@@ -38,7 +38,7 @@ from friday.sdk.agent import AgentDeclaration
 from friday.kernel.harness.harness import Harness
 from friday.kernel.extraction.answer import Clarify, answer_shape, params_and_clarify
 from friday.kernel.extraction.context import FullContext
-from friday.kernel.domain.models import MODEL_AUTHORED, Params
+from friday.kernel.domain.tasks import MODEL_AUTHORED, Params
 from friday.kernel.extraction.prompt import build_input, build_instructions
 
 if TYPE_CHECKING:

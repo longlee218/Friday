@@ -86,7 +86,9 @@ from friday.sdk.prompt import (
 from friday.sdk.prompt import _QUOTE_CLOSE, _QUOTE_OPEN, _escape, _quoted
 from friday.kernel.harness.skills import Skill
 from friday.sdk.memory import MemoryOrigin
-from friday.kernel.domain.models import InboundEvent, Memory, Params, RoomSummary
+from friday.kernel.domain.messages import InboundEvent
+from friday.kernel.domain.memory import Memory, RoomSummary
+from friday.kernel.domain.tasks import Params
 
 log = logging.getLogger(__name__)
 

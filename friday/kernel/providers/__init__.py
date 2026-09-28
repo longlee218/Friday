@@ -6,7 +6,8 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.domain.models import InboundEvent, Outbound
+from friday.kernel.domain.messages import InboundEvent
+from friday.kernel.domain.outbound import Outbound
 
 __all__ = ["CredentialRejected", "Provider"]
 
@@ -31,7 +32,7 @@ class Provider(Protocol):
     missing method surfaces only when something reaches for it, at run time, in
     production. `history` and `recent` were both absent for three tickets and
     the recovery sweep never ran once; `send` was absent from here while
-    `friday/kernel/outbox/__init__.py` called it on every delivery. The test that
+    `friday/kernel/outbox.py` called it on every delivery. The test that
     catches that reads *this list*, so the two cannot drift apart again — it
     used to read a hand-written copy, which is how `send` came to be in one and
     not the other.

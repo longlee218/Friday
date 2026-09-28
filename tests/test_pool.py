@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.kernel.domain.models import Task
+from friday.kernel.domain.tasks import Task
 from datetime import datetime, timezone
 
 from conftest import ScriptedHarness, make_event
@@ -360,7 +360,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     from friday.kernel.extraction import _EXTRACTORS, build_extractor
     from friday.kernel.extraction.answer import answer_shape
     from friday.kernel.harness.harness import Harness
-    from friday.kernel.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.messages import InboundEvent, MentionType
     from plugins.ops.params import AccessRequestParams
 
     class StubResult:
@@ -459,7 +459,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
     from friday.kernel.dag.router import EDGE_ROUTER, build_simple_dag, register_dag
     from friday.kernel.harness.harness import Harness
     from friday.kernel.config import AgentConfig
-    from friday.kernel.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.messages import InboundEvent, MentionType
     from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction import _EXTRACTORS, build_extractor
     from friday.kernel.extraction.answer import answer_shape
@@ -549,7 +549,7 @@ async def test_the_responder_is_told_what_this_task_actually_knows(db):
 async def _said(db, message_id, text, *, secs, mention=None, author="u-reporter"):
     from datetime import timedelta
 
-    from friday.kernel.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.messages import InboundEvent, MentionType
 
     await db.record_message(
         InboundEvent(
@@ -753,7 +753,7 @@ async def _operator_said(db, message_id, text, *, reply_to=None, secs=10, author
     """The watched account typing in the channel. `is_own`, no mention."""
     from datetime import timedelta
 
-    from friday.kernel.domain.models import InboundEvent
+    from friday.kernel.domain.messages import InboundEvent
 
     await db.record_message(
         InboundEvent(
@@ -900,7 +900,7 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
     channel file's `people:` map until the files went (board
     `read-it-the-way-the-operator-does`, ticket 10)."""
     from friday.sdk.memory import MemoryOrigin
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
 
     await db.memory_add(
         FridayState(channel_id="watched", agent="operator"), "",
@@ -1050,7 +1050,7 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
     from friday.kernel.dag.router import EDGE_ROUTER, build_simple_dag, register_dag
     from friday.kernel.harness.harness import Harness
     from friday.kernel.config import AgentConfig
-    from friday.kernel.domain.models import InboundEvent, MentionType
+    from friday.kernel.domain.messages import InboundEvent, MentionType
     from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction import _EXTRACTORS, build_extractor
     from friday.kernel.extraction.answer import answer_shape

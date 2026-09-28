@@ -16,7 +16,8 @@ import pytest
 from conftest import BoardClient
 from friday.kernel.domain.memory_guard import InstructionShaped
 from friday.sdk.memory import MemoryOrigin
-from friday.kernel.domain.models import FridayState, MemoryRefused, ModelMemoryKind
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.memory import MemoryRefused, ModelMemoryKind
 from friday.kernel.memory import registry as memory_kinds
 from friday.kernel.memory import write
 from friday.kernel.ops.api import build_api

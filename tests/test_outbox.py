@@ -11,7 +11,7 @@ import pytest
 
 from conftest import make_event
 from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.domain.models import Outbound
+from friday.kernel.domain.outbound import Outbound
 from friday.kernel.domain.states import OutboundState, TaskState
 from friday.kernel.outbox import Kind, Outbox, record_decision
 
@@ -365,7 +365,7 @@ async def _replied(db, task, message_id, text, *, to, at=None):
     """
     from datetime import datetime, timezone
 
-    from friday.kernel.domain.models import InboundEvent
+    from friday.kernel.domain.messages import InboundEvent
 
     await db.record_message(
         InboundEvent(

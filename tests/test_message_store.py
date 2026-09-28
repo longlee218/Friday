@@ -10,7 +10,7 @@ from conftest import FakeProvider, captured, make_event
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.config import IngestConfig
 from friday.kernel.inbox import Inbox
-from friday.kernel.domain.models import MentionType
+from friday.kernel.domain.messages import MentionType
 from friday.kernel.domain.states import TaskState
 
 

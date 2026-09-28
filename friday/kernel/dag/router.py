@@ -21,7 +21,7 @@ from friday.kernel.config import ConfigError
 from friday.sdk.workflow import DAG
 from friday.kernel.dag import registry
 from friday.kernel.dag.prepare import plan_by_required_parameters, prepare_node
-from friday.kernel.domain.models import Params
+from friday.kernel.domain.tasks import Params
 
 __all__ = [
     "EDGE_ROUTER",

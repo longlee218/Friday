@@ -14,7 +14,7 @@ import dataclasses
 
 import pytest
 
-from friday.kernel.domain.models import FridayState
+from friday.kernel.domain.state import FridayState
 
 
 def _state(**over) -> FridayState:

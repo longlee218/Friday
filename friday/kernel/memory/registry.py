@@ -28,7 +28,7 @@ from collections.abc import Mapping
 from dataclasses import fields as dataclass_fields
 from typing import Any
 
-from friday.kernel.domain.models import (
+from friday.kernel.domain.memory import (
     DecisionData,
     FindingData,
     MemoryRefused,

@@ -17,7 +17,7 @@ from friday.sdk.outbox import Kind
 from friday.sdk.plugin import Plugin, PluginAPI, TaskTypeSpec
 from friday.sdk.redact import scrub
 from friday.sdk.sources import CodeSource, Lines, LogSource, Placement, Reads
-from friday.sdk.tools import ToolContext, ToolSpec, tool
+from friday.sdk.toolset import ToolContext, ToolSpec, tool
 from friday.sdk.validation import InSet, Matches, NonEmpty, OneOf, Problem, asked_as, validate
 
 __all__ = [

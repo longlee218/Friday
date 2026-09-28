@@ -10,7 +10,8 @@ from __future__ import annotations
 import pytest
 
 from friday.kernel.domain.memory_guard import InstructionShaped
-from friday.kernel.domain.models import CandidateStatus, FridayState
+from friday.kernel.domain.memory import CandidateStatus
+from friday.kernel.domain.state import FridayState
 from friday.kernel.memory import write
 
 ROOM = FridayState(channel_id="c1", task_id=7, agent="responder", message_id="m1")

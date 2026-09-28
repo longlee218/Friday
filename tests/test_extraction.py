@@ -320,7 +320,7 @@ def test_an_extractor_cannot_ask_about_a_field_that_does_not_exist():
     messages this system has ever sent asking for one had to teach the
     reporter where to look.
     """
-    from friday.kernel.harness.harness import _answer_params
+    from friday.kernel.harness.model_client import _answer_params
     from plugins.ops.params import AccessRequestParams
     from plugins.backend.answer_question import DocQuestionParams
     from plugins.backend.params import ApiIssueParams
@@ -534,7 +534,7 @@ def _rows(*lines, origin="admin", channel_id="watched", kind="fact"):
     `read-it-the-way-the-operator-does`, ticket 10."""
     from datetime import datetime, timezone
 
-    from friday.kernel.domain.models import Memory
+    from friday.kernel.domain.memory import Memory
 
     now = datetime(2026, 9, 1, tzinfo=timezone.utc)
     return tuple(

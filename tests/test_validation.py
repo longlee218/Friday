@@ -361,7 +361,7 @@ def _asks() -> dict[tuple[str, str], str]:
     were renamed, which is the drift this whole ticket is about.
     """
     from friday.kernel.dag import registry
-    from friday.kernel.domain.models import askable_fields
+    from friday.kernel.domain.tasks import askable_fields
     from friday.sdk.validation import asked_as
 
     found: dict[tuple[str, str], str] = {}

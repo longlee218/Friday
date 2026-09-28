@@ -28,8 +28,10 @@ from friday.store.db import Database
 from friday.kernel.dag import adapter
 from friday.sdk.actions import Action, Ask, HandOver, Reply
 from friday.kernel.domain.states import TaskState
-from friday.kernel.domain.models import FridayState, Task
-from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind, card
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.tasks import Task
+from friday.kernel import outbox_card as card
+from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind
 from friday.kernel.ops.redact import scrub
 from friday.kernel.responder.check import rejected
 

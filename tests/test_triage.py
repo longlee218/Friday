@@ -430,7 +430,7 @@ async def test_build_input_does_not_carry_the_operators_rows(db):
     the kind of thing a value would be built from. `readers_for` gives
     triage the summary and nothing else."""
     from friday.sdk.memory import MemoryOrigin
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
     from friday.kernel.triage.context import build_light_context
     from friday.kernel.triage.prompt import build_input
 
@@ -656,7 +656,7 @@ async def test_the_summary_section_does_not_care_how_much_the_room_has_said(db):
     summary row, and nothing writes one but the summariser, on its own
     schedule, strictly less often than every message.
     """
-    from friday.kernel.domain.models import FridayState
+    from friday.kernel.domain.state import FridayState
     from friday.kernel.triage.context import build_light_context
     from friday.kernel.triage.prompt import build_input
 
@@ -844,7 +844,7 @@ def test_every_decision_the_model_may_name_carries_its_own_description():
     This replaces `test_create_task_describes_every_type_from_its_own_params_class`,
     which asserted the same thing about `classify`'s enum.
     """
-    from friday.kernel.harness.harness import _answer_params
+    from friday.kernel.harness.model_client import _answer_params
     from friday.kernel.dag import registry
     from friday.kernel.domain.triage import make_decided
 
@@ -969,7 +969,7 @@ def test_both_of_the_fields_triage_answers_are_required():
     """Asserted on the schema as well as through the run, because this is the
     guard and a guard that only holds by accident of another test's scripting
     is not one."""
-    from friday.kernel.harness.harness import _answer_params
+    from friday.kernel.harness.model_client import _answer_params
 
     schema = _answer_params(Decided)
 

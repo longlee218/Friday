@@ -32,7 +32,8 @@ from dotenv import load_dotenv
 from friday.kernel.config import load_config
 from friday.kernel.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
 from friday.sdk.memory import MemoryOrigin
-from friday.kernel.domain.models import FridayState, MemoryRefused
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.memory import MemoryRefused
 from friday.kernel.memory import registry as memory_kinds
 from friday.kernel.memory import write
 from friday.store.db import Database
