@@ -61,8 +61,22 @@ Left open, on purpose:
   14's to reconcile when it wires spine agents.
 - Shell output enters `Evidence` by duck typing (`run.evidence.show`); the
   class lives in `plugins/backend`.
-- The allowlist passes `kubectl get secret -o yaml` and `cat` of any readable
-  file; redaction masks only registered values and token-shaped strings.
+- Secret reads (fixed after close, operator's call — option A, patch the
+  known holes; two review rounds): `kubectl` refuses the `secret` resource,
+  `--raw`/`-f`/`-k`/`--template` and `*-file` outputs, its short flags
+  matched inside a cluster; `ps` refuses printing environments (`e` as its
+  first argument, `-E`); `cat`/`grep`/`head`/`tail` refuse an argument naming
+  a credential file/dir (`SECRET_FILES`, `SECRET_DIRS`, case-insensitive —
+  grep's pattern included, since telling it from a path means parsing grep's
+  options); every `grep` runs with `--exclude`/`--exclude-dir` for them and
+  may not `--include` or `-R`, long options matched by unambiguous prefix.
+  **Still a guardrail by name, not a boundary** (the operator accepted this
+  over dropping the file readers): `grep -r` on a symlink named otherwise
+  still follows it on the command line; a secret in a file named otherwise
+  (`config.yaml`, a pod's logs) is read. False refusals, accepted:
+  `kubectl get pods -n secrets`, `kubectl logs -f` (use `--follow`), a value
+  written into a kubectl cluster (`-ojsonpath=…`; write `-o jsonpath=…`), a
+  grep pattern that looks like a credential name (`grep id_rsa auth.log`).
 - `/tmp/friday/<id>` is on a shared `/tmp` with predictable ids; a
   pre-planted symlink there would redirect writes. Low risk on the operator's
   one-user machine.

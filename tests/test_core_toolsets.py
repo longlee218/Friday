@@ -108,6 +108,113 @@ def test_a_credential_or_write_flag_is_refused(command):
     assert "is refused" in refusal(command)
 
 
+@pytest.mark.parametrize("command", [
+    "kubectl get secrets -n api",
+    "kubectl get secret/db-creds -o yaml",
+    "kubectl get pods,secrets",
+    "kubectl describe secret db-creds",
+    "kubectl get secrets.v1 -o json",
+])
+def test_the_secret_resource_is_refused(command):
+    assert "secret resource" in refusal(command)
+    assert refusal("kubectl get pods -o wide") is None
+
+
+@pytest.mark.parametrize("command", [
+    "cat /srv/app/.env",
+    "cat /srv/app/.env.production",
+    "head /Users/op/.ssh/id_ed25519",
+    "cat /etc/nginx/tls/server.key",
+    "cat /home/op/.aws/credentials",
+    "grep --file=/srv/app/.env x /srv/app/log",
+    "tail /home/op/.config/gcloud/credentials.db",
+])
+def test_a_credential_path_is_refused(command):
+    assert "credential file or directory" in refusal(command)
+
+
+@pytest.mark.parametrize("command", [
+    # kubectl around the resource check
+    "kubectl get --raw /api/v1/namespaces/default/secrets/db",
+    "kubectl get --raw=/api/v1/secrets",
+    "kubectl get -f /tmp/friday/7/s.yaml -o yaml",
+    "kubectl get --filename=/tmp/friday/7/s.yaml",
+    "kubectl get -k /tmp/friday/7/kust",
+    # grep around its excludes
+    "grep -r --include=* x /home/u",
+    "grep -R x /home/u/link",
+    "grep -nR x /home/u/link",
+    "grep --dereference-recursive x /home/u",
+    "grep -r x /home/u/gcloud",
+    # names the first lists missed, and case
+    "cat /Users/u/.SSH/ID_RSA",
+    "cat /var/run/secrets/kubernetes.io/serviceaccount/token",
+    "cat /etc/kubernetes/admin.conf",
+    "cat /etc/ssh/ssh_host_ed25519_key",
+    "cat /app/prod.env",
+    "cat /home/u/.npmrc",
+    "cat /infra/terraform.tfstate",
+    "cat /proc/1234/environ",
+    # process environments
+    "ps eww",
+    "ps auxe",
+    "ps -E",
+    # the second review's
+    "grep -ie. /root/.aws/credentials",
+    "grep --regex=. /root/.aws/credentials",
+    "grep --inc=* -r x /home",
+    "kubectl get -Af m.yaml",
+    "kubectl get -Rk dir",
+    "kubectl get pods -o jsonpath-file=/root/.ssh/id_rsa",
+    "kubectl get pods -o=go-template-file=/app/.env",
+    "kubectl get pods --template={{.x}}",
+    "cat /etc/kubernetes/super-admin.conf",
+])
+def test_a_reported_bypass_is_refused(command):
+    assert refusal(command) is not None, command
+
+
+@pytest.mark.parametrize("command", [
+    "grep -c KEY /srv/app/.env.example",
+    "grep -A 2 timeout /var/log/app.log",
+    "ps -o user",
+    "ps -u deploy",
+    "ps -C sleep",
+    "find . -name *.env",
+    "ls /home/u/.ssh",
+    "cat /etc/pki/tls/certs/ca-bundle.crt",
+    "grep -rn timeout /srv/app/config",
+    "ps aux",
+    "ps -ef",
+    "kubectl logs api-0 --follow",
+    "kubectl get pods -l app=api -o wide",
+])
+def test_ordinary_debugging_still_passes(command):
+    assert refusal(command) is None, refusal(command)
+
+
+def test_a_grep_pattern_is_checked_like_a_path():
+    """The price of not parsing grep's options: a pattern that looks like a
+    credential name is refused too."""
+    assert refusal("grep id_rsa /var/log/auth.log") is not None
+    assert refusal("grep -e x /srv/app/.env") is not None
+
+
+async def test_a_recursive_grep_skips_credential_files(db, tmp_path):
+    """`grep -r` names only the directory, so the per-argument check cannot
+    see the `.env` beneath it; the excludes do."""
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / ".env").write_text("MARK=hunter2\n")
+    (tmp_path / "app" / ".ssh").mkdir()
+    (tmp_path / "app" / ".ssh" / "config").write_text("MARK in ssh\n")
+    (tmp_path / "app" / "main.log").write_text("MARK used\n")
+
+    got = await _run_command(db)(host="local", command=f"grep -r MARK {tmp_path / 'app'}")
+
+    assert "MARK used" in got
+    assert "hunter2" not in got and "in ssh" not in got
+
+
 @pytest.mark.parametrize("command", ["", "  ", "ls |", "| ls", "cat 'unclosed"])
 def test_an_empty_or_unparseable_command_is_refused(command):
     assert refusal(command) is not None

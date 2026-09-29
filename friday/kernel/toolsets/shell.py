@@ -13,6 +13,16 @@ enforced in code, not by prompt** (`docs/DESIGN.md` D6):
   and so is a `kubectl` flag that picks the credentials or the server
   (`--kubeconfig` names a file whose `exec` entry runs any binary, and the
   workspace can write that file);
+- a secret is not read: `kubectl` refuses the `secret` resource (and
+  `--raw`, `-f`, `-k`, which reach it another way), `ps` refuses printing
+  environments, and every other command refuses an argument naming a
+  credential file or directory (`SECRET_FILES`, `SECRET_DIRS`, matched
+  case-insensitively — macOS is; checked for the commands that print content,
+  grep's pattern included). A recursive `grep` would pass that check by
+  naming only the directory above, so every `grep` runs with
+  `--exclude`/`--exclude-dir` for the same names and may not `--include` or
+  `-R`. **A guardrail by name, not a boundary**: `grep -r` on a symlink named
+  otherwise still follows it, and a secret in a file named otherwise is read;
 - the command is re-quoted segment by segment before a shell sees it, so an
   argument reaches the remote side as the literal it was parsed as;
 - a refused command is **refused, not queued**: no approval, no pause. Each
@@ -40,6 +50,8 @@ import os
 import shlex
 import signal
 from collections.abc import Sequence
+from fnmatch import fnmatch
+from pathlib import PurePosixPath
 from typing import Any
 
 from friday.kernel.harness.harness import tool
@@ -54,6 +66,8 @@ __all__ = [
     "READ_COMMANDS",
     "TIMEOUT_SECONDS",
     "REFUSED_FLAGS",
+    "SECRET_DIRS",
+    "SECRET_FILES",
     "refusal",
     "shell_tools",
 ]
@@ -76,9 +90,13 @@ READ_COMMANDS = frozenset({
 #: `kubectl` reads only through these verbs, written first (`kubectl get …`).
 KUBECTL_VERBS = frozenset({"get", "logs", "describe", "top"})
 
-#: Flags refused per command: ones that write, and `kubectl`'s ones that pick
-#: the credentials, server or cache dir. A flag matches itself or
-#: `flag=value`; a one-letter flag also matches `-sVALUE`.
+#: Flags refused per command: ones that write; `kubectl`'s ones that pick the
+#: credentials, server or cache dir, or read around the `secret` check
+#: (`--raw` takes an API path, `-f`/`-k` a manifest the workspace can write);
+#: `grep`'s that defeat its excludes (`--include`, `-R` follows a symlink to
+#: `.ssh`); `ps`'s `-E`, which prints environments. A flag matches itself or
+#: `flag=value`; a one-letter flag also matches `-sVALUE`, and for `grep` and
+#: `ps` (boolean clusters) anywhere in `-nR`.
 REFUSED_FLAGS = {
     "find": frozenset({
         "-delete", "-exec", "-execdir", "-ok", "-okdir",
@@ -94,8 +112,39 @@ REFUSED_FLAGS = {
         "--as-group", "--as-uid", "--user", "--cluster", "--context",
         "--certificate-authority", "--client-certificate", "--client-key",
         "--username", "--password", "--insecure-skip-tls-verify",
+        "--raw", "-f", "--filename", "-k", "--kustomize", "--template",
     }),
+    "grep": frozenset({"--include", "-R", "--dereference-recursive"}),
+    "ps": frozenset({"-E"}),
 }
+
+#: Commands whose one-letter flags cluster (`grep -nR`, `ps -ef`,
+#: `kubectl -Af`). Matched letter by letter, so a value written into the
+#: cluster (`-ojsonpath=…`) can be refused: write it as `-o jsonpath=…`.
+_CLUSTERED = frozenset({"grep", "kubectl", "ps"})
+
+#: The commands that print a file's content; only their arguments are
+#: checked against the credential names (`ls` and `find` print names).
+_CONTENT_READERS = frozenset({"cat", "grep", "head", "tail"})
+
+#: File names whose content is a credential, as globs on the last path part.
+#: Refused as an argument; excluded from every `grep`.
+SECRET_FILES = (
+    ".env", ".env.*", "*.env", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*",
+    "id_ecdsa*", "id_ed25519*", "id_dsa*", "ssh_host_*", ".netrc", ".pgpass",
+    ".git-credentials", ".npmrc", "*.tfstate", "*.tfstate.*", "environ",
+    "admin.conf", "super-admin.conf", "kubelet.conf", "controller-manager.conf",
+    "scheduler.conf", "token",
+)
+
+#: A name matching `SECRET_FILES` with one of these endings is a template.
+_TEMPLATES = (".example", ".sample", ".template", ".dist")
+
+#: Directories that hold credentials; any path through one is refused.
+SECRET_DIRS = frozenset({
+    ".ssh", ".aws", ".kube", ".gnupg", ".docker", ".azure", "gcloud",
+    "secrets", "serviceaccount",
+})
 
 #: Lines shown to the model; the rest is counted and left for `save_to`.
 MAX_LINES = 200
@@ -134,12 +183,75 @@ def _segment_refusal(argv: Sequence[str]) -> str | None:
         return f"{name!r} is not on the read-command allowlist"
     if name == "kubectl" and (len(argv) < 2 or argv[1] not in KUBECTL_VERBS):
         return f"kubectl reads only with {sorted(KUBECTL_VERBS)}, written first"
-    for arg in argv[1:]:
+    # Every argument of a content reader is checked, grep's pattern included:
+    # telling the pattern from a path means parsing grep's options (`-ie.`,
+    # `--regex=`, `-A 2`), and a wrong guess reads the file unchecked.
+    for index, arg in enumerate(argv[1:], start=1):
+        if name == "kubectl" and _names_secrets(arg):
+            return "kubectl may not read the secret resource"
+        if name == "kubectl" and ("-file=" in arg or arg.endswith("-file")):
+            return "kubectl may not read a template file (`*-file` output)"
+        if name == "ps" and index == 1 and _ps_environment(arg):
+            return "ps may not print process environments"
+        if name in _CONTENT_READERS and _secret_path(arg):
+            return f"{arg!r} names a credential file or directory"
         for flag in REFUSED_FLAGS.get(name, ()):
-            short = len(flag) == 2 and arg.startswith(flag)
-            if short or arg == flag or arg.startswith(f"{flag}="):
-                return f"{name} {flag} is refused (it writes or changes credentials)"
+            if _matches(name, flag, arg):
+                return f"{name} {flag} is refused (it writes, changes credentials or reads around a guard)"
     return None
+
+
+def _matches(name: str, flag: str, arg: str) -> bool:
+    if arg == flag or arg.startswith(f"{flag}="):
+        return True
+    # GNU getopt takes any unambiguous prefix of a long option (`--inc=*`).
+    option = arg.partition("=")[0]
+    if arg.startswith("--") and len(option) > 3 and flag.startswith(option):
+        return True
+    if len(flag) != 2:
+        return False
+    cluster = name in _CLUSTERED and arg.startswith("-") and not arg.startswith("--")
+    return arg.startswith(flag) or (cluster and flag[1] in arg[1:])
+
+
+def _ps_environment(arg: str) -> bool:
+    """BSD-style `ps e`/`ps eww`: the first argument, an option word without
+    a dash, holding `e`. Only the first, so `ps -u deploy` is a user name."""
+    return not arg.startswith("-") and arg.isalpha() and "e" in arg
+
+
+def _names_secrets(arg: str) -> bool:
+    """`secret`, `secrets`, `secret/x`, `pods,secrets`, `secrets.v1` — any
+    spelling of the resource. Flags are not resources."""
+    if arg.startswith("-"):
+        return False
+    return any(
+        part.split("/")[0].split(".")[0].lower() in {"secret", "secrets"}
+        for part in arg.split(",")
+    )
+
+
+def _secret_path(arg: str) -> bool:
+    """Whether `arg`, or the value of an `--opt=value`, is a path through a
+    credential directory or to a credential file."""
+    for value in (arg.lower(), arg.partition("=")[2].lower()):
+        if not value:
+            continue
+        path = PurePosixPath(value)
+        if any(part in SECRET_DIRS for part in path.parts):
+            return True
+        if path.name.endswith(_TEMPLATES):
+            continue
+        if any(fnmatch(path.name, glob) for glob in SECRET_FILES):
+            return True
+    return False
+
+
+#: What every `grep` is run with, so a recursive one skips what `_secret_path`
+#: would have refused by name. Both GNU and BSD grep take these.
+_GREP_EXCLUDES = tuple(f"--exclude={glob}" for glob in SECRET_FILES) + tuple(
+    f"--exclude-dir={d}" for d in sorted(SECRET_DIRS)
+)
 
 
 def refusal(command: str) -> str | None:
@@ -158,7 +270,10 @@ def _script(command: str) -> str:
     it. Only called on a command `refusal` passed."""
     segments = _segments(command)
     assert not isinstance(segments, str)
-    return " | ".join(shlex.join(argv) for argv in segments)
+    return " | ".join(
+        shlex.join([argv[0], *_GREP_EXCLUDES, *argv[1:]] if argv[0] == "grep" else argv)
+        for argv in segments
+    )
 
 
 async def _run(host: str, script: str) -> tuple[int, str]:
