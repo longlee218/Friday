@@ -132,7 +132,7 @@ def test_the_shipped_config_holds_only_tiers_and_install_facts():
 
     assert set(raw) <= {
         "database_path", "tiers", "backend", "operator_id", "board_host",
-        "board_port", "board_origins", "repo_root", "backup_dir", "mcp_servers",
+        "board_port", "board_origins", "repo_root", "backup_dir", "mcp_servers", "shell_hosts",
         "workflows", "ingest", "context", "sensitive_words", "triage_examples",
     }
     assert set(raw["ingest"]) == {"mention_types", "watched_channels"}

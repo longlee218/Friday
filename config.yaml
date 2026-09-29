@@ -42,6 +42,12 @@ mcp_servers:
     transport: http
     auth: {}
 
+# ── Shell hosts ────────────────────────────────────────────────────────────
+# Where `core.shell` may run a read-only command: `local` is this machine, any
+# other name is an alias in ~/.ssh/config. Which commands may run is declared
+# in code (the read-command allowlist), not here.
+shell_hosts: [local, dev]
+
 # ── Workflows ───────────────────────────────────────────────────────────────
 workflows:
   max_asks: 3                     # times to ask for the same detail before handover

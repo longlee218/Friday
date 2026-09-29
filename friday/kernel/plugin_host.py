@@ -23,6 +23,7 @@ from typing import Any
 from friday.kernel.boot_refusals import refusals
 from friday.kernel.config import ConfigError
 from friday.kernel.registry import DuplicateRegistration, PluginRegistration, Registry
+from friday.kernel.toolsets import core_plugin
 
 __all__ = ["BootRefused", "Loaded", "configured_plugins", "load_plugins"]
 
@@ -73,9 +74,13 @@ def load_plugins(config: Any) -> Loaded:
     anything the registry cannot run with. `config.tiers` and
     `config.mcp_servers` are what an agent's tier and a toolset's servers are
     checked against; a config without them (the memory-kinds default) skips
-    those two checks."""
+    those two checks. The core's own toolsets (`core.*`) register first, under
+    a `core` owner, with the config's `shell_hosts`."""
     registry = Registry()
+    shell_hosts = getattr(config, "shell_hosts", None)
+    core = core_plugin(hosts=shell_hosts or ())
     try:
+        registry.apply(core)
         apis = tuple(registry.apply(plugin, cfg) for plugin, cfg in configured_plugins(config))
     except DuplicateRegistration as exc:
         raise BootRefused(str(exc)) from exc
@@ -83,6 +88,7 @@ def load_plugins(config: Any) -> Loaded:
         registry,
         tiers=getattr(config, "tiers", None),
         servers=_names(getattr(config, "mcp_servers", None)),
+        shell_hosts=shell_hosts,
     )
     if errors:
         raise BootRefused("the plugins cannot boot:\n  " + "\n  ".join(errors))

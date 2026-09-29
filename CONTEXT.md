@@ -159,11 +159,12 @@ is the premise each board tracks against.
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **In progress:** tickets 01, 02, 03, 05, 06, 07, 09, 10 and 12 done
+  **In progress:** tickets 01, 02, 03, 05, 06, 07, 08, 09, 10 and 12 done
   (2026-09-29; names are `backend.*`/`ops.*`, live db wiped; core Intake and
   the backend enricher live through the DAG's intake node; the backend's
-  tools are its four toolsets, reading code at the running tag); 04, 08, 11
-  and 13 are takeable (`.scratch/build-the-spine/STATUS.md`). The triage eval
+  tools are its four toolsets, reading code at the running tag; the core's
+  four toolsets `core.memory/skills/shell/workspace` are registered but no
+  spine agent is wired to them until 14); 04, 11 and 13 are takeable (`.scratch/build-the-spine/STATUS.md`). The triage eval
   and `run_api_issue_eval` are deferred until the operator has an OpenRouter
   key.
 
@@ -355,6 +356,27 @@ picks a subset per run and never adds; only the contract travels with a plan.
 budget `(max_turns, tokens)`, temperature. A declaration, not a Pydantic AI
 agent; the core runs it through the Harness. The spine's form of the
 **agent declaration**.
+
+**Toolset** — the unit an action's contract grants and an agent spec names:
+a set of tools under one name, `<plugin>.<thing>` (`backend.logs`) or
+`core.<thing>` for the core's own (`core.memory`, `core.skills`,
+`core.shell`, `core.workspace`, in `friday/kernel/toolsets/`), which any
+plugin may grant. Declared as a *toolset spec*. Not a Pydantic AI toolset,
+though `core.workspace`'s factory hands one back.
+
+**Workspace** — Friday's own scratch folder for one task,
+`/tmp/friday/<task_id>/` (`core.workspace`): read, write, edit and list
+freely inside it, nothing outside (pydantic-ai-harness `FileSystem(root_dir=…)`).
+The one place Friday writes; lost on reboot by design. `core.shell`'s
+`save_to` writes long output there.
+
+**Read-command allowlist** — the core constant (`READ_COMMANDS`,
+`KUBECTL_VERBS`, `REFUSED_FLAGS` in `friday/kernel/toolsets/shell.py`) deciding
+what `core.shell` runs, the same for every plugin: `shlex`-parsed, `|` only
+between listed commands, operators, substitutions, write flags and
+`kubectl`'s credential/server flags refused.
+Off the list is **refused, not queued** and written to `audit_log`; the
+operator widens it by commit.
 
 **Toolset spec** — a named set of tools a plugin registers (`ToolsetSpec`):
 description, a factory that builds the tools per run, the MCP reads it may

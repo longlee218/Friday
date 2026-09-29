@@ -6,7 +6,7 @@ grepping `@tool` was wrong twice over: two of them are wrapped by calling
 the ones that did appear were scattered across four modules that each owned
 part of the answer.
 
-So the rule is `friday/kernel/tools/` holds them all, and these tests are what make
+So the rule is `friday/kernel/toolsets/` holds them all, and these tests are what make
 that a rule rather than a tidy-up somebody will undo. A tool declared beside
 its caller is invisible to the next person asking the same question.
 """
@@ -20,10 +20,10 @@ import inspect
 import pkgutil
 from pathlib import Path
 
-import friday.kernel.tools
+import friday.kernel.toolsets
 
 REPO = Path(__file__).resolve().parents[1]
-TOOLS = REPO / "friday" / "kernel" / "tools"
+TOOLS = REPO / "friday" / "kernel" / "toolsets"
 
 #: The one file outside the package that may hold a tool, and it is *this* file
 #: — matched whole, not by basename. `path.name == "harness.py"` exempted any
@@ -64,24 +64,43 @@ def _factories() -> dict[str, object]:
     build it with — and the alternative, skipping them, is what let two thirds
     of this system's tools go unlisted by the assertion below.
     """
+    import tempfile
+
     from friday.kernel.harness.skills import SkillLibrary
-    from friday.kernel.tools.describe_skill import describe_skill_tool
-    from friday.kernel.tools.fetch_skill import fetch_skill_tool
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets import workspace
+    from friday.kernel.toolsets.memory import memory_tools
+    from friday.kernel.toolsets.shell import shell_tools
+    from friday.kernel.toolsets.skills import (
+        describe_skill_tool,
+        fetch_skill_tool,
+        read_skill_file_tool,
+        search_skills_tool,
+    )
+    from friday.kernel.toolsets.workspace import workspace_tools
     from friday.sdk.toolset import RunContext
     from plugins.backend.placement import Placement
     from plugins.backend.toolsets import TOOLSETS
     from plugins.backend.toolsets.evidence import Evidence
-    from friday.kernel.tools.read_skill_file import read_skill_file_tool
-    from friday.kernel.tools.search_skills import search_skills_tool
 
     library = SkillLibrary(REPO / "skills")
+    run = RunContext(
+        task_id=1, domain=None, evidence=Evidence(), mcp={},
+        reported_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
+    )
+    # `core.workspace` hands back one Pydantic AI toolset, not tools: listed by
+    # the names inside it. Built under a throwaway root, not `/tmp/friday`.
+    root, workspace.WORKSPACE_ROOT = workspace.WORKSPACE_ROOT, Path(tempfile.mkdtemp())
+    try:
+        (files,) = workspace_tools(1)
+    finally:
+        workspace.WORKSPACE_ROOT = root
     built = [
         fetch_skill_tool(library),
         search_skills_tool(library),
         describe_skill_tool(library),
         read_skill_file_tool(library),
         *memory_tools(object()),
+        *shell_tools(run, hosts=("local",), audit=object()),
         # Built per run rather than once: every one of these needs the
         # placement `Intake` produced, so there is nothing to inject here
         # but a stand-in for it. Every backend toolset, by its own factory.
@@ -100,7 +119,7 @@ def _factories() -> dict[str, object]:
     # so the test inspects what the model actually sees (ticket 14).
     from friday.kernel.harness.harness import _bind_tool_spec
 
-    return {tool.name: tool for tool in (_bind_tool_spec(t) for t in built)}
+    return {tool.name: tool for tool in (_bind_tool_spec(t) for t in built)} | dict(files.tools)
 
 
 def _tool_objects() -> dict[str, object]:
@@ -118,7 +137,7 @@ def _tool_objects() -> dict[str, object]:
     """
     found: dict[str, object] = {}
     for info in pkgutil.iter_modules([str(TOOLS)]):
-        module = importlib.import_module(f"friday.kernel.tools.{info.name}")
+        module = importlib.import_module(f"friday.kernel.toolsets.{info.name}")
         for attr in vars(module).values():
             if hasattr(attr, "name") and hasattr(attr, "function_schema"):
                 found[attr.name] = attr
@@ -146,6 +165,15 @@ def test_the_tools_this_system_has_are_all_in_one_place():
         "read_docs",
         "describe_db",
         "query_db",
+        "run_command",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_directory",
+        "search_files",
+        "find_files",
+        "create_directory",
+        "file_info",
     }
 
 
@@ -251,7 +279,7 @@ def test_no_tool_is_declared_outside_the_tools_package():
         if lines:
             offenders[str(path.relative_to(REPO))] = lines
 
-    assert offenders == {}, f"a tool declared outside friday/kernel/tools/: {offenders}"
+    assert offenders == {}, f"a tool declared outside friday/kernel/toolsets/: {offenders}"
 
 
 def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
@@ -261,7 +289,7 @@ def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
     `friday/kernel/memory/`, had no callers, and read like a working tool.
 
     The check is by *shape*: a factory whose name ends `_tool` belongs in
-    `friday/kernel/tools/`, whether or not it ever got decorated. A thing that looks
+    `friday/kernel/toolsets/`, whether or not it ever got decorated. A thing that looks
     like a tool and is not is worse than either.
 
     **`harness.py` is exempt, and the exemption is named rather than silent** —
@@ -285,7 +313,7 @@ def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
         if named:
             offenders[str(path.relative_to(root.parent))] = named
 
-    assert offenders == {}, f"tool-shaped and not in friday/kernel/tools/: {offenders}"
+    assert offenders == {}, f"tool-shaped and not in friday/kernel/toolsets/: {offenders}"
 
 
 def test_the_answer_is_a_run_s_output_not_a_door_an_agent_chooses():
@@ -336,9 +364,9 @@ def test_the_skill_tools_ask_the_model_for_what_their_names_promise():
     through the library underneath, which would keep passing if a tool asked
     for the wrong thing or stopped asking at all."""
     from friday.kernel.harness.skills import SkillLibrary
-    from friday.kernel.tools.describe_skill import describe_skill_tool
-    from friday.kernel.tools.read_skill_file import read_skill_file_tool
-    from friday.kernel.tools.search_skills import search_skills_tool
+    from friday.kernel.toolsets.skills import describe_skill_tool
+    from friday.kernel.toolsets.skills import read_skill_file_tool
+    from friday.kernel.toolsets.skills import search_skills_tool
 
     library = SkillLibrary(REPO / "skills")
     schema = lambda built: set(_props(built))
@@ -449,7 +477,7 @@ async def test_memory_tools_say_so_when_they_were_wired_without_a_scope():
     import pytest
 
     from friday.kernel.domain.state import FridayState
-    from friday.kernel.tools.memory import NotWired, memory_tools
+    from friday.kernel.toolsets.memory import NotWired, memory_tools
 
     seen = {}
 
@@ -483,7 +511,7 @@ def test_the_numbers_the_memory_prose_quotes_are_the_ones_it_enforces():
     could not describe different numbers, over an arrangement where the prose
     was static text and the factory took a `limits=` override — so they could
     differ and nothing would notice."""
-    from friday.kernel.tools.memory import RESULTS, TEXT_CHARS, memory_tools
+    from friday.kernel.toolsets.memory import RESULTS, TEXT_CHARS, memory_tools
 
     search, add, _, _, _ = memory_tools(object())
 
@@ -499,7 +527,7 @@ async def test_memory_add_tells_the_model_the_channel_is_full_rather_than_losing
     `Database.MEMORY_PER_CHANNEL`). Nothing here evicts anything to make room
     — the model is told to correct or remove something on purpose instead."""
     from friday.kernel.domain.state import FridayState
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
 
     class FullChannel:
         async def memory_add(self, scope, text, *, kind, origin=None, key=None, data=None):
@@ -522,7 +550,7 @@ async def test_memory_add_writes_under_the_voice_kind():
     material (D14) — the split between the two memory stores is by who
     writes, not by kind."""
     from friday.kernel.domain.state import FridayState
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
 
     seen = {}
 
@@ -548,7 +576,7 @@ async def test_memory_propose_tells_the_model_it_is_waiting_for_a_mark():
     marked."""
     from friday.kernel.domain.memory import CandidateStatus, MemoryCandidate
     from friday.kernel.domain.state import FridayState
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
     from datetime import datetime, timezone
 
     class Store:
@@ -577,7 +605,7 @@ async def test_memory_propose_reports_an_immediate_resolution():
     not the generic "waiting" answer."""
     from friday.kernel.domain.memory import CandidateStatus, MemoryCandidate
     from friday.kernel.domain.state import FridayState
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
     from datetime import datetime, timezone
 
     class Store:
@@ -602,7 +630,7 @@ async def test_memory_propose_reports_an_immediate_resolution():
 
 async def test_memory_propose_writes_under_the_voice_kind():
     from friday.kernel.domain.state import FridayState
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
 
     seen = {}
 
@@ -631,7 +659,7 @@ async def test_memory_propose_writes_under_the_voice_kind():
 
 async def test_memory_search_reads_only_the_voice_kind():
     from friday.kernel.domain.state import FridayState
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
 
     seen = {}
 
@@ -659,7 +687,7 @@ def test_memory_search_does_not_promise_a_ranking_it_does_not_do():
     ones while the model is told it got the best ones — an old, precise
     memory becomes unreachable behind newer vague ones with the prompt
     asserting the opposite."""
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
 
     search, _, _, _, _ = memory_tools(object())
 
@@ -678,7 +706,7 @@ async def test_a_hostile_memory_cannot_close_a_section_in_the_responders_prompt(
     every later search in the room, not just the one call that wrote it.
     """
     from friday.kernel.domain.state import FridayState
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
 
     class Memory:
         id = "a1b2c3"

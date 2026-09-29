@@ -6,8 +6,9 @@ rotates) or a decision held only in a process that has since restarted:
 
 - **who approved which bytes** — every operator decision on a reply;
 - **refused requests** — a decision refused because the decider was not the
-  operator (`refused_decision`). This is the only request the kernel refuses
-  today; the narrowed-handle refusals §5.1 describes have no path yet (a
+  operator (`refused_decision`), and a command `core.shell` would not run
+  (`shell_refused`, build-the-spine ticket 08). The narrowed-handle refusals
+  §5.1 describes have no path yet (a
   plugin's `deps`/`needs` that cannot be satisfied fails the boot with a
   `ConfigError`, before this log opens), so that entry is added with that
   path, on its trigger (§16), not shipped inert ahead of it;
@@ -79,6 +80,24 @@ class AuditLog:
         """A plugin loaded into the process, and at what trust tier (§3.1)."""
         await self._append(
             "plugin_load", actor=None, detail={"plugin": plugin_id, "tier": tier}
+        )
+
+    async def shell_refused(
+        self, *, task_id: int, toolset: str, host: str, command: str, reason: str
+    ) -> None:
+        """A command `core.shell` would not run — off the read-command
+        allowlist, or shaped to write. Refused rather than queued; the
+        operator widens the list by commit when it was harmless."""
+        await self._append(
+            "shell_refused",
+            actor=None,
+            detail={
+                "task_id": task_id,
+                "toolset": toolset,
+                "host": host,
+                "command": command,
+                "reason": reason,
+            },
         )
 
     async def mcp_grant(self, *, server: str, tools: list[str]) -> None:

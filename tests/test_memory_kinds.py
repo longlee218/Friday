@@ -190,7 +190,7 @@ def test_the_memory_tools_offer_a_model_no_kind_outside_its_five():
     kinds it must not write — as a parameter, an enum member, a const or a
     default. Descriptions are prose ("a preference the person has told you")
     and are not an offer."""
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
 
     def offered(node):
         if isinstance(node, dict):

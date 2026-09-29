@@ -133,7 +133,7 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
     reach `harness._tool_failed`'s generic swallow — a model told "that tool
     is unavailable" learns nothing about why, and would only try again."""
 
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
 
     class Store:
         async def memory_add(self, scope, text, kind):
@@ -154,7 +154,7 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
 
 
 async def test_the_update_tool_also_tells_the_model_why():
-    from friday.kernel.tools.memory import memory_tools
+    from friday.kernel.toolsets.memory import memory_tools
 
     class Store:
         async def memory_update(self, scope, memory_id, text):

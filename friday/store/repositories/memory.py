@@ -16,7 +16,7 @@ class MemoryRepo:
         not ranked by how well it matches, only by when it was written.
 
         `kind` is required, the same reasoning `limit` already got: the only
-        caller (`friday/kernel/tools/memory.py`, scoped to the responder) always
+        caller (`friday/kernel/toolsets/memory.py`, scoped to the responder) always
         knows which kind it means — `voice` — and a default here
         would let a second caller agree with that by coincidence rather than
         by saying so. Only `ACTIVE` rows match (D16): a superseded or deleted
@@ -353,13 +353,13 @@ class MemoryRepo:
         """Write a new memory, or refuse if the channel is already full.
 
         `kind` defaults to `voice` because the only wired producer
-        today is the responder (`friday/kernel/tools/memory.py`), which writes
+        today is the responder (`friday/kernel/toolsets/memory.py`), which writes
         nothing else — unlike `memory_search`'s `kind`, a default here names
         the one thing every caller before this ticket already meant, rather
         than standing in for a caller that forgot to say.
 
         `None` means the channel is at `MEMORY_PER_CHANNEL` — the caller
-        (`friday/kernel/tools/memory.py`) turns that into a message the model can
+        (`friday/kernel/toolsets/memory.py`) turns that into a message the model can
         act on, the same way it turns a wrong-scope id into one. The count
         only considers active memories: a superseded or deleted row already
         freed its slot, the same rule `test_deleting_a_memory_frees_its_slot`

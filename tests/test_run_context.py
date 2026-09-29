@@ -130,7 +130,7 @@ def _walks_through_context(node: ast.expr) -> bool:
 #: **What this misses, and why it is not chased.** A local alias
 #: (`state = ctx.context` then `state.decided = x`) is invisible to it, and so
 #: are `setattr` and mutation by method call. Two reviews found the alias
-#: independently, and it is the likeliest of the three — `friday/kernel/tools/memory.py`
+#: independently, and it is the likeliest of the three — `friday/kernel/toolsets/memory.py`
 #: already opens with `state = getattr(ctx, "context", None)`, so it is the
 #: shape a tool author has in front of them.
 #:

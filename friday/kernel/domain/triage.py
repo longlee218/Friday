@@ -169,7 +169,7 @@ class NeedsHuman:
 
 
 #: What a classification comes to. Here rather than in `friday/kernel/triage/`
-#: because the tool that produces it lives in `friday/kernel/tools/`, and a tool
+#: because the tool that produces it lives in `friday/kernel/toolsets/`, and a tool
 #: importing the module that imports it is the cycle ticket 01 took out of
 #: `Ask`/`Reply`/`HandOver` for exactly this reason.
 TriageOutcome = Decided | NeedsHuman

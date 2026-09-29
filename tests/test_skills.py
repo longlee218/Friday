@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from friday.kernel.harness.skills import Skill, SkillLibrary
-from friday.kernel.tools.describe_skill import describe
+from friday.kernel.toolsets.skills import describe
 
 
 def write(directory, name: str, text: str) -> None:
@@ -250,7 +250,7 @@ def test_the_skills_that_ship_with_the_repo_all_parse():
 
 def test_the_tool_is_bound_to_one_library(tmp_path):
     """What an agent can reach is composition, not something it declares."""
-    from friday.kernel.tools.fetch_skill import fetch_skill_tool
+    from friday.kernel.toolsets.skills import fetch_skill_tool
 
     write(tmp_path, "trace-a-request", SKILL)
     tool = fetch_skill_tool(SkillLibrary(tmp_path).load())

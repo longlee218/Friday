@@ -174,6 +174,10 @@ class Config:
     workflows: WorkflowConfig = field(default_factory=WorkflowConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     mcp_servers: tuple[MCPServerConfig, ...] = ()
+    #: Where `core.shell` may run a command: SSH aliases, or `local` for this
+    #: machine. An install fact, global like `mcp_servers`; a host not listed
+    #: is refused (build-the-spine ticket 08).
+    shell_hosts: tuple[str, ...] = ()
     #: The plugins this build loads, by import path (`friday.kernel.plugin_host` reads
     #: each package's `PLUGIN`). A plugin owns its own config block, validated
     #: against its own schema — the core no longer names any of them.
@@ -309,6 +313,7 @@ def load_config(path: Path | str = DEFAULT_PATH) -> Config:
         # know a plugin's config shape.
         plugin_blocks=raw,
         mcp_servers=_mcp_servers(_expand(raw.get("mcp_servers") or {})),
+        shell_hosts=tuple(str(h) for h in raw.get("shell_hosts") or ()),
         triage_examples=_triage_examples(raw.get("triage_examples") or []),
         sensitive_words=_sensitive_words(raw.get("sensitive_words") or []),
         database_path=raw.get("database_path", "./data/friday.db"),

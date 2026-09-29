@@ -3,7 +3,7 @@
 One test per refusal (build-the-spine ticket 05). Each starts from `_demo`, a
 plugin whose declarations boot clean, and breaks exactly one thing, so a test
 that passes proves its own guard and nothing else. Refusal 9 (`core.shell`
-host not declared) lands with `core.shell` in ticket 08.
+granted with no `shell_hosts` declared) landed with `core.shell` in ticket 08.
 """
 
 from __future__ import annotations
@@ -263,6 +263,21 @@ def test_a_toolset_without_a_description_refuses():
     assert "toolset 'demo.logs' has no description" in _one(
         _demo(toolsets=[_toolset(description="")])
     )
+
+
+# 9: core.shell granted, no host declared
+def test_granting_core_shell_with_no_shell_hosts_refuses(monkeypatch):
+    shell = _contract(allowed_toolsets=frozenset({"demo.logs", "core.shell"}))
+    demo = _demo(actions=[Action("demo.trace", _recognition(), shell), _explain()])
+    monkeypatch.setattr(
+        "friday.kernel.plugin_host.configured_plugins", lambda config: [(demo, None)]
+    )
+    with pytest.raises(BootRefused) as info:
+        load_plugins(SimpleNamespace(shell_hosts=()))
+    assert "action 'demo.trace' grants 'core.shell', but config.yaml declares no shell_hosts" in str(info.value)
+
+    load_plugins(SimpleNamespace(shell_hosts=("dev",)))
+    load_plugins(SimpleNamespace())  # no config in hand: skipped
 
 
 # the host

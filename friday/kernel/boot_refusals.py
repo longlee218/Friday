@@ -5,8 +5,10 @@ Offline checks on registered data only (board `domains-plug-in`, tickets 02 §5
 and 03 with its amendment, 12 §2). A duplicate name is refused earlier, by the
 `Registry` itself. Not checked here: whether an allowlisted MCP tool exists on
 its server — that needs the network, and the server filter and `Reads` refuse
-it at call time. A `core.shell` host not declared in `config.yaml` is refused
-once `core.shell` exists (build-the-spine ticket 08).
+it at call time. Refusal 9 (build-the-spine ticket 08, the operator's call):
+an action granting `core.shell` while `config.yaml` declares no
+`shell_hosts` — a granted shell with nowhere to run. A host the model names
+that is not declared is refused at call time, by `core.shell` itself.
 
 Returns every refusal rather than the first, so one boot shows the operator
 the whole list.
@@ -26,6 +28,9 @@ __all__ = ["refusals"]
 #: The namespace of everything the core registers; any plugin may grant it.
 CORE_PREFIX = "core."
 
+#: The core toolset that runs a command on a declared host.
+SHELL = "core.shell"
+
 #: A reader that is not an agent: the kernel's own code path.
 _CODE_READER = "code"
 
@@ -40,12 +45,17 @@ def domain_type(plugin: Plugin | None) -> type | None:
 
 
 def refusals(
-    registry: Registry, *, tiers: Iterable[str] | None, servers: Iterable[str] | None
+    registry: Registry,
+    *,
+    tiers: Iterable[str] | None,
+    servers: Iterable[str] | None,
+    shell_hosts: Iterable[str] | None = None,
 ) -> list[str]:
     """Every reason this registry cannot boot, or `[]`. `tiers` are the tier
-    names `config.yaml` declares; `servers` the MCP server names it declares.
-    `None` means no config is in hand (a script or test registering memory
-    kinds only), so that check is skipped rather than failed."""
+    names `config.yaml` declares; `servers` the MCP server names it declares;
+    `shell_hosts` the hosts `core.shell` may run on. `None` means no config is
+    in hand (a script or test registering memory kinds only), so that check is
+    skipped rather than failed."""
     out: list[str] = []
     out += _namespaces(registry)
     out += _descriptions(registry)
@@ -57,6 +67,10 @@ def refusals(
         out += _contract(registry, action)
         out += _recognition(registry, action)
     out += _shared_examples(registry)
+    if shell_hosts is not None and not list(shell_hosts):
+        out += [f"action {name!r} grants {SHELL!r}, but config.yaml declares no shell_hosts"
+                for name, action in registry.actions().items()
+                if SHELL in action.contract.allowed_toolsets]
     return out
 
 

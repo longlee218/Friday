@@ -179,7 +179,7 @@ class Memory:
     and had no producer for months. This is written and read back by the same
     kind of call, with the floor moved from an approval count to three
     narrower guarantees — scope, visibility, and never reaching a model except
-    as a tool result. See `friday/kernel/tools/memory.py`.
+    as a tool result. See `friday/kernel/toolsets/memory.py`.
 
     `id` is opaque and sparse rather than sequential, so a model that invents
     one fails instead of landing on a neighbouring row.

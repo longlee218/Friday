@@ -48,6 +48,7 @@ from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelResponse, TextPa
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai.toolsets import AbstractToolset
 from fastmcp.client.transports import (
     SSETransport,
     StdioTransport,
@@ -246,23 +247,20 @@ class Harness:
         )
         tool_list = list(tools or [])
         if self.skills:
-            from friday.kernel.tools.describe_skill import describe_skill_tool
-            from friday.kernel.tools.fetch_skill import fetch_skill_tool
-            from friday.kernel.tools.read_skill_file import read_skill_file_tool
-            from friday.kernel.tools.search_skills import search_skills_tool
+            from friday.kernel.toolsets.skills import skill_toolset
 
-            tool_list += [
-                fetch_skill_tool(skills),
-                search_skills_tool(skills),
-                describe_skill_tool(skills),
-                read_skill_file_tool(skills),
-            ]
-        # A tool arrives as a neutral `ToolSpec` (a plugin declaring one names no
-        # vendor) or as an already-built `Tool`; bound to the SDK's `Tool` here,
-        # the one place that names it.
-        tool_list = [_bind_tool_spec(t) for t in tool_list]
-        self._tools = tool_list
-        self._toolsets = list(mcp_servers or [])
+            tool_list += skill_toolset(skills)
+        # A toolset factory may hand back a whole Pydantic AI toolset rather
+        # than tools (`core.workspace`'s file tools); it rides beside the tool
+        # servers. Everything else arrives as a neutral `ToolSpec` (a plugin
+        # declaring one names no vendor) or an already-built `Tool`, bound to
+        # the SDK's `Tool` here, the one place that names it.
+        self._toolsets = list(mcp_servers or []) + [
+            t for t in tool_list if isinstance(t, AbstractToolset)
+        ]
+        self._tools = [
+            _bind_tool_spec(t) for t in tool_list if not isinstance(t, AbstractToolset)
+        ]
 
         self.answers = answers
         #: The result types of the terminal output tools in `ends_with`, so
@@ -383,7 +381,7 @@ class Harness:
             name=config.name,
             model_settings=settings,
             retries=retries,
-            tools=tool_list,
+            tools=self._tools,
             toolsets=self._toolsets,
             **agent_options,
         )
