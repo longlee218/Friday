@@ -36,6 +36,7 @@ from pydantic_ai import (
     Agent,
     ModelRetry,
     RunContext,
+    StructuredDict,
     Tool,
     ToolOutput,
     UsageLimits,
@@ -55,7 +56,7 @@ from fastmcp.client.transports import (
     StreamableHttpTransport,
 )
 
-from friday.kernel.harness.model_client import ANSWER, _client
+from friday.kernel.harness.model_client import ANSWER, _answer_params, _client
 from friday.kernel.harness.retry import _About, _Progress, _transient, _why
 from friday.kernel.harness.structured import Unfit, describe, find_json, fits
 from friday.kernel.config import AgentConfig
@@ -389,8 +390,14 @@ class Harness:
     def _answer_output(self, schema: type):
         """The function the answer tool runs, generated from the shape.
 
-        Its signature is `**data`, so Pydantic AI passes the model's arguments
-        through untouched and validation is `fits`'s — which drops unknown keys,
+        **The model is sent the shape's own JSON schema** (`_answer_params`),
+        and Pydantic AI checks the arguments only as "a dict": its one
+        parameter is a `StructuredDict`, which carries the schema to the model
+        and validates as `dict[str, Any]`. It was `def answer(**data)` until
+        2026-09-29, and a signature with no parameters became the schema
+        `{"properties": {}}` — the fields lived only in the tool's description,
+        and a model that follows the schema (qwen3-30b, gpt-5-mini) answered
+        `{}`. Validation stays `fits`'s — which drops unknown keys,
         tells "all keys unknown" from "empty", and produces an `Unfit` that
         names the field but quotes none of the arguments (an extractor's
         arguments are reporter-controlled text). On a bad call it raises
@@ -404,13 +411,19 @@ class Harness:
         body. See `_refused`.
         """
 
-        def answer(**data: Any) -> Any:
-            value, problem = fits(data, schema)
+        def answer(data: Any) -> Any:
+            value, problem = fits(dict(data), schema)
             if problem is None:
                 return value
             self._refused(problem)
             raise ModelRetry(f"that did not fit: {problem.why}")
 
+        # Set here, not written in the signature: the schema is built per
+        # shape, and this module's annotations are strings (`from __future__`).
+        answer.__annotations__ = {
+            "data": StructuredDict(_answer_params(schema), name=ANSWER),
+            "return": Any,
+        }
         return answer
 
     def _refused(self, problem: Unfit) -> None:

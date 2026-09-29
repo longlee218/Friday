@@ -602,3 +602,54 @@ def test_a_key_the_shape_does_not_name_refuses_without_rejecting_a_field():
 
     assert problem.fields == {"mode"}
     assert problem.rejected == frozenset()
+
+
+# --- the answer tool carries its schema (2026-09-29) --------------------------
+
+
+async def test_the_answer_tool_is_sent_with_the_shapes_fields():
+    """The model must be *told* the answer's fields in the tool's schema, not
+    only in its description. From 2026-09-22 to 2026-09-29 the tool went out as
+    `{"properties": {}, "additionalProperties": true}` — `def answer(**data)`
+    has no parameters to build one from — and models that follow the schema
+    (qwen3-30b, gpt-5-mini) answered `{}` on almost every call; only a model
+    that read the description got through."""
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    seen: list = []
+
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        seen.extend(info.output_tools)
+        return ModelResponse(parts=[ToolCallPart("answer", {"mode": "loose"})])
+
+    harness = Harness(
+        config=AgentConfig(name="t", api_key="k", base_url="http://x", model="m"),
+        instructions="pick one",
+        answers=Required,
+        model=FunctionModel(reply),
+    )
+
+    assert await harness.run_structured("x") == Required(mode="loose")
+    (tool,) = [t for t in seen if t.name == "answer"]
+    schema = tool.parameters_json_schema
+    assert schema["properties"]["mode"]["enum"] == ["strict", "loose"]
+    assert schema["required"] == ["mode"]
+
+
+async def test_an_answer_missing_a_field_is_still_corrected_by_fits():
+    """The schema is for the model; checking the answer stays `fits`'s, so a
+    turned-down call still reaches `unfit` (D20) and gets the harness's own
+    correction, not the framework's."""
+    model = ScriptedModel([
+        [function_call("answer", {}, call_id="1")],
+        [function_call("answer", {"mode": "loose"}, call_id="2")],
+    ])
+    harness = Harness(
+        config=AgentConfig(name="t", api_key="k", base_url="http://x", model="m"),
+        instructions="pick one",
+        answers=Required,
+        model=model,
+    )
+
+    assert await harness.run_structured("x") == Required(mode="loose")
