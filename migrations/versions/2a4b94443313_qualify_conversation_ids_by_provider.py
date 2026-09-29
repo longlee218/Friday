@@ -14,16 +14,16 @@ Revises: 443468757024
 Create Date: 2026-08-31
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = '2a4b94443313'
-down_revision: Union[str, Sequence[str], None] = '443468757024'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "2a4b94443313"
+down_revision: str | Sequence[str] | None = "443468757024"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 #: The stored form, built in SQL so the migration does not depend on
 #: application code that will keep changing after it is written.
@@ -48,13 +48,13 @@ def upgrade() -> None:
         f"""
         UPDATE tasks SET conversation_id = (
             SELECT {messages} FROM messages m
-            WHERE {_OLD.format(thread='m.thread_id', channel='m.channel_id')}
+            WHERE {_OLD.format(thread="m.thread_id", channel="m.channel_id")}
                   = tasks.conversation_id
             LIMIT 1
         )
         WHERE EXISTS (
             SELECT 1 FROM messages m
-            WHERE {_OLD.format(thread='m.thread_id', channel='m.channel_id')}
+            WHERE {_OLD.format(thread="m.thread_id", channel="m.channel_id")}
                   = tasks.conversation_id
         )
         """
@@ -63,9 +63,7 @@ def upgrade() -> None:
 
     # SQLite cannot change a primary key in place, and the new key is a value
     # the old columns only imply — so build the table rather than alter it.
-    op.create_table(
-        "conversations_new", sa.Column("id", sa.String(), primary_key=True)
-    )
+    op.create_table("conversations_new", sa.Column("id", sa.String(), primary_key=True))
     op.execute(
         "INSERT OR IGNORE INTO conversations_new (id) SELECT DISTINCT "
         + _QUALIFIED.format(

@@ -23,7 +23,11 @@ tiers:
 """
 
 TRIAGE_LIKE = AgentDeclaration(
-    name="triage", tier="flash", temperature=0.0, max_turns=1, tokens=50_000,
+    name="triage",
+    tier="flash",
+    temperature=0.0,
+    max_turns=1,
+    tokens=50_000,
     request_timeout_seconds=30.0,
 )
 
@@ -44,10 +48,12 @@ def test_each_tier_carries_its_own_endpoint_and_model(tmp_path, keys):
     tiers = load_config(write(tmp_path, SAMPLE)).tiers
 
     assert (tiers["flash"].base_url, tiers["flash"].model) == (
-        "https://api.minimax.io/v1", "MiniMax-M3",
+        "https://api.minimax.io/v1",
+        "MiniMax-M3",
     )
     assert (tiers["strong"].base_url, tiers["strong"].model) == (
-        "https://api.openai.com/v1", "gpt-4o",
+        "https://api.openai.com/v1",
+        "gpt-4o",
     )
 
 
@@ -85,7 +91,11 @@ def test_an_undeclared_tier_refuses_the_boot(tmp_path, keys):
     missing block — never a reason to run without the model."""
     config = load_config(write(tmp_path, SAMPLE))
     typo = AgentDeclaration(
-        name="triage", tier="flsh", temperature=0.0, max_turns=1, tokens=1,
+        name="triage",
+        tier="flsh",
+        temperature=0.0,
+        max_turns=1,
+        tokens=1,
         request_timeout_seconds=30.0,
     )
 
@@ -168,13 +178,16 @@ def test_max_tokens_reaches_the_model_settings_without_a_knob_for_it():
     provider setting, not a budget: the per-run budget is the declaration's
     `tokens`.
     """
-    from friday.kernel.harness.harness import Harness
     from friday.kernel.config import AgentConfig
+    from friday.kernel.harness.harness import Harness
 
     built = Harness(
         config=AgentConfig(
-            name="a", api_key="k", base_url="https://example.invalid/v1",
-            model="test-model", settings={"temperature": 0, "max_tokens": 4096},
+            name="a",
+            api_key="k",
+            base_url="https://example.invalid/v1",
+            model="test-model",
+            settings={"temperature": 0, "max_tokens": 4096},
         ),
         instructions="i",
     )
@@ -189,12 +202,14 @@ def test_the_client_retries_nothing_and_keeps_its_own_timeout():
     operator's call (ticket 17)."""
     from openai import DEFAULT_TIMEOUT
 
-    from friday.kernel.harness.harness import _chat_model
     from friday.kernel.config import AgentConfig
+    from friday.kernel.harness.harness import _chat_model
 
     model = _chat_model(
         AgentConfig(
-            name="a", api_key="k", base_url="https://example.invalid/v1",
+            name="a",
+            api_key="k",
+            base_url="https://example.invalid/v1",
             model="test-model",
         )
     )

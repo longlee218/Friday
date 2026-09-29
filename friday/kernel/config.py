@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -360,10 +360,15 @@ _MOVED_KNOBS = {
     ("heartbeat_seconds",): "`HEARTBEAT_SECONDS` in friday/kernel/ops/liveness.py",
     ("down_after_seconds",): "`DOWN_AFTER_SECONDS` in friday/kernel/ops/liveness.py",
     ("summary_at_hour",): "`SUMMARY_AT_HOUR` in friday/kernel/ops/liveness.py",
-    ("keep_model_calls_days",): "`KEEP_MODEL_CALLS_DAYS` in friday/kernel/ops/liveness.py",
+    (
+        "keep_model_calls_days",
+    ): "`KEEP_MODEL_CALLS_DAYS` in friday/kernel/ops/liveness.py",
     ("keep_backups",): "`KEEP_BACKUPS` in friday/kernel/ops/backup.py",
     ("ingest", "turn_seconds"): "`TURN_SECONDS` in friday/kernel/inbox",
-    ("ingest", "sweep_interval_seconds"): "`SWEEP_INTERVAL_SECONDS` in friday/kernel/inbox",
+    (
+        "ingest",
+        "sweep_interval_seconds",
+    ): "`SWEEP_INTERVAL_SECONDS` in friday/kernel/inbox",
     ("ingest", "context_messages"): "`CONTEXT_MESSAGES` in friday/kernel/inbox",
     ("context", "summary_max_chars"): "`SUMMARY_MAX_CHARS` in "
     "friday/kernel/memory/channel_context.py",
@@ -399,12 +404,8 @@ def _tiers(raw: dict[str, Any]) -> dict[str, TierConfig]:
             spec["base_url"] = PROVIDER_BASE_URLS[provider]
         missing = [f for f in _REQUIRED_TIER_FIELDS if not spec.get(f)]
         if missing:
-            hint = (
-                " (or a `provider:` shorthand)" if "base_url" in missing else ""
-            )
-            raise ConfigError(
-                f"Tier {name!r} is missing: {', '.join(missing)}{hint}"
-            )
+            hint = " (or a `provider:` shorthand)" if "base_url" in missing else ""
+            raise ConfigError(f"Tier {name!r} is missing: {', '.join(missing)}{hint}")
         tiers[name] = TierConfig(
             name=name,
             api_key=spec.pop("api_key"),
@@ -426,9 +427,7 @@ def _slots(value: Any) -> int:
     refused where the operator is looking, not discovered as a silent stall."""
     parsed = int(value)
     if parsed < 1:
-        raise ConfigError(
-            f"workflows.concurrency must be at least 1 — got {parsed}"
-        )
+        raise ConfigError(f"workflows.concurrency must be at least 1 — got {parsed}")
     return parsed
 
 
@@ -485,8 +484,7 @@ def _mcp_servers(raw: dict) -> tuple[MCPServerConfig, ...]:
         transport = str(spec.get("transport", "http"))
         if transport not in {"http", "sse"}:
             raise ConfigError(
-                f"mcp server {name!r}: transport {transport!r} is not one of "
-                "http, sse"
+                f"mcp server {name!r}: transport {transport!r} is not one of http, sse"
             )
         servers.append(
             MCPServerConfig(
@@ -518,4 +516,3 @@ def _sensitive_words(raw) -> tuple[str, ...]:
     if bad:
         raise ConfigError(f"sensitive_words should all be text, got {bad!r}")
     return tuple(w.strip() for w in raw if w.strip())
-

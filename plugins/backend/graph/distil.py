@@ -186,7 +186,9 @@ def distil(
     kept |= decisive
     around = ours if needles else decisive
     for i in sorted(around):
-        for j in range(max(0, i - context_lines), min(len(lines), i + context_lines + 1)):
+        for j in range(
+            max(0, i - context_lines), min(len(lines), i + context_lines + 1)
+        ):
             kept.add(j)
 
     not_checked: list[str] = []
@@ -222,9 +224,7 @@ def distil(
         total=len(lines),
         has_error=any(_ERROR.search(line) for line in survived),
         has_stack=any(_FRAME.search(line) for line in survived),
-        histogram=tuple(
-            sorted(counted.items(), key=lambda pair: (-pair[1], pair[0]))
-        ),
+        histogram=tuple(sorted(counted.items(), key=lambda pair: (-pair[1], pair[0]))),
         not_checked=tuple(not_checked),
     )
 

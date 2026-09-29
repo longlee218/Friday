@@ -90,9 +90,17 @@ def test_only_the_source_package_starts_a_process():
     """`ssh` and `kubectl` are how dev is reached, and they are subprocesses.
     A second module that spawns one is a second door."""
     offenders = {
-        name for name, tree in modules()
+        name
+        for name, tree in modules()
         if not allowed(name)
-        and _calls(tree) & {"create_subprocess_exec", "create_subprocess_shell", "Popen", "system", "check_output"}
+        and _calls(tree)
+        & {
+            "create_subprocess_exec",
+            "create_subprocess_shell",
+            "Popen",
+            "system",
+            "check_output",
+        }
     }
 
     assert offenders == set(), (
@@ -104,7 +112,8 @@ def test_only_the_source_package_reads_through_a_tool_server():
     """Loki is behind the devops MCP. Anything that calls a tool on a server
     is reading the outside world, whatever it calls itself."""
     offenders = {
-        name for name, tree in modules()
+        name
+        for name, tree in modules()
         if not allowed(name) and _calls(tree) & READS_THROUGH_MCP
     }
 

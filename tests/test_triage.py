@@ -14,17 +14,17 @@ the tool schema is the only thing stopping a model from being asked to do both.
 from __future__ import annotations
 
 import pytest
+from conftest import make_event, summary_row
+
+from friday.kernel.config import AgentConfig
+from friday.kernel.triage import Decided, NeedsHuman, Triage
+from friday.kernel.triage.prefilter import Sensitive
 from friday.sdk.testing import (
     FunctionModel,
     ScriptedModel,
     assistant_message,
     function_call,
 )
-
-from conftest import make_event, summary_row
-from friday.kernel.config import AgentConfig
-from friday.kernel.triage import Decided, NeedsHuman, Triage
-from friday.kernel.triage.prefilter import Sensitive
 
 CONFIG = AgentConfig(
     name="triage",
@@ -71,13 +71,17 @@ def _shown(messages) -> str:
 
 
 def _capturing(seen: list) -> FunctionModel:
-    """A model that records what it was shown, then answers `api_issue`."""
+    """A model that records what it was shown, then answers `trace_problem`."""
     from friday.sdk.testing import ModelResponse
 
     def fn(messages, info):
         seen.append(_shown(messages))
         return ModelResponse(
-            parts=[function_call("answer", {"type": "backend.trace_problem", "confidence": 0.9})]
+            parts=[
+                function_call(
+                    "answer", {"type": "backend.trace_problem", "confidence": 0.9}
+                )
+            ]
         )
 
     return FunctionModel(fn, model_name="test-model")
@@ -87,10 +91,16 @@ async def decide(triage, text="the api is wrong", turn=()):
     return await triage.decide(make_event(text=text), turn=turn)
 
 
-async def test_an_api_problem_becomes_an_api_issue():
-    triage = triage_with([
-        function_call("answer", {"type": "backend.trace_problem", "confidence": 0.9}, call_id="1")
-    ])
+async def test_an_api_problem_becomes_a_trace_problem():
+    triage = triage_with(
+        [
+            function_call(
+                "answer",
+                {"type": "backend.trace_problem", "confidence": 0.9},
+                call_id="1",
+            )
+        ]
+    )
 
     outcome = await decide(triage)
 
@@ -100,36 +110,54 @@ async def test_an_api_problem_becomes_an_api_issue():
 
 
 async def test_a_permission_request_becomes_a_request_permission():
-    triage = triage_with([
-        function_call("answer", {"type": "ops.request_permission", "confidence": 0.95}, call_id="1")
-    ])
+    triage = triage_with(
+        [
+            function_call(
+                "answer",
+                {"type": "ops.request_permission", "confidence": 0.95},
+                call_id="1",
+            )
+        ]
+    )
 
     assert (await decide(triage)).type == "ops.request_permission"
 
 
 async def test_a_question_about_docs_becomes_a_doc_question():
-    triage = triage_with([
-        function_call("answer", {"type": "backend.answer_question", "confidence": 0.8}, call_id="1")
-    ])
+    triage = triage_with(
+        [
+            function_call(
+                "answer",
+                {"type": "backend.answer_question", "confidence": 0.8},
+                call_id="1",
+            )
+        ]
+    )
 
     assert (await decide(triage)).type == "backend.answer_question"
 
 
 async def test_social_talk_becomes_a_skip():
-    triage = triage_with([
-        function_call("answer", {"type": "skip", "confidence": 0.99}, call_id="1")
-    ])
+    triage = triage_with(
+        [function_call("answer", {"type": "skip", "confidence": 0.99}, call_id="1")]
+    )
 
     assert (await decide(triage)).type == "skip"
 
 
 async def test_a_message_carrying_nothing_still_decides():
-    """"the api is wrong" is the most common shape there is and carries no
+    """ "the api is wrong" is the most common shape there is and carries no
     values at all. It must still produce a task — that is what triggers asking
     for the fields, and it is why classifying does not depend on extracting."""
-    triage = triage_with([
-        function_call("answer", {"type": "backend.trace_problem", "confidence": 0.6}, call_id="1")
-    ])
+    triage = triage_with(
+        [
+            function_call(
+                "answer",
+                {"type": "backend.trace_problem", "confidence": 0.6},
+                call_id="1",
+            )
+        ]
+    )
 
     assert (await decide(triage)).type == "backend.trace_problem"
 
@@ -236,8 +264,8 @@ def test_the_reason_names_the_word_and_not_the_message():
     "text",
     [
         "lương tháng này về chưa",
-        "luong thang nay ve chua",          # no diacritics — how half of it is typed
-        "LƯƠNG tháng này?",                 # shouting
+        "luong thang nay ve chua",  # no diacritics — how half of it is typed
+        "LƯƠNG tháng này?",  # shouting
         "khi nào có thưởng tết",
         "did the salary come through?",
         "what's the BONUS structure",
@@ -255,7 +283,7 @@ async def test_every_phrasing_of_a_listed_word_is_caught(text):
     "text",
     [
         "the payment API returns 500",
-        "salary-service is down on staging",   # a system, not a payday
+        "salary-service is down on staging",  # a system, not a payday
         "can you review the bonuses endpoint",  # `bonuses` is not `bonus`
     ],
 )
@@ -263,7 +291,13 @@ async def test_a_word_inside_an_identifier_is_not_the_word(text):
     """A hyphen or a suffix makes it a name. Holding every message about
     `salary-service` would make the list unusable in a codebase that has one."""
     triage = triage_with(
-        [function_call("answer", {"type": "backend.trace_problem", "confidence": 0.9}, call_id="1")],
+        [
+            function_call(
+                "answer",
+                {"type": "backend.trace_problem", "confidence": 0.9},
+                call_id="1",
+            )
+        ],
     )
     triage._sensitive = WORDS
 
@@ -275,10 +309,18 @@ async def test_an_empty_list_holds_nothing():
     had without the feature, not someone else's guesses about what is sensitive
     in their workplace."""
     triage = triage_with(
-        [function_call("answer", {"type": "backend.trace_problem", "confidence": 0.9}, call_id="1")],
+        [
+            function_call(
+                "answer",
+                {"type": "backend.trace_problem", "confidence": 0.9},
+                call_id="1",
+            )
+        ],
     )
 
-    assert (await decide(triage, "lương tháng này về chưa")).type == "backend.trace_problem"
+    assert (
+        await decide(triage, "lương tháng này về chưa")
+    ).type == "backend.trace_problem"
 
 
 async def test_a_malformed_classify_call_is_corrected_by_the_model():
@@ -303,10 +345,20 @@ async def test_a_malformed_classify_call_is_corrected_by_the_model():
         config=CONFIG,
         model=ScriptedModel(
             [
-                [function_call("answer", {"type": "backend.trace_problem",
-                                            "confidence": "high"}, call_id="1")],
-                [function_call("answer", {"type": "backend.trace_problem",
-                                            "confidence": 0.9}, call_id="2")],
+                [
+                    function_call(
+                        "answer",
+                        {"type": "backend.trace_problem", "confidence": "high"},
+                        call_id="1",
+                    )
+                ],
+                [
+                    function_call(
+                        "answer",
+                        {"type": "backend.trace_problem", "confidence": 0.9},
+                        call_id="2",
+                    )
+                ],
             ]
         ),
     )
@@ -328,8 +380,13 @@ async def test_a_model_that_cannot_fix_its_own_call_becomes_a_persons_problem():
     """
     from friday.sdk.testing import ScriptedModel, function_call
 
-    bad = [function_call("answer", {"type": "backend.trace_problem",
-                                      "confidence": "high"}, call_id="1")]
+    bad = [
+        function_call(
+            "answer",
+            {"type": "backend.trace_problem", "confidence": "high"},
+            call_id="1",
+        )
+    ]
     triage = Triage(config=CONFIG, model=ScriptedModel([bad, bad, bad]))
 
     outcome = await triage.decide(make_event(text="the api is 500ing"))
@@ -353,7 +410,7 @@ def test_triage_carries_no_skill_catalogue_and_cannot_be_given_one():
 
     Asserted as "cannot be given one" rather than "is not given one", because
     a parameter that still exists is a parameter something can pass. That is
-    not hypothetical here: `evals/run_triage_eval.py` never passed `skills=`
+    not hypothetical here: the triage eval runner never passed `skills=`
     while production always did, so for two days the regression net scored a
     classifier that did not exist. Removing the parameter is what makes the
     eval correct by construction rather than by remembering."""
@@ -416,9 +473,12 @@ def test_build_input_carries_the_rooms_summary_when_there_is_one():
     from friday.kernel.triage.context import LightContext
     from friday.kernel.triage.prompt import build_input
 
-    said = build_input(LightContext(
-        turn=[make_event(text="api lỗi")], summary=summary_row(topic="the reelme api"),
-    ))
+    said = build_input(
+        LightContext(
+            turn=[make_event(text="api lỗi")],
+            summary=summary_row(topic="the reelme api"),
+        )
+    )
 
     assert "<channel_derived>" in said
     assert "the reelme api" in said
@@ -429,20 +489,25 @@ async def test_build_input_does_not_carry_the_operators_rows(db):
     everywhere — it decides a label, not a value, and those rows are exactly
     the kind of thing a value would be built from. `readers_for` gives
     triage the summary and nothing else."""
-    from friday.sdk.memory import MemoryOrigin
     from friday.kernel.domain.state import FridayState
     from friday.kernel.triage.context import build_light_context
     from friday.kernel.triage.prompt import build_input
+    from friday.sdk.memory import MemoryOrigin
 
     for channel in ("watched", "*"):
         await db.memory_add(
             FridayState(channel_id=channel, agent="operator"),
             f"test.apero is staging for {channel}",
-            kind="fact", origin=MemoryOrigin.ADMIN,
+            kind="fact",
+            origin=MemoryOrigin.ADMIN,
         )
-    said = build_input(await build_light_context(
-        db, channel_id="watched", turn=[make_event(text="api lỗi")],
-    ))
+    said = build_input(
+        await build_light_context(
+            db,
+            channel_id="watched",
+            turn=[make_event(text="api lỗi")],
+        )
+    )
 
     assert "staging" not in said
 
@@ -574,7 +639,11 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
     changes nothing about what a classifier is shown. Built the old way —
     the exact two section calls `build_input` always made — and the new way,
     and compared for equality, not "contains the same words"."""
-    from friday.kernel.harness.instruction_prompt import assemble, channel_derived, conversation
+    from friday.kernel.harness.instruction_prompt import (
+        assemble,
+        channel_derived,
+        conversation,
+    )
     from friday.kernel.triage.context import LightContext
     from friday.kernel.triage.prompt import build_input
 
@@ -605,9 +674,15 @@ async def test_decide_gathers_context_through_the_one_builder(monkeypatch):
 
     monkeypatch.setattr(triage_module, "build_light_context", spy)
 
-    triage = triage_with([
-        function_call("answer", {"type": "backend.trace_problem", "confidence": 0.9}, call_id="1")
-    ])
+    triage = triage_with(
+        [
+            function_call(
+                "answer",
+                {"type": "backend.trace_problem", "confidence": 0.9},
+                call_id="1",
+            )
+        ]
+    )
     await decide(triage)
 
     assert len(calls) == 1
@@ -661,21 +736,29 @@ async def test_the_summary_section_does_not_care_how_much_the_room_has_said(db):
     from friday.kernel.triage.prompt import build_input
 
     await db.memory_add(
-        FridayState(channel_id="watched", agent="summary"), "the reelme wrapper api",
+        FridayState(channel_id="watched", agent="summary"),
+        "the reelme wrapper api",
         kind="summary",
         data={"topic": "the reelme wrapper api", "facts": ["x"], "summary_of": "1"},
     )
 
-    first = build_input(await build_light_context(
-        db, channel_id="watched", turn=[make_event(message_id="1", text="a")],
-    ))
+    first = build_input(
+        await build_light_context(
+            db,
+            channel_id="watched",
+            turn=[make_event(message_id="1", text="a")],
+        )
+    )
     # Real messages, recorded into the actual database — not rebuilt from.
     for n in range(2, 12):
         await db.record_message(make_event(message_id=str(n), text=f"noise {n}"))
-    later = build_input(await build_light_context(
-        db, channel_id="watched",
-        turn=[make_event(message_id="11", text="a later mention")],
-    ))
+    later = build_input(
+        await build_light_context(
+            db,
+            channel_id="watched",
+            turn=[make_event(message_id="11", text="a later mention")],
+        )
+    )
 
     def summary_section(said: str) -> str:
         return said.split("<conversation>")[0]
@@ -696,7 +779,9 @@ def test_two_turns_against_the_same_room_share_everything_but_the_turn():
 
     room = summary_row(topic="the reelme wrapper api")
 
-    said_a = build_input(LightContext(turn=[make_event(message_id="1", text="api lỗi")], summary=room))
+    said_a = build_input(
+        LightContext(turn=[make_event(message_id="1", text="api lỗi")], summary=room)
+    )
     said_b = build_input(
         LightContext(
             turn=[make_event(message_id="2", text="a completely different report")],
@@ -758,10 +843,16 @@ async def test_a_classification_is_the_return_value_of_the_call_that_asked():
     said, validated, and reading the code is enough to see where the answer
     comes from — which it was not while a tool wrote into a per-run object the
     caller read back afterwards."""
-    from friday.sdk.testing import ScriptedModel, function_call
+    from friday.sdk.testing import function_call
 
     triage = triage_with(
-        [function_call("answer", {"type": "backend.trace_problem", "confidence": 0.9}, call_id="1")]
+        [
+            function_call(
+                "answer",
+                {"type": "backend.trace_problem", "confidence": 0.9},
+                call_id="1",
+            )
+        ]
     )
 
     assert await decide(triage) == Decided(type="backend.trace_problem", confidence=0.9)
@@ -771,7 +862,7 @@ async def test_skip_is_a_member_of_the_same_set_and_is_validated_the_same_way():
     """D6 reverses the `classify`/`skip` split. The two were validated
     differently because they were two tools; "there is no work here" is now
     checked exactly as strictly as "there is"."""
-    from friday.sdk.testing import ScriptedModel, function_call
+    from friday.sdk.testing import function_call
 
     triage = triage_with(
         [function_call("answer", {"type": "skip", "confidence": 0.95}, call_id="1")]
@@ -791,11 +882,19 @@ async def test_a_type_outside_the_closed_set_never_becomes_a_classification():
     configured provider returned `hardware_issue`. What stops it is the
     validation in this process.
     """
-    from friday.sdk.testing import ScriptedModel, function_call
+    from friday.sdk.testing import function_call
 
     triage = triage_with(
-        [function_call("answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="1")],
-        [function_call("answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="2")],
+        [
+            function_call(
+                "answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="1"
+            )
+        ],
+        [
+            function_call(
+                "answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="2"
+            )
+        ],
     )
 
     outcome = await decide(triage)
@@ -809,11 +908,21 @@ async def test_a_type_outside_the_closed_set_never_becomes_a_classification():
 async def test_an_invented_type_earns_the_same_one_correction_as_anything_else():
     """It is a bad tool call like any other, so it comes back as the tool's own
     output naming the field, and the model gets the turn `max_turns` allows."""
-    from friday.sdk.testing import ScriptedModel, function_call
+    from friday.sdk.testing import function_call
 
     triage = triage_with(
-        [function_call("answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="1")],
-        [function_call("answer", {"type": "backend.trace_problem", "confidence": 0.8}, call_id="2")],
+        [
+            function_call(
+                "answer", {"type": "hardware_issue", "confidence": 0.9}, call_id="1"
+            )
+        ],
+        [
+            function_call(
+                "answer",
+                {"type": "backend.trace_problem", "confidence": 0.8},
+                call_id="2",
+            )
+        ],
     )
 
     assert await decide(triage) == Decided(type="backend.trace_problem", confidence=0.8)
@@ -871,7 +980,7 @@ async def test_an_answer_that_names_no_type_is_never_silently_a_skip():
     unreadable answer becoming a successful one because every field had a
     default.
     """
-    from friday.sdk.testing import ScriptedModel, function_call
+    from friday.sdk.testing import function_call
 
     nothing = {}
     triage = triage_with(
@@ -897,7 +1006,7 @@ async def test_the_tools_own_former_parameter_name_is_not_a_skip_either():
     older than this board), so the only thing standing between a stale field
     name and a lost mention is `type` having no default.
     """
-    from friday.sdk.testing import ScriptedModel, function_call
+    from friday.sdk.testing import function_call
 
     stale = {"task_type": "backend.trace_problem", "confidence": 0.9}
     triage = triage_with(
@@ -930,7 +1039,7 @@ async def test_a_malformed_confidence_is_not_reported_as_an_invented_type():
     invented decision — was counted as an invented type and printed under that
     sentence.
     """
-    from friday.sdk.testing import ScriptedModel, function_call
+    from friday.sdk.testing import function_call
 
     wrong_shape = {"type": "backend.trace_problem", "confidence": "very high"}
     triage = triage_with(
@@ -981,7 +1090,7 @@ async def test_a_model_that_named_nothing_did_not_name_an_invented_type():
     Found by review, twice: the flag first fired on any validation failure,
     then on any failure of the `type` field, and only this version distinguishes
     a value the model *sent* from one it left out."""
-    from friday.sdk.testing import ScriptedModel, function_call
+    from friday.sdk.testing import function_call
 
     triage = triage_with(
         [function_call("answer", {}, call_id="1")],
@@ -996,10 +1105,10 @@ async def test_a_model_that_named_nothing_did_not_name_an_invented_type():
 
 async def test_a_real_type_under_the_deleted_tools_old_key_is_not_invented_either():
     """`task_type` is what `classify` called this field. A model carrying that
-    habit named `api_issue` — a real member of the set — under a key this shape
+    habit named `trace_problem` — a real member of the set — under a key this shape
     cannot see. It still reaches a person, and the mention is still not
     dropped, but calling it an invented type would be false."""
-    from friday.sdk.testing import ScriptedModel, function_call
+    from friday.sdk.testing import function_call
 
     stale = {"task_type": "backend.trace_problem", "confidence": 0.9}
     triage = triage_with(
@@ -1016,7 +1125,7 @@ async def test_a_real_type_under_the_deleted_tools_old_key_is_not_invented_eithe
 async def test_a_type_the_model_actually_invented_is_still_counted():
     """The other side of the line, so the narrowing above cannot have quietly
     turned the number off."""
-    from friday.sdk.testing import ScriptedModel, function_call
+    from friday.sdk.testing import function_call
 
     invented = {"type": "hardware_issue", "confidence": 0.9}
     triage = triage_with(
@@ -1038,7 +1147,7 @@ async def test_an_accented_word_is_not_a_different_accented_word():
     The rule the folding is for still holds: a message typed without
     diacritics still matches a listed word that has them.
     """
-    triage, model = guarded()
+    _triage, _model = guarded()
 
     for innocent in (
         "tài liệu về luồng duyệt task ở đâu vậy",

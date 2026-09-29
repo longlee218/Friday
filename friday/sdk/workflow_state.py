@@ -19,7 +19,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["DAGState", "MissingNodeResult", "UNSTORABLE"]
+__all__ = ["UNSTORABLE", "DAGState", "MissingNodeResult"]
 
 #: Marks a node that ran but whose result does not survive a round trip through
 #: JSON. See `DAGState.to_dict`.
@@ -45,11 +45,11 @@ class DAGState:
     results: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def empty(cls) -> "DAGState":
+    def empty(cls) -> DAGState:
         return cls(results={})
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any] | None) -> "DAGState":
+    def from_dict(cls, raw: dict[str, Any] | None) -> DAGState:
         """Rebuild from storage. A missing or malformed row starts empty.
 
         **Nodes marked unstorable are dropped, so they run again.** The two
@@ -67,9 +67,7 @@ class DAGState:
             return cls.empty()
         return cls(
             results={
-                name: value
-                for name, value in raw.items()
-                if not _is_marker(value)
+                name: value for name, value in raw.items() if not _is_marker(value)
             }
         )
 
@@ -101,7 +99,7 @@ class DAGState:
         """The result, or `default`. Use when absence is expected."""
         return self.results.get(node, default)
 
-    def with_result(self, node: str, result: Any) -> "DAGState":
+    def with_result(self, node: str, result: Any) -> DAGState:
         """A new state with one more node recorded."""
         return DAGState(results={**self.results, node: result})
 

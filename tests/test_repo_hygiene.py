@@ -17,6 +17,7 @@ moved to smaller per-guard files in `test_web_tokens.py` and
 the local `test_repo_hygiene.py`. A subset lives here so the
 history stays readable.
 """
+
 from __future__ import annotations
 
 import ast
@@ -27,12 +28,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _project_state() -> str:
     src = (ROOT / "CONTEXT.md").read_text(encoding="utf-8")
-    return src[src.index("# Project state"):src.index("# Vocabulary")]
+    return src[src.index("# Project state") : src.index("# Vocabulary")]
 
 
 def _what_exists() -> str:
     src = (ROOT / "docs" / "DESIGN.md").read_text(encoding="utf-8")
-    return src[src.index("# What exists"):src.index("# Reasoning")]
+    return src[src.index("# What exists") : src.index("# Reasoning")]
 
 
 def test_project_state_mentions_the_current_monitor_board() -> None:
@@ -51,8 +52,12 @@ def test_claudemd_holds_no_state_and_no_architecture() -> None:
     there; one coming back is the file growing a second copy of what
     CONTEXT.md and docs/DESIGN.md already say."""
     src = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-    for heading in ("## Status", "## Layout", "## Architecture constraints",
-                    "## Running it on a server"):
+    for heading in (
+        "## Status",
+        "## Layout",
+        "## Architecture constraints",
+        "## Running it on a server",
+    ):
         assert heading not in src, f"CLAUDE.md grew {heading!r} back"
 
 
@@ -60,8 +65,20 @@ def test_old_board_tickets_are_marked_retired_or_done() -> None:
     """Ticket 19 (Liquid Glass) is retired, ticket 20 (SSE) is done.
     A regression that leaves one in `ready-for-agent` is a regression
     the audit would catch on the next board review."""
-    old19 = (ROOT / ".scratch" / "discord-mention-triage" / "issues" / "19-liquid-glass-on-the-chrome.md").read_text()
-    old20 = (ROOT / ".scratch" / "discord-mention-triage" / "issues" / "20-live-updates-without-polling.md").read_text()
+    old19 = (
+        ROOT
+        / ".scratch"
+        / "discord-mention-triage"
+        / "issues"
+        / "19-liquid-glass-on-the-chrome.md"
+    ).read_text()
+    old20 = (
+        ROOT
+        / ".scratch"
+        / "discord-mention-triage"
+        / "issues"
+        / "20-live-updates-without-polling.md"
+    ).read_text()
     assert "Status:** retired" in old19 or "Status:** done" in old19, (
         "ticket 19 should be marked retired or done"
     )
@@ -108,8 +125,7 @@ def test_composition_root_reads_no_agent_config() -> None:
             if "agents" in chain:
                 offenders.append(".".join(chain))
     assert not offenders, (
-        f"run_agent.py reads agent config outside the composition "
-        f"contract: {offenders}"
+        f"run_agent.py reads agent config outside the composition contract: {offenders}"
     )
 
 
@@ -118,11 +134,13 @@ def test_doc_paths_resolve_to_existing_files() -> None:
     CLAUDE.md, CONTEXT.md § Project state and docs/DESIGN.md § What exists.
     DESIGN.md § Reasoning and CONTEXT.md § Vocabulary are left out on
     purpose — they name removed packages as history."""
-    src = "\n".join([
-        (ROOT / "CLAUDE.md").read_text(encoding="utf-8"),
-        _project_state(),
-        _what_exists(),
-    ])
+    src = "\n".join(
+        [
+            (ROOT / "CLAUDE.md").read_text(encoding="utf-8"),
+            _project_state(),
+            _what_exists(),
+        ]
+    )
     # A backticked path under one of this repo's own directories, or one of
     # the two entrypoint scripts, must exist on disk.
     #
@@ -133,6 +151,7 @@ def test_doc_paths_resolve_to_existing_files() -> None:
     # `docstring_style`. Six false positives, none of them a path, and a red
     # suite that told every later change the repo was broken.
     import re
+
     candidates = re.findall(
         r"`((?:\.scratch|friday|docs|web|migrations|tests)/[^`]+"
         r"|run_agent\.py|serve_board\.py)`",
@@ -151,10 +170,7 @@ def test_doc_paths_resolve_to_existing_files() -> None:
             continue
         if not (ROOT / path_str).exists():
             missing.append(path_str)
-    assert not missing, (
-        f"the docs name paths that do not exist: {missing}"
-    )
-
+    assert not missing, f"the docs name paths that do not exist: {missing}"
 
 
 def test_only_config_knows_where_the_message_age_cutoff_lives() -> None:

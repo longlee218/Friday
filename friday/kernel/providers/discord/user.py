@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import logging
 from collections.abc import AsyncIterator, Callable
+from datetime import UTC, datetime
 
 import discord_self
 
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.messages import InboundEvent
 from friday.kernel.domain.outbound import Outbound
+from friday.kernel.memory.verdicts import mark_for
 from friday.kernel.providers import CredentialRejected
 from friday.kernel.providers.discord.normalise import normalise
-from friday.kernel.memory.verdicts import mark_for
 
 __all__ = ["DiscordUserProvider", "is_credential_rejected"]
 
@@ -77,7 +77,7 @@ class DiscordUserProvider:
         forever and the alert would never fire.
         """
         if self.down_since is None:
-            self.down_since = datetime.now(timezone.utc)
+            self.down_since = datetime.now(UTC)
             log.warning("discord gateway disconnected")
 
     async def _handle_ready(self) -> None:
@@ -270,8 +270,8 @@ class DiscordUserProvider:
             )
 
     async def _channel(self, target: int):
-        return self._client.get_channel(target) or await (
-            self._client.fetch_channel(target)
+        return self._client.get_channel(target) or await self._client.fetch_channel(
+            target
         )
 
     async def send(self, row: Outbound) -> str:
@@ -319,7 +319,6 @@ class DiscordUserProvider:
             connection.cancel()
             await self._client.close()
 
-
     @staticmethod
     def _reraise(connection: asyncio.Task) -> None:
         """The connection ended. Say why, in terms an operator can act on."""
@@ -346,9 +345,7 @@ def is_credential_rejected(exc: BaseException) -> bool:
     """
     if isinstance(exc, discord_self.LoginFailure):
         return True
-    return (
-        isinstance(exc, discord_self.ConnectionClosed) and exc.code == 4004
-    )
+    return isinstance(exc, discord_self.ConnectionClosed) and exc.code == 4004
 
 
 #: What one forward page of a channel's history is worth reading, and ticket

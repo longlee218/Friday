@@ -26,9 +26,7 @@ class Explanation:
     verdict: Literal["yes", "no", "partly", "unknown"] = field(
         metadata={"doc": "Does the code running now do what they asked about."}
     )
-    answer: str = field(
-        metadata={"doc": "One to three sentences, in Vietnamese."}
-    )
+    answer: str = field(metadata={"doc": "One to three sentences, in Vietnamese."})
     conclusive: bool = field(
         metadata={"doc": "true only if the lines cited would convince a sceptic."}
     )
@@ -51,7 +49,7 @@ EXPLAIN = AgentSpec(
     "how, citing the lines it read.",
     instructions="You answer whether the code or docs running now do what the "
     "reporter asked about, and how. Search and read before you answer; cite the "
-    "lines you read. \"Not found\" is not \"not there\": a conclusive no needs "
+    'lines you read. "Not found" is not "not there": a conclusive no needs '
     "the place that would have done it, read.",
     result=Explanation,
     tier="flash",

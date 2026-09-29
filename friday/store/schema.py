@@ -10,13 +10,29 @@ Nothing outside `friday.db` imports this module.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Index, String, TypeDecorator
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-__all__ = ["AuditEntry", "Base", "Conversation", "Cursor", "DagState", "Memory", "MemoryCandidate", "Message", "ModelCall", "NodeRun", "Outbound", "StepResult", "Task", "ToolCall", "Verdict"]
+__all__ = [
+    "AuditEntry",
+    "Base",
+    "Conversation",
+    "Cursor",
+    "DagState",
+    "Memory",
+    "MemoryCandidate",
+    "Message",
+    "ModelCall",
+    "NodeRun",
+    "Outbound",
+    "StepResult",
+    "Task",
+    "ToolCall",
+    "Verdict",
+]
 
 
 class IsoDateTime(TypeDecorator):
@@ -41,7 +57,7 @@ class IsoDateTime(TypeDecorator):
         # Normalised to UTC, not just serialised: ORDER BY sorts this column as
         # text, so a row written at +07:00 would sort by its wall clock rather
         # than its instant and land in the wrong place in a conversation.
-        return value.astimezone(timezone.utc).isoformat()
+        return value.astimezone(UTC).isoformat()
 
     def process_result_value(self, value: str | None, dialect) -> datetime | None:
         return datetime.fromisoformat(value) if value is not None else None
@@ -580,5 +596,3 @@ class AuditEntry(Base):
     #: without a column per kind.
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
     at: Mapped[datetime] = mapped_column(IsoDateTime, index=True)
-
-

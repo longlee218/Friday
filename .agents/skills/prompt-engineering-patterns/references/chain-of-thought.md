@@ -16,6 +16,7 @@ def zero_shot_cot(query):
 
 Let's think step by step:"""
 
+
 # Example
 query = "If a train travels 60 mph for 2.5 hours, how far does it go?"
 prompt = zero_shot_cot(query)
@@ -62,6 +63,7 @@ Generate multiple reasoning paths and take the majority vote:
 import openai
 from collections import Counter
 
+
 def self_consistency_cot(query, n=5, temperature=0.7):
     prompt = f"{query}\n\nLet's think step by step:"
 
@@ -70,7 +72,7 @@ def self_consistency_cot(query, n=5, temperature=0.7):
         response = openai.ChatCompletion.create(
             model="gpt-5.4",
             messages=[{"role": "user", "content": prompt}],
-            temperature=temperature
+            temperature=temperature,
         )
         responses.append(extract_final_answer(response))
 
@@ -79,9 +81,9 @@ def self_consistency_cot(query, n=5, temperature=0.7):
     final_answer = answer_counts.most_common(1)[0][0]
 
     return {
-        'answer': final_answer,
-        'confidence': answer_counts[final_answer] / n,
-        'all_responses': responses
+        "answer": final_answer,
+        "confidence": answer_counts[final_answer] / n,
+        "all_responses": responses,
     }
 ```
 
@@ -324,10 +326,7 @@ class ReasoningCache:
         problem_embedding = embed(problem)
 
         for cached_problem, reasoning in self.cache.items():
-            similarity = cosine_similarity(
-                problem_embedding,
-                embed(cached_problem)
-            )
+            similarity = cosine_similarity(problem_embedding, embed(cached_problem))
             if similarity > threshold:
                 return reasoning
 
@@ -360,11 +359,11 @@ def adaptive_cot(problem, initial_depth=3):
 ```python
 def evaluate_cot_quality(reasoning_chain):
     metrics = {
-        'coherence': measure_logical_coherence(reasoning_chain),
-        'completeness': check_all_steps_present(reasoning_chain),
-        'correctness': verify_final_answer(reasoning_chain),
-        'efficiency': count_unnecessary_steps(reasoning_chain),
-        'clarity': rate_explanation_clarity(reasoning_chain)
+        "coherence": measure_logical_coherence(reasoning_chain),
+        "completeness": check_all_steps_present(reasoning_chain),
+        "correctness": verify_final_answer(reasoning_chain),
+        "efficiency": count_unnecessary_steps(reasoning_chain),
+        "clarity": rate_explanation_clarity(reasoning_chain),
     }
     return metrics
 ```

@@ -21,18 +21,19 @@ proven by spike to survive a kill mid-wait.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from dbos import DBOS, SetWorkflowID
 
-from friday.sdk.actions import Ask
 from friday.kernel.ops.redact import scrub
+from friday.sdk.actions import Ask
 from friday.sdk.workflow import (
     DAG,
     DAGState,
@@ -144,10 +145,12 @@ async def _invoke(
             )
             try:
                 await record(run)
-            except Exception:  # noqa: BLE001 - a failed record must not lose the run
+            except Exception:
                 log.exception(
                     "workflow %s: could not record attempt %d of %s",
-                    dag_name, attempt, node.name,
+                    dag_name,
+                    attempt,
+                    node.name,
                 )
         return result
 
@@ -247,9 +250,12 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
                 # Publish what the run is waiting on, so the pool can poll it to
                 # its next boundary without blocking (get_event from outside).
                 await DBOS.set_event_async(
-                    PENDING_EVENT, {"waiting": True, "node": current, "text": result.text}
+                    PENDING_EVENT,
+                    {"waiting": True, "node": current, "text": result.text},
                 )
-                answer = await DBOS.recv_async(current, timeout_seconds=WAIT_TIMEOUT_SECONDS)
+                answer = await DBOS.recv_async(
+                    current, timeout_seconds=WAIT_TIMEOUT_SECONDS
+                )
                 await DBOS.set_event_async(PENDING_EVENT, {"waiting": False})
                 live.answers.setdefault(current, []).append(answer)
                 continue  # re-run `current`; do not advance, do not record the Ask
@@ -313,7 +319,11 @@ async def deliver_outbound(outbound_id: int, attempt: int) -> str:
 
 
 async def run_node(
-    dag_name: str, node: Node, state: DAGState, deps: Deps, record: Recorder | None = None
+    dag_name: str,
+    node: Node,
+    state: DAGState,
+    deps: Deps,
+    record: Recorder | None = None,
 ) -> Any:
     """Run one node OUTSIDE a workflow, through the very same `_invoke` the
     workflow uses — its clock, its retry, its redaction and its `node_runs`
@@ -370,7 +380,9 @@ async def start(dag_name: str, scope_key: ScopeKey, *, workflow_id: str | None =
         return await DBOS.start_workflow_async(_run_graph, dag_name, scope_key)
 
 
-async def run(dag_name: str, scope_key: ScopeKey, *, workflow_id: str | None = None) -> dict[str, Any]:
+async def run(
+    dag_name: str, scope_key: ScopeKey, *, workflow_id: str | None = None
+) -> dict[str, Any]:
     """Start and await a graph to completion — the final state as a dict."""
     handle = await start(dag_name, scope_key, workflow_id=workflow_id)
     return await handle.get_result()
@@ -414,7 +426,7 @@ def _workflow_view(wf: Any) -> dict[str, Any]:
 def _iso_ms(epoch_ms: int | None) -> str | None:
     if epoch_ms is None:
         return None
-    return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(epoch_ms / 1000, tz=UTC).isoformat()
 
 
 async def list_workflows(limit: int = 100) -> list[dict[str, Any]]:
@@ -461,7 +473,9 @@ async def pending(workflow_id: str) -> dict[str, Any] | None:
     """What a suspended run is waiting on — `{"node", "text"}` — or `None` if it
     is not currently suspended on an `Ask`."""
     try:
-        event = await DBOS.get_event_async(workflow_id, PENDING_EVENT, timeout_seconds=0)
+        event = await DBOS.get_event_async(
+            workflow_id, PENDING_EVENT, timeout_seconds=0
+        )
     except Exception:  # noqa: BLE001
         return None
     if event and event.get("waiting"):
@@ -472,7 +486,5 @@ async def pending(workflow_id: str) -> dict[str, Any] | None:
 async def cancel(workflow_id: str) -> None:
     """Stop a run for good — the task was handled or escalated out of band, so
     its suspended workflow must not sit waiting on an answer that will not come."""
-    try:
+    with contextlib.suppress(Exception):  # already gone is fine
         await DBOS.cancel_workflow_async(workflow_id)
-    except Exception:  # noqa: BLE001 - already gone is fine
-        pass

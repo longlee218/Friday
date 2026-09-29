@@ -24,11 +24,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 __all__ = [
+    "TOOL_CALL_TIMEOUT_SECONDS",
     "CodeSource",
     "Lines",
     "LogSource",
     "Reads",
-    "TOOL_CALL_TIMEOUT_SECONDS",
 ]
 
 #: How long one tool call — an SSH `kubectl`, an MCP call, a git read — may

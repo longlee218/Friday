@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 __all__ = [
     "Section",
@@ -77,7 +77,7 @@ def base(now: datetime) -> Section:
     every call a fresh prefix and waste the cache hit on every section that
     follows."""
     if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        now = now.replace(tzinfo=UTC)
     return Section("base", f"Today's date: {now.date().isoformat()}.")
 
 
@@ -169,7 +169,9 @@ def _body(value: Body, marker) -> str:
     kept as written. Escaped either way — the section's boundary is here."""
     if isinstance(value, str):
         return _escape(value.strip())
-    return "\n".join(f"{marker(i)} {_escape(item)}" for i, item in enumerate(value or (), 1))
+    return "\n".join(
+        f"{marker(i)} {_escape(item)}" for i, item in enumerate(value or (), 1)
+    )
 
 
 def response_style(rules: Body) -> Section:

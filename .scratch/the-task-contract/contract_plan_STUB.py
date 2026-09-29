@@ -10,7 +10,9 @@ type-level (authored once, inherited), some instance-level (per run).
 Decision 01: the type-level half lands early; the instance-level half (objective,
 model-proposed acceptance, dynamic steps) waits for durable-spine's Planner.
 """
+
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -22,9 +24,9 @@ from typing import Literal
 # ─────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True, slots=True)
 class Acceptance:
-    name: str                              # "grounded", "weighed", "root_cause"
-    check: Literal["code", "agent"]        # deterministic vs model-judge (t03)
-    description: str                       # what "met" means, for the verifier
+    name: str  # "grounded", "weighed", "root_cause"
+    check: Literal["code", "agent"]  # deterministic vs model-judge (t03)
+    description: str  # what "met" means, for the verifier
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -34,14 +36,15 @@ class Acceptance:
 # ─────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True, slots=True)
 class Budget:
-    max_steps: int                         # today: MAX_READS = 12 (investigate.py)
-    max_tokens: int                        # today: extraction/agent token budget
-    max_time_seconds: float                # today: node timeouts
+    max_steps: int  # today: MAX_READS = 12 (investigate.py)
+    max_tokens: int  # today: extraction/agent token budget
+    max_time_seconds: float  # today: node timeouts
 
 
 @dataclass(frozen=True, slots=True)
 class TaskContract:
     """The per-*type* template. Authored once for devops.api_issue."""
+
     task_type: str
     # today: the grounding gate ("a ref that resolves to nothing voids the
     # answer"), stated as an invariant rather than buried in _judged.
@@ -64,18 +67,20 @@ class TaskContract:
 class Step:
     """A plan step. FIXED today (the graph's nodes); a `Planner`'s output under
     durable-spine. Left thin here — its vocabulary is durable-spine's ticket."""
+
     id: str
-    type: str                              # e.g. "sub_agent", "read_source" (later)
+    type: str  # e.g. "sub_agent", "read_source" (later)
 
 
 @dataclass(frozen=True, slots=True)
 class Plan:
     """The run's contract-and-plan, one artifact (Q3)."""
-    contract: TaskContract                 # inherited (type-level, lands now)
+
+    contract: TaskContract  # inherited (type-level, lands now)
     # instance-level — the durable-spine half; deferred until the Planner:
-    objective: str = ""                    # this case's goal (== sketch.objective)
+    objective: str = ""  # this case's goal (== sketch.objective)
     acceptance: tuple[Acceptance, ...] = ()  # template + model-proposed-per-case
-    steps: tuple[Step, ...] = ()           # fixed now; Planner-generated later
+    steps: tuple[Step, ...] = ()  # fixed now; Planner-generated later
     on_obstacle: Literal["replan", "handover", "abort"] = "handover"
 
 

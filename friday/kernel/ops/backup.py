@@ -24,7 +24,7 @@ import asyncio
 import logging
 import shutil
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 __all__ = ["Backup", "databases", "restore"]
@@ -81,7 +81,7 @@ class Backup:
         """
         if self._keep <= 0:
             return False
-        stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d")
+        stamp = (now or datetime.now(UTC)).strftime("%Y%m%d")
         if self._dest(self._sources[0], stamp).exists():
             return False
         await asyncio.to_thread(self._backup_all, stamp)
@@ -97,7 +97,12 @@ class Backup:
             _copy(src, dest)
             made.append(dest.name)
         self._prune()
-        log.info("backed up %s to %s (keeping %d days)", ", ".join(made), self._dir, self._keep)
+        log.info(
+            "backed up %s to %s (keeping %d days)",
+            ", ".join(made),
+            self._dir,
+            self._keep,
+        )
 
     def _dest(self, src: Path, stamp: str) -> Path:
         return _dest(self._dir, src, stamp)
@@ -114,7 +119,7 @@ class Backup:
                 stamp = _stamp_of(path, src)
                 if stamp is not None:
                     by_day.setdefault(stamp, []).append(path)
-        for stamp in sorted(by_day, reverse=True)[self._keep:]:
+        for stamp in sorted(by_day, reverse=True)[self._keep :]:
             for path in by_day[stamp]:
                 path.unlink(missing_ok=True)
 
@@ -139,7 +144,9 @@ def _stamp_of(path: Path, src: Path) -> str | None:
     name = path.name
     if not name.startswith(prefix) or not name.endswith(suffix):
         return None
-    stamp = name[len(prefix):len(name) - len(suffix)] if suffix else name[len(prefix):]
+    stamp = (
+        name[len(prefix) : len(name) - len(suffix)] if suffix else name[len(prefix) :]
+    )
     return stamp if stamp.isdigit() else None
 
 
@@ -191,7 +198,9 @@ def _main() -> None:
             "restore overwrites the live databases; stop the agent first."
         )
     config = load_config()
-    done = restore(args[1], sources=databases(config.database_path), backup_dir=config.backup_dir)
+    done = restore(
+        args[1], sources=databases(config.database_path), backup_dir=config.backup_dir
+    )
     print(f"restored {', '.join(done)} from {args[1]}")
 
 

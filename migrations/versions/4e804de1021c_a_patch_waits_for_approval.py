@@ -11,24 +11,24 @@ waiting on the operator's yes or no — nullable, and empty for every ordinary
 task, which is every task that never reaches that call.
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = '4e804de1021c'
-down_revision: Union[str, Sequence[str], None] = 'a17c3e5b28d0'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "4e804de1021c"
+down_revision: str | Sequence[str] | None = "a17c3e5b28d0"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     op.add_column(
-        'dag_state',
-        sa.Column('interruption', sa.JSON(), nullable=True),
+        "dag_state",
+        sa.Column("interruption", sa.JSON(), nullable=True),
     )
 
 
 def downgrade() -> None:
-    op.drop_column('dag_state', 'interruption')
+    op.drop_column("dag_state", "interruption")

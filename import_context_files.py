@@ -30,12 +30,15 @@ import yaml
 from dotenv import load_dotenv
 
 from friday.kernel.config import load_config
-from friday.kernel.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
-from friday.sdk.memory import MemoryOrigin
-from friday.kernel.domain.state import FridayState
 from friday.kernel.domain.memory import MemoryRefused
+from friday.kernel.domain.memory_guard import (
+    InstructionShaped,
+    check_not_instruction_shaped,
+)
+from friday.kernel.domain.state import FridayState
 from friday.kernel.memory import registry as memory_kinds
 from friday.kernel.memory import write
+from friday.sdk.memory import MemoryOrigin
 from friday.store.db import Database
 
 _PERSON = ("name", "role", "team")
@@ -63,10 +66,21 @@ async def _write(db: Database, channel_id: str, written: dict[str, Any]) -> list
         if key == "people" and isinstance(value, dict):
             for who, about in value.items():
                 if isinstance(about, dict) and all(k in about for k in _PERSON):
-                    data = {"discord_id": str(who), **{k: str(about[k]) for k in _PERSON}}
+                    data = {
+                        "discord_id": str(who),
+                        **{k: str(about[k]) for k in _PERSON},
+                    }
                     rows.append((f"people.{who}", "", memory_kinds.PERSON, data, None))
                 else:
-                    rows.append((f"people.{who}", f"people.{who}: {about}", memory_kinds.FACT, None, about))
+                    rows.append(
+                        (
+                            f"people.{who}",
+                            f"people.{who}: {about}",
+                            memory_kinds.FACT,
+                            None,
+                            about,
+                        )
+                    )
         else:
             rows.append((key, f"{key}: {value}", memory_kinds.FACT, None, value))
 

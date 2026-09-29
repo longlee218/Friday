@@ -75,13 +75,29 @@ MAX_ROWS = 50
 #: nobody updates it for. Short ones are exact for the same reason a stem is
 #: not: `ip` inside `description` is not an address.
 _PII_STEMS = (
-    "email", "token", "secret", "password", "passwd", "phone",
-    "address", "payload", "useragent",
+    "email",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "phone",
+    "address",
+    "payload",
+    "useragent",
 )
-_PII_NAMES = frozenset({
-    "ip", "adid", "idfa", "idfv", "gpsadid", "androidid", "headers",
-    "devicemetadata", "obfuscatedexternalaccountid",
-})
+_PII_NAMES = frozenset(
+    {
+        "ip",
+        "adid",
+        "idfa",
+        "idfv",
+        "gpsadid",
+        "androidid",
+        "headers",
+        "devicemetadata",
+        "obfuscatedexternalaccountid",
+    }
+)
 
 #: A read. `with` is here because a CTE is one, and this is the whole of the
 #: check: the credential is what actually stops a write, and this only stops
@@ -113,8 +129,10 @@ class Rows:
 
     def text(self) -> str:
         return json.dumps(
-            {"rows": list(self.rows), "count": self.count}, ensure_ascii=False,
-            indent=1, default=str,
+            {"rows": list(self.rows), "count": self.count},
+            ensure_ascii=False,
+            indent=1,
+            default=str,
         )
 
 
@@ -178,9 +196,9 @@ class DbSource:
                 "does not start a read. Every database here is a reader, so "
                 "the question is what you meant, not what you could do."
             )
-        answer = _json(await self.server.call(
-            "execute_query", {"db_id": db_id, "sql": bare}
-        ))
+        answer = _json(
+            await self.server.call("execute_query", {"db_id": db_id, "sql": bare})
+        )
         return _capped(answer, self.max_rows)
 
     def _permitted(self, db_id: str) -> None:
@@ -310,8 +328,10 @@ def _query_db(evidence: Evidence, source: DbSource | None):
 def db_tools(run: RunContext) -> list:
     """`backend.db`'s factory: the room's databases (`Placement.dbs`) only."""
     reads = run.mcp.get(DB_SERVER)
-    source = None if reads is None else DbSource(
-        server=reads, allowed=frozenset(run.domain.dbs)
+    source = (
+        None
+        if reads is None
+        else DbSource(server=reads, allowed=frozenset(run.domain.dbs))
     )
     return [_describe_db(run.evidence, source), _query_db(run.evidence, source)]
 

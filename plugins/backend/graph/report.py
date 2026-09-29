@@ -15,15 +15,15 @@ diagnosis is wrong.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from plugins.backend.graph.diagnose import diagnosis_of
-from plugins.backend.graph.intake import intake_of
-from friday.sdk.workflow import DAGState, Deps, HandOver, Node, Reply
 from friday.sdk.outbox import Kind
 from friday.sdk.redact import scrub
+from friday.sdk.workflow import DAGState, Deps, HandOver, Node, Reply
+from plugins.backend.graph.diagnose import diagnosis_of
+from plugins.backend.graph.intake import intake_of
 
 __all__ = ["render", "report_node"]
 
@@ -89,7 +89,9 @@ def render(state: DAGState, *, task_id: int, at: datetime) -> str:
         reason = thought.get("reason", "") if isinstance(thought, dict) else ""
         lines.append(f"Nothing. {reason or 'The diagnose node did not run.'}")
 
-    not_checked = list(thought.get("not_checked", [])) if isinstance(thought, dict) else []
+    not_checked = (
+        list(thought.get("not_checked", [])) if isinstance(thought, dict) else []
+    )
 
     lines += ["", "## What it did not check", ""]
     lines += [f"- {line}" for line in not_checked if line] or ["- nothing recorded"]
@@ -137,7 +139,7 @@ def report_node(*, reports_dir: Path, approver: str = "") -> Node:
     """
 
     async def _report(state: DAGState, deps: Deps) -> Any:
-        at = datetime.now(timezone.utc)
+        at = datetime.now(UTC)
         directory = reports_dir
         text = render(state, task_id=deps.task.id, at=at)
 
@@ -168,9 +170,8 @@ def report_node(*, reports_dir: Path, approver: str = "") -> Node:
                 thought.get("reason", "") if isinstance(thought, dict) else ""
             ) or "nothing was diagnosed"
 
-        told = (
-            f"{headline}"
-            + (f" — the full report is in {written}" if written else "")
+        told = f"{headline}" + (
+            f" — the full report is in {written}" if written else ""
         )
 
         # **The operator is told either way**, and told the one thing the

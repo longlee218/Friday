@@ -144,11 +144,15 @@ async def enrich(seed: IntakeSeed, db: Any) -> Placement:
     # Room rows come first, so the first of a name is the room's own.
     by_name: dict[str, Project] = {}
     for row in await db.structured_memories(channel_id, kind=BACKEND_PROJECT):
-        by_name.setdefault(row.name, Project(
-            name=row.name, repo_path=row.repo_path or "",
-            docs_paths=tuple(row.docs_paths or ()),
-            error_codes_doc=row.error_codes_doc or "",
-        ))
+        by_name.setdefault(
+            row.name,
+            Project(
+                name=row.name,
+                repo_path=row.repo_path or "",
+                docs_paths=tuple(row.docs_paths or ()),
+                error_codes_doc=row.error_codes_doc or "",
+            ),
+        )
     projects = tuple(by_name.values())
 
     fields: dict[str, Any] = {
@@ -160,17 +164,30 @@ async def enrich(seed: IntakeSeed, db: Any) -> Placement:
     if resolved is None:
         # Vague, or unnamed: the candidate set, for the agent to narrow by
         # reading — never a guess.
-        return Placement(env=env, candidates=tuple(row.name for row in services), **fields)
+        return Placement(
+            env=env, candidates=tuple(row.name for row in services), **fields
+        )
 
     fields["service"] = resolved.name
     if env == "production":
-        fields.update(cluster=resolved.prod.cluster, namespace=resolved.prod.namespace,
-                      app=resolved.prod.app)
+        fields.update(
+            cluster=resolved.prod.cluster,
+            namespace=resolved.prod.namespace,
+            app=resolved.prod.app,
+        )
     elif env == "dev":
-        fields.update(namespace=resolved.dev.namespace, pod_pattern=resolved.dev.pod_pattern)
-    project = await db.structured_memory(channel_id, kind=BACKEND_PROJECT, key=resolved.project)
+        fields.update(
+            namespace=resolved.dev.namespace, pod_pattern=resolved.dev.pod_pattern
+        )
+    project = await db.structured_memory(
+        channel_id, kind=BACKEND_PROJECT, key=resolved.project
+    )
     if project is not None:
-        fields.update(project=project.name,
-                      clone_path=project.repo_path or "", repo_path=project.repo_path or "",
-                      error_code_doc=project.error_codes_doc or "", stack=project.stack or "")
+        fields.update(
+            project=project.name,
+            clone_path=project.repo_path or "",
+            repo_path=project.repo_path or "",
+            error_code_doc=project.error_codes_doc or "",
+            stack=project.stack or "",
+        )
     return Placement(env=env, **fields)

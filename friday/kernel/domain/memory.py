@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 from enum import StrEnum
+from typing import Any
 
 from friday.sdk.memory import MemoryOrigin
 
@@ -124,10 +124,12 @@ class RoomSummary:
     )
     facts: list[str] = field(
         default_factory=list,
-        metadata={"doc": "what is true of this room and would still be true "
-                         "next month — what a name refers to, which host is "
-                         "which, where something lives. Copy a name exactly "
-                         "as it is written."},
+        metadata={
+            "doc": "what is true of this room and would still be true "
+            "next month — what a name refers to, which host is "
+            "which, where something lives. Copy a name exactly "
+            "as it is written."
+        },
     )
     decisions: list[str] = field(
         default_factory=list,

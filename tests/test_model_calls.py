@@ -6,22 +6,24 @@ fact. A log line answers it while the process is alive and never again.
 
 from __future__ import annotations
 
-from friday.sdk.testing import FunctionModel
 from dataclasses import asdict
-
-from friday.sdk.testing import ScriptedModel, function_call
+from datetime import UTC
 
 from conftest import captured, make_event
+
 from friday.kernel.config import AgentConfig
 from friday.kernel.triage import Triage
+from friday.sdk.testing import FunctionModel, ScriptedModel, function_call
 
 CONFIG = AgentConfig(
-    name="triage", api_key="sk-secret", base_url="https://example.invalid/v1",
+    name="triage",
+    api_key="sk-secret",
+    base_url="https://example.invalid/v1",
     model="test-model",
 )
 
 
-def api_issue_call():
+def trace_problem_call():
     return function_call(
         "answer", {"type": "backend.trace_problem", "confidence": 0.9}, call_id="1"
     )
@@ -34,7 +36,7 @@ async def test_a_run_reports_both_sides_of_the_call():
         calls.append(call)
 
     triage = Triage(
-        config=CONFIG, model=ScriptedModel([[api_issue_call()]]), record=sink
+        config=CONFIG, model=ScriptedModel([[trace_problem_call()]]), record=sink
     )
 
     await triage.decide(make_event(text="checkout is 500ing"))
@@ -55,7 +57,7 @@ async def test_a_run_reports_both_sides_of_the_call():
 async def test_triage_still_writes_nothing_itself():
     """It reaches no store. Built without a sink, it records nowhere and still
     decides — which is what makes it testable without a database."""
-    triage = Triage(config=CONFIG, model=ScriptedModel([[api_issue_call()]]))
+    triage = Triage(config=CONFIG, model=ScriptedModel([[trace_problem_call()]]))
 
     outcome = await triage.decide(make_event())
 
@@ -91,7 +93,7 @@ async def test_a_decision_can_be_traced_back_to_the_call_that_made_it(
     await captured(inbox)
     triage = Triage(
         config=CONFIG,
-        model=ScriptedModel([[api_issue_call()]]),
+        model=ScriptedModel([[trace_problem_call()]]),
         record=_recording(db),
     )
 
@@ -128,13 +130,20 @@ async def test_a_credential_never_reaches_storage(inbox, provider, db):
 async def test_old_calls_are_trimmed(db):
     """A container that never restarts would otherwise fill its volume with
     prompts nobody will read."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    old = datetime.now(timezone.utc) - timedelta(days=30)
-    for age, message_id in ((old, "old"), (datetime.now(timezone.utc), "new")):
+    old = datetime.now(UTC) - timedelta(days=30)
+    for age, message_id in ((old, "old"), (datetime.now(UTC), "new")):
         await db.record_model_call(
-            message_id=message_id, agent="triage", model="m", system_prompt="s",
-            prompt="p", output="o", input_tokens=1, output_tokens=1, created_at=age,
+            message_id=message_id,
+            agent="triage",
+            model="m",
+            system_prompt="s",
+            prompt="p",
+            output="o",
+            input_tokens=1,
+            output_tokens=1,
+            created_at=age,
         )
 
     removed = await db.trim_model_calls(keep_days=14)

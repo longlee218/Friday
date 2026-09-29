@@ -19,9 +19,9 @@ import asyncio
 import os
 import sys
 
+from friday.kernel.dag import adapter
 from friday.kernel.outbox import Outbox
 from friday.store.db import Database
-from friday.kernel.dag import adapter
 
 
 class Crashing:
@@ -56,7 +56,12 @@ async def _go(sysdb: str, app_db: str, marker: str, row_id: int) -> None:
 
 
 def _main() -> None:
-    sysdb, app_db, marker, row_id = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+    sysdb, app_db, marker, row_id = (
+        sys.argv[1],
+        sys.argv[2],
+        sys.argv[3],
+        int(sys.argv[4]),
+    )
     asyncio.run(_go(sysdb, app_db, marker, row_id))
 
 

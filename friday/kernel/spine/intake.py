@@ -49,7 +49,9 @@ async def intake(
     domain's (`Plugin.enricher`); `None` for a domain with none."""
     turns = tuple(await db.original_turns_for(task_id))
     request_text = "\n".join(turns)
-    seed = IntakeSeed(channel_id, request_text, reported_at, hints_of(request_text), turns)
+    seed = IntakeSeed(
+        channel_id, request_text, reported_at, hints_of(request_text), turns
+    )
     domain = await enricher(seed, db) if enricher is not None else None
     keys = domain.retrieval_keys() if domain is not None else {}
     records = await db.case_memories(channel_id, keys, request_text)

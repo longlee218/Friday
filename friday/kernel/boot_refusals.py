@@ -68,26 +68,40 @@ def refusals(
         out += _recognition(registry, action)
     out += _shared_examples(registry)
     if shell_hosts is not None and not list(shell_hosts):
-        out += [f"action {name!r} grants {SHELL!r}, but config.yaml declares no shell_hosts"
-                for name, action in registry.actions().items()
-                if SHELL in action.contract.allowed_toolsets]
+        out += [
+            f"action {name!r} grants {SHELL!r}, but config.yaml declares no shell_hosts"
+            for name, action in registry.actions().items()
+            if SHELL in action.contract.allowed_toolsets
+        ]
     return out
 
 
 def _namespaces(registry: Registry) -> list[str]:
-    names = [*registry.actions(), *registry.agents(), *registry.toolsets(), *registry.memory_kinds()]
+    names = [
+        *registry.actions(),
+        *registry.agents(),
+        *registry.toolsets(),
+        *registry.memory_kinds(),
+        *registry.evals(),
+    ]
     out = []
     for name in names:
         owner = registry.owner_of(name)
         if owner is not None and not name.startswith(f"{owner.id}."):
-            out.append(f"{name!r} is registered by plugin {owner.id!r} but not named under {owner.id!r}.")
+            out.append(
+                f"{name!r} is registered by plugin {owner.id!r} but not named under {owner.id!r}."
+            )
     return out
 
 
 def _descriptions(registry: Registry) -> list[str]:
     specs = [("agent", s) for s in registry.agents().values()]
     specs += [("toolset", s) for s in registry.toolsets().values()]
-    return [f"{what} {s.name!r} has no description" for what, s in specs if not s.description.strip()]
+    return [
+        f"{what} {s.name!r} has no description"
+        for what, s in specs
+        if not s.description.strip()
+    ]
 
 
 def _agents(registry: Registry, tiers: set[str] | None) -> list[str]:
@@ -95,9 +109,14 @@ def _agents(registry: Registry, tiers: set[str] | None) -> list[str]:
     toolsets = registry.toolsets()
     for agent in registry.agents().values():
         if tiers is not None and agent.tier not in tiers:
-            out.append(f"agent {agent.name!r} runs on tier {agent.tier!r}, which config.yaml does not declare")
-        out += [f"agent {agent.name!r} names toolset {t!r}, which is not registered"
-                for t in agent.toolsets if t not in toolsets]
+            out.append(
+                f"agent {agent.name!r} runs on tier {agent.tier!r}, which config.yaml does not declare"
+            )
+        out += [
+            f"agent {agent.name!r} names toolset {t!r}, which is not registered"
+            for t in agent.toolsets
+            if t not in toolsets
+        ]
     return out
 
 
@@ -114,12 +133,15 @@ def _readers(registry: Registry) -> list[str]:
     """A plugin's reader names one of its agents, or `code`. Only for a plugin
     that registers at least one `AgentSpec`: until then its readers name DAG
     agents that have no spec (temporary, ticket 16 deletes the DAG path)."""
-    with_specs = {registry.owner_of(n).id for n in registry.agents() if registry.owner_of(n)}
+    with_specs = {
+        registry.owner_of(n).id for n in registry.agents() if registry.owner_of(n)
+    }
     agents = registry.agents()
     return [
         f"reader {name!r} is not a registered agent (nor {_CODE_READER!r})"
         for name in registry.readers()
-        if name != _CODE_READER and name not in agents
+        if name != _CODE_READER
+        and name not in agents
         and registry.reader_owners(name) & with_specs
     ]
 
@@ -129,17 +151,29 @@ def _contract(registry: Registry, action: Action) -> list[str]:
     mine = f"{owner.id}." if owner else CORE_PREFIX
     contract = action.contract
     agents, toolsets = registry.agents(), registry.toolsets()
-    out = [f"action {action.name!r} grants agent {a!r}, which is not registered"
-           for a in sorted(contract.allowed_agents) if a not in agents]
-    out += [f"action {action.name!r} grants toolset {t!r}, which is not registered"
-            for t in sorted(contract.allowed_toolsets) if t not in toolsets]
-    out += [f"action {action.name!r} grants {x!r}, which belongs to another plugin"
-            for x in sorted(contract.allowed_agents | contract.allowed_toolsets)
-            if not (x.startswith(mine) or x.startswith(CORE_PREFIX))]
+    out = [
+        f"action {action.name!r} grants agent {a!r}, which is not registered"
+        for a in sorted(contract.allowed_agents)
+        if a not in agents
+    ]
+    out += [
+        f"action {action.name!r} grants toolset {t!r}, which is not registered"
+        for t in sorted(contract.allowed_toolsets)
+        if t not in toolsets
+    ]
+    out += [
+        f"action {action.name!r} grants {x!r}, which belongs to another plugin"
+        for x in sorted(contract.allowed_agents | contract.allowed_toolsets)
+        if not (x.startswith((mine, CORE_PREFIX)))
+    ]
     domain = domain_type(owner)
     for name in sorted(contract.allowed_toolsets):
         ts = toolsets.get(name)
-        if ts is not None and ts.domain_type is not None and ts.domain_type is not domain:
+        if (
+            ts is not None
+            and ts.domain_type is not None
+            and ts.domain_type is not domain
+        ):
             out.append(
                 f"action {action.name!r} grants toolset {name!r}, which reads a "
                 f"{ts.domain_type.__name__} domain, but its domain is "
@@ -162,7 +196,9 @@ def _recognition(registry: Registry, action: Action) -> list[str]:
         if other == action.name:
             out.append(f"action {action.name!r} names itself in `not_when`")
         elif other not in actions:
-            out.append(f"action {action.name!r} names {other!r} in `not_when`, which is not registered")
+            out.append(
+                f"action {action.name!r} names {other!r} in `not_when`, which is not registered"
+            )
     return out
 
 
@@ -173,5 +209,7 @@ def _shared_examples(registry: Registry) -> list[str]:
         for text in action.recognition.examples:
             first = seen.setdefault(text.strip(), action.name)
             if first != action.name:
-                out.append(f"example {text!r} is claimed by both {first!r} and {action.name!r}")
+                out.append(
+                    f"example {text!r} is claimed by both {first!r} and {action.name!r}"
+                )
     return out

@@ -12,7 +12,7 @@ test_a_crash_resumes_from_the_last_incomplete_step`.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -49,7 +49,7 @@ async def test_a_backup_copies_both_files(tmp_path):
     sources = _sources(tmp_path)
     backup = Backup(sources=sources, backup_dir=str(tmp_path / "backups"), keep=7)
 
-    made = await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=timezone.utc))
+    made = await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=UTC))
 
     assert made
     day = tmp_path / "backups"
@@ -62,7 +62,7 @@ async def test_it_backs_up_at_most_once_a_day(tmp_path):
     restart, because the file itself is the record of having run."""
     sources = _sources(tmp_path)
     backup = Backup(sources=sources, backup_dir=str(tmp_path / "backups"), keep=7)
-    now = datetime(2026, 9, 24, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 24, tzinfo=UTC)
 
     assert await backup.run_if_due(now=now) is True
     assert await backup.run_if_due(now=now) is False  # already done today
@@ -73,20 +73,24 @@ async def test_retention_keeps_the_newest_days_both_halves(tmp_path):
     sources = _sources(tmp_path)
     backup = Backup(sources=sources, backup_dir=str(tmp_path / "backups"), keep=2)
     for day in (22, 23, 24):
-        await backup.run_if_due(now=datetime(2026, 9, day, tzinfo=timezone.utc))
+        await backup.run_if_due(now=datetime(2026, 9, day, tzinfo=UTC))
 
     kept = sorted(p.name for p in (tmp_path / "backups").glob("*.db"))
     # Only the newest two days, and both files of each — never a lone half.
     assert kept == [
-        "friday.20260923.db", "friday.20260924.db",
-        "friday.system.20260923.db", "friday.system.20260924.db",
+        "friday.20260923.db",
+        "friday.20260924.db",
+        "friday.system.20260923.db",
+        "friday.system.20260924.db",
     ]
 
 
 async def test_keep_zero_turns_the_backup_off(tmp_path):
-    backup = Backup(sources=_sources(tmp_path), backup_dir=str(tmp_path / "backups"), keep=0)
+    backup = Backup(
+        sources=_sources(tmp_path), backup_dir=str(tmp_path / "backups"), keep=0
+    )
 
-    assert await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=timezone.utc)) is False
+    assert await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=UTC)) is False
     assert not (tmp_path / "backups").exists()
 
 
@@ -98,7 +102,7 @@ async def test_a_system_db_not_created_yet_is_skipped(tmp_path):
     sources = [str(app), str(tmp_path / "friday.system.db")]  # system db absent
     backup = Backup(sources=sources, backup_dir=str(tmp_path / "backups"), keep=7)
 
-    assert await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=timezone.utc)) is True
+    assert await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=UTC)) is True
     day = tmp_path / "backups"
     assert (day / "friday.20260924.db").exists()
     assert not (day / "friday.system.20260924.db").exists()
@@ -107,13 +111,15 @@ async def test_a_system_db_not_created_yet_is_skipped(tmp_path):
 async def test_restore_brings_both_files_back(tmp_path):
     sources = _sources(tmp_path)
     backup = Backup(sources=sources, backup_dir=str(tmp_path / "backups"), keep=7)
-    await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=timezone.utc))
+    await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=UTC))
 
     # The live files move on, then a restore rewinds both to the backup.
     _make_db(Path(sources[0]), "app-later")
     _make_db(Path(sources[1]), "workflow-later")
 
-    restored = restore("20260924", sources=sources, backup_dir=str(tmp_path / "backups"))
+    restored = restore(
+        "20260924", sources=sources, backup_dir=str(tmp_path / "backups")
+    )
 
     assert set(restored) == set(sources)
     assert _rows(Path(sources[0])) == ["app"]
@@ -126,7 +132,7 @@ async def test_restore_clears_stale_wal_sidecars(tmp_path):
     next open, undoing the restore — so restore deletes the sidecars."""
     sources = _sources(tmp_path)
     backup = Backup(sources=sources, backup_dir=str(tmp_path / "backups"), keep=7)
-    await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=timezone.utc))
+    await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=UTC))
 
     # A crash left WAL/SHM sidecars beside the live application db.
     app = Path(sources[0])
@@ -166,7 +172,7 @@ async def test_an_unrelated_file_in_the_dir_is_left_alone(tmp_path):
     (day / "notes.txt").write_text("keep me")
     backup = Backup(sources=sources, backup_dir=str(day), keep=1)
 
-    await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=timezone.utc))
+    await backup.run_if_due(now=datetime(2026, 9, 24, tzinfo=UTC))
 
     assert (day / "notes.txt").read_text() == "keep me"
 

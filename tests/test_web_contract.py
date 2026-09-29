@@ -18,9 +18,9 @@ import pathlib
 import re
 
 import pytest
+from conftest import BoardClient, captured, make_event
 from fastapi.testclient import TestClient
 
-from conftest import BoardClient, captured, make_event
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.states import TaskState
 from friday.kernel.ops.api import build_api, servable
@@ -33,10 +33,10 @@ TYPES = pathlib.Path(__file__).resolve().parents[1] / "web" / "src" / "api-types
 def declared(interface: str) -> set[str]:
     """The field names one `export interface` block declares."""
     body = re.search(
-        rf"export interface {interface} \{{(.*?)\n\}}", TYPES.read_text(), re.S
+        rf"export interface {interface} \{{(.*?)\n\}}", TYPES.read_text(), re.DOTALL
     )
     assert body, f"web/src/api-types.ts declares no interface {interface}"
-    return set(re.findall(r"^\s{2}(\w+)[?]?:", body.group(1), re.M))
+    return set(re.findall(r"^\s{2}(\w+)[?]?:", body.group(1), re.MULTILINE))
 
 
 @pytest.fixture
@@ -54,12 +54,18 @@ async def test_the_page_and_the_board_route_agree(client, inbox, provider, db):
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
     task = await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
     row = await db.queue_outbound(
-        task_id=task.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=task.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     await db.fail_outbound(row.id, "boom")
     await db.mark_triaged(make_event(message_id="10"), task_id=task.id)
@@ -78,7 +84,9 @@ async def test_the_page_and_the_board_route_agree(client, inbox, provider, db):
     assert isinstance(board["counts"]["outbound"], dict)
     assert set(board["messages"][0]) == declared("Message")
     assert set(board["tasks_by_state"]["pending"][0]) == declared("Task")
-    assert set(board["tasks_by_state"]["pending"][0]["opening"]) == declared("TaskOpening")
+    assert set(board["tasks_by_state"]["pending"][0]["opening"]) == declared(
+        "TaskOpening"
+    )
     assert set(board["failed"][0]) == declared("Outbound")
 
 
@@ -86,19 +94,33 @@ async def test_the_page_and_the_flow_route_agree(client, inbox, provider, db):
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
     task = await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
     await db.record_model_call(
-        message_id="10", agent="triage", model="m", system_prompt="s",
-        prompt="p", output="o", input_tokens=1, output_tokens=1,
+        message_id="10",
+        agent="triage",
+        model="m",
+        system_prompt="s",
+        prompt="p",
+        output="o",
+        input_tokens=1,
+        output_tokens=1,
     )
     await db.record_tool_call(
-        task_id=task.id, agent="extractor", tool="memory_search",
-        arguments="{}", result="ok", failed=False,
+        task_id=task.id,
+        agent="extractor",
+        tool="memory_search",
+        arguments="{}",
+        result="ok",
+        failed=False,
     )
     await db.mark_triaged(
-        make_event(message_id="10"), task.id,
+        make_event(message_id="10"),
+        task.id,
         decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}},
     )
 
@@ -123,8 +145,14 @@ async def test_the_summary_shown_beside_a_message_agrees(client, inbox, provider
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
     await db.record_model_call(
-        message_id="10", agent="triage", model="m", system_prompt="s",
-        prompt="p", output="o", input_tokens=1, output_tokens=1,
+        message_id="10",
+        agent="triage",
+        model="m",
+        system_prompt="s",
+        prompt="p",
+        output="o",
+        input_tokens=1,
+        output_tokens=1,
     )
 
     (message,) = client.get("/api/board").json()["messages"]
@@ -197,8 +225,14 @@ async def test_the_days_spend_is_reachable_and_split_by_agent(client, db):
     what to set it to."""
     for agent, tokens in (("triage", 10), ("responder", 100), ("triage", 5)):
         await db.record_model_call(
-            message_id=None, agent=agent, model="m", system_prompt="s",
-            prompt="p", output="o", input_tokens=tokens, output_tokens=0,
+            message_id=None,
+            agent=agent,
+            model="m",
+            system_prompt="s",
+            prompt="p",
+            output="o",
+            input_tokens=tokens,
+            output_tokens=0,
         )
 
     spend = client.get("/api/spend").json()
@@ -211,8 +245,14 @@ async def test_an_agent_that_spent_nothing_is_simply_absent(client, db):
     """Which agents exist is config.yaml's business, so there is no list to
     enumerate against."""
     await db.record_model_call(
-        message_id=None, agent="triage", model="m", system_prompt="s",
-        prompt="p", output="o", input_tokens=1, output_tokens=1,
+        message_id=None,
+        agent="triage",
+        model="m",
+        system_prompt="s",
+        prompt="p",
+        output="o",
+        input_tokens=1,
+        output_tokens=1,
     )
 
     assert list(client.get("/api/spend").json()["by_agent"]) == ["triage"]
@@ -355,17 +395,32 @@ async def test_a_tasks_tool_calls_are_reachable_beside_its_prompts(client, db):
     all, so nothing on that screen had ever shown a tool call. Two ticked
     criteria, one missing route."""
     task = await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
     await db.record_model_call(
-        message_id=None, task_id=task.id, node="prepare", agent="extractor",
-        model="m", system_prompt="s", prompt="p", output="o",
-        input_tokens=4, output_tokens=1,
+        message_id=None,
+        task_id=task.id,
+        node="prepare",
+        agent="extractor",
+        model="m",
+        system_prompt="s",
+        prompt="p",
+        output="o",
+        input_tokens=4,
+        output_tokens=1,
     )
     await db.record_tool_call(
-        task_id=task.id, node="prepare", agent="extractor",
-        tool="memory_search", arguments="{}", result="asked", failed=False,
+        task_id=task.id,
+        node="prepare",
+        agent="extractor",
+        tool="memory_search",
+        arguments="{}",
+        result="asked",
+        failed=False,
     )
 
     calls = client.get(f"/api/tasks/{task.id}/calls").json()
@@ -381,8 +436,11 @@ async def test_a_stuck_tasks_compaction_state_is_reachable(client, db):
     task whose own transcript truncation could not bring it under budget,
     but a log is not the operator's own view of it — this route is."""
     task = await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
 
     fresh = client.get(f"/api/tasks/{task.id}/compaction").json()
@@ -405,8 +463,15 @@ def test_the_page_and_the_memory_routes_agree(client):
     renders, and the form's description of each kind matches its types."""
     made = client.post(
         "/api/channels/c1/memories",
-        json={"kind": "person", "data": {"discord_id": "1", "name": "Lan",
-                                          "role": "backend", "team": "orders"}},
+        json={
+            "kind": "person",
+            "data": {
+                "discord_id": "1",
+                "name": "Lan",
+                "role": "backend",
+                "team": "orders",
+            },
+        },
     ).json()
     (listed,) = client.get("/api/channels/c1/memories").json()
     kinds = client.get("/api/channels/c1/memory-kinds").json()
@@ -433,14 +498,23 @@ def test_a_field_that_names_another_row_offers_the_rows_that_exist(client):
     wrong answers look exactly like its right ones — the first six rows ever
     typed proved it."""
     for name in ("reelme-v2", "midas"):
-        client.post("/api/channels/c1/memories", json={
-            "kind": "backend.project", "text": f"repo {name}",
-            "data": {"name": name, "repo_path": f"~/{name}",
-                     "default_branch": "main", "stack": "NestJS"},
-        })
+        client.post(
+            "/api/channels/c1/memories",
+            json={
+                "kind": "backend.project",
+                "text": f"repo {name}",
+                "data": {
+                    "name": name,
+                    "repo_path": f"~/{name}",
+                    "default_branch": "main",
+                    "stack": "NestJS",
+                },
+            },
+        )
 
-    field = _field(client.get("/api/channels/c1/memory-kinds").json(),
-                   "backend.service", "project")
+    field = _field(
+        client.get("/api/channels/c1/memory-kinds").json(), "backend.service", "project"
+    )
 
     assert field["type"] == "choice"
     assert field["names"] == "backend.project"
@@ -448,14 +522,23 @@ def test_a_field_that_names_another_row_offers_the_rows_that_exist(client):
 
 
 def test_the_choices_are_this_rooms_rows_and_not_another_rooms(client):
-    client.post("/api/channels/c1/memories", json={
-        "kind": "backend.project", "text": "repo", "data": {
-            "name": "reelme-v2", "repo_path": "~/x",
-            "default_branch": "main", "stack": "NestJS"},
-    })
+    client.post(
+        "/api/channels/c1/memories",
+        json={
+            "kind": "backend.project",
+            "text": "repo",
+            "data": {
+                "name": "reelme-v2",
+                "repo_path": "~/x",
+                "default_branch": "main",
+                "stack": "NestJS",
+            },
+        },
+    )
 
-    field = _field(client.get("/api/channels/c2/memory-kinds").json(),
-                   "backend.service", "project")
+    field = _field(
+        client.get("/api/channels/c2/memory-kinds").json(), "backend.service", "project"
+    )
 
     assert field["choices"] == []
 

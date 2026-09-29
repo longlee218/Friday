@@ -8,8 +8,14 @@ looking for.
 
 from __future__ import annotations
 
-from friday.kernel.text_transform import Attachment, redact, render_attachments, transform
+from datetime import UTC
 
+from friday.kernel.text_transform import (
+    Attachment,
+    redact,
+    render_attachments,
+    transform,
+)
 
 # --- code survives exactly ---------------------------------------------------
 
@@ -41,7 +47,7 @@ def test_the_prose_around_code_is_still_cleaned():
 
 
 def test_an_inline_span_stays_a_word_in_the_sentence():
-    """"the `correlationId` field" must not become "the field"."""
+    """ "the `correlationId` field" must not become "the field"."""
     cleaned = transform("cái field `correlationId` ấy, nó null 🤔")
 
     assert "correlationId" in cleaned.text
@@ -49,7 +55,7 @@ def test_an_inline_span_stays_a_word_in_the_sentence():
 
 
 def test_a_stack_trace_is_not_reflowed():
-    raw = "```\nTraceback:\n  File \"pay.py\", line 20\n    → TypeError\n```"
+    raw = '```\nTraceback:\n  File "pay.py", line 20\n    → TypeError\n```'
 
     assert transform(raw).code == (
         'Traceback:\n  File "pay.py", line 20\n    → TypeError',
@@ -68,7 +74,7 @@ def test_vietnamese_survives():
 
 
 def test_emoji_and_invisible_characters_go():
-    cleaned = transform("​API lỗi nè 😭😭  anh xem giúp em với  ")
+    cleaned = transform("\u200bAPI lỗi nè 😭😭  anh xem giúp em với  ")
 
     assert cleaned.text == "API lỗi nè anh xem giúp em với"
 
@@ -154,7 +160,7 @@ def test_a_string_where_a_list_belongs_is_refused():
 
 def _discord_message(text: str, *, files=()):
     """The shape `normalise` reads, with nothing it does not read."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     from types import SimpleNamespace
 
     return SimpleNamespace(
@@ -162,7 +168,7 @@ def _discord_message(text: str, *, files=()):
         content="",
         clean_content=text,
         author=SimpleNamespace(id=9, display_name="dana"),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         mentions=[],
         role_mentions=[],
         channel=SimpleNamespace(id=5),

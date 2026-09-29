@@ -25,8 +25,8 @@ never runs.
 The rebuild does two things and only one of them depends on promotion:
 
 ```python
-derived["learned"] = learned                      # depends on promotion
-summary = await self._maybe_summarize(channel_id) # depends on message volume
+derived["learned"] = learned  # depends on promotion
+summary = await self._maybe_summarize(channel_id)  # depends on message volume
 ```
 
 The second is the per-channel summary every later prompt for that room reads.

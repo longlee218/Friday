@@ -12,24 +12,24 @@ log line. Worse than the planner it replaced, which had no memory and so
 reconsidered every time.
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = 'a17c3e5b28d0'
-down_revision: Union[str, Sequence[str], None] = '8f31d4a90c25'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "a17c3e5b28d0"
+down_revision: str | Sequence[str] | None = "8f31d4a90c25"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     op.add_column(
-        'dag_state',
-        sa.Column('params_fingerprint', sa.String(), nullable=False, server_default=''),
+        "dag_state",
+        sa.Column("params_fingerprint", sa.String(), nullable=False, server_default=""),
     )
 
 
 def downgrade() -> None:
-    op.drop_column('dag_state', 'params_fingerprint')
+    op.drop_column("dag_state", "params_fingerprint")

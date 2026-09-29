@@ -23,13 +23,13 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
+from friday.kernel.config import ConfigError, MCPServerConfig
 from friday.kernel.harness.harness import (
     MCPToolset,
     SSETransport,
     StdioTransport,
     StreamableHttpTransport,
 )
-from friday.kernel.config import ConfigError, MCPServerConfig
 from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS
 
 __all__ = ["build", "name_of"]
@@ -101,6 +101,7 @@ def _one(config: MCPServerConfig, allowed: frozenset[str]):
     `tool_error_behavior='failed'` so a failing tool becomes a message the model
     is told and carries on past, rather than a retry of a call it cannot fix.
     """
+
     def offered(ctx, tool_def) -> bool:
         return tool_def.name in allowed
 

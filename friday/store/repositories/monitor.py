@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class MonitorRepo:
-
     async def decisions(self) -> list[dict]:
         """Every triage decision, oldest first. The evidence for the threshold."""
         async with self._sessions() as session:
@@ -30,9 +29,7 @@ class MonitorRepo:
                 for row in rows
             ]
 
-    async def flow_for(
-        self, *, provider: str, message_id: str
-    ) -> MessageFlow | None:
+    async def flow_for(self, *, provider: str, message_id: str) -> MessageFlow | None:
         """Everything that followed from one message, in one request.
 
         **"One request", not "one instant", and the difference is deliberate.**
@@ -144,7 +141,7 @@ class MonitorRepo:
         is worth, and this repo's own convention is that the rules only
         written down are the ones that drifted.
         """
-        by_key = lambda table: (  # noqa: E731
+        by_key = lambda table: (
             (table.message_id == message_id) | (table.task_id == task_id)
             if task_id is not None
             else (table.message_id == message_id)
@@ -192,16 +189,22 @@ class MonitorRepo:
                     select(func.max(schema.Message.created_at))
                 ),
                 "tasks": dict(
-                    (await session.execute(
-                        select(schema.Task.state, func.count())
-                        .group_by(schema.Task.state)
-                    )).all()
+                    (
+                        await session.execute(
+                            select(schema.Task.state, func.count()).group_by(
+                                schema.Task.state
+                            )
+                        )
+                    ).all()
                 ),
                 "outbound": dict(
-                    (await session.execute(
-                        select(schema.Outbound.state, func.count())
-                        .group_by(schema.Outbound.state)
-                    )).all()
+                    (
+                        await session.execute(
+                            select(schema.Outbound.state, func.count()).group_by(
+                                schema.Outbound.state
+                            )
+                        )
+                    ).all()
                 ),
             }
 
@@ -277,7 +280,9 @@ class MonitorRepo:
                     message_subq.c.task_id == schema.Task.id,
                 )
                 .order_by(
-                    func.coalesce(model_subq.c.last_at, tool_subq.c.last_at).desc().nullslast()
+                    func.coalesce(model_subq.c.last_at, tool_subq.c.last_at)
+                    .desc()
+                    .nullslast()
                 )
             )
             rows = await session.execute(stmt)
@@ -299,12 +304,13 @@ class MonitorRepo:
                 # whose last activity is the same timestamp the
                 # `tool_subq` aggregated. Cheaper than a window
                 # function on SQLite.
-                tool_stmt = (
-                    select(schema.ToolCall.task_id, schema.ToolCall.tool, schema.ToolCall.created_at)
-                    .where(
-                        schema.ToolCall.task_id.in_({tid for tid, _ in ts_pairs}),
-                        schema.ToolCall.created_at.in_({ts for _, ts in ts_pairs}),
-                    )
+                tool_stmt = select(
+                    schema.ToolCall.task_id,
+                    schema.ToolCall.tool,
+                    schema.ToolCall.created_at,
+                ).where(
+                    schema.ToolCall.task_id.in_({tid for tid, _ in ts_pairs}),
+                    schema.ToolCall.created_at.in_({ts for _, ts in ts_pairs}),
                 )
                 async with self._sessions() as session:
                     for tid, tool, _ in await session.execute(tool_stmt):

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class RoomsRepo:
-
     async def rooms(self) -> list[dict]:
         """Every conversation this system has seen, for the left-hand list.
 
@@ -127,11 +126,14 @@ class RoomsRepo:
 
     async def conversation_is_tracked(self, event: InboundEvent) -> bool:
         async with self._sessions() as session:
-            return await session.scalar(
-                select(schema.Conversation.id).where(
-                    schema.Conversation.id == str(event.conversation)
+            return (
+                await session.scalar(
+                    select(schema.Conversation.id).where(
+                        schema.Conversation.id == str(event.conversation)
+                    )
                 )
-            ) is not None
+                is not None
+            )
 
     async def record_conversation(self, event: InboundEvent) -> bool:
         """Ensure the conversation exists. True if this created it."""

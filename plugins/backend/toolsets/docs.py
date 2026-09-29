@@ -18,7 +18,11 @@ from friday.sdk.toolset import RunContext, ToolsetSpec, tool
 from plugins.backend.placement import Placement, Project
 from plugins.backend.toolsets.code import at_ref, numbered, unknown_repo
 from plugins.backend.toolsets.evidence import Evidence
-from plugins.backend.toolsets.release import RELEASE_SERVER, ReleaseSource, RunningVersion
+from plugins.backend.toolsets.release import (
+    RELEASE_SERVER,
+    ReleaseSource,
+    RunningVersion,
+)
 
 __all__ = ["DOCS", "docs_tools"]
 
@@ -58,7 +62,11 @@ def _listing(project: Project) -> list[str]:
     clone = Path(project.repo_path).expanduser().resolve()
     found: list[str] = []
     for root in _roots(project):
-        files = [root] if root.is_file() else sorted(p for p in root.rglob("*") if p.is_file())
+        files = (
+            [root]
+            if root.is_file()
+            else sorted(p for p in root.rglob("*") if p.is_file())
+        )
         found += [f.relative_to(clone).as_posix() for f in files]
     return found[:MAX_LISTED]
 
@@ -87,13 +95,19 @@ def _read_docs(evidence: Evidence, placement: Placement, running: RunningVersion
         if not path:
             evidence.reads += 1
             listed = _listing(project)
-            return "\n".join(listed) if listed else f"{repo}'s docs folders hold no files."
+            return (
+                "\n".join(listed) if listed else f"{repo}'s docs folders hold no files."
+            )
         found = _doc(project, path)
         if found is None:
             return f"{path} is not a document under {repo}'s docs folders."
         evidence.reads += 1
         tag, why = await running.of(repo)
-        text = await asyncio.to_thread(at_ref, project.repo_path, found, tag) if tag else None
+        text = (
+            await asyncio.to_thread(at_ref, project.repo_path, found, tag)
+            if tag
+            else None
+        )
         if tag and text is None:
             why = f"the clone has no {path} at {tag} — fetch its tags"
         if text is not None:
@@ -110,7 +124,11 @@ def _read_docs(evidence: Evidence, placement: Placement, running: RunningVersion
         start = max(1, int(line))
         total = len(text.splitlines())
         shown = numbered(text, start, before=0, after=DOC_LINES - 1)
-        more = f" of {total}; more from line {start + DOC_LINES}" if start + DOC_LINES <= total else ""
+        more = (
+            f" of {total}; more from line {start + DOC_LINES}"
+            if start + DOC_LINES <= total
+            else ""
+        )
         return f"--- {path} ({where}){more}\n" + evidence.show(shown.splitlines())
 
     return read_docs

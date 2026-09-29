@@ -152,7 +152,9 @@ def _asking(row: Outbound) -> str:
 def _stuck(row: Outbound, board_url: str | None) -> str:
     """Enough to judge without opening anything, and where to go if you want to."""
     where = f"\n{board_url}" if board_url else ""
-    return f"**Nothing I can do with this**\n> {row.text}\n_in {row.conversation}_{where}"
+    return (
+        f"**Nothing I can do with this**\n> {row.text}\n_in {row.conversation}_{where}"
+    )
 
 
 class _Buttons(discord.ui.View):

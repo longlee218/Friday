@@ -15,7 +15,7 @@ imports `friday.sdk` only, so this builder never reaches for the kernel's
 `Harness` class directly: it asks `caps.make_harness(...)` for the model
 behind `Diagnose`. `caps` also carries the tool servers a run opened and the
 `sender`/`approver` identities a queued row uses. Ticket 14 lifted this
-package out of `friday/kernel/dag/api_issue/` into `plugins/backend/` unchanged
+package out of the kernel's DAG folder into `plugins/backend/` unchanged
 in shape, only in where it reaches for things.
 """
 
@@ -27,9 +27,9 @@ from typing import Any
 from friday.sdk.agent import AgentDeclaration
 from friday.sdk.workflow import (
     DAG,
+    Ask,
     DAGState,
     Edge,
-    Ask,
     HandOver,
     Reply,
     status_of,
@@ -54,8 +54,12 @@ TASK_TYPE = "backend.trace_problem"
 #: calls (board `domains-plug-in`, ticket 17 — the loop's real budget comes
 #: with the spine). 60s a request: it reads logs and code, the largest prompt.
 DIAGNOSE = AgentDeclaration(
-    name="backend.diagnose", tier="flash", temperature=0.0, max_turns=1,
-    tokens=500_000, request_timeout_seconds=60.0,
+    name="backend.diagnose",
+    tier="flash",
+    temperature=0.0,
+    max_turns=1,
+    tokens=500_000,
+    request_timeout_seconds=60.0,
 )
 
 

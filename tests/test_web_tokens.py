@@ -26,6 +26,7 @@ The fifth check is that every primitive `web/src/ui/` advertises is
 also importable from `web/src/ui/index.ts`, so `import {Button} from
 "../ui"` keeps working after the split.
 """
+
 from __future__ import annotations
 
 import re
@@ -126,8 +127,7 @@ def test_no_light_mode_media_query() -> None:
     css = _read(SRC / "index.css")
     for n, line in enumerate(css.splitlines(), 1):
         assert "prefers-color-scheme: light" not in line, (
-            f"index.css:{n}: light-mode media query found; "
-            "operator chose dark-only"
+            f"index.css:{n}: light-mode media query found; operator chose dark-only"
         )
 
 
@@ -228,7 +228,7 @@ def test_the_rooms_row_has_no_whole_row_click_handler() -> None:
     row_block = re.search(r'<div\s+className=\{[^}]*"msg"[^}]*\}>', src)
     if row_block:
         # The "msg" class row must not carry an onClick.
-        after = src[row_block.end():src.find("</div>", row_block.end())]
+        after = src[row_block.end() : src.find("</div>", row_block.end())]
         assert "onClick" not in after, (
             "the row has a click handler — the timestamp is the only "
             "thing that should open the flow"
@@ -276,6 +276,7 @@ def test_three_named_motions_with_enter_slower_than_exit() -> None:
     feels like a closing rather than a pause.
     """
     import re
+
     css = (SRC / "index.css").read_text(encoding="utf-8")
 
     # Each motion class pair (enter + exit) must be defined.
@@ -289,8 +290,12 @@ def test_three_named_motions_with_enter_slower_than_exit() -> None:
     # durations are --d-med or --d-fast (180ms / 120ms). Picking up
     # the variables instead of literal ms means a redesign of the
     # motion system is one file; the test still pins the relationship.
-    enter_dur = re.findall(r"\.(?:fade|slide|scale)-enter\s*\{[^}]*var\(--d-(slow|med|fast)\)", css)
-    exit_dur = re.findall(r"\.(?:fade|slide|scale)-exit\s*\{[^}]*var\(--d-(slow|med|fast)\)", css)
+    enter_dur = re.findall(
+        r"\.(?:fade|slide|scale)-enter\s*\{[^}]*var\(--d-(slow|med|fast)\)", css
+    )
+    exit_dur = re.findall(
+        r"\.(?:fade|slide|scale)-exit\s*\{[^}]*var\(--d-(slow|med|fast)\)", css
+    )
     ordering = {"fast": 0, "med": 1, "slow": 2}
     assert len(enter_dur) == 3, f"expected 3 enter classes, got {enter_dur}"
     assert len(exit_dur) == 3, f"expected 3 exit classes, got {exit_dur}"
@@ -309,7 +314,11 @@ def test_motion_respects_prefers_reduced_motion() -> None:
     is the audit's note #1 — the screen must not move for someone
     who asked it not to."""
     css = (SRC / "index.css").read_text(encoding="utf-8")
-    block = re.search(r"@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{(.*?)\}\s*\}", css, re.DOTALL)
+    block = re.search(
+        r"@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{(.*?)\}\s*\}",
+        css,
+        re.DOTALL,
+    )
     assert block, "no @media (prefers-reduced-motion: reduce) block"
     body = block.group(1)
     assert "--d-fast: 0ms" in body
@@ -371,8 +380,7 @@ def test_skeleton_renders_a_real_element_not_a_text_placeholder() -> None:
         "without the class is no better than text"
     )
     assert "Loading" not in skeleton, (
-        "Skeleton renders a Loading… text — that is exactly what "
-        "ticket 03 replaces"
+        "Skeleton renders a Loading… text — that is exactly what ticket 03 replaces"
     )
 
 
@@ -389,6 +397,7 @@ def test_monitor_screen_has_aria_log_and_memo_on_task_card() -> None:
     # asked for; a bare `memo` reference would be a wrapper without
     # application.
     import re
+
     assert re.search(r"\bmemo\s*\(", src), (
         "TaskCard is not React.memo'd — the audit asked for the wrap"
     )
@@ -404,7 +413,7 @@ def test_monitor_routes_at_root() -> None:
     assert 'section === "/" && <MonitorScreen />' in app
     # The topbar's first tab is the front door, in the same order
     # the spec called for: Monitor, Board, Rooms.
-    assert "label: \"Monitor\"" in app
+    assert 'label: "Monitor"' in app
     # The old first tab is no longer the first tab.
     assert 'label: "Board"' in app
 
@@ -438,15 +447,9 @@ def test_breadcrumb_collapses_more_than_four_items() -> None:
     "the constant dropped below 4" or "the slice was replaced
     with something that does not bound the trail"."""
     src = (SRC / "ui" / "Breadcrumb.tsx").read_text(encoding="utf-8")
-    assert "MAX_ITEMS = 4" in src, (
-        "Breadcrumb no longer caps at 4 items"
-    )
-    assert "slice(" in src, (
-        "Breadcrumb's collapse does not slice the trail"
-    )
-    assert "›" in src, (
-        "Breadcrumb lost its separator glyph"
-    )
+    assert "MAX_ITEMS = 4" in src, "Breadcrumb no longer caps at 4 items"
+    assert "slice(" in src, "Breadcrumb's collapse does not slice the trail"
+    assert "›" in src, "Breadcrumb lost its separator glyph"
 
 
 def test_monitor_task_card_is_clickable_and_opens_flow() -> None:
@@ -461,8 +464,7 @@ def test_monitor_task_card_is_clickable_and_opens_flow() -> None:
         "cannot drill into a task from the Monitor screen"
     )
     assert "onClick" in src, (
-        "MonitorScreen has no click handler — the audit asked for "
-        "click-to-flow"
+        "MonitorScreen has no click handler — the audit asked for click-to-flow"
     )
 
 
@@ -520,6 +522,7 @@ def test_app_uses_keyboard_and_renders_the_overlay() -> None:
     # actually install the listener. The `useKeyboard(` call site
     # inside the function body is what the guard pins.
     import re
+
     assert re.search(r"^\s*useKeyboard\(", src, re.MULTILINE), (
         "App does not install keyboard shortcuts — the operator has "
         "no `?` overlay trigger"
@@ -538,9 +541,7 @@ def test_focus_ring_token_survives_a_redesign() -> None:
         "index.css lost its :focus-visible rule — keyboard navigation "
         "would lose its ring"
     )
-    assert "var(--accent)" in css, (
-        "focus-visible no longer uses the accent token"
-    )
+    assert "var(--accent)" in css, "focus-visible no longer uses the accent token"
 
 
 def test_shortcut_overlay_renders_keys_in_kbd_tags() -> None:
@@ -578,14 +579,14 @@ def test_rooms_agent_marker_is_visible_not_just_text() -> None:
     # not anywhere in the file. A regression that drops the border
     # while leaving the rule in place is the one this pin catches.
     import re
+
     block_match = re.search(
         r"\.thread\s+\.msg\.is_own\s*\{([^}]*)\}",
         css,
         re.DOTALL,
     )
     assert block_match is not None, (
-        ".thread .msg.is_own block has no closing brace — the "
-        "rule is broken"
+        ".thread .msg.is_own block has no closing brace — the rule is broken"
     )
     assert "border-left" in block_match.group(1), (
         "agent row's left-border accent is gone — the audit's "

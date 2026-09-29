@@ -46,8 +46,13 @@ async def test_an_approval_records_who_and_which_bytes(db):
     reply_id = await _reply(db)
 
     ok = await record_decision(
-        db, outbound_id=reply_id, approved=True, by="longle_",
-        by_id=OPERATOR, operator_id=OPERATOR, audit=audit,
+        db,
+        outbound_id=reply_id,
+        approved=True,
+        by="longle_",
+        by_id=OPERATOR,
+        operator_id=OPERATOR,
+        audit=audit,
     )
 
     assert ok
@@ -66,8 +71,13 @@ async def test_a_decision_by_the_wrong_person_is_recorded_as_refused(db):
     reply_id = await _reply(db)
 
     ok = await record_decision(
-        db, outbound_id=reply_id, approved=True, by="stranger",
-        by_id=999, operator_id=OPERATOR, audit=audit,
+        db,
+        outbound_id=reply_id,
+        approved=True,
+        by="stranger",
+        by_id=999,
+        operator_id=OPERATOR,
+        audit=audit,
     )
 
     assert ok is False
@@ -83,12 +93,12 @@ async def test_an_mcp_grant_is_recorded_and_only_when_it_changes(db):
 
     await audit.mcp_grant(server="loki", tools=["query_range", "labels"])
     await audit.mcp_grant(server="loki", tools=["labels", "query_range"])  # same set
-    await audit.mcp_grant(server="loki", tools=["query_range"])            # changed
+    await audit.mcp_grant(server="loki", tools=["query_range"])  # changed
 
     grants = await db.audit_entries(event="mcp_grant")
     assert [g.detail["tools"] for g in grants] == [
-        ["labels", "query_range"],   # sorted, recorded once
-        ["query_range"],             # the change
+        ["labels", "query_range"],  # sorted, recorded once
+        ["query_range"],  # the change
     ]
 
 

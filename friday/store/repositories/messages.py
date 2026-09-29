@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class MessagesRepo:
-
     # ---- messages ------------------------------------------------------
 
     async def record_message(
@@ -90,7 +89,8 @@ class MessagesRepo:
             log.warning(
                 "%s/%s: code split differently on re-read — no artifact "
                 "recorded, the summariser will see this message's raw text",
-                event.provider, event.provider_message_id,
+                event.provider,
+                event.provider_message_id,
             )
             return
         rows = [
@@ -142,8 +142,7 @@ class MessagesRepo:
                 update(schema.Message)
                 .where(
                     schema.Message.provider == event.provider,
-                    schema.Message.provider_message_id
-                    == event.provider_message_id,
+                    schema.Message.provider_message_id == event.provider_message_id,
                 )
                 .values(redacted_text=redacted_text)
             )
@@ -248,8 +247,9 @@ class MessagesRepo:
         the tail grows as the conversation continues.
         """
         return await self._events(
-            self._relevant(schema.Message.conversation_id == str(conversation))
-            .order_by(*_OLDEST_FIRST)
+            self._relevant(
+                schema.Message.conversation_id == str(conversation)
+            ).order_by(*_OLDEST_FIRST)
         )
 
     async def relevant_messages_in_channel(
@@ -430,8 +430,7 @@ class MessagesRepo:
         async with self._sessions() as session:
             rows = await session.execute(enriched)
             return [
-                replace(_event(row[0]), is_enrichment=row.is_enrichment)
-                for row in rows
+                replace(_event(row[0]), is_enrichment=row.is_enrichment) for row in rows
             ]
 
     async def tone_examples(self, limit: int = 8) -> list[InboundEvent]:
@@ -443,9 +442,11 @@ class MessagesRepo:
         round. Real examples carry a tone that a written style guide does not,
         which is the whole reason for reading them.
         """
-        sent = select(schema.Outbound).where(
-            schema.Outbound.state.in_((OUTBOUND_SENT, OUTBOUND_SENT_MANUALLY))
-        ).subquery()
+        sent = (
+            select(schema.Outbound)
+            .where(schema.Outbound.state.in_((OUTBOUND_SENT, OUTBOUND_SENT_MANUALLY)))
+            .subquery()
+        )
         our_ids = select(sent.c.sent_message_id).where(
             sent.c.sent_message_id.is_not(None)
         )

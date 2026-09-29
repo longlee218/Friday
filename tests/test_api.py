@@ -7,14 +7,15 @@ catch a credential.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import BoardClient, captured, make_event
-from friday.kernel.ops.api import build_api
+
 from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.outbox import Kind
 from friday.kernel.domain.states import TaskState
+from friday.kernel.ops.api import build_api
+from friday.kernel.outbox import Kind
 
 WATCHED = ConversationId("fake", "watched")
 
@@ -30,8 +31,11 @@ async def test_one_request_renders_the_whole_page(client, inbox, provider, db):
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
     await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
-        confidence=0.9, params={"summary": "checkout 500"},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={"summary": "checkout 500"},
     )
 
     board = client.get("/api/board").json()
@@ -49,9 +53,14 @@ async def test_a_prompt_is_never_in_a_list(client, inbox, provider, db):
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
     await db.record_model_call(
-        message_id="10", agent="triage", model="MiniMax-M3",
-        system_prompt="you triage", prompt="classify this", output="tool(...)",
-        input_tokens=10, output_tokens=2,
+        message_id="10",
+        agent="triage",
+        model="MiniMax-M3",
+        system_prompt="you triage",
+        prompt="classify this",
+        output="tool(...)",
+        input_tokens=10,
+        output_tokens=2,
     )
 
     (message,) = client.get("/api/board").json()["messages"]
@@ -80,12 +89,18 @@ async def test_a_credential_does_not_cross_the_wire(client, db):
     """`last_error` is scrubbed on the way in; this is the belt to that
     braces, because task params are model-extracted from a stranger's text."""
     task = await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.NEEDS_HUMAN,
-        confidence=0.9, params={"summary": "token is sk-abcdefghijklmnopqrstuvwx"},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.NEEDS_HUMAN,
+        confidence=0.9,
+        params={"summary": "token is sk-abcdefghijklmnopqrstuvwx"},
     )
     row = await db.queue_outbound(
-        task_id=task.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=task.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     await db.fail_outbound(row.id, "boom")
 
@@ -96,12 +111,18 @@ async def test_a_credential_does_not_cross_the_wire(client, db):
 
 async def test_a_failed_send_carries_its_text_and_its_error(client, db):
     task = await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.NEEDS_HUMAN,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.NEEDS_HUMAN,
+        confidence=0.9,
+        params={},
     )
     row = await db.queue_outbound(
-        task_id=task.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment are you on?",
+        task_id=task.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment are you on?",
     )
     await db.fail_outbound(row.id, "discord said no")
 
@@ -144,7 +165,6 @@ def test_a_taken_port_is_reported_in_one_line():
     """Uvicorn calls sys.exit inside a TaskGroup task for this, which unwinds
     as sixty lines of traceback ending in `SystemExit: 3`. The one fact that
     matters — something else is already on the port — is buried in it."""
-    import socket
 
     from friday.kernel.ops.api import bind
 
@@ -241,20 +261,28 @@ async def test_a_tasks_own_calls_are_reachable(client, db):
     working on it" — an extractor runs on every pass against every message the
     reporter sent, and a responder answers a task."""
     task = await db.create_task(
-        conversation=ConversationId("fake", "watched"), type="backend.trace_problem",
-        state=TaskState.PENDING, confidence=0.9, params={},
+        conversation=ConversationId("fake", "watched"),
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
-    common = dict(model="m", system_prompt="s", output="o",
-                  input_tokens=3, output_tokens=4)
+    common = dict(
+        model="m", system_prompt="s", output="o", input_tokens=3, output_tokens=4
+    )
     await db.record_model_call(
-        task_id=task.id, node="prepare", agent="api_issue_extractor",
-        prompt="lift the fields out", latency_ms=120, **common,
+        task_id=task.id,
+        node="prepare",
+        agent="trace_problem_extractor",
+        prompt="lift the fields out",
+        latency_ms=120,
+        **common,
     )
     await db.record_model_call(agent="summary", prompt="somebody else's", **common)
 
     got = client.get(f"/api/tasks/{task.id}/model-calls").json()
 
-    assert [c["agent"] for c in got] == ["api_issue_extractor"]
+    assert [c["agent"] for c in got] == ["trace_problem_extractor"]
     assert got[0]["node"] == "prepare"
     assert got[0]["latency_ms"] == 120
 
@@ -268,9 +296,12 @@ async def test_calls_that_name_no_message_are_still_reachable(client, db):
     with was that the steps producing text a person reads had no record of
     what they were sent; storing it and not being able to look at it is the
     same complaint one step later."""
-    common = dict(model="m", system_prompt="s", output="o",
-                  input_tokens=1, output_tokens=1)
-    await db.record_model_call(agent="summary", prompt="what this room is like", **common)
+    common = dict(
+        model="m", system_prompt="s", output="o", input_tokens=1, output_tokens=1
+    )
+    await db.record_model_call(
+        agent="summary", prompt="what this room is like", **common
+    )
     await db.record_model_call(
         message_id="10", agent="triage", prompt="classify this", **common
     )
@@ -278,7 +309,9 @@ async def test_calls_that_name_no_message_are_still_reachable(client, db):
     got = client.get("/api/model-calls").json()
 
     assert [c["agent"] for c in got] == ["triage", "summary"], "newest first"
-    assert client.get("/api/model-calls?uncorrelated=true").json()[0]["agent"] == "summary"
+    assert (
+        client.get("/api/model-calls?uncorrelated=true").json()[0]["agent"] == "summary"
+    )
 
 
 async def test_a_channels_memories_are_reachable_live_and_deleted(client, db):
@@ -304,7 +337,6 @@ async def test_a_channels_memories_are_bounded_like_every_other_list_route(clien
     """Live memories stop at `MEMORY_PER_CHANNEL`, but a deleted row is never
     purged — a channel that has churned many corrections holds an unbounded
     number of rows, and every other list route on this board is bounded."""
-    from friday.store.db import Database
     from friday.kernel.domain.state import FridayState
 
     scope = FridayState(channel_id="100", task_id=None, agent="responder")
@@ -368,23 +400,40 @@ async def test_a_channels_candidates_do_not_leak_another_ones(client, db):
 # --- a message's whole path (board `a-window-on-the-whole-path`, ticket 02) ---
 
 
-async def test_a_messages_whole_path_arrives_in_one_request(client, inbox, provider, db):
+async def test_a_messages_whole_path_arrives_in_one_request(
+    client, inbox, provider, db
+):
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
     task = await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
     await db.record_model_call(
-        message_id="10", agent="triage", model="m", system_prompt="s",
-        prompt="p", output="o", input_tokens=10, output_tokens=2,
+        message_id="10",
+        agent="triage",
+        model="m",
+        system_prompt="s",
+        prompt="p",
+        output="o",
+        input_tokens=10,
+        output_tokens=2,
     )
     await db.record_tool_call(
-        task_id=task.id, node="prepare", agent="extractor", tool="memory_search",
-        arguments='{"missing": []}', result="asked", failed=False,
+        task_id=task.id,
+        node="prepare",
+        agent="extractor",
+        tool="memory_search",
+        arguments='{"missing": []}',
+        result="asked",
+        failed=False,
     )
     await db.mark_triaged(
-        make_event(message_id="10"), task.id,
+        make_event(message_id="10"),
+        task.id,
         decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}},
     )
 
@@ -403,7 +452,8 @@ async def test_a_skipped_message_still_has_a_path(client, inbox, provider, db):
     provider.emit(make_event(message_id="11", text="anyone want lunch"))
     await captured(inbox)
     await db.mark_triaged(
-        make_event(message_id="11"), None,
+        make_event(message_id="11"),
+        None,
         decision={"type": "skip", "confidence": 0.95, "params": {}},
     )
 
@@ -413,7 +463,9 @@ async def test_a_skipped_message_still_has_a_path(client, inbox, provider, db):
     assert flow["task"] is None
 
 
-async def test_an_untriaged_message_is_a_state_not_a_missing_path(client, inbox, provider):
+async def test_an_untriaged_message_is_a_state_not_a_missing_path(
+    client, inbox, provider
+):
     provider.emit(make_event(message_id="12"))
     await captured(inbox)
 
@@ -427,13 +479,20 @@ async def test_a_message_that_never_existed_is_a_404(client):
     assert client.get("/api/messages/fake/nope/flow").status_code == 404
 
 
-async def test_a_credential_does_not_cross_the_wire_on_a_path(client, inbox, provider, db):
+async def test_a_credential_does_not_cross_the_wire_on_a_path(
+    client, inbox, provider, db
+):
     provider.emit(make_event(message_id="13", text="it broke"))
     await captured(inbox)
     await db.record_model_call(
-        message_id="13", agent="triage", model="m", system_prompt="s",
+        message_id="13",
+        agent="triage",
+        model="m",
+        system_prompt="s",
         prompt="the user said: token is sk-abcdefghijklmnopqrstuvwx",
-        output="o", input_tokens=1, output_tokens=1,
+        output="o",
+        input_tokens=1,
+        output_tokens=1,
     )
 
     body = client.get("/api/messages/fake/13/flow").text
@@ -545,17 +604,25 @@ async def test_each_message_says_which_task_it_belongs_to(client, inbox, provide
     provider.emit(make_event(message_id="12", text="just chatting"))
     await captured(inbox)
     first = await db.create_task(
-        conversation=WATCHED, type="backend.answer_question", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.answer_question",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
     second = await db.create_task(
-        conversation=WATCHED, type="backend.answer_question", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.answer_question",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
     await db.mark_triaged(make_event(message_id="10"), task_id=first.id)
     await db.mark_triaged(make_event(message_id="11"), task_id=second.id)
 
-    by_id = {m["provider_message_id"]: m for m in client.get("/api/board").json()["messages"]}
+    by_id = {
+        m["provider_message_id"]: m for m in client.get("/api/board").json()["messages"]
+    }
 
     assert by_id["10"]["task_id"] == first.id
     assert by_id["11"]["task_id"] == second.id
@@ -572,24 +639,39 @@ async def test_a_task_carries_its_opening_message_past_the_boards_window(
     # Distinct times, oldest first: `make_event`'s default gives every message
     # one timestamp, which made "earliest" a tie SQLite settled by row order —
     # a descending sort passed this test too (second review, 2026-09-18).
-    start = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
-    provider.emit(make_event(message_id="1", text="api tạo mới user bị 500", created_at=start))
+    start = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+    provider.emit(
+        make_event(message_id="1", text="api tạo mới user bị 500", created_at=start)
+    )
     for n in range(2, 32):
-        provider.emit(make_event(
-            message_id=str(n), text=f"later {n}", created_at=start + timedelta(minutes=n),
-        ))
+        provider.emit(
+            make_event(
+                message_id=str(n),
+                text=f"later {n}",
+                created_at=start + timedelta(minutes=n),
+            )
+        )
     await captured(inbox)
     old = await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
     new = await db.create_task(
-        conversation=WATCHED, type="backend.answer_question", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.answer_question",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
     bare = await db.create_task(
-        conversation=WATCHED, type="backend.answer_question", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.answer_question",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
     await db.mark_triaged(make_event(message_id="1"), task_id=old.id)
     await db.mark_triaged(make_event(message_id="5"), task_id=old.id)
@@ -600,7 +682,9 @@ async def test_a_task_carries_its_opening_message_past_the_boards_window(
     by_id = {t["id"]: t for t in board["tasks_by_state"]["pending"]}
 
     assert by_id[old.id]["opening"] == {
-        "provider": "fake", "provider_message_id": "1", "text": "api tạo mới user bị 500",
+        "provider": "fake",
+        "provider_message_id": "1",
+        "text": "api tạo mới user bị 500",
     }
     assert by_id[new.id]["opening"]["provider_message_id"] == "31"
     assert by_id[bare.id]["opening"] is None

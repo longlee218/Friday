@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from friday.kernel.domain.outbound import (
     POLICY,
@@ -35,10 +35,10 @@ DELIVERY_UNKNOWN = OutboundState.DELIVERY_UNKNOWN
 
 __all__ = [
     "FAILED",
-    "Kind",
-    "Outbox",
     "POLICY",
     "QUEUED",
+    "Kind",
+    "Outbox",
     "payload_hash",
     "record_decision",
 ]
@@ -76,11 +76,16 @@ async def record_decision(
         log.warning(
             "refused a decision on reply %d by %s (id %s): only the operator "
             "(id %s) may release a reply that speaks in their name",
-            outbound_id, by, by_id, operator_id,
+            outbound_id,
+            by,
+            by_id,
+            operator_id,
         )
         if audit is not None:
             await audit.refused_decision(
-                outbound_id=outbound_id, by=by, by_id=by_id,
+                outbound_id=outbound_id,
+                by=by,
+                by_id=by_id,
                 reason="not the operator",
             )
         return False
@@ -90,7 +95,9 @@ async def record_decision(
         if audit is not None:
             row = await db.outbound_row(outbound_id)
             await audit.approval(
-                outbound_id=outbound_id, by=by, approved=True,
+                outbound_id=outbound_id,
+                by=by,
+                approved=True,
                 payload_hash=row.approved_payload_hash if row else None,
             )
         return True
@@ -106,6 +113,7 @@ async def record_decision(
     log.info("task %d rejected by %s (reply %d)", row.task_id, by, outbound_id)
     return True
 
+
 #: The two a *reader* asks about — the board, the API and the liveness line all
 #: want "what is waiting" and "what gave up". Named here for them; defined in
 #: `friday/domain/tasks.py`, which is the only place any of the four is defined.
@@ -117,7 +125,7 @@ FAILED = OutboundState.FAILED
 #: the outbox was built with; `run_agent.py` maps it to a provider.
 #:
 #: Here rather than defaulted twice. The pool has always defaulted to it, and
-#: the `api_issue` graph now queues rows of its own before any action reaches
+#: the `trace_problem` graph now queues rows of its own before any action reaches
 #: the pool — two defaults spelled separately are two answers to one
 #: question, and the day they disagree the graph's rows go out as somebody
 #: else or not at all.
@@ -218,7 +226,9 @@ class Outbox:
         # it as sendable with no operator decision behind it — gets it stopped,
         # not sent (`tests/test_outbox.py`'s self-approving-store guard).
         if Kind(row.kind).needs_approval and not self._payload_matches(row):
-            await self._give_up(row, "a reply reached delivery without a valid approval")
+            await self._give_up(
+                row, "a reply reached delivery without a valid approval"
+            )
             return "not_approved"
 
         interrupted = row.state == DISPATCHING
@@ -235,11 +245,14 @@ class Outbox:
         # approved message can be edited while the row waits, and neither is
         # something a resumed send should ignore.
         if await self._overtaken(row):
-            await self._give_up(row, "the conversation moved on before this was approved")
+            await self._give_up(
+                row, "the conversation moved on before this was approved"
+            )
             return "overtaken"
         if not self._payload_matches(row):
             await self._give_up(
-                row, "the message changed after it was approved, so the approval no longer applies"
+                row,
+                "the message changed after it was approved, so the approval no longer applies",
             )
             return "stale_approval"
 
@@ -299,9 +312,7 @@ class Outbox:
         await self._db.record_outbound_attempt(
             row.id,
             str(exc),
-            retry_after=datetime.now(timezone.utc) + timedelta(seconds=delay)
-            if delay
-            else None,
+            retry_after=datetime.now(UTC) + timedelta(seconds=delay) if delay else None,
         )
         log.warning(
             "outbound %d failed (attempt %d/%d): %s",

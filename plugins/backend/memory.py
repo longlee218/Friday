@@ -47,7 +47,13 @@ BACKEND_DEPENDENCY = "backend.dependency"
 #: Every backend pack kind, in one set — for the boot check and the
 #: dependency-rule test's "pack kinds are `backend.*`" expectation.
 BACKEND_KINDS = frozenset(
-    {BACKEND_PROJECT, BACKEND_SERVICE, BACKEND_ROUTE, BACKEND_ENVIRONMENT, BACKEND_DEPENDENCY}
+    {
+        BACKEND_PROJECT,
+        BACKEND_SERVICE,
+        BACKEND_ROUTE,
+        BACKEND_ENVIRONMENT,
+        BACKEND_DEPENDENCY,
+    }
 )
 
 
@@ -149,24 +155,44 @@ def _dependency_key(data, _given):
 
 BACKEND_MEMORY_KINDS = (
     MemoryKindSpec(
-        name=BACKEND_PROJECT, data=ProjectData, writers=_ADMIN,
-        cardinality="one-per-key", injected=False, key=_by("name"),
+        name=BACKEND_PROJECT,
+        data=ProjectData,
+        writers=_ADMIN,
+        cardinality="one-per-key",
+        injected=False,
+        key=_by("name"),
     ),
     MemoryKindSpec(
-        name=BACKEND_SERVICE, data=ServiceData, writers=_ADMIN,
-        cardinality="one-per-key", injected=False, key=_by("name"),
+        name=BACKEND_SERVICE,
+        data=ServiceData,
+        writers=_ADMIN,
+        cardinality="one-per-key",
+        injected=False,
+        key=_by("name"),
     ),
     MemoryKindSpec(
-        name=BACKEND_ROUTE, data=RouteData, writers=_ADMIN,
-        cardinality="one-per-key", injected=False, key=_by("domain"),
+        name=BACKEND_ROUTE,
+        data=RouteData,
+        writers=_ADMIN,
+        cardinality="one-per-key",
+        injected=False,
+        key=_by("domain"),
     ),
     MemoryKindSpec(
-        name=BACKEND_ENVIRONMENT, data=EnvironmentData, writers=_ADMIN,
-        cardinality="one-per-key", injected=False, key=_by("suffix"),
+        name=BACKEND_ENVIRONMENT,
+        data=EnvironmentData,
+        writers=_ADMIN,
+        cardinality="one-per-key",
+        injected=False,
+        key=_by("suffix"),
     ),
     MemoryKindSpec(
-        name=BACKEND_DEPENDENCY, data=DependencyData, writers=_ADMIN,
-        cardinality="one-per-key", injected=False, key=_dependency_key,
+        name=BACKEND_DEPENDENCY,
+        data=DependencyData,
+        writers=_ADMIN,
+        cardinality="one-per-key",
+        injected=False,
+        key=_dependency_key,
     ),
 )
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field, make_dataclass
-from functools import lru_cache
+from functools import cache
 from typing import Any, Literal
 
 from friday.kernel.domain.tasks import SKIP
@@ -64,14 +64,16 @@ def _decided_field(name: str, annotation: Any, doc: str) -> tuple[str, Any, Any]
     return (name, annotation, field(metadata={"doc": doc}))
 
 
-@lru_cache(maxsize=None)
+@cache
 def _make_decided(names: tuple[str, ...]) -> type:
     schema = make_dataclass(
         "Decided",
         [
             _decided_field("type", Literal[(*names, SKIP)], TYPE_DOC),  # type: ignore[valid-type]
             _decided_field(
-                "confidence", float, "how certain you are of this classification, 0 to 1."
+                "confidence",
+                float,
+                "how certain you are of this classification, 0 to 1.",
             ),
         ],
         frozen=True,

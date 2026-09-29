@@ -193,6 +193,7 @@ async def invoke(ctx, args: str):
     except (json.JSONDecodeError, ValidationError) as bad:
         return f"that did not fit: {bad}"
 
+
 # "Answered" means the tool returned an instance, not that it returned
 # anything — the same distinction `stop_when` already draws, for the same
 # reason: an error string is a tool output too.

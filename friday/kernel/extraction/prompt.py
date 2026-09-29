@@ -27,11 +27,10 @@ throwing away fields it had already read.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import fields as dataclass_fields
 
+from friday.kernel.extraction.context import FullContext
 from friday.kernel.harness.instruction_prompt import (
     SkillMeta,
-    skill_system,
     assemble,
     clarification_system,
     critical_reminder,
@@ -40,12 +39,12 @@ from friday.kernel.harness.instruction_prompt import (
     outstanding_questions,
     role,
     room_facts,
+    skill_system,
     thinking_style,
     trust_boundary,
     user_input,
 )
 from friday.kernel.harness.structured import describe
-from friday.kernel.extraction.context import FullContext
 
 __all__ = ["build_input", "build_instructions"]
 
@@ -92,7 +91,9 @@ def build_instructions(
 ) -> str:
     """Who it is, the job, how to read, how to ask, what not to get wrong."""
     return assemble(
-        role("Friday", "a field extractor", "you lift values out of what someone wrote"),
+        role(
+            "Friday", "a field extractor", "you lift values out of what someone wrote"
+        ),
         trust_boundary(),
         job(JOB),
         thinking_style(THINKING),

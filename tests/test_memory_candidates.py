@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import pytest
 
-from friday.kernel.domain.memory_guard import InstructionShaped
 from friday.kernel.domain.memory import CandidateStatus
+from friday.kernel.domain.memory_guard import InstructionShaped
 from friday.kernel.domain.state import FridayState
 from friday.kernel.memory import write
 
 ROOM = FridayState(channel_id="c1", task_id=7, agent="responder", message_id="m1")
-OTHER_ROOM = FridayState(channel_id="c2", task_id=None, agent="responder", message_id="m2")
+OTHER_ROOM = FridayState(
+    channel_id="c2", task_id=None, agent="responder", message_id="m2"
+)
 NO_MESSAGE = FridayState(channel_id="c1", task_id=7, agent="responder")
 
 
@@ -46,7 +48,7 @@ async def test_a_channel_cannot_see_another_ones_candidates(db):
 
 
 async def test_marking_right_accepts_and_writes_it_with_its_kind(db):
-    """"Marked accepted, it is written with its kind, through the refusal in
+    """ "Marked accepted, it is written with its kind, through the refusal in
     11" — the checklist's own words. `memory_search` proves it actually
     landed, not just that the candidate's own status says so."""
     await db.propose_memory(ROOM, "they usually reply in Vietnamese", kind="voice")
@@ -96,9 +98,12 @@ async def test_a_candidate_with_no_message_in_scope_is_never_resolved(db):
 
     assert candidate.source_message_id is None
     assert candidate.status == CandidateStatus.PENDING
-    assert await db.resolve_candidates_for_message(
-        provider_message_id="", mark="right", by="lee"
-    ) == []
+    assert (
+        await db.resolve_candidates_for_message(
+            provider_message_id="", mark="right", by="lee"
+        )
+        == []
+    )
 
 
 async def test_an_instruction_shaped_candidate_is_refused_at_propose(db):

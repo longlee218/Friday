@@ -38,7 +38,7 @@ class _About:
         message_id: str | None = None,
         task_id: int | None = None,
         node: str | None = None,
-    ) -> "_About":
+    ) -> _About:
         """What this call was about, read off the run's state where there is one
         (D8) and named explicitly where there is not. An explicit argument still
         wins, for a caller that knows better than the state it was handed.
@@ -65,7 +65,10 @@ class _About:
 #: 400 is the provider saying the request itself is wrong, and paying to ask it
 #: a second time buys nothing.
 _TRANSIENT = (
-    APIConnectionError, APITimeoutError, RateLimitError, InternalServerError,
+    APIConnectionError,
+    APITimeoutError,
+    RateLimitError,
+    InternalServerError,
     # An attempt past its bound (`_attempts`).
     TimeoutError,
 )
@@ -110,10 +113,11 @@ def _why(exc: Exception, attempts: int = 0) -> str:
     from friday.kernel.ops.redact import scrub
 
     # `asyncio.wait_for` raises a `TimeoutError` whose `str()` is empty.
-    said = "no answer within the request timeout" if isinstance(
-        exc, TimeoutError
-    ) else scrub(str(exc))
+    said = (
+        "no answer within the request timeout"
+        if isinstance(exc, TimeoutError)
+        else scrub(str(exc))
+    )
     if attempts > 1:
         return f"gave up after {attempts} attempts: {said}"
     return said
-

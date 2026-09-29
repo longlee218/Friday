@@ -6,7 +6,7 @@ the library.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from friday.kernel.domain.messages import MentionType
@@ -30,9 +30,13 @@ def group_channel(id=30):
     return SimpleNamespace(id=id, parent_id=None, recipients=[SimpleNamespace(id=55)])
 
 
+#: The default guild a message is in.
+GUILD = SimpleNamespace(id=1)
+
+
 def message(
     *,
-    guild=SimpleNamespace(id=1),
+    guild=GUILD,
     channel=None,
     mentions=(),
     role_mentions=(),
@@ -46,7 +50,7 @@ def message(
         mentions=list(mentions),
         role_mentions=list(role_mentions),
         content=content,
-        created_at=datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
         author=SimpleNamespace(id=55, display_name="dana"),
         reference=reference,
     )
@@ -88,7 +92,9 @@ def test_a_message_addressed_to_nobody_relevant_is_not_a_mention():
 
 def test_a_direct_mention_outranks_a_role_mention():
     event = normalised(
-        message(mentions=[SimpleNamespace(id=ME)], role_mentions=[SimpleNamespace(id=200)])
+        message(
+            mentions=[SimpleNamespace(id=ME)], role_mentions=[SimpleNamespace(id=200)]
+        )
     )
 
     assert event.mention_type is MentionType.DIRECT
@@ -142,16 +148,16 @@ def test_being_mentioned_in_a_group_chat_is_a_direct_mention():
 
 def test_a_group_chat_reports_its_own_channel_id_so_it_can_be_whitelisted():
     event = normalised(
-        message(guild=None, channel=group_channel(id=30), mentions=[SimpleNamespace(id=ME)])
+        message(
+            guild=None, channel=group_channel(id=30), mentions=[SimpleNamespace(id=ME)]
+        )
     )
 
     assert (event.channel_id, event.thread_id) == ("30", None)
 
 
 def test_a_reply_records_what_it_replies_to():
-    event = normalised(
-        message(reference=SimpleNamespace(message_id=777))
-    )
+    event = normalised(message(reference=SimpleNamespace(message_id=777)))
 
     assert event.reply_to == "777"
 

@@ -24,10 +24,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from friday.sdk.outbox import Kind
+from friday.sdk.workflow import DAGState, Deps, Node, envelope
 from plugins.backend.graph.intake import intake_of
 from plugins.backend.placement import Placement
-from friday.sdk.workflow import DAGState, Deps, Node, envelope
-from friday.sdk.outbox import Kind
 
 __all__ = ["ack_text", "acknowledge_node"]
 
@@ -78,8 +78,7 @@ def acknowledge_node(*, sender: str = "") -> Node:
             # about being quiet.
             return envelope(
                 "skipped",
-                "no sender is configured, so nobody was told this was being "
-                "worked on",
+                "no sender is configured, so nobody was told this was being worked on",
             )
 
         # **Once per task, whatever a resume does.** A graph re-runs from its

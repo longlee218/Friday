@@ -12,7 +12,7 @@ what the eval measures; whether the eval measures it is what these do.
 
 from __future__ import annotations
 
-from evals.api_issue import Scored, report, score
+from plugins.backend.evals.trace_problem import Scored, report, score
 
 CASE = {
     "id": "prod-onboarding-400",
@@ -26,9 +26,9 @@ def said(**kw) -> dict:
 
 
 def test_a_cause_carrying_every_token_passes():
-    got = score(CASE, said(
-        cause="Client gửi categoryId rỗng; ValidationPipe từ chối request."
-    ))
+    got = score(
+        CASE, said(cause="Client gửi categoryId rỗng; ValidationPipe từ chối request.")
+    )
 
     assert got.cause_found
     assert got.missing == ()
@@ -89,8 +89,14 @@ def test_refs_are_counted_because_a_cause_with_none_was_not_built_on_evidence():
 
 def _scored(**kw) -> Scored:
     return Scored(
-        case="c", cause_found=True, missing=(), expected_conclusive=True,
-        said_conclusive=True, refs=1, grounded=True, **kw
+        case="c",
+        cause_found=True,
+        missing=(),
+        expected_conclusive=True,
+        said_conclusive=True,
+        refs=1,
+        grounded=True,
+        **kw,
     )
 
 
@@ -109,12 +115,20 @@ def test_a_set_large_enough_stops_apologising():
 def test_every_row_is_printed_beside_the_totals():
     """A single figure over a set this small moves by ten per cent when one
     case changes its mind, and nobody can act on it without the rows."""
-    said_so = report([
-        _scored(),
-        Scored(case="other", cause_found=False, missing=("categoryId",),
-               expected_conclusive=True, said_conclusive=True, refs=0,
-               grounded=True),
-    ])
+    said_so = report(
+        [
+            _scored(),
+            Scored(
+                case="other",
+                cause_found=False,
+                missing=("categoryId",),
+                expected_conclusive=True,
+                said_conclusive=True,
+                refs=0,
+                grounded=True,
+            ),
+        ]
+    )
 
     assert "MISS" in said_so and "other" in said_so
     assert "missing: categoryId" in said_so
@@ -130,9 +144,14 @@ def test_an_empty_set_says_so_rather_than_dividing_by_zero():
 def test_an_unlabelled_case_is_named_rather_than_skipped(tmp_path):
     """A case in the directory with no labels scores zero for the cause,
     which reads as the model failing when it is the set that is unfinished."""
-    from evals.run_api_issue_eval import unlabelled
+    from friday.sdk import EvalCase
+    from plugins.backend.evals.trace_problem import unlabelled
 
-    assert unlabelled([{"id": "a", "cause_mentions": ["x"]}, {"id": "b"}]) == ["b"]
+    found = [
+        EvalCase(name="a", inputs={"id": "a", "cause_mentions": ["x"]}),
+        EvalCase(name="b", inputs={"id": "b"}),
+    ]
+    assert unlabelled(found) == ["b"]
 
 
 def test_the_cases_are_read_in_a_stable_order(tmp_path):
@@ -140,12 +159,19 @@ def test_the_cases_are_read_in_a_stable_order(tmp_path):
     listing is not ordered."""
     import json
 
-    from evals.run_api_issue_eval import cases
+    from plugins.backend.evals.trace_problem import cases
 
     for name in ("c.json", "a.json", "b.json"):
         (tmp_path / name).write_text(json.dumps({"id": name[0]}))
 
-    assert [c["id"] for c in cases(tmp_path)] == ["a", "b", "c"]
+    assert [c.name for c in cases(tmp_path)] == ["a", "b", "c"]
+
+
+def test_the_backend_registers_its_eval_under_its_own_name():
+    from friday.kernel.plugin_host import load_plugins
+
+    evals = load_plugins(None).registry.evals()
+    assert evals["backend.trace_problem"].checks.keys() == {"cause_found"}
 
 
 def test_the_labels_are_a_declared_part_of_a_case():
@@ -155,3 +181,19 @@ def test_the_labels_are_a_declared_part_of_a_case():
     from replay_case import CASE_KEYS
 
     assert {"cause_mentions", "conclusive", "decisive", "cause"} <= CASE_KEYS
+
+
+def test_the_check_and_the_report_score_the_raw_diagnosis():
+    """The task hands back the diagnosis as the node answered it; scoring is
+    the eval's own check, so the framework's per-case column means something."""
+    from friday.sdk import EvalCase
+    from plugins.backend.evals.trace_problem import TRACE_PROBLEM_EVAL
+
+    case = EvalCase(name="c", inputs=CASE)
+    right = said(cause="categoryId rỗng; ValidationPipe chặn")
+
+    assert TRACE_PROBLEM_EVAL.checks["cause_found"](case, right) is True
+    assert TRACE_PROBLEM_EVAL.checks["cause_found"](case, None) is False
+    assert "cause            1/2" in TRACE_PROBLEM_EVAL.report(
+        [(case, right), (case, None)]
+    )

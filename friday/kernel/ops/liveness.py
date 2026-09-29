@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from friday.store.db import Database
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.outbox import FAILED, QUEUED, Kind
+from friday.store.db import Database
 
 __all__ = ["Heartbeat", "Liveness"]
 
@@ -45,7 +45,7 @@ class Heartbeat:
         db: Database,
         interval_seconds: float = HEARTBEAT_SECONDS,
         keep_model_calls_days: float | None = KEEP_MODEL_CALLS_DAYS,
-        liveness: "Liveness | None" = None,
+        liveness: Liveness | None = None,
         context_rebuilder=None,
         backup=None,
         extra=None,
@@ -66,7 +66,7 @@ class Heartbeat:
         #: Rebuilds rooms' summary rows. Its own condition decides whether
         #: a channel is worth another summary call — see `ContextRebuilder`.
         self._context_rebuilder = context_rebuilder
-        self._started = datetime.now(timezone.utc)
+        self._started = datetime.now(UTC)
         self._last_seen: int | None = None
 
     async def run_forever(self) -> None:
@@ -102,8 +102,11 @@ class Heartbeat:
         if self._keep_days is not None:
             removed = await self._db.trim_model_calls(keep_days=self._keep_days)
             if removed:
-                log.info("trimmed %d model call(s) older than %s days",
-                         removed, self._keep_days)
+                log.info(
+                    "trimmed %d model call(s) older than %s days",
+                    removed,
+                    self._keep_days,
+                )
         if self._backup is not None:
             await self._backup.run_if_due()
         line = await self.summary()
@@ -147,13 +150,13 @@ class Heartbeat:
 
 
 def _since(start: datetime) -> str:
-    return _duration((datetime.now(timezone.utc) - start).total_seconds())
+    return _duration((datetime.now(UTC) - start).total_seconds())
 
 
 def _ago(when: datetime | None) -> str:
     if when is None:
         return "never"
-    return f"{_duration((datetime.now(timezone.utc) - when).total_seconds())} ago"
+    return f"{_duration((datetime.now(UTC) - when).total_seconds())} ago"
 
 
 def _duration(seconds: float) -> str:
@@ -197,7 +200,7 @@ class Liveness:
         self._told_about: datetime | None = None
 
     async def check(self, *, now: datetime | None = None) -> None:
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         await self._connection(now)
         await self._summary(now)
 

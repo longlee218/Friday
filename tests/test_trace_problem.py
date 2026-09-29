@@ -1,6 +1,6 @@
 """Ticket 00 — the vertical slice, node by node and end to end.
 
-The property the whole board turns on: **a complete api_issue report is
+The property the whole board turns on: **a complete trace_problem report is
 investigated, not handed back.** Before this graph existed, node 0 filled the
 parameters in, found nothing to ask about and said "everything needed is
 here, and there is no investigation past this point" — which was true, and
@@ -14,28 +14,30 @@ missing, and it says out loud what it did not check.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
 from plugins.backend.graph import build_backend_dag
-from plugins.backend.toolsets.code import CONTAINER_ROOTS
 from plugins.backend.graph.diagnose import (
     Diagnosis,
     diagnose_node,
     unresolved_refs,
 )
 from plugins.backend.graph.report import render, report_node
-from plugins.backend.toolsets.code import repo_file
+from plugins.backend.toolsets.code import CONTAINER_ROOTS, repo_file
 
 
 class _StubCaps:
     """A stand-in for the composition root's boot caps, for building the backend
     DAG in a test without a live process (ticket 14)."""
 
-    def __init__(self, *, diagnose_harness=None, budget_tokens=None, diagnose_agent=None):
+    def __init__(
+        self, *, diagnose_harness=None, budget_tokens=None, diagnose_agent=None
+    ):
         self.config = SimpleNamespace(
             agent=lambda declaration: diagnose_agent,
             context=SimpleNamespace(extraction_budget_tokens=budget_tokens),
@@ -45,8 +47,9 @@ class _StubCaps:
         self.approver = "discord_bot"
         self._harness = diagnose_harness
 
-    def make_harness(self, *, agent, instructions, answers=None, tools=None,
-                     ends_with=None):
+    def make_harness(
+        self, *, agent, instructions, answers=None, tools=None, ends_with=None
+    ):
         return self._harness
 
     async def intake(self, *args, **kwargs):
@@ -58,7 +61,9 @@ class _StubCaps:
         return build_tools(toolsets, context, self.servers)
 
 
-def _dag(*, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnose_agent=None):
+def _dag(
+    *, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnose_agent=None
+):
     """The `backend.trace_problem` DAG, built through the plugin's own builder."""
     api = SimpleNamespace(
         caps=_StubCaps(
@@ -69,19 +74,19 @@ def _dag(*, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnos
     )
     return build_backend_dag(api, reports_dir=reports_dir or Path("./data/reports"))
 
-from friday.sdk.workflow import Deps
-from plugins.backend.graph.intake import intake_of
-from friday.kernel.spine.intake import intake as core_intake
-from friday.sdk.workflow import DAGState, status_of
-from friday.sdk.actions import Ask, HandOver, Reply
+
 from friday.kernel.domain.conversation import ConversationId
-from friday.sdk.memory import MemoryOrigin
 from friday.kernel.domain.state import FridayState
-from plugins.backend.params import ApiIssueParams
+from friday.kernel.spine.intake import intake as core_intake
+from friday.sdk.actions import Ask, HandOver, Reply
+from friday.sdk.memory import MemoryOrigin
+from friday.sdk.workflow import DAGState, Deps, status_of
+from plugins.backend.graph.intake import intake_of
+from plugins.backend.params import TraceProblemParams
 
 CURL = (
     'curl -X POST -H "Content-Type: application/json" '
-    '--data \'{"items":[]}\' '
+    "--data '{\"items\":[]}' "
     '"https://api-reelme-v2.dev.aperogroup.ai/v1/pod/orders/init"'
 )
 
@@ -89,7 +94,7 @@ CURL = (
 # --- fixtures ---------------------------------------------------------------
 
 
-REPORTED_AT = datetime(2026, 9, 20, 4, 40, 46, tzinfo=timezone.utc)
+REPORTED_AT = datetime(2026, 9, 20, 4, 40, 46, tzinfo=UTC)
 
 
 def deps_for(db, *, task_id: int = 1) -> Deps:
@@ -110,7 +115,7 @@ def deps_for(db, *, task_id: int = 1) -> Deps:
 def prepared(**params) -> DAGState:
     return DAGState.empty().with_result(
         "prepare",
-        ApiIssueParams(**{"summary": "500 khi init đơn", "curl": CURL, **params}),
+        TraceProblemParams(**{"summary": "500 khi init đơn", "curl": CURL, **params}),
     )
 
 
@@ -121,8 +126,11 @@ async def write_environment_rows(db, channel_id: str = "watched"):
     state = FridayState(channel_id=channel_id, agent="admin")
     for suffix, env in (("aperogroup.ai", "production"), ("dev.aperogroup.ai", "dev")):
         await db.memory_add(
-            state, f"{suffix} is {env}", kind="backend.environment",
-            origin=MemoryOrigin.ADMIN, data={"suffix": suffix, "env": env},
+            state,
+            f"{suffix} is {env}",
+            kind="backend.environment",
+            origin=MemoryOrigin.ADMIN,
+            data={"suffix": suffix, "env": env},
         )
 
 
@@ -138,36 +146,52 @@ async def write_rows(db, *, env: str = "dev", repo: str | None = None):
     state = FridayState(channel_id="watched", agent="admin")
     await write_environment_rows(db)
     domain = (
-        "api-reelme-v2.dev.aperogroup.ai" if env == "dev"
+        "api-reelme-v2.dev.aperogroup.ai"
+        if env == "dev"
         else "api-reelme-v2.aperogroup.ai"
     )
     await db.memory_add(
-        state, "the ReelMe repository", kind="backend.project",
+        state,
+        "the ReelMe repository",
+        kind="backend.project",
         origin=MemoryOrigin.ADMIN,
         data={
-            "name": "reelme", "repo_path": repo or "/nowhere",
-            "default_branch": "main", "stack": "NestJS",
+            "name": "reelme",
+            "repo_path": repo or "/nowhere",
+            "default_branch": "main",
+            "stack": "NestJS",
         },
     )
     await db.memory_add(
-        state, "the ReelMe v2 backend", kind="backend.service",
+        state,
+        "the ReelMe v2 backend",
+        kind="backend.service",
         origin=MemoryOrigin.ADMIN,
         data={
             "name": "backend-reelme-v2",
             "project": "reelme",
-            "prod": {"cluster": "vultr-ailab", "namespace": "sw", "app": "backend-reelme-v2"},
-            "dev": {"kube_context": "dev", "namespace": "dev", "pod_pattern": "backend-reelme-v2"},
+            "prod": {
+                "cluster": "vultr-ailab",
+                "namespace": "sw",
+                "app": "backend-reelme-v2",
+            },
+            "dev": {
+                "kube_context": "dev",
+                "namespace": "dev",
+                "pod_pattern": "backend-reelme-v2",
+            },
         },
     )
     await db.memory_add(
-        state, "ReelMe v2 on dev", kind="backend.route", origin=MemoryOrigin.ADMIN,
+        state,
+        "ReelMe v2 on dev",
+        kind="backend.route",
+        origin=MemoryOrigin.ADMIN,
         data={"domain": domain, "env": env, "service": "backend-reelme-v2"},
     )
 
 
 @dataclass
-
-
 class FakeSource:
     """A log source that answers from a script and records what it was asked."""
 
@@ -206,9 +230,7 @@ class FakeSource:
             return Lines(
                 tuple(l for l in answer if needle in l), self.oldest, self.newest
             )
-        return Lines(
-            tuple(answer), self.oldest, self.newest, truncated=self.truncated
-        )
+        return Lines(tuple(answer), self.oldest, self.newest, truncated=self.truncated)
 
     @property
     def spans(self) -> list[tuple]:
@@ -273,8 +295,8 @@ def test_the_kubectl_window_is_clipped_by_the_runtimes_own_stamps():
     Python traceback tomorrow."""
     from plugins.backend.toolsets.logs import _within
 
-    since = datetime(2026, 9, 20, 4, 10, tzinfo=timezone.utc)
-    until = datetime(2026, 9, 20, 4, 45, tzinfo=timezone.utc)
+    since = datetime(2026, 9, 20, 4, 10, tzinfo=UTC)
+    until = datetime(2026, 9, 20, 4, 45, tzinfo=UTC)
 
     found = _within(
         [
@@ -282,14 +304,15 @@ def test_the_kubectl_window_is_clipped_by_the_runtimes_own_stamps():
             "2026-09-21T07:38:50.548Z hôm nay, ngoài cửa sổ",
             "2026-09-20T04:40:00.000Z đúng request của reporter",
         ],
-        since=since, until=until,
+        since=since,
+        until=until,
     )
 
     assert found.lines == (
         'Defaulted container "backend-reelme-v2" out of: …',
         "đúng request của reporter",
     ), "kubectl's own warning is kept; the stamp is taken back off"
-    assert found.oldest == datetime(2026, 9, 20, 4, 40, tzinfo=timezone.utc)
+    assert found.oldest == datetime(2026, 9, 20, 4, 40, tzinfo=UTC)
 
 
 # --- read_failing_code ------------------------------------------------------
@@ -299,7 +322,9 @@ def test_a_frame_is_mapped_into_the_clone(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "orders.ts").write_text("a\nb\nc\n")
 
-    found = repo_file("/app/src/orders.ts", str(tmp_path), container_roots=CONTAINER_ROOTS)
+    found = repo_file(
+        "/app/src/orders.ts", str(tmp_path), container_roots=CONTAINER_ROOTS
+    )
 
     assert found == (tmp_path / "src" / "orders.ts").resolve()
 
@@ -318,7 +343,10 @@ def test_a_frame_that_climbs_out_of_the_clone_is_never_opened(tmp_path):
     secret = tmp_path / "secret.txt"
     secret.write_text("not yours")
 
-    assert repo_file("/app/../secret.txt", str(repo), container_roots=CONTAINER_ROOTS) is None
+    assert (
+        repo_file("/app/../secret.txt", str(repo), container_roots=CONTAINER_ROOTS)
+        is None
+    )
     assert repo_file("/etc/passwd", str(repo), container_roots=CONTAINER_ROOTS) is None
     assert secret.is_file(), "the escape target was real"
 
@@ -331,7 +359,10 @@ def test_a_pointer_to_a_line_nobody_showed_it_does_not_resolve():
     puts the text back, so the check is a lookup rather than a decision about
     how much rewrapping to forgive."""
     diagnosis = Diagnosis(
-        cause="x", confidence="likely", conclusive=True, refs=["L1", "L99"],
+        cause="x",
+        confidence="likely",
+        conclusive=True,
+        refs=["L1", "L99"],
     )
 
     assert unresolved_refs(diagnosis, {"L1": "ERROR ERR19"}) == ["L99"]
@@ -339,7 +370,9 @@ def test_a_pointer_to_a_line_nobody_showed_it_does_not_resolve():
 
 def test_a_pointer_is_read_however_the_model_spelled_it():
     diagnosis = Diagnosis(
-        cause="x", confidence="likely", conclusive=True,
+        cause="x",
+        confidence="likely",
+        conclusive=True,
         refs=["L12", "l12", "L12:", "line 12"],
     )
 
@@ -351,10 +384,13 @@ async def test_an_ungrounded_diagnosis_is_not_reported(db):
     model supplied itself, asserted in the operator's name."""
     result = await diagnose_node(
         make_harness=_answered_after_reading(
-            cause="the database is down", confidence="certain",
-            conclusive=True, refs=["L99"],
+            cause="the database is down",
+            confidence="certain",
+            conclusive=True,
+            refs=["L99"],
         ),
-        agent="backend.diagnose", build_tools=_reading_tools(),
+        agent="backend.diagnose",
+        build_tools=_reading_tools(),
     ).run(_reads_state(), deps_for(db))
 
     assert status_of(result) == "empty"
@@ -366,7 +402,10 @@ async def test_a_conclusive_answer_that_points_at_nothing_is_not_reported(db):
     to refuse, and "conclusive" is exactly the claim that needs one."""
     result = await diagnose_node(
         make_harness=_answered_after_reading(
-            cause="nó hỏng", confidence="certain", conclusive=True, refs=[],
+            cause="nó hỏng",
+            confidence="certain",
+            conclusive=True,
+            refs=[],
             # Filled, so this reaches the refs gate rather than the
             # alternatives one: the two refuse for different reasons and
             # this test is about pointing at nothing.
@@ -374,7 +413,8 @@ async def test_a_conclusive_answer_that_points_at_nothing_is_not_reported(db):
                 {"hypothesis": "mạng chập", "why": "không có timeout nào"}
             ],
         ),
-        agent="backend.diagnose", build_tools=_reading_tools(),
+        agent="backend.diagnose",
+        build_tools=_reading_tools(),
     ).run(_reads_state(), deps_for(db))
 
     assert status_of(result) == "empty"
@@ -390,18 +430,26 @@ async def test_no_diagnose_agent_skips_rather_than_failing(db):
 # --- report -----------------------------------------------------------------
 
 
-async def test_the_report_is_written_and_the_reporter_is_offered_the_cause(db, tmp_path):
-    state = (
-        _intake_state(env="dev", service="backend-reelme-v2", pod_pattern="p")
-        .with_result("diagnose", {
-            "status": "ok", "reason": "",
+async def test_the_report_is_written_and_the_reporter_is_offered_the_cause(
+    db, tmp_path
+):
+    state = _intake_state(
+        env="dev", service="backend-reelme-v2", pod_pattern="p"
+    ).with_result(
+        "diagnose",
+        {
+            "status": "ok",
+            "reason": "",
             "diagnosis": {
-                "cause": "ERR19", "confidence": "likely", "conclusive": False,
-                "refs": ["L1"], "next_checks": ["hỏi reporter"],
+                "cause": "ERR19",
+                "confidence": "likely",
+                "conclusive": False,
+                "refs": ["L1"],
+                "next_checks": ["hỏi reporter"],
             },
             "quotes": ["ERROR ERR19"],
             "not_checked": ["read at HEAD"],
-        })
+        },
     )
 
     result = await report_node(reports_dir=tmp_path).run(state, deps_for(db))
@@ -427,21 +475,31 @@ def test_the_report_no_longer_renders_the_dossier_sections():
         DAGState.empty()
         .with_result(
             "find_request_log",
-            {"status": "ok", "reason": "", "dossier": "ERROR ERR19",
-             "source": "kubectl", "kept": 1, "total": 90,
-             "histogram": [["ERR19", 90]]},
+            {
+                "status": "ok",
+                "reason": "",
+                "dossier": "ERROR ERR19",
+                "source": "kubectl",
+                "kept": 1,
+                "total": 90,
+                "histogram": [["ERR19", 90]],
+            },
         )
         .with_result(
             "read_failing_code",
             {"status": "ok", "reason": "", "code": "throw new Error()"},
         )
-        .with_result("diagnose", {
-            "status": "empty", "reason": "no diagnose agent is configured",
-            "not_checked": ["the log does not reach back to the report"],
-        })
+        .with_result(
+            "diagnose",
+            {
+                "status": "empty",
+                "reason": "no diagnose agent is configured",
+                "not_checked": ["the log does not reach back to the report"],
+            },
+        )
     )
 
-    text = render(state, task_id=6, at=datetime(2026, 9, 20, tzinfo=timezone.utc))
+    text = render(state, task_id=6, at=datetime(2026, 9, 20, tzinfo=UTC))
 
     assert "log source" not in text
     assert "ERROR ERR19" not in text
@@ -462,8 +520,8 @@ async def test_the_reporter_is_told_it_is_being_worked_on(db):
     do about silence is ask again."""
     from conftest import make_event
 
-    from plugins.backend.graph.acknowledge import ack_text, acknowledge_node
     from friday.kernel.outbox import DEFAULT_SENDER, Kind
+    from plugins.backend.graph.acknowledge import ack_text, acknowledge_node
 
     await db.record_message(make_event(message_id="m1"))
     state = _intake_state(service="backend-reelme-v2")
@@ -485,8 +543,8 @@ async def test_the_acknowledgement_does_not_wait_for_approval(db):
     """The operator's call, 2026-09-22. It promises no finding, quotes no
     log line and names no fault — and one that waits for a person arrives
     after the reply it was meant to precede."""
-    from plugins.backend.graph.acknowledge import acknowledge_node
     from friday.kernel.outbox import DEFAULT_SENDER, Kind
+    from plugins.backend.graph.acknowledge import acknowledge_node
 
     await acknowledge_node(sender=DEFAULT_SENDER).run(_intake_state(), deps_for(db))
 
@@ -498,8 +556,8 @@ async def test_a_resumed_graph_does_not_acknowledge_twice(db):
     """A graph re-runs from its checkpoint after the reporter answers a
     question. A second "đang xử lý" three minutes after the first reads as a
     stuck robot."""
-    from plugins.backend.graph.acknowledge import acknowledge_node
     from friday.kernel.outbox import DEFAULT_SENDER
+    from plugins.backend.graph.acknowledge import acknowledge_node
 
     deps = deps_for(db)
     state = _intake_state()
@@ -525,20 +583,23 @@ def test_nobody_is_acknowledged_before_the_placement_is_known():
     ok = DAGState.empty().with_result("intake", {"status": "ok", "reason": ""})
 
     assert dag.next_after("intake", ok) == "acknowledge"
-    assert dag.next_after(
-        "intake", DAGState.empty().with_result("intake", HandOver("not ours"))
-    ) is None
-    assert [n.name for n in dag.nodes].index("acknowledge") > \
-        [n.name for n in dag.nodes].index("intake")
+    assert (
+        dag.next_after(
+            "intake", DAGState.empty().with_result("intake", HandOver("not ours"))
+        )
+        is None
+    )
+    assert [n.name for n in dag.nodes].index("acknowledge") > [
+        n.name for n in dag.nodes
+    ].index("intake")
 
 
 def test_ack_text_names_the_service_or_stays_generic():
     """Names the service when Intake resolved one; otherwise stays generic —
     never 'log của external' (external is not a place a reporter knows, and the
     loop reads code/docs, not only logs). Operator's fog-item call, 2026-09-27."""
-    from plugins.backend.placement import Placement
-
     from plugins.backend.graph.acknowledge import ack_text
+    from plugins.backend.placement import Placement
 
     named = ack_text(Placement(env="production", service="backend-reelme-v2"))
     assert "backend-reelme-v2" in named and "log của backend-reelme-v2" in named
@@ -552,9 +613,8 @@ def test_the_reads_input_names_the_stack_when_known():
     """The stack (e.g. NestJS) is a hint the diagnose prompt gives the model so
     it reads a trace in that framework's idiom — restored on the unified
     Placement (2026-09-27). Absent when the placement carries no stack."""
-    from plugins.backend.placement import Placement
-
     from plugins.backend.graph.prompt import build_reads_input
+    from plugins.backend.placement import Placement
 
     with_stack = build_reads_input(
         report="loi 500",
@@ -578,21 +638,32 @@ async def test_a_run_with_no_sender_investigates_anyway(db):
 
     assert status_of(result) == "skipped"
     assert "sender" in result["reason"]
-    assert _dag().next_after(
-        "acknowledge", DAGState.empty().with_result("acknowledge", result)
-    ) == "diagnose"
+    assert (
+        _dag().next_after(
+            "acknowledge", DAGState.empty().with_result("acknowledge", result)
+        )
+        == "diagnose"
+    )
 
 
 def _diagnosed() -> DAGState:
     """A state that reached a cause, which is what the last two outputs need."""
-    return DAGState.empty().with_result("diagnose", {
-        "status": "ok", "reason": "",
-        "diagnosis": {
-            "cause": "ERR19 ở orders.init", "confidence": "likely",
-            "conclusive": False, "refs": ["L1"], "next_checks": [],
+    return DAGState.empty().with_result(
+        "diagnose",
+        {
+            "status": "ok",
+            "reason": "",
+            "diagnosis": {
+                "cause": "ERR19 ở orders.init",
+                "confidence": "likely",
+                "conclusive": False,
+                "refs": ["L1"],
+                "next_checks": [],
+            },
+            "quotes": [],
+            "not_checked": [],
         },
-        "quotes": [], "not_checked": [],
-    })
+    )
 
 
 async def test_the_operator_is_told_where_the_whole_report_is(db, tmp_path):
@@ -642,10 +713,15 @@ def test_the_brief_carries_the_cause_and_not_the_evidence():
     things they have been asked to do."""
     from plugins.backend.graph.report import brief
 
-    said = brief(Diagnosis(
-        cause="categoryId rỗng", confidence="certain", conclusive=True,
-        refs=["L1"], next_checks=["hỏi BE về mapping"],
-    ))
+    said = brief(
+        Diagnosis(
+            cause="categoryId rỗng",
+            confidence="certain",
+            conclusive=True,
+            refs=["L1"],
+            next_checks=["hỏi BE về mapping"],
+        )
+    )
 
     assert said == "categoryId rỗng"
 
@@ -653,9 +729,14 @@ def test_the_brief_carries_the_cause_and_not_the_evidence():
 def test_a_brief_that_is_not_conclusive_says_so_in_words():
     from plugins.backend.graph.report import brief
 
-    said = brief(Diagnosis(
-        cause="có thể do cache", confidence="likely", conclusive=False, refs=["L1"],
-    ))
+    said = brief(
+        Diagnosis(
+            cause="có thể do cache",
+            confidence="likely",
+            conclusive=False,
+            refs=["L1"],
+        )
+    )
 
     assert "chưa kết luận" in said
 
@@ -681,11 +762,14 @@ def test_the_pool_and_the_graph_send_as_the_same_two_identities():
     assert taken["approver"].default == DEFAULT_APPROVER
 
 
-def test_api_issue_is_the_one_graph_with_an_investigation_past_node_zero():
+def test_trace_problem_is_the_one_graph_with_an_investigation_past_node_zero():
     dag = _dag()
 
     assert [n.name for n in dag.nodes] == [
-        "intake", "acknowledge", "diagnose", "report",
+        "intake",
+        "acknowledge",
+        "diagnose",
+        "report",
     ]
 
 
@@ -705,8 +789,9 @@ def test_loki_is_read_only_when_its_server_is_open():
     from plugins.backend.toolsets.logs import LOKI_SERVER, log_sources
 
     def run(mcp):
-        return RunContext(task_id=1, domain=None, evidence=None, mcp=mcp,
-                          reported_at=REPORTED_AT)
+        return RunContext(
+            task_id=1, domain=None, evidence=None, mcp=mcp, reported_at=REPORTED_AT
+        )
 
     dev = log_sources(run({}))
     prod = log_sources(run({LOKI_SERVER: object()}))
@@ -748,7 +833,9 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
 
     await write_rows(db, repo=str(tmp_path))
     task_id = await _task_with_text(
-        db, "backend-reelme-v2 dang tra 500\n" f"```\n{CURL}\n```", code=(CURL,),
+        db,
+        f"backend-reelme-v2 dang tra 500\n```\n{CURL}\n```",
+        code=(CURL,),
     )
     task = await db.task(task_id)
 
@@ -763,13 +850,16 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
             read = await self._tools["read_log"](needle="ERR19")
             assert "ERR19" in read
             return Diagnosis(
-                cause="ERR19 ở orders.init", confidence="likely",
-                conclusive=False, refs=["L1"],
+                cause="ERR19 ở orders.init",
+                confidence="likely",
+                conclusive=False,
+                refs=["L1"],
             )
 
     class HonestCaps(_StubCaps):
-        def make_harness(self, *, agent, instructions, answers=None,
-                         tools=None, ends_with=None):
+        def make_harness(
+            self, *, agent, instructions, answers=None, tools=None, ends_with=None
+        ):
             return None if tools is None else Honest(tools)
 
     reports_dir = tmp_path / "reports"
@@ -816,9 +906,12 @@ def test_a_captured_case_runs_through_the_real_source():
 
     read = asyncio.run(
         source.lines(
-            Placement(env="production", service="s", cluster="c",
-                      namespace="n", app="a"),
-            since=REPORTED_AT, until=REPORTED_AT, limit=400,
+            Placement(
+                env="production", service="s", cluster="c", namespace="n", app="a"
+            ),
+            since=REPORTED_AT,
+            until=REPORTED_AT,
+            limit=400,
         )
     )
 
@@ -835,19 +928,28 @@ def test_a_case_key_nobody_reads_is_an_error_rather_than_a_silence():
     from replay_case import case_params
 
     with pytest.raises(ValueError, match="correlationId"):
-        case_params({
-            "id": "x", "channel_id": "c", "reported_at": "2026-09-21T00:00:00",
-            "reads": {}, "correlationId": "abc-123",
-        })
+        case_params(
+            {
+                "id": "x",
+                "channel_id": "c",
+                "reported_at": "2026-09-21T00:00:00",
+                "reads": {},
+                "correlationId": "abc-123",
+            }
+        )
 
 
 def test_a_case_missing_what_it_needs_says_which():
     from replay_case import case_params
 
     with pytest.raises(ValueError, match="reads"):
-        case_params({
-            "id": "x", "channel_id": "c", "reported_at": "2026-09-21T00:00:00",
-        })
+        case_params(
+            {
+                "id": "x",
+                "channel_id": "c",
+                "reported_at": "2026-09-21T00:00:00",
+            }
+        )
 
 
 def test_the_parameters_are_read_off_the_dataclass_not_the_class_body():
@@ -856,17 +958,26 @@ def test_the_parameters_are_read_off_the_dataclass_not_the_class_body():
     a base class."""
     import dataclasses
 
-    from plugins.backend.params import ApiIssueParams
+    from plugins.backend.params import TraceProblemParams
     from replay_case import case_params
 
-    kept = case_params({
-        "id": "x", "channel_id": "c", "reported_at": "2026-09-21T00:00:00",
-        "reads": {}, "summary": "s", "curl": "c", "correlation_id": "i",
-        "environment": "dev", "response": "r", "endpoint": "/v1/x",
-        "identifier": "device-1",
-    })
+    kept = case_params(
+        {
+            "id": "x",
+            "channel_id": "c",
+            "reported_at": "2026-09-21T00:00:00",
+            "reads": {},
+            "summary": "s",
+            "curl": "c",
+            "correlation_id": "i",
+            "environment": "dev",
+            "response": "r",
+            "endpoint": "/v1/x",
+            "identifier": "device-1",
+        }
+    )
 
-    assert set(kept) == {f.name for f in dataclasses.fields(ApiIssueParams)}
+    assert set(kept) == {f.name for f in dataclasses.fields(TraceProblemParams)}
 
 
 def test_a_dev_case_is_captured_from_kubectl_and_replays_through_it():
@@ -879,21 +990,23 @@ def test_a_dev_case_is_captured_from_kubectl_and_replays_through_it():
     from plugins.backend.placement import Placement
     from replay_case import canned_source
 
-    name, source = canned_source({
-        "source": "kubectl",
-        "reads": {
-            "window": "2026-09-21T10:35:01Z INFO quiet\n",
-            "narrowed": "2026-09-21T10:35:01Z ERROR boom\n",
-        },
-    })
+    name, source = canned_source(
+        {
+            "source": "kubectl",
+            "reads": {
+                "window": "2026-09-21T10:35:01Z INFO quiet\n",
+                "narrowed": "2026-09-21T10:35:01Z ERROR boom\n",
+            },
+        }
+    )
 
     read = asyncio.run(
         source.lines(
-            Placement(env="dev", service="s", namespace="n",
-                      pod_pattern="backend"),
-            since=datetime(2026, 9, 21, 10, tzinfo=timezone.utc),
-            until=datetime(2026, 9, 21, 11, tzinfo=timezone.utc),
-            limit=400, needle="abc",
+            Placement(env="dev", service="s", namespace="n", pod_pattern="backend"),
+            since=datetime(2026, 9, 21, 10, tzinfo=UTC),
+            until=datetime(2026, 9, 21, 11, tzinfo=UTC),
+            limit=400,
+            needle="abc",
         )
     )
 
@@ -919,9 +1032,7 @@ def test_a_captured_case_answers_the_two_reads_separately():
     canned = CannedReads({"window": {"streams": []}, "narrowed": {"truncated": True}})
 
     window = asyncio.run(canned.call("loki_query_range", {"query": '{app="a"}'}))
-    ours = asyncio.run(
-        canned.call("loki_query_range", {"query": '{app="a"} |= "abc"'})
-    )
+    ours = asyncio.run(canned.call("loki_query_range", {"query": '{app="a"} |= "abc"'}))
 
     assert "streams" in window and "truncated" in ours
 
@@ -938,23 +1049,27 @@ def test_a_superset_capture_serves_any_needle_the_loop_chooses():
     from replay_case import CannedReads
 
     superset = [
-        "2026-09-21T09:00:00Z ERROR boom user=old",   # before the window
+        "2026-09-21T09:00:00Z ERROR boom user=old",  # before the window
         "2026-09-21T10:35:01Z ERROR boom user=abc",
         "2026-09-21T10:35:02Z INFO ok user=xyz",
         "2026-09-21T10:35:03Z ERROR boom user=def",
     ]
     src = LokiSource(server=CannedReads({"superset": superset}))
-    place = Placement(env="production", service="s", cluster="c",
-                      namespace="n", app="a")
-    since = datetime(2026, 9, 21, 10, tzinfo=timezone.utc)
-    until = datetime(2026, 9, 21, 11, tzinfo=timezone.utc)
+    place = Placement(
+        env="production", service="s", cluster="c", namespace="n", app="a"
+    )
+    since = datetime(2026, 9, 21, 10, tzinfo=UTC)
+    until = datetime(2026, 9, 21, 11, tzinfo=UTC)
 
-    boom = asyncio.run(src.lines(place, since=since, until=until, limit=400,
-                                 needle="boom"))
-    xyz = asyncio.run(src.lines(place, since=since, until=until, limit=400,
-                                needle="xyz"))
-    gone = asyncio.run(src.lines(place, since=since, until=until, limit=400,
-                                 needle="nope"))
+    boom = asyncio.run(
+        src.lines(place, since=since, until=until, limit=400, needle="boom")
+    )
+    xyz = asyncio.run(
+        src.lines(place, since=since, until=until, limit=400, needle="xyz")
+    )
+    gone = asyncio.run(
+        src.lines(place, since=since, until=until, limit=400, needle="nope")
+    )
 
     assert boom.lines == ("ERROR boom user=abc", "ERROR boom user=def")
     assert xyz.lines == ("INFO ok user=xyz",)
@@ -973,15 +1088,19 @@ def test_a_superset_read_is_capped_at_the_limit_and_says_truncated():
 
     superset = [f"2026-09-21T10:35:0{i}Z ERROR boom {i}" for i in range(5)]
     src = LokiSource(server=CannedReads({"superset": superset}))
-    place = Placement(env="production", service="s", cluster="c",
-                      namespace="n", app="a")
+    place = Placement(
+        env="production", service="s", cluster="c", namespace="n", app="a"
+    )
 
-    read = asyncio.run(src.lines(
-        place,
-        since=datetime(2026, 9, 21, 10, tzinfo=timezone.utc),
-        until=datetime(2026, 9, 21, 11, tzinfo=timezone.utc),
-        limit=2, needle="boom",
-    ))
+    read = asyncio.run(
+        src.lines(
+            place,
+            since=datetime(2026, 9, 21, 10, tzinfo=UTC),
+            until=datetime(2026, 9, 21, 11, tzinfo=UTC),
+            limit=2,
+            needle="boom",
+        )
+    )
 
     assert len(read.lines) == 2 and read.truncated
 
@@ -995,20 +1114,27 @@ def test_a_kubectl_superset_serves_the_needle_the_loop_chose():
     from plugins.backend.placement import Placement
     from replay_case import canned_source
 
-    name, source = canned_source({
-        "source": "kubectl",
-        "reads": {"superset": [
-            "2026-09-21T10:35:01Z ERROR boom",
-            "2026-09-21T10:35:02Z INFO quiet",
-        ]},
-    })
+    name, source = canned_source(
+        {
+            "source": "kubectl",
+            "reads": {
+                "superset": [
+                    "2026-09-21T10:35:01Z ERROR boom",
+                    "2026-09-21T10:35:02Z INFO quiet",
+                ]
+            },
+        }
+    )
 
-    read = asyncio.run(source.lines(
-        Placement(env="dev", service="s", namespace="n", pod_pattern="backend"),
-        since=datetime(2026, 9, 21, 10, tzinfo=timezone.utc),
-        until=datetime(2026, 9, 21, 11, tzinfo=timezone.utc),
-        limit=400, needle="boom",
-    ))
+    read = asyncio.run(
+        source.lines(
+            Placement(env="dev", service="s", namespace="n", pod_pattern="backend"),
+            since=datetime(2026, 9, 21, 10, tzinfo=UTC),
+            until=datetime(2026, 9, 21, 11, tzinfo=UTC),
+            limit=400,
+            needle="boom",
+        )
+    )
 
     assert name == "kubectl" and read.lines == ("ERROR boom",)
 
@@ -1024,23 +1150,30 @@ def test_a_kubectl_superset_serves_a_needle_with_spaces_and_a_quote():
     from plugins.backend.placement import Placement
     from replay_case import canned_source
 
-    name, source = canned_source({
-        "source": "kubectl",
-        "reads": {"superset": [
-            "2026-09-21T10:35:01Z ERROR connection refused to db",
-            "2026-09-21T10:35:02Z WARN can't reach cache",
-            "2026-09-21T10:35:03Z INFO quiet",
-        ]},
-    })
-    place = Placement(env="dev", service="s", namespace="n",
-                      pod_pattern="backend")
-    since = datetime(2026, 9, 21, 10, tzinfo=timezone.utc)
-    until = datetime(2026, 9, 21, 11, tzinfo=timezone.utc)
+    _name, source = canned_source(
+        {
+            "source": "kubectl",
+            "reads": {
+                "superset": [
+                    "2026-09-21T10:35:01Z ERROR connection refused to db",
+                    "2026-09-21T10:35:02Z WARN can't reach cache",
+                    "2026-09-21T10:35:03Z INFO quiet",
+                ]
+            },
+        }
+    )
+    place = Placement(env="dev", service="s", namespace="n", pod_pattern="backend")
+    since = datetime(2026, 9, 21, 10, tzinfo=UTC)
+    until = datetime(2026, 9, 21, 11, tzinfo=UTC)
 
-    spaced = asyncio.run(source.lines(place, since=since, until=until,
-                                      limit=400, needle="connection refused"))
-    quoted = asyncio.run(source.lines(place, since=since, until=until,
-                                      limit=400, needle="can't"))
+    spaced = asyncio.run(
+        source.lines(
+            place, since=since, until=until, limit=400, needle="connection refused"
+        )
+    )
+    quoted = asyncio.run(
+        source.lines(place, since=since, until=until, limit=400, needle="can't")
+    )
 
     assert spaced.lines == ("ERROR connection refused to db",)
     assert quoted.lines == ("WARN can't reach cache",)
@@ -1055,8 +1188,12 @@ def test_a_node_that_ended_the_run_does_not_read_as_one_that_passed_it_on():
     from replay_case import answers
 
     run = NodeRun(
-        dag_name="backend.trace_problem", node="resolve", attempt=1,
-        status="ok", reason="", duration_ms=6,
+        dag_name="backend.trace_problem",
+        node="resolve",
+        attempt=1,
+        status="ok",
+        reason="",
+        duration_ms=6,
     )
     final = DAGState.empty().with_result("resolve", HandOver("no service row"))
 
@@ -1074,14 +1211,21 @@ def test_a_node_that_failed_is_named_as_a_seam_that_broke():
 
     def run(node, status, reason=""):
         return NodeRun(
-            dag_name="backend.trace_problem", node=node, attempt=1,
-            status=status, reason=reason, duration_ms=1,
+            dag_name="backend.trace_problem",
+            node=node,
+            attempt=1,
+            status=status,
+            reason=reason,
+            duration_ms=1,
         )
 
     found = answers(
-        [run("find_request_log", "error", "ssh: no route to host"),
-         run("read_failing_code", "empty", "no frame")],
-        DAGState.empty(), wall_s=0.1,
+        [
+            run("find_request_log", "error", "ssh: no route to host"),
+            run("read_failing_code", "empty", "no frame"),
+        ],
+        DAGState.empty(),
+        wall_s=0.1,
     )
 
     assert found["broke"] == ["find_request_log: ssh: no route to host"]
@@ -1159,9 +1303,9 @@ def _kubectl_returning(count: int):
 
     return asyncio.run(
         Source().lines(
-            Placement(env="dev", service="s", namespace="n",
-                      pod_pattern="backend"),
-            since=REPORTED_AT - timedelta(hours=1), until=REPORTED_AT,
+            Placement(env="dev", service="s", namespace="n", pod_pattern="backend"),
+            since=REPORTED_AT - timedelta(hours=1),
+            until=REPORTED_AT,
             limit=5,
         )
     )
@@ -1194,8 +1338,8 @@ def test_both_parsers_say_which_span_they_handed_over():
     )
     clipped = _within(
         ["2026-09-21T10:38:20Z first", "2026-09-21T10:39:44Z last"],
-        since=datetime(2026, 9, 21, 10, tzinfo=timezone.utc),
-        until=datetime(2026, 9, 21, 11, tzinfo=timezone.utc),
+        since=datetime(2026, 9, 21, 10, tzinfo=UTC),
+        until=datetime(2026, 9, 21, 11, tzinfo=UTC),
     )
 
     for read in (parsed, clipped):
@@ -1214,7 +1358,7 @@ def test_loki_asks_its_back_end_for_the_lines_that_carry_the_needle():
     from plugins.backend.toolsets.logs import LokiSource
 
     class Server:
-        asked: dict = {}
+        asked: ClassVar[dict] = {}
 
         async def call_tool(self, tool, arguments):
             Server.asked = arguments
@@ -1223,9 +1367,12 @@ def test_loki_asks_its_back_end_for_the_lines_that_carry_the_needle():
     source = LokiSource(server=Reads(Server(), LokiSource.TOOLS))
     asyncio.run(
         source.lines(
-            Placement(env="production", service="s", cluster="c",
-                      namespace="n", app="a"),
-            since=REPORTED_AT, until=REPORTED_AT, limit=400,
+            Placement(
+                env="production", service="s", cluster="c", namespace="n", app="a"
+            ),
+            since=REPORTED_AT,
+            until=REPORTED_AT,
+            limit=400,
             # A needle carrying a quote, so the escaping is guarded **where
             # it is used** and not only where it is defined: a call site
             # that dropped `_logql` passed a test that only ever asked it
@@ -1266,9 +1413,11 @@ def test_kubectl_searches_the_whole_window_rather_than_its_tail():
 
     asyncio.run(
         Source().lines(
-            Placement(env="dev", service="s", namespace="n",
-                      pod_pattern="backend"),
-            since=REPORTED_AT, until=REPORTED_AT, limit=400, needle="abc-123",
+            Placement(env="dev", service="s", namespace="n", pod_pattern="backend"),
+            since=REPORTED_AT,
+            until=REPORTED_AT,
+            limit=400,
+            needle="abc-123",
         )
     )
 
@@ -1293,9 +1442,10 @@ def test_a_needle_reaches_the_shell_quoted():
 
     asyncio.run(
         Source().lines(
-            Placement(env="dev", service="s", namespace="n",
-                      pod_pattern="backend"),
-            since=REPORTED_AT, until=REPORTED_AT, limit=10,
+            Placement(env="dev", service="s", namespace="n", pod_pattern="backend"),
+            since=REPORTED_AT,
+            until=REPORTED_AT,
+            limit=10,
             needle="x; rm -rf /",
         )
     )
@@ -1335,9 +1485,11 @@ def test_a_failing_kubectl_is_not_hidden_by_the_pipe_that_narrows_it():
 
     asyncio.run(
         Source().lines(
-            Placement(env="dev", service="s", namespace="n",
-                      pod_pattern="backend"),
-            since=REPORTED_AT, until=REPORTED_AT, limit=10, needle="abc-123",
+            Placement(env="dev", service="s", namespace="n", pod_pattern="backend"),
+            since=REPORTED_AT,
+            until=REPORTED_AT,
+            limit=10,
+            needle="abc-123",
         )
     )
 
@@ -1397,9 +1549,8 @@ def _built(root, *, ts_lines=20, js_line=3, ts_line=11):
     (root / "src" / "x.ts").write_text(
         "\n".join(f"ts line {i}" for i in range(1, ts_lines + 1))
     )
-    (root / "dist" / "x.js").write_text(
-        "\n".join(f"js line {i}" for i in range(1, 6))
-    )
+    (root / "dist" / "x.js").write_text("\n".join(f"js line {i}" for i in range(1, 6)))
+
     # One segment on the `js_line`th generated line, pointing at `ts_line`.
     # Every field is a delta and `A` is zero, so the third field carries the
     # original line: `ts_line - 1` encoded, and this builds it by hand.
@@ -1413,11 +1564,18 @@ def _built(root, *, ts_lines=20, js_line=3, ts_line=11):
                 return out
 
     segment = "A" + "A" + vlq(ts_line - 1) + "A"
-    (root / "dist" / "x.js.map").write_text(json.dumps({
-        "version": 3, "file": "x.js", "sourceRoot": "",
-        "sources": ["../src/x.ts"], "names": [],
-        "mappings": ";" * (js_line - 1) + segment,
-    }))
+    (root / "dist" / "x.js.map").write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "file": "x.js",
+                "sourceRoot": "",
+                "sources": ["../src/x.ts"],
+                "names": [],
+                "mappings": ";" * (js_line - 1) + segment,
+            }
+        )
+    )
 
 
 def test_a_compiled_frame_is_translated_back_to_the_source(tmp_path):
@@ -1580,14 +1738,10 @@ def test_a_two_column_table_is_read_as_well_as_a_three(tmp_path):
 
     doc = tmp_path / "error-codes.md"
     doc.write_text(
-        "| Code | Meaning |\n"
-        "| ---- | ------- |\n"
-        "| `ERR306` | Content pack required |\n"
+        "| Code | Meaning |\n| ---- | ------- |\n| `ERR306` | Content pack required |\n"
     )
 
-    assert meanings(doc, ("ERR306",), tmp_path) == {
-        "ERR306": "Content pack required"
-    }
+    assert meanings(doc, ("ERR306",), tmp_path) == {"ERR306": "Content pack required"}
 
 
 # --- reading the code that is actually running (ticket 04) -------------------
@@ -1605,12 +1759,19 @@ def test_the_running_tag_is_read_out_of_the_release_answer():
     class Server:
         async def call(self, tool, arguments):
             assert tool == "release_status"
-            return json.dumps({
-                "status": {"config": {"image": {
-                    "repository": "…/backend-reelme-v2", "tag": "0.4.4",
-                }}},
-                "manifest": "x" * 50_000,
-            })
+            return json.dumps(
+                {
+                    "status": {
+                        "config": {
+                            "image": {
+                                "repository": "…/backend-reelme-v2",
+                                "tag": "0.4.4",
+                            }
+                        }
+                    },
+                    "manifest": "x" * 50_000,
+                }
+            )
 
     got = asyncio.run(ReleaseSource(server=Server()).running_tag("p", "prod"))
 
@@ -1646,7 +1807,7 @@ def test_reading_at_a_ref_never_moves_the_operators_clone(tmp_path):
 
     root = tmp_path / "clone"
     root.mkdir()
-    run = lambda *a: subprocess.run(  # noqa: E731
+    run = lambda *a: subprocess.run(
         ["git", "-C", str(root), *a], capture_output=True, text=True, check=True
     )
     run("init", "-q")
@@ -1677,10 +1838,16 @@ def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monke
 
     ran = []
     monkeypatch.setattr(
-        code_source.subprocess, "run", lambda *a, **k: ran.append(a) or (_ for _ in ()).throw(AssertionError("git was run"))
+        code_source.subprocess,
+        "run",
+        lambda *a, **k: (
+            ran.append(a) or (_ for _ in ()).throw(AssertionError("git was run"))
+        ),
     )
 
-    assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "--upload-pack=x") is None
+    assert (
+        code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "--upload-pack=x") is None
+    )
     assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "") is None
     assert ran == []
 
@@ -1689,30 +1856,51 @@ def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monke
 
 
 def _intake_state(
-    *, env="dev", service="s", cluster="", namespace="", app="",
-    pod_pattern="p", repo_path="", error_code_doc="",
-    candidates=(), request_text="500 khi init đơn",
+    *,
+    env="dev",
+    service="s",
+    cluster="",
+    namespace="",
+    app="",
+    pod_pattern="p",
+    repo_path="",
+    error_code_doc="",
+    candidates=(),
+    request_text="500 khi init đơn",
 ) -> DAGState:
     """An `intake` envelope reads-mode (and `acknowledge`/`report`) needs —
     the JSON-round-tripped shape `intake_of` reads back."""
-    return DAGState.empty().with_result("intake", {
-        "status": "ok", "reason": "",
-        "intake": {
-            "request_text": request_text,
-            "reported_at": REPORTED_AT.isoformat(),
-            "hints": {"uuids": [], "artifacts": []},
-            "domain": {
-                "env": env, "service": service, "cluster": cluster,
-                "namespace": namespace, "app": app, "pod_pattern": pod_pattern,
-                "clone_path": repo_path, "repo_path": repo_path,
-                "error_code_doc": error_code_doc,
-                "dbs": [], "candidates": list(candidates),
-                "correlation_id": None, "curl_artifact_id": None,
-                "response_artifact_id": None,
+    return DAGState.empty().with_result(
+        "intake",
+        {
+            "status": "ok",
+            "reason": "",
+            "intake": {
+                "request_text": request_text,
+                "reported_at": REPORTED_AT.isoformat(),
+                "hints": {"uuids": [], "artifacts": []},
+                "domain": {
+                    "env": env,
+                    "service": service,
+                    "cluster": cluster,
+                    "namespace": namespace,
+                    "app": app,
+                    "pod_pattern": pod_pattern,
+                    "clone_path": repo_path,
+                    "repo_path": repo_path,
+                    "error_code_doc": error_code_doc,
+                    "dbs": [],
+                    "candidates": list(candidates),
+                    "correlation_id": None,
+                    "curl_artifact_id": None,
+                    "response_artifact_id": None,
+                },
+                "memory": [],
+                "skills": [],
             },
-            "memory": [], "skills": [],
         },
-    })
+    )
+
 
 def _reads_state():
     """A placement reads-mode needs, off a real `intake` envelope."""
@@ -1725,7 +1913,10 @@ def _reading_toolsets(source):
     from plugins.backend.toolsets import CODE, LOGS
     from plugins.backend.toolsets.logs import log_tools
 
-    return (replace(LOGS, factory=lambda run: log_tools(run, {"kubectl": source})), CODE)
+    return (
+        replace(LOGS, factory=lambda run: log_tools(run, {"kubectl": source})),
+        CODE,
+    )
 
 
 def _reading_tools():
@@ -1761,9 +1952,13 @@ async def test_conclusive_without_a_rejected_alternative_is_refused(db):
     which is exactly the answer a reader cannot tell from a considered one."""
     result = await diagnose_node(
         make_harness=_answered_after_reading(
-            cause="x", confidence="certain", conclusive=True, refs=["L1"],
+            cause="x",
+            confidence="certain",
+            conclusive=True,
+            refs=["L1"],
         ),
-        agent="backend.diagnose", build_tools=_reading_tools(),
+        agent="backend.diagnose",
+        build_tools=_reading_tools(),
     ).run(_reads_state(), deps_for(db))
 
     assert status_of(result) == "empty"
@@ -1776,10 +1971,14 @@ async def test_an_alternative_with_no_reason_does_not_satisfy_the_gate(db):
     satisfied by the shape rather than by the thinking."""
     result = await diagnose_node(
         make_harness=_answered_after_reading(
-            cause="x", confidence="certain", conclusive=True, refs=["L1"],
+            cause="x",
+            confidence="certain",
+            conclusive=True,
+            refs=["L1"],
             alternatives_rejected=[{"hypothesis": "   ", "why": ""}, "not a dict"],
         ),
-        agent="backend.diagnose", build_tools=_reading_tools(),
+        agent="backend.diagnose",
+        build_tools=_reading_tools(),
     ).run(_reads_state(), deps_for(db))
 
     assert status_of(result) == "empty"
@@ -1803,7 +2002,11 @@ async def test_the_reading_loop_can_hand_over_instead_of_answering(db):
         make_harness=lambda *, tools: HandsOver(), agent="backend.diagnose"
     )
     state = _intake_state(
-        env="production", service="s", cluster="c", namespace="n", app="a",
+        env="production",
+        service="s",
+        cluster="c",
+        namespace="n",
+        app="a",
     )
 
     result = await node.run(state, deps_for(db))
@@ -1858,11 +2061,13 @@ async def test_the_reading_loop_can_ask_the_reporter_instead_of_answering(db):
         async def run_structured(self, prompt, **_):
             return Ask("Ban dung moi truong nao, production hay dev?")
 
-    node = diagnose_node(
-        make_harness=lambda *, tools: Asks(), agent="backend.diagnose"
-    )
+    node = diagnose_node(make_harness=lambda *, tools: Asks(), agent="backend.diagnose")
     state = _intake_state(
-        env="production", service="s", cluster="c", namespace="n", app="a",
+        env="production",
+        service="s",
+        cluster="c",
+        namespace="n",
+        app="a",
     )
 
     result = await node.run(state, deps_for(db))
@@ -1884,13 +2089,20 @@ def test_an_ask_from_diagnose_ends_the_walk_instead_of_reaching_report():
 async def test_a_weighed_conclusive_answer_is_reported(db):
     result = await diagnose_node(
         make_harness=_answered_after_reading(
-            cause="x", confidence="certain", conclusive=True, refs=["L1"],
+            cause="x",
+            confidence="certain",
+            conclusive=True,
+            refs=["L1"],
             alternatives_rejected=[
-                {"hypothesis": "downstream timeout", "why": "no timeout line",
-                 "ref": "L1"}
+                {
+                    "hypothesis": "downstream timeout",
+                    "why": "no timeout line",
+                    "ref": "L1",
+                }
             ],
         ),
-        agent="backend.diagnose", build_tools=_reading_tools(),
+        agent="backend.diagnose",
+        build_tools=_reading_tools(),
     ).run(_reads_state(), deps_for(db))
 
     assert status_of(result) == "ok"
@@ -1904,10 +2116,14 @@ async def test_an_alternative_pointing_at_a_line_it_was_not_shown_voids_it(db):
     gate that checked half the answer is a gate a model learns the shape of."""
     result = await diagnose_node(
         make_harness=_answered_after_reading(
-            cause="x", confidence="certain", conclusive=True, refs=["L1"],
+            cause="x",
+            confidence="certain",
+            conclusive=True,
+            refs=["L1"],
             alternatives_rejected=[{"hypothesis": "y", "why": "z", "ref": "L99"}],
         ),
-        agent="backend.diagnose", build_tools=_reading_tools(),
+        agent="backend.diagnose",
+        build_tools=_reading_tools(),
     ).run(_reads_state(), deps_for(db))
 
     assert status_of(result) == "empty"
@@ -1919,10 +2135,13 @@ async def test_a_tentative_answer_needs_no_alternative(db):
     certainty — not a tax on every answer."""
     result = await diagnose_node(
         make_harness=_answered_after_reading(
-            cause="có thể do cache", confidence="likely", conclusive=False,
+            cause="có thể do cache",
+            confidence="likely",
+            conclusive=False,
             refs=["L1"],
         ),
-        agent="backend.diagnose", build_tools=_reading_tools(),
+        agent="backend.diagnose",
+        build_tools=_reading_tools(),
     ).run(_reads_state(), deps_for(db))
 
     assert status_of(result) == "ok"
@@ -1975,12 +2194,12 @@ def test_check_deps_refuses_a_deps_factory_that_forgets_a_required_field():
     wrong identity or none — fails at boot, where a config error belongs, not
     mid-investigation on a task nobody is watching. Delete `check_deps` and
     nothing catches it until the run."""
+    from dataclasses import field
+
     from friday.kernel.config import ConfigError
     from friday.kernel.dag import registry
     from friday.kernel.dag.router import check_deps
     from friday.sdk.plugin import TaskTypeSpec
-    from dataclasses import field
-
     from friday.sdk.workflow import DAG, Deps, Node
 
     @dataclass(frozen=True, slots=True)
@@ -1993,7 +2212,7 @@ def test_check_deps_refuses_a_deps_factory_that_forgets_a_required_field():
     dag = DAG(name="bad", nodes=(Node(name="n", run=lambda s, d: None),))
     registry.clear()
     registry.register_task_type(
-        TaskTypeSpec(name="bad", params=ApiIssueParams, deps=forgets_sender),
+        TaskTypeSpec(name="bad", params=TraceProblemParams, deps=forgets_sender),
         dag=dag,
     )
     try:
@@ -2018,8 +2237,11 @@ async def _task_with_text(
 
     conversation = ConversationId("fake", channel_id)
     task = await db.create_task(
-        conversation=conversation, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={},
+        conversation=conversation,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     event = replace(
         make_event(channel_id=channel_id, message_id=f"m{task.id}", text=text),
@@ -2033,9 +2255,9 @@ async def _task_with_text(
 async def test_intake_makes_no_model_call():
     """No `agent`, no harness parameter — a model call is not something this
     node's construction can even make."""
-    from plugins.backend.graph.intake import intake_node
-
     import inspect
+
+    from plugins.backend.graph.intake import intake_node
 
     node = intake_node(core_intake)
 
@@ -2091,15 +2313,23 @@ async def test_intake_never_guesses_a_vague_service(db):
 async def _add_mirror_service(db):
     state = FridayState(channel_id="watched", agent="admin")
     await db.memory_add(
-        state, "the ReelMe v2 backend, mirrored", kind="backend.service",
+        state,
+        "the ReelMe v2 backend, mirrored",
+        kind="backend.service",
         origin=MemoryOrigin.ADMIN,
         data={
             "name": "backend-reelme-v2-mirror",
             "project": "reelme",
-            "prod": {"cluster": "vultr-ailab", "namespace": "sw",
-                     "app": "backend-reelme-v2-mirror"},
-            "dev": {"kube_context": "dev", "namespace": "dev",
-                    "pod_pattern": "backend-reelme-v2-mirror"},
+            "prod": {
+                "cluster": "vultr-ailab",
+                "namespace": "sw",
+                "app": "backend-reelme-v2-mirror",
+            },
+            "dev": {
+                "kube_context": "dev",
+                "namespace": "dev",
+                "pod_pattern": "backend-reelme-v2-mirror",
+            },
         },
     )
 
@@ -2122,7 +2352,8 @@ async def test_intake_never_guesses_when_several_services_match(db):
     placement = result["intake"]["domain"]
     assert placement["service"] == ""
     assert set(placement["candidates"]) == {
-        "backend-reelme-v2", "backend-reelme-v2-mirror",
+        "backend-reelme-v2",
+        "backend-reelme-v2-mirror",
     }
 
 
@@ -2156,7 +2387,10 @@ async def test_intake_does_not_resolve_a_short_name_inside_a_host(db):
     await write_rows(db, env="dev")
     state = FridayState(channel_id="watched", agent="admin")
     await db.memory_add(
-        state, "the gateway", kind="backend.service", origin=MemoryOrigin.ADMIN,
+        state,
+        "the gateway",
+        kind="backend.service",
+        origin=MemoryOrigin.ADMIN,
         data={
             "name": "api",
             "project": "reelme",
@@ -2174,7 +2408,7 @@ async def test_intake_does_not_resolve_a_short_name_inside_a_host(db):
     )
 
     placement = result["intake"]["domain"]
-    assert placement["service"] == ""            # not "api"
+    assert placement["service"] == ""  # not "api"
     assert "api" in placement["candidates"]
 
 
@@ -2210,11 +2444,16 @@ def test_placement_identity_is_stable_when_memory_or_skills_change():
     from plugins.backend.placement import Placement
 
     placement = Placement(env="dev", service="backend-reelme-v2", repo_path="/r")
-    a = IntakeContext(request_text="x", reported_at="t", hints=Hints(), domain=placement)
+    a = IntakeContext(
+        request_text="x", reported_at="t", hints=Hints(), domain=placement
+    )
     b = IntakeContext(
-        request_text="x", reported_at="t", hints=Hints(uuids=("u",)),
+        request_text="x",
+        reported_at="t",
+        hints=Hints(uuids=("u",)),
         domain=replace(placement, correlation_id="u"),
-        memory=("a fact",), skills=("a skill",),
+        memory=("a fact",),
+        skills=("a skill",),
     )
 
     assert a.identity == b.identity == ("dev", "backend-reelme-v2", "", "/r")
@@ -2226,14 +2465,25 @@ async def test_intake_retrieval_lands_matched_skills_and_facts(db):
     await write_rows(db, env="dev")
     state = FridayState(channel_id="watched", agent="admin")
     await db.memory_add(
-        state, "backend-reelme-v2 has flaky retries", kind="fact",
+        state,
+        "backend-reelme-v2 has flaky retries",
+        kind="fact",
         origin=MemoryOrigin.ADMIN,
     )
     await db.memory_add(
-        state, "read backend-reelme-v2's queue depth first", kind="skill",
-        origin=MemoryOrigin.ADMIN, key="reelme-queue",
-        data={"when": {"service": ["backend-reelme-v2"], "error_codes": [],
-                        "path_patterns": [], "keywords": []}},
+        state,
+        "read backend-reelme-v2's queue depth first",
+        kind="skill",
+        origin=MemoryOrigin.ADMIN,
+        key="reelme-queue",
+        data={
+            "when": {
+                "service": ["backend-reelme-v2"],
+                "error_codes": [],
+                "path_patterns": [],
+                "keywords": [],
+            }
+        },
     )
     task_id = await _task_with_text(db, "backend-reelme-v2 dang tra 500")
 
@@ -2284,7 +2534,6 @@ async def test_intake_result_survives_dagstate_storage_round_trip(db):
     result is dropped as `UNSTORABLE` and the node re-runs on resume. Guards the
     tuple->list pass — a raw tuple field would fail the equality and go red."""
     from friday.sdk.workflow_state import UNSTORABLE
-
     from plugins.backend.graph.intake import intake_node
 
     await write_rows(db, env="dev", repo="/clone/reelme")
@@ -2297,4 +2546,3 @@ async def test_intake_result_survives_dagstate_storage_round_trip(db):
 
     assert UNSTORABLE not in stored["intake"]
     assert stored["intake"] == result
-

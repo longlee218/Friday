@@ -14,11 +14,11 @@ import tempfile
 
 import pytest
 
-from friday.sdk.actions import Ask
+from friday.kernel.dag import adapter
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.outbox import Outbox
+from friday.sdk.actions import Ask
 from friday.sdk.workflow import DAG, DAGState, Deps, Edge, Node, NodeRun, envelope
-from friday.kernel.dag import adapter
 
 WATCHED = ConversationId("fake", "watched")
 
@@ -32,7 +32,10 @@ def _launch(sysdb: str) -> None:
     from dbos import DBOS, DBOSConfig
 
     DBOS.destroy(destroy_registry=False)  # clear any stale singleton first
-    cfg: DBOSConfig = {"name": "friday-wf-test", "system_database_url": f"sqlite:///{sysdb}"}
+    cfg: DBOSConfig = {
+        "name": "friday-wf-test",
+        "system_database_url": f"sqlite:///{sysdb}",
+    }
     DBOS(config=cfg)
     DBOS.launch()
 
@@ -157,10 +160,18 @@ async def test_a_node_retries_the_exceptions_it_named_then_succeeds(dbos_sqlite)
             raise ValueError("transient")
         return envelope("ok", tries=tries["n"])
 
-    dag = DAG(name="retry", nodes=(Node(
-        name="flaky", run=flaky, retry_on=(ValueError,), max_attempts=2,
-        retry_backoff_seconds=0.0,
-    ),))
+    dag = DAG(
+        name="retry",
+        nodes=(
+            Node(
+                name="flaky",
+                run=flaky,
+                retry_on=(ValueError,),
+                max_attempts=2,
+                retry_backoff_seconds=0.0,
+            ),
+        ),
+    )
     adapter.register_graph(dag, _no_deps, _record_all)
 
     state = await adapter.run("retry", {})
@@ -191,6 +202,7 @@ async def test_ask_suspends_then_the_answer_reruns_the_asking_node(dbos_sqlite):
     """Pure model B: `Ask` suspends; the answer re-runs the SAME node with the
     answer in `deps.answers` (v1's "answer re-runs the asking node"), not a
     result-replacement. Only that node re-runs — upstream stays memoized."""
+
     async def asker(state, deps):
         RAN.append("ask")
         if deps.answers:  # re-run after the answer arrived
@@ -266,12 +278,24 @@ async def test_a_crash_resumes_from_the_last_incomplete_step(dbos_sqlite):
     marker = dbos_sqlite + ".marker"
     DBOS.destroy(destroy_registry=False)
     child = subprocess.run(
-        [sys.executable, str(root / "tests/dbos_crash_child.py"), dbos_sqlite, marker, "wf-crash"],
-        capture_output=True, text=True, timeout=60, cwd=str(root),
+        [
+            sys.executable,
+            str(root / "tests/dbos_crash_child.py"),
+            dbos_sqlite,
+            marker,
+            "wf-crash",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(root),
         env={**os.environ, "PYDANTIC_AI_NO_BANNER": "1", "PYTHONPATH": str(root)},
+        check=False,
     )
-    assert child.returncode == 1, f"child did not crash as expected: {child.stderr[-800:]}"
-    assert open(marker).read().count("a") == 1  # ask ran once before the kill
+    assert child.returncode == 1, (
+        f"child did not crash as expected: {child.stderr[-800:]}"
+    )
+    assert Path(marker).read_text().count("a") == 1  # ask ran once before the kill
 
     _launch(dbos_sqlite)  # "restart" — same SQLite file, fresh process state
     build_and_register(marker)
@@ -282,11 +306,15 @@ async def test_a_crash_resumes_from_the_last_incomplete_step(dbos_sqlite):
     handle = await DBOS.retrieve_workflow_async("wf-crash")
     state = await handle.get_result()
 
-    assert open(marker).read().count("a") == 1  # memoized: ask not re-run on resume
+    assert (
+        Path(marker).read_text().count("a") == 1
+    )  # memoized: ask not re-run on resume
     assert state["ask"]["answer"] == "resumed" and state["after"]["done"] is True
 
 
-async def test_a_send_interrupted_mid_call_is_delivery_unknown_after_restart(dbos_sqlite):
+async def test_a_send_interrupted_mid_call_is_delivery_unknown_after_restart(
+    dbos_sqlite,
+):
     """Ticket 07, criterion 6: kill between the channel call and the write ->
     the row is `delivery_unknown` after restart, and nothing is sent twice.
 
@@ -305,8 +333,8 @@ async def test_a_send_interrupted_mid_call_is_delivery_unknown_after_restart(dbo
 
     from dbos import DBOS
 
-    from friday.store.db import Database
     from friday.kernel.dag import adapter
+    from friday.store.db import Database
 
     tmp = tempfile.mkdtemp()
     app_db = f"{tmp}/app.db"
@@ -317,24 +345,42 @@ async def test_a_send_interrupted_mid_call_is_delivery_unknown_after_restart(dbo
     # go of both databases so the child has exclusive access.
     db = await Database.connect(app_db, create=True)
     opened = await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={"summary": "s"},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={"summary": "s"},
     )
     row = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind="ask_for_details",
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind="ask_for_details",
+        sender="discord_user",
+        text="which environment?",
     )
     await db.close()
     DBOS.destroy(destroy_registry=False)  # the child needs the system db to itself
 
     child = subprocess.run(
-        [sys.executable, str(root / "tests/outbox_crash_child.py"),
-         dbos_sqlite, app_db, marker, str(row.id)],
-        capture_output=True, text=True, timeout=60, cwd=str(root),
+        [
+            sys.executable,
+            str(root / "tests/outbox_crash_child.py"),
+            dbos_sqlite,
+            app_db,
+            marker,
+            str(row.id),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(root),
         env={**os.environ, "PYDANTIC_AI_NO_BANNER": "1", "PYTHONPATH": str(root)},
+        check=False,
     )
-    assert child.returncode == 1, f"child did not crash as expected: {child.stderr[-800:]}"
-    assert open(marker).read().count("a") == 1  # the channel was called once
+    assert child.returncode == 1, (
+        f"child did not crash as expected: {child.stderr[-800:]}"
+    )
+    assert Path(marker).read_text().count("a") == 1  # the channel was called once
 
     # "Restart": same system db, same application db, a fresh sender.
     _launch(dbos_sqlite)
@@ -347,7 +393,9 @@ async def test_a_send_interrupted_mid_call_is_delivery_unknown_after_restart(dbo
     outcome = await handle.get_result()
 
     assert outcome == "delivery_unknown"
-    assert open(marker).read().count("a") == 1, "the send was not repeated on resume"
+    assert Path(marker).read_text().count("a") == 1, (
+        "the send was not repeated on resume"
+    )
     assert (await db.outbound_row(row.id)).state == "delivery_unknown"
     assert (await db.tasks())[0].state == "needs_human"
     await db.close()
@@ -376,7 +424,9 @@ def test_the_adapter_is_the_only_module_that_imports_dbos():
     allowed = {"friday/kernel/dag/adapter.py"}
     hits = subprocess.run(
         ["grep", "-rlE", r"^\s*(from|import)\s+dbos\b", "friday/"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.split()
 
     assert set(hits) <= allowed, f"unexpected dbos importer: {set(hits) - allowed}"

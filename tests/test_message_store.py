@@ -6,12 +6,15 @@ queue from the surrounding context is a column, not a second table.
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from conftest import FakeProvider, captured, make_event
-from friday.kernel.domain.conversation import ConversationId
+
 from friday.kernel.config import IngestConfig
-from friday.kernel.inbox import Inbox
+from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.messages import MentionType
 from friday.kernel.domain.states import TaskState
+from friday.kernel.inbox import Inbox
 
 
 def context(**kw):
@@ -75,9 +78,7 @@ async def test_a_message_kept_as_context_is_never_queued(inbox, provider, db):
     prevent."""
     provider.emit(make_event(message_id="10", text="api is wrong"))
     provider.emit(
-        make_event(
-            message_id="20", text="my own reply", is_own=True, mention_type=None
-        )
+        make_event(message_id="20", text="my own reply", is_own=True, mention_type=None)
     )
     await captured(inbox)
 
@@ -109,9 +110,7 @@ async def test_context_is_not_reported_as_a_triage_decision(inbox, provider, db)
     """Context is kept, not judged. A row with no decision on it is not one."""
     provider.emit(make_event(message_id="10", text="api is wrong"))
     provider.emit(
-        make_event(
-            message_id="20", text="my own reply", is_own=True, mention_type=None
-        )
+        make_event(message_id="20", text="my own reply", is_own=True, mention_type=None)
     )
     await captured(inbox)
 
@@ -149,24 +148,35 @@ async def test_a_call_made_for_a_task_is_read_back_by_that_task(db):
     stored under no key at all.
     """
     task = await db.create_task(
-        conversation=ConversationId("fake", "watched"), type="backend.trace_problem",
-        state=TaskState.PENDING, confidence=0.9, params={},
+        conversation=ConversationId("fake", "watched"),
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
-    common = dict(model="m", system_prompt="s", output="o",
-                  input_tokens=1, output_tokens=1)
-    await db.record_model_call(
-        task_id=task.id, node="prepare", agent="api_issue_extractor",
-        prompt="lift the fields out", latency_ms=120, **common,
+    common = dict(
+        model="m", system_prompt="s", output="o", input_tokens=1, output_tokens=1
     )
     await db.record_model_call(
-        task_id=task.id, agent="responder", prompt="write it in their voice",
-        latency_ms=340, **common,
+        task_id=task.id,
+        node="prepare",
+        agent="trace_problem_extractor",
+        prompt="lift the fields out",
+        latency_ms=120,
+        **common,
+    )
+    await db.record_model_call(
+        task_id=task.id,
+        agent="responder",
+        prompt="write it in their voice",
+        latency_ms=340,
+        **common,
     )
     await db.record_model_call(agent="summary", prompt="unrelated", **common)
 
     mine = await db.calls_for_task(task.id)
 
-    assert [c.agent for c in mine] == ["api_issue_extractor", "responder"]
+    assert [c.agent for c in mine] == ["trace_problem_extractor", "responder"]
     assert mine[0].node == "prepare"
     assert mine[0].latency_ms == 120
     assert mine[1].node is None
@@ -180,25 +190,37 @@ async def test_what_an_agent_has_spent_today_is_read_from_what_it_wrote(db):
     are different jobs against different models — the classifier running on
     every mention and the responder running on a few are not one pool.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     common = dict(model="m", system_prompt="s", prompt="p", output="o")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     await db.record_model_call(
-        agent="triage", input_tokens=1000, output_tokens=200,
-        created_at=now, **common,
+        agent="triage",
+        input_tokens=1000,
+        output_tokens=200,
+        created_at=now,
+        **common,
     )
     await db.record_model_call(
-        agent="triage", input_tokens=300, output_tokens=100,
-        created_at=now, **common,
+        agent="triage",
+        input_tokens=300,
+        output_tokens=100,
+        created_at=now,
+        **common,
     )
     await db.record_model_call(  # yesterday's, and yesterday is paid for
-        agent="triage", input_tokens=9999, output_tokens=9999,
-        created_at=now - timedelta(days=1), **common,
+        agent="triage",
+        input_tokens=9999,
+        output_tokens=9999,
+        created_at=now - timedelta(days=1),
+        **common,
     )
     await db.record_model_call(  # a different job entirely
-        agent="responder", input_tokens=500, output_tokens=50,
-        created_at=now, **common,
+        agent="responder",
+        input_tokens=500,
+        output_tokens=50,
+        created_at=now,
+        **common,
     )
 
     assert await db.spent_today("triage") == 1600
@@ -218,8 +240,14 @@ async def test_a_call_records_which_attempt_it_was(db):
     Which is the whole point: the provider bills per attempt, so the record
     has to be per attempt or the two disagree.
     """
-    common = dict(model="m", system_prompt="s", prompt="p", output="o",
-                  input_tokens=1, output_tokens=1)
+    common = dict(
+        model="m",
+        system_prompt="s",
+        prompt="p",
+        output="o",
+        input_tokens=1,
+        output_tokens=1,
+    )
     await db.record_model_call(agent="triage", attempt=1, **common)
     await db.record_model_call(agent="triage", attempt=2, **common)
 

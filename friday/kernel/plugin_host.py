@@ -26,7 +26,13 @@ from friday.kernel.registry import DuplicateRegistration, PluginRegistration, Re
 from friday.kernel.toolsets import core_plugin
 from friday.sdk.action import Action
 
-__all__ = ["BootRefused", "Loaded", "configured_plugins", "load_plugins", "registered_actions"]
+__all__ = [
+    "BootRefused",
+    "Loaded",
+    "configured_plugins",
+    "load_plugins",
+    "registered_actions",
+]
 
 
 class BootRefused(ConfigError):
@@ -82,7 +88,9 @@ def load_plugins(config: Any) -> Loaded:
     core = core_plugin(hosts=shell_hosts or ())
     try:
         registry.apply(core)
-        apis = tuple(registry.apply(plugin, cfg) for plugin, cfg in configured_plugins(config))
+        apis = tuple(
+            registry.apply(plugin, cfg) for plugin, cfg in configured_plugins(config)
+        )
     except DuplicateRegistration as exc:
         raise BootRefused(str(exc)) from exc
     errors = refusals(

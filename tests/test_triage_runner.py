@@ -6,13 +6,14 @@ database and the application is testable without a model.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from conftest import captured, make_event
-from datetime import datetime, timedelta, timezone
 
 from friday.kernel.domain.conversation import ConversationId
+from friday.kernel.domain.states import TaskState
 from friday.kernel.triage import Decided, NeedsHuman
 from friday.kernel.triage.runner import TriageRunner
-from friday.kernel.domain.states import TaskState
 
 
 class StubTriage:
@@ -29,7 +30,7 @@ class StubTriage:
         return self._outcomes.pop(0) if self._outcomes else NeedsHuman("no script")
 
 
-def api_issue(confidence=0.9):
+def trace_problem(confidence=0.9):
     return Decided(type="backend.trace_problem", confidence=confidence)
 
 
@@ -41,7 +42,7 @@ async def test_a_confident_decision_becomes_a_task(inbox, provider, db):
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
 
-    created = await runner(db, StubTriage(api_issue())).run_once()
+    created = await runner(db, StubTriage(trace_problem())).run_once()
 
     assert [t.type for t in created] == ["backend.trace_problem"]
     stored = await db.tasks()
@@ -64,7 +65,7 @@ async def test_a_skip_creates_no_task(inbox, provider, db):
 async def test_an_event_is_triaged_only_once(inbox, provider, db):
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
-    triage = StubTriage(api_issue())
+    triage = StubTriage(trace_problem())
     r = runner(db, triage)
 
     await r.run_once()
@@ -74,13 +75,11 @@ async def test_an_event_is_triaged_only_once(inbox, provider, db):
     assert len(await db.tasks()) == 1
 
 
-async def test_low_confidence_asks_for_a_human_instead_of_guessing(
-    inbox, provider, db
-):
+async def test_low_confidence_asks_for_a_human_instead_of_guessing(inbox, provider, db):
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
 
-    created = await runner(db, StubTriage(api_issue(confidence=0.3))).run_once()
+    created = await runner(db, StubTriage(trace_problem(confidence=0.3))).run_once()
 
     assert created[0].state == "needs_human"
 
@@ -103,7 +102,7 @@ async def test_a_follow_up_updates_the_open_task_rather_than_opening_a_second(
     provider.emit(make_event(message_id="20", text="still broken"))
     await captured(inbox)
 
-    r = runner(db, StubTriage(api_issue(), api_issue()))
+    r = runner(db, StubTriage(trace_problem(), trace_problem()))
     await r.run_once()
 
     assert len(await db.tasks()) == 1
@@ -116,19 +115,19 @@ async def test_a_message_of_a_different_type_gets_its_own_task(inbox, provider, 
     It used to be: the open task was flagged for a human and the new message
     was marked triaged against it, so no task was ever opened for what it
     actually was. Caught by running the real pipeline over six messages — a
-    genuine api_issue arrived after a held one and produced nothing at all.
+    genuine trace_problem arrived after a held one and produced nothing at all.
     """
     provider.emit(make_event(message_id="10"))
     provider.emit(make_event(message_id="20", text="actually give me repo access"))
     await captured(inbox)
     access = Decided(type="ops.request_permission", confidence=0.9)
 
-    r = runner(db, StubTriage(api_issue(), access))
+    r = runner(db, StubTriage(trace_problem(), access))
     await r.run_once()
 
     tasks = await db.tasks()
     assert [(t.type, t.state) for t in tasks] == [
-        ("backend.trace_problem", "needs_human"),   # flagged: its subject changed
+        ("backend.trace_problem", "needs_human"),  # flagged: its subject changed
         ("ops.request_permission", "pending"),  # and the new report is real work
     ]
 
@@ -145,15 +144,16 @@ async def test_triage_is_given_the_turn_not_the_unbounded_window(inbox, provider
     messages `turn_from` read, not the unbounded window and not a pre-joined
     string — through to `Triage.decide` as `turn=`.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime
 
-    earlier = datetime(2026, 8, 30, 11, 0, tzinfo=timezone.utc)
+    earlier = datetime(2026, 8, 30, 11, 0, tzinfo=UTC)
     provider.emit_recent(
-        "watched", make_event(message_id="1", text="deploy went out", created_at=earlier)
+        "watched",
+        make_event(message_id="1", text="deploy went out", created_at=earlier),
     )
     provider.emit(make_event(message_id="10", text="checkout is 500ing"))
     await captured(inbox)
-    triage = StubTriage(api_issue())
+    triage = StubTriage(trace_problem())
 
     await runner(db, triage).run_once()
 
@@ -176,13 +176,13 @@ async def test_a_follow_up_sends_the_task_back_to_be_re_planned(inbox, provider,
     """
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
     task_id = (await db.tasks())[0].id
     await db.move_task(task_id, TaskState.WAITING_FOR_DETAILS)
 
     provider.emit(make_event(message_id="20", text="prod, correlationId abc-123"))
     await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
 
     assert (await db.tasks())[0].state == "pending"
 
@@ -195,16 +195,17 @@ async def test_the_extractor_is_shown_the_answer_and_not_only_the_report(
     second one, and nothing else in the system reads it."""
     provider.emit(make_event(message_id="10", text="API lỗi nè"))
     await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
     task_id = (await db.tasks())[0].id
 
     provider.emit(make_event(message_id="20", text="correlationId abc-123 nhé"))
     await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
 
     said = await db.original_text_for(task_id)
     assert "API lỗi nè" in said
     assert "abc-123" in said
+
 
 async def test_a_skip_is_still_recorded_as_a_decision(inbox, provider, db):
     """A skip creates no task, so without this the decision leaves no trace and
@@ -225,7 +226,7 @@ async def test_an_opened_task_records_its_decision_too(inbox, provider, db):
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
 
-    created = await runner(db, StubTriage(api_issue())).run_once()
+    created = await runner(db, StubTriage(trace_problem())).run_once()
 
     (decision,) = await db.decisions()
     assert decision["type"] == "backend.trace_problem"
@@ -240,7 +241,9 @@ async def test_a_follow_ups_decision_is_recorded_separately(inbox, provider, db)
     provider.emit(make_event(message_id="20", text="still broken"))
     await captured(inbox)
 
-    await runner(db, StubTriage(api_issue(), api_issue(confidence=0.55))).run_once()
+    await runner(
+        db, StubTriage(trace_problem(), trace_problem(confidence=0.55))
+    ).run_once()
 
     assert [d["confidence"] for d in await db.decisions()] == [0.9, 0.55]
 
@@ -262,12 +265,12 @@ async def test_a_follow_up_without_the_details_asks_again(inbox, provider, db):
     heard."""
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
     await db.move_task((await db.tasks())[0].id, TaskState.WAITING_FOR_DETAILS)
 
     provider.emit(make_event(message_id="20", text="it is still slow"))
     await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
 
     assert (await db.tasks())[0].state == "pending"  # the workflow will re-ask
 
@@ -297,14 +300,14 @@ async def test_a_question_back_does_not_close_the_report(inbox, provider, db):
         us:    em gửi anh cái correlationId hoặc curl em gọi được không?
         them:  correlationId là cái gì a nhỉ, e ko biết   → doc_question
 
-    Live, triage called that third message `api_issue` and everything worked.
+    Live, triage called that third message `trace_problem` and everything worked.
     It is not obliged to. Called `doc_question` it used to push the report to
     `needs_human` and open a second task — for a question that is about the
     first one.
     """
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
     task_id = (await db.tasks())[0].id
     await _we_asked(db, task_id, sent_as="ours-1")
     await db.move_task(task_id, TaskState.WAITING_FOR_DETAILS)
@@ -330,7 +333,7 @@ async def test_the_answer_reaches_the_task_that_asked_for_it(inbox, provider, db
     as part of the task that asked — not as a report of its own."""
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
     task_id = (await db.tasks())[0].id
     await _we_asked(db, task_id, sent_as="ours-1")
     await db.move_task(task_id, TaskState.WAITING_FOR_DETAILS)
@@ -344,9 +347,13 @@ async def test_the_answer_reaches_the_task_that_asked_for_it(inbox, provider, db
         )
     )
     await captured(inbox)
-    await runner(db, StubTriage(Decided(type="ops.request_permission", confidence=0.9))).run_once()
+    await runner(
+        db, StubTriage(Decided(type="ops.request_permission", confidence=0.9))
+    ).run_once()
 
-    assert [(t.type, t.state) for t in await db.tasks()] == [("backend.trace_problem", "pending")]
+    assert [(t.type, t.state) for t in await db.tasks()] == [
+        ("backend.trace_problem", "pending")
+    ]
 
 
 async def test_an_unprompted_message_is_still_checked_by_type(inbox, provider, db):
@@ -358,7 +365,7 @@ async def test_an_unprompted_message_is_still_checked_by_type(inbox, provider, d
     await captured(inbox)
     access = Decided(type="ops.request_permission", confidence=0.9)
 
-    await runner(db, StubTriage(api_issue(), access)).run_once()
+    await runner(db, StubTriage(trace_problem(), access)).run_once()
 
     assert [(t.type, t.state) for t in await db.tasks()] == [
         ("backend.trace_problem", "needs_human"),
@@ -383,7 +390,7 @@ async def test_a_reply_to_a_message_of_ours_that_had_no_task(inbox, provider, db
     provider.emit(make_event(message_id="10", text="ok anh", reply_to="alert-1"))
     await captured(inbox)
 
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
 
     assert [t.type for t in await db.tasks()] == ["backend.trace_problem"]
 
@@ -392,17 +399,15 @@ async def test_a_reply_does_not_reopen_finished_work(inbox, provider, db):
     """A reply is not a reason to reopen work somebody closed."""
     provider.emit(make_event(message_id="10"))
     await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
     task_id = (await db.tasks())[0].id
     await _we_asked(db, task_id, sent_as="ours-1")
     await db.move_task(task_id, TaskState.REVIEW)
     await db.move_task(task_id, TaskState.DONE)
 
-    provider.emit(
-        make_event(message_id="20", text="cảm ơn anh", reply_to="ours-1")
-    )
+    provider.emit(make_event(message_id="20", text="cảm ơn anh", reply_to="ours-1"))
     await captured(inbox)
-    await runner(db, StubTriage(api_issue())).run_once()
+    await runner(db, StubTriage(trace_problem())).run_once()
 
     states = [(t.type, t.state) for t in await db.tasks()]
     assert ("backend.trace_problem", "done") in states
@@ -423,8 +428,10 @@ async def test_three_messages_in_five_seconds_are_classified_once(inbox, provide
     the system asked for what it had just been sent."""
     from datetime import timedelta
 
-    t0 = datetime.now(timezone.utc) - timedelta(minutes=5)
-    provider.emit(make_event(message_id="1", text="@Lee API lỗi rồi a ơi", created_at=t0))
+    t0 = datetime.now(UTC) - timedelta(minutes=5)
+    provider.emit(
+        make_event(message_id="1", text="@Lee API lỗi rồi a ơi", created_at=t0)
+    )
     provider.emit(
         make_event(
             message_id="2",
@@ -442,7 +449,7 @@ async def test_three_messages_in_five_seconds_are_classified_once(inbox, provide
         )
     )
     await captured(inbox)
-    triage = StubTriage(api_issue())
+    triage = StubTriage(trace_problem())
 
     await runner(db, triage).run_once()
 
@@ -456,9 +463,9 @@ async def test_three_messages_in_five_seconds_are_classified_once(inbox, provide
 async def test_a_turn_still_open_is_left_for_the_next_pass(inbox, provider, db):
     """Twelve seconds of silence means they have stopped. Three seconds does
     not."""
-    provider.emit(make_event(message_id="1", created_at=datetime.now(timezone.utc)))
+    provider.emit(make_event(message_id="1", created_at=datetime.now(UTC)))
     await captured(inbox)
-    triage = StubTriage(api_issue())
+    triage = StubTriage(trace_problem())
     r = TriageRunner(db=db, triage=triage, confidence_threshold=0.7, turn_seconds=12)
 
     await r.run_once()
@@ -470,13 +477,16 @@ async def test_a_turn_still_open_is_left_for_the_next_pass(inbox, provider, db):
 async def test_typing_keeps_a_turn_open_past_the_window(inbox, provider, db):
     from datetime import timedelta
 
-    old = datetime.now(timezone.utc) - timedelta(seconds=30)
+    old = datetime.now(UTC) - timedelta(seconds=30)
     provider.emit(make_event(message_id="1", created_at=old))
     await captured(inbox)
-    triage = StubTriage(api_issue())
+    triage = StubTriage(trace_problem())
     r = TriageRunner(
-        db=db, triage=triage, confidence_threshold=0.7,
-        turn_seconds=12, still_typing=_typing(True),
+        db=db,
+        triage=triage,
+        confidence_threshold=0.7,
+        turn_seconds=12,
+        still_typing=_typing(True),
     )
 
     await r.run_once()
@@ -486,19 +496,26 @@ async def test_typing_keeps_a_turn_open_past_the_window(inbox, provider, db):
 
 async def test_somebody_else_speaking_closes_the_turn_at_once(inbox, provider, db):
     """No waiting out the window: the floor has changed hands."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     provider.emit(make_event(message_id="1", text="@Lee API lỗi", created_at=now))
     provider.emit(
         make_event(
-            message_id="2", text="ừ mình cũng thấy", author_id="u-other",
-            author_name="minh", mention_type=None, created_at=now,
+            message_id="2",
+            text="ừ mình cũng thấy",
+            author_id="u-other",
+            author_name="minh",
+            mention_type=None,
+            created_at=now,
         )
     )
     await captured(inbox)
-    triage = StubTriage(api_issue())
+    triage = StubTriage(trace_problem())
     r = TriageRunner(
-        db=db, triage=triage, confidence_threshold=0.7,
-        turn_seconds=12, still_typing=_typing(True),
+        db=db,
+        triage=triage,
+        confidence_threshold=0.7,
+        turn_seconds=12,
+        still_typing=_typing(True),
     )
 
     await r.run_once()
@@ -514,21 +531,26 @@ async def test_what_this_process_posted_is_not_part_of_their_turn(inbox, provide
 
     from friday.kernel.outbox import Kind
 
-    t0 = datetime.now(timezone.utc) - timedelta(seconds=60)
+    t0 = datetime.now(UTC) - timedelta(seconds=60)
     row = await db.queue_outbound(
-        task_id=None, conversation=ConversationId("fake", "watched"),
-        kind=Kind.ASK_FOR_DETAILS, sender="discord_user", text="cho anh xin correlationId",
+        task_id=None,
+        conversation=ConversationId("fake", "watched"),
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="cho anh xin correlationId",
     )
     await db.mark_outbound_sent(row.id, sent_message_id="ours")
     provider.emit(make_event(message_id="1", text="@Lee API lỗi", created_at=t0))
     provider.emit(
         make_event(
-            message_id="ours", text="cho anh xin correlationId", mention_type=None,
+            message_id="ours",
+            text="cho anh xin correlationId",
+            mention_type=None,
             created_at=t0 + timedelta(seconds=2),
         )
     )
     await captured(inbox)
-    triage = StubTriage(api_issue())
+    triage = StubTriage(trace_problem())
 
     await runner(db, triage).run_once()
 
@@ -551,17 +573,25 @@ async def _one_of_ours_in_the_queue(db, *, text="Alive. 79 messages held."):
 
     task = await db.create_task(
         conversation=ConversationId("fake", "watched"),
-        type="backend.trace_problem", state="pending", confidence=0.9, params={},
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     row = await db.queue_outbound(
-        task_id=task.id, conversation=task.conversation, kind=Kind.HELP_WANTED,
-        sender="discord_bot", text=text,
+        task_id=task.id,
+        conversation=task.conversation,
+        kind=Kind.HELP_WANTED,
+        sender="discord_bot",
+        text=text,
     )
     await db.mark_outbound_sent(row.id, sent_message_id="ours-echo")
     await db.record_message(
         make_event(
-            message_id="ours-echo", text=text, author_id="bot",
-            created_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+            message_id="ours-echo",
+            text=text,
+            author_id="bot",
+            created_at=datetime.now(UTC) - timedelta(minutes=10),
         )
     )
     return task
@@ -596,7 +626,7 @@ async def test_one_unreadable_message_does_not_stop_the_others(db):
     real = make_event(message_id="20", text="API lỗi rồi anh ơi")
     await db.record_message(real)
 
-    acted = await runner(db, StubTriage(api_issue())).run_once()
+    acted = await runner(db, StubTriage(trace_problem())).run_once()
 
     assert [t.type for t in acted] == ["backend.trace_problem"], (
         "the good message was triaged despite the bad one ahead of it"
@@ -614,12 +644,11 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(
     *eventually* — a provider that is down all afternoon must surface, and the
     reason has to say the moment lasted rather than reading like one blip.
     """
-    from friday.sdk.testing import FunctionModel
-
     from friday.kernel.config import AgentConfig
     from friday.kernel.harness import harness as harness_module
     from friday.kernel.triage import Triage
     from friday.kernel.triage.runner import NEEDS_HUMAN, TriageRunner
+    from friday.sdk.testing import FunctionModel
     from tests.test_harness import _rate_limited
 
     monkeypatch.setattr(harness_module, "PROVIDER_BACKOFF_SECONDS", 0.0)
@@ -636,7 +665,9 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(
         db=db,
         triage=Triage(
             config=AgentConfig(
-                name="triage", api_key="k", base_url="https://example.invalid/v1",
+                name="triage",
+                api_key="k",
+                base_url="https://example.invalid/v1",
                 model="test-model",
             ),
             model=always_busy,
@@ -657,9 +688,7 @@ async def test_giving_up_on_a_provider_still_reaches_a_person(
 def stale(hours: float, **kw):
     """A message written `hours` ago. The clock, not the capture — a message
     the sweep finds a week late is a week old (D2)."""
-    return make_event(
-        created_at=datetime.now(timezone.utc) - timedelta(hours=hours), **kw
-    )
+    return make_event(created_at=datetime.now(UTC) - timedelta(hours=hours), **kw)
 
 
 async def test_a_message_older_than_the_cutoff_never_reaches_the_model(db):
@@ -668,7 +697,7 @@ async def test_a_message_older_than_the_cutoff_never_reaches_the_model(db):
     was paid for on work nobody wants done."""
     event = stale(30, message_id="10")
     await db.record_message(event)
-    triage = StubTriage(api_issue())
+    triage = StubTriage(trace_problem())
     r = TriageRunner(
         db=db, triage=triage, confidence_threshold=0.7, max_message_age=24 * 3600
     )
@@ -702,7 +731,7 @@ async def test_with_no_cutoff_configured_nothing_changes(db):
     `daily_token_budget` has no default."""
     event = stale(24 * 30, message_id="10")
     await db.record_message(event)
-    triage = StubTriage(api_issue())
+    triage = StubTriage(trace_problem())
 
     await TriageRunner(db=db, triage=triage, confidence_threshold=0.7).run_once()
 
@@ -714,7 +743,7 @@ async def test_a_message_exactly_at_the_cutoff_is_still_answered(db):
     old as" differ by exactly the case somebody hits at 24 hours and one
     second."""
     await db.record_message(stale(23.9, message_id="10"))
-    triage = StubTriage(api_issue())
+    triage = StubTriage(trace_problem())
 
     await TriageRunner(
         db=db, triage=triage, confidence_threshold=0.7, max_message_age=24 * 3600
@@ -728,10 +757,8 @@ async def test_a_fresh_follow_up_brings_its_older_turn_with_it(db):
     turn, and it is fresh — otherwise a reporter returning to their own thread
     is answered without the context they wrote."""
     for n, hours in ((1, 30), (2, 29), (3, 0.5)):
-        await db.record_message(
-            stale(hours, message_id=str(n), text=f"part {n}")
-        )
-    triage = StubTriage(api_issue())
+        await db.record_message(stale(hours, message_id=str(n), text=f"part {n}"))
+    triage = StubTriage(trace_problem())
 
     await TriageRunner(
         db=db, triage=triage, confidence_threshold=0.7, max_message_age=24 * 3600
@@ -751,17 +778,25 @@ async def test_a_late_answer_to_our_own_question_is_never_outdated(db):
     reported = make_event(message_id="1", text="the api is down")
     await db.record_message(reported)
     task = await db.create_task(
-        conversation=reported.conversation, type="backend.trace_problem",
-        state=TaskState.WAITING_FOR_DETAILS, confidence=0.9, params={},
+        conversation=reported.conversation,
+        type="backend.trace_problem",
+        state=TaskState.WAITING_FOR_DETAILS,
+        confidence=0.9,
+        params={},
     )
     asked = await db.queue_outbound(
-        task_id=task.id, conversation=reported.conversation, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=task.id,
+        conversation=reported.conversation,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     await db.mark_outbound_sent(asked.id, sent_message_id="99")
 
-    await db.record_message(stale(72, message_id="100", text="production", reply_to="99"))
-    triage = StubTriage(api_issue())
+    await db.record_message(
+        stale(72, message_id="100", text="production", reply_to="99")
+    )
+    triage = StubTriage(trace_problem())
 
     await TriageRunner(
         db=db, triage=triage, confidence_threshold=0.7, max_message_age=24 * 3600

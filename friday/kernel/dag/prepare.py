@@ -14,22 +14,24 @@ staying behind an import.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, fields, replace
 from typing import Any, get_args, get_type_hints
 
-from friday.sdk.workflow import Deps as DAGDeps, DAGState, Node
-from friday.sdk.actions import Ask, HandOver, Outcome
 from friday.kernel.domain.tasks import MODEL_AUTHORED, ExtractionMark, Params
-from friday.sdk.validation import Problem, asked_as, validate
 from friday.kernel.extraction import (
     Clarify,
-    extract as _extract,
     input_fingerprint,
 )
+from friday.kernel.extraction import (
+    extract as _extract,
+)
 from friday.kernel.extraction.context import FullContext, build_full_context
+from friday.sdk.actions import Ask, HandOver, Outcome
+from friday.sdk.validation import Problem, asked_as, validate
+from friday.sdk.workflow import DAGState, Node
+from friday.sdk.workflow import Deps as DAGDeps
 
 __all__ = [
     "plan_by_required_parameters",
@@ -45,6 +47,7 @@ log = logging.getLogger(__name__)
 #: the extraction package's own entry point, and the remembering wrapper node 0
 #: puts round it.
 _Extract = Callable[..., Awaitable[tuple["Params | None", "Clarify | None"]]]
+
 
 def prepare_node(
     task_type: str,
@@ -99,8 +102,9 @@ def prepare_node(
         if context.transcript_over_budget:
             count = await deps.db.record_ineffective_compaction(deps.task.id)
             log.warning(
-                "task %s: compaction did not bring the build under budget "
-                "(attempt %d)", deps.task.id, count,
+                "task %s: compaction did not bring the build under budget (attempt %d)",
+                deps.task.id,
+                count,
             )
         filled, problem = await prepare(
             task_type,
@@ -145,7 +149,8 @@ async def resolve_artifacts(db: Any, task_id: int, params: Params) -> Params:
     and what the model copied is all there is.
     """
     named = {
-        value for f in fields(params)
+        value
+        for f in fields(params)
         if isinstance(value := getattr(params, f.name), str) and value
     }
     if not named:
@@ -223,7 +228,10 @@ async def prepare(
     clarify: Clarify | None = None
     if context is not None and context.transcript is not None:
         extracted, clarify = await (extract or _extract)(
-            task_type, context, task_id=task_id, node=node,
+            task_type,
+            context,
+            task_id=task_id,
+            node=node,
         )
         if extracted is not None:
             params = _fill(params, extracted)
@@ -236,9 +244,7 @@ async def prepare(
         still_missing = tuple(f for f in clarify.fields if not getattr(params, f, None))
         if still_missing:
             return params, Ask(
-                _question_from_clarify(
-                    params, Clarify(still_missing, clarify.because)
-                )
+                _question_from_clarify(params, Clarify(still_missing, clarify.because))
             )
 
     return params, None
@@ -271,7 +277,11 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
     """
 
     async def extract(
-        task_type: str, context: FullContext, *, task_id=None, node=None,
+        task_type: str,
+        context: FullContext,
+        *,
+        task_id=None,
+        node=None,
     ):
         # Asked of the extraction family rather than reconstructed here. The
         # reconstruction knew about the field schema and the reporter's text,
@@ -292,7 +302,10 @@ def _remembering(db: Any, task_id: int, params_cls: type[Params]) -> _Extract:
                 Clarify(mark.asked_about, mark.because) if mark.asked_about else None,
             )
         extracted, clarify = await _extract(
-            task_type, context, task_id=task_id, node=node,
+            task_type,
+            context,
+            task_id=task_id,
+            node=node,
         )
         if extracted is None and clarify is None:
             # Nothing to remember, so nothing is written — and the next pass
@@ -382,8 +395,7 @@ def _fill(known: Params, extracted: Params) -> Params:
         **{
             f.name: getattr(extracted, f.name)
             for f in fields(extracted)
-            if getattr(extracted, f.name) is not None
-            and not getattr(known, f.name)
+            if getattr(extracted, f.name) is not None and not getattr(known, f.name)
         },
     )
 

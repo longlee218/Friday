@@ -1,7 +1,7 @@
 """Ticket 06's review — the single place `Triage` is assembled from config
 and a store.
 
-Split out of `TriageRunner.build` so `evals/run_triage_eval.py` builds the
+Split out of `TriageRunner.build` so the `core.triage` eval builds the
 identical `Triage` production runs, rather than a second copy of "which
 examples, which sensitive words" that could silently drift from it — the
 same worry ticket 09's review raised about `MemoryScope` and a bare `8`
@@ -39,7 +39,10 @@ def _config(**tiers) -> Config:
 
 #: The tier triage runs on, whatever it is named this week.
 FLASH = TierConfig(
-    name=TRIAGE.tier, api_key="k", base_url="https://example.invalid/v1", model="test-model"
+    name=TRIAGE.tier,
+    api_key="k",
+    base_url="https://example.invalid/v1",
+    model="test-model",
 )
 
 
@@ -74,6 +77,9 @@ async def test_confirmed_rows_are_read_for_the_registered_actions_only():
     triage = await build_triage(_config(**{TRIAGE.tier: FLASH}), db=db)
 
     assert set(db.decisions_asked) == {
-        "backend.trace_problem", "backend.answer_question", "ops.request_permission", "skip",
+        "backend.trace_problem",
+        "backend.answer_question",
+        "ops.request_permission",
+        "skip",
     }
     assert "### backend.answer_question" in triage._run.instructions

@@ -13,19 +13,18 @@ Revises: b7c1a4e93f02
 Create Date: 2026-09-21
 
 """
-from typing import Sequence, Union
 
 import json
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'c3e8d2a51b47'
-down_revision: Union[str, Sequence[str], None] = 'b7c1a4e93f02'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "c3e8d2a51b47"
+down_revision: str | Sequence[str] | None = "b7c1a4e93f02"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 _tasks = sa.table("tasks", sa.column("id", sa.Integer), sa.column("params", sa.JSON))

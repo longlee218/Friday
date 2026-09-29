@@ -54,9 +54,22 @@ _DIRECTIVE_LEADS = {"always", "never", "don't", "must", "should", "please"}
 #: same text, so a word being in both never lets one condition stand in for
 #: the other.
 _IMPERATIVE_VERBS = {
-    "send", "reply", "respond", "answer", "skip", "ignore", "disregard",
-    "approve", "refuse", "escalate", "override", "bypass", "pretend", "act",
-    "treat", "validate",
+    "send",
+    "reply",
+    "respond",
+    "answer",
+    "skip",
+    "ignore",
+    "disregard",
+    "approve",
+    "refuse",
+    "escalate",
+    "override",
+    "bypass",
+    "pretend",
+    "act",
+    "treat",
+    "validate",
 }
 
 #: This system's own mechanism, named — the half of the rule that keeps
@@ -67,12 +80,42 @@ _IMPERATIVE_VERBS = {
 #: refused just because `send`, its own first word, also happens to be a
 #: mechanism word.
 _MECHANISM_WORDS = (
-    "approval", "approve", "approved", "validate", "validation", "review",
-    "reviewed", "confidence", "escalate", "escalation", "hand over",
-    "handover", "refuse", "refusal", "ignore", "disregard", "override",
-    "bypass", "instruction", "instructions", "prompt", "rule", "rules",
-    "persona", "roleplay", "pretend", "reply", "respond", "response",
-    "send", "message", "language", "english", "vietnamese", "tone", "voice",
+    "approval",
+    "approve",
+    "approved",
+    "validate",
+    "validation",
+    "review",
+    "reviewed",
+    "confidence",
+    "escalate",
+    "escalation",
+    "hand over",
+    "handover",
+    "refuse",
+    "refusal",
+    "ignore",
+    "disregard",
+    "override",
+    "bypass",
+    "instruction",
+    "instructions",
+    "prompt",
+    "rule",
+    "rules",
+    "persona",
+    "roleplay",
+    "pretend",
+    "reply",
+    "respond",
+    "response",
+    "send",
+    "message",
+    "language",
+    "english",
+    "vietnamese",
+    "tone",
+    "voice",
 )
 
 #: Whole-word (or whole-phrase) matches only. A raw substring test once let
@@ -91,7 +134,11 @@ def _lead_word_count(text: str) -> int:
     if not words:
         return 0
     first = words[0].strip(".,!?;:\"'").lower()
-    if first == "do" and len(words) > 1 and words[1].strip(".,!?;:\"'").lower() == "not":
+    if (
+        first == "do"
+        and len(words) > 1
+        and words[1].strip(".,!?;:\"'").lower() == "not"
+    ):
         return 2
     if first in _DIRECTIVE_LEADS or first in _IMPERATIVE_VERBS:
         return 1

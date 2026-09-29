@@ -11,7 +11,7 @@ question.
 
 This is the pure value layer — no friday imports, no I/O — so it lives in
 `friday.sdk`, the bottom of the stack. A plugin reaches the DSL to declare its
-params' rules (`ApiIssueParams._RULES`) by importing `sdk` only.
+params' rules (`TraceProblemParams._RULES`) by importing `sdk` only.
 """
 
 from __future__ import annotations
@@ -20,14 +20,13 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-
 __all__ = [
-    "asked_as",
     "InSet",
     "Matches",
     "NonEmpty",
     "OneOf",
     "Problem",
+    "asked_as",
     "validate",
 ]
 
@@ -117,9 +116,7 @@ def _is_blank(value: Any) -> bool:
     """
     if value is None:
         return True
-    if isinstance(value, str) and not value.strip():
-        return True
-    return False
+    return bool(isinstance(value, str) and not value.strip())
 
 
 @dataclass(frozen=True, slots=True)

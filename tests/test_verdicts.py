@@ -14,7 +14,6 @@ from conftest import make_event
 
 from friday.kernel.memory.verdicts import Mark, mark_for
 
-
 # --- what a reaction means --------------------------------------------------
 
 
@@ -83,7 +82,7 @@ async def test_marking_the_same_thing_twice_leaves_one_row(db):
 
 
 async def test_taking_the_mark_back_leaves_no_row(db):
-    """"Unmarked" and "never marked" mean the same thing downstream: nobody
+    """ "Unmarked" and "never marked" mean the same thing downstream: nobody
     is vouching for this one."""
     await db.record_verdict(
         provider="fake", provider_message_id="m1", mark="right", by="operator"
@@ -284,7 +283,9 @@ def test_examples_are_rendered_with_what_they_turned_out_to_be():
     model."""
     from friday.kernel.triage.prompt import build_instructions
 
-    built = build_instructions(examples=[("checkout is 500ing", "backend.trace_problem")])
+    built = build_instructions(
+        examples=[("checkout is 500ing", "backend.trace_problem")]
+    )
 
     assert "<examples>" in built
     assert "checkout is 500ing" in built
@@ -318,15 +319,9 @@ async def test_removing_an_old_reaction_does_not_delete_the_newer_mark(db):
             by=by,
         )
 
-    await marked(
-        provider_message_id="m1", mark=Mark.RIGHT, by="op", taking_back=False
-    )
-    await marked(
-        provider_message_id="m1", mark=Mark.WRONG, by="op", taking_back=False
-    )
-    await marked(
-        provider_message_id="m1", mark=Mark.RIGHT, by="op", taking_back=True
-    )
+    await marked(provider_message_id="m1", mark=Mark.RIGHT, by="op", taking_back=False)
+    await marked(provider_message_id="m1", mark=Mark.WRONG, by="op", taking_back=False)
+    await marked(provider_message_id="m1", mark=Mark.RIGHT, by="op", taking_back=True)
 
     assert await db.verdict_for(provider="fake", provider_message_id="m1") == (
         "wrong",
@@ -348,7 +343,15 @@ async def test_a_state_recorded_as_a_decision_never_becomes_an_example(db):
     assert await db.confirmed_classifications() == []
 
 
-@pytest.mark.parametrize("kind", ["backend.trace_problem", "ops.request_permission", "backend.answer_question", "skip"])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "backend.trace_problem",
+        "ops.request_permission",
+        "backend.answer_question",
+        "skip",
+    ],
+)
 async def test_every_type_the_classifier_can_produce_can_become_an_example(db, kind):
     """Including `skip`. The hardest thing a classifier learns is when *not*
     to open a task, and a negative example is the only thing that teaches it."""

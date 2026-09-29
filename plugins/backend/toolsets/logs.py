@@ -21,7 +21,7 @@ import logging
 import re
 import shlex
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS, Lines
@@ -34,8 +34,8 @@ __all__ = [
     "LOGS",
     "LOKI_SERVER",
     "LOKI_TOOL",
-    "LokiSource",
     "SSH_HOST",
+    "LokiSource",
     "SshKubectlSource",
     "log_sources",
     "log_tools",
@@ -158,14 +158,13 @@ class SshKubectlSource:
         # sentence where missing a capped one costs a dossier believed to be
         # the window.
         raw = out.splitlines()
-        return _within(
-            raw, since=since, until=until, truncated=len(raw) >= int(limit)
-        )
+        return _within(raw, since=since, until=until, truncated=len(raw) >= int(limit))
 
     async def _run(self, remote: str) -> str:
         proc = await asyncio.create_subprocess_exec(
             "ssh",
-            "-o", "BatchMode=yes",
+            "-o",
+            "BatchMode=yes",
             self.host,
             remote,
             stdout=asyncio.subprocess.PIPE,
@@ -175,7 +174,7 @@ class SshKubectlSource:
             out, err = await asyncio.wait_for(
                 proc.communicate(), timeout=TOOL_CALL_TIMEOUT_SECONDS
             )
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             proc.kill()
             # Reaped, not merely killed: without this the child stays a
             # zombie for the life of the process, and this runs on every
@@ -227,9 +226,7 @@ class LokiSource:
     name: str = "loki"
     tool: str = "loki_query_range"
     #: LogQL. `{...}` is filled with the placement's labels.
-    query: str = (
-        '{{apero_cluster="{cluster}", namespace="{namespace}", app="{app}"}}'
-    )
+    query: str = '{{apero_cluster="{cluster}", namespace="{namespace}", app="{app}"}}'
 
     async def lines(
         self,
@@ -289,8 +286,8 @@ def _reported_at(task: Any) -> datetime:
             "instead, which is not when this was reported",
             getattr(task, "id", "?"),
         )
-        return datetime.now(timezone.utc)
-    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+        return datetime.now(UTC)
+    return at if at.tzinfo else at.replace(tzinfo=UTC)
 
 
 def _said(window: timedelta) -> str:
@@ -300,7 +297,7 @@ def _said(window: timedelta) -> str:
 
 def _rfc3339(at: datetime) -> str:
     """The one time format both sides of this module speak."""
-    return at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _text_of(result: Any) -> str:
@@ -330,7 +327,7 @@ def _streams(answered: str) -> Lines:
 
     `{"streams": [{"labels": …, "lines": ["<iso> <line>", …]}, …],
     "truncated": bool}` — captured from the real server on 2026-09-21 and
-    kept in `tests/test_api_issue.py` as a fixture, because a shape this
+    kept in `tests/test_trace_problem.py` as a fixture, because a shape this
     module parses is a shape that has to be checked against the thing that
     produces it rather than against what its documentation says.
 
@@ -353,9 +350,9 @@ def _streams(answered: str) -> Lines:
         for raw in stream.get("lines") or []:
             at, _, line = str(raw).partition(" ")
             try:
-                when = datetime.fromisoformat(at.replace("Z", "+00:00"))
+                when = datetime.fromisoformat(at)
             except ValueError:
-                stamped.append((datetime.max.replace(tzinfo=timezone.utc), str(raw)))
+                stamped.append((datetime.max.replace(tzinfo=UTC), str(raw)))
                 continue
             oldest = when if oldest is None else min(oldest, when)
             newest = when if newest is None else max(newest, when)
@@ -370,7 +367,10 @@ def _streams(answered: str) -> Lines:
 
 
 def _within(
-    stamped: list[str], *, since: datetime, until: datetime,
+    stamped: list[str],
+    *,
+    since: datetime,
+    until: datetime,
     truncated: bool = False,
 ) -> Lines:
     """The lines inside the window, with their stamps taken back off, and the
@@ -393,7 +393,7 @@ def _within(
         if found is None:
             kept.append(raw)
             continue
-        at = datetime.fromisoformat(found.group("at").replace("Z", "+00:00"))
+        at = datetime.fromisoformat(found.group("at"))
         oldest = at if oldest is None else min(oldest, at)
         newest = at if newest is None else max(newest, at)
         if since <= at <= until:
@@ -415,7 +415,7 @@ def _logql(needle: str) -> str:
 
 def _rfc3339(at: datetime) -> str:
     """The one time format both back ends speak."""
-    return at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _text_of(result: Any) -> str:
@@ -498,8 +498,11 @@ def _read_log(
         since = reported_at - timedelta(minutes=window)
         try:
             found = await source.lines(
-                placement, since=since, until=reported_at + MARGIN,
-                limit=LOG_LINES, needle=needle,
+                placement,
+                since=since,
+                until=reported_at + MARGIN,
+                limit=LOG_LINES,
+                needle=needle,
             )
         except Exception as exc:  # noqa: BLE001 — a source that is down is an answer
             log.warning("read_log(%r) failed: %s", needle, exc)

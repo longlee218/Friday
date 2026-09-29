@@ -5,11 +5,10 @@ Just over 200 lines until the extractor's rows (`extraction_mark`,
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class TasksRepo:
-
     # ---- tasks ---------------------------------------------------------
 
     async def create_task(
@@ -199,9 +198,7 @@ class TasksRepo:
             return {}
         async with self._sessions() as session:
             rows = await session.execute(
-                select(
-                    schema.DagState.task_id, schema.DagState.paused_question
-                ).where(
+                select(schema.DagState.task_id, schema.DagState.paused_question).where(
                     schema.DagState.task_id.in_(list(task_ids)),
                     schema.DagState.paused_question.is_not(None),
                 )

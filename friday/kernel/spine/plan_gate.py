@@ -56,28 +56,37 @@ def _contract_errors(plan: Plan, agents: Mapping[str, AgentSpec]) -> list[str]:
     errors: list[str] = []
     for step in plan.steps:
         if step.type not in contract.allowed_step_types:
-            errors.append(f"{step.id}: step type {step.type} is not allowed by the "
-                          f"contract ({_names(contract.allowed_step_types)})")
+            errors.append(
+                f"{step.id}: step type {step.type} is not allowed by the "
+                f"contract ({_names(contract.allowed_step_types)})"
+            )
         if not isinstance(step, AgentStep):
             continue
         if step.agent not in contract.allowed_agents:
-            errors.append(f"{step.id}: agent {step.agent} is not allowed by the "
-                          f"contract ({_names(contract.allowed_agents)})")
+            errors.append(
+                f"{step.id}: agent {step.agent} is not allowed by the "
+                f"contract ({_names(contract.allowed_agents)})"
+            )
         spec = agents.get(step.agent)
         if spec is None:
             errors.append(f"{step.id}: agent {step.agent} is not registered")
             continue
         ceiling = contract.allowed_toolsets & frozenset(spec.toolsets)
-        errors += [f"{step.id}: toolset {t} is outside what {step.agent} may be "
-                   f"granted ({_names(ceiling)})"
-                   for t in step.toolsets if t not in ceiling]
+        errors += [
+            f"{step.id}: toolset {t} is outside what {step.agent} may be "
+            f"granted ({_names(ceiling)})"
+            for t in step.toolsets
+            if t not in ceiling
+        ]
     return errors
 
 
 def _limit_errors(plan: Plan) -> list[str]:
     most = plan.contract.limits.max_steps
     if len(plan.steps) > most:
-        return [f"the plan has {len(plan.steps)} steps; the contract allows at most {most}"]
+        return [
+            f"the plan has {len(plan.steps)} steps; the contract allows at most {most}"
+        ]
     return []
 
 

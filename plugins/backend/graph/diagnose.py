@@ -73,6 +73,7 @@ def hand_over(reason: str) -> HandOver:
     """
     return HandOver(reason=reason)
 
+
 log = logging.getLogger(__name__)
 
 #: Five rungs, named rather than numeric. A model asked for 0.0–1.0 answers
@@ -156,9 +157,10 @@ def _rejected(answer: Diagnosis) -> list[dict]:
     for entry in answer.alternatives_rejected or ():
         if not isinstance(entry, dict):
             continue
-        if str(entry.get("hypothesis", "")).strip() and str(
-            entry.get("why", "")
-        ).strip():
+        if (
+            str(entry.get("hypothesis", "")).strip()
+            and str(entry.get("why", "")).strip()
+        ):
             kept.append(entry)
     return kept
 
@@ -220,7 +222,6 @@ def quoted(diagnosis: Diagnosis, index: dict[str, str]) -> list[str]:
     return [index[_key(r)] for r in diagnosis.refs if _key(r) in index]
 
 
-
 def _judged(answer: Any, index: dict, not_checked: tuple, deps: Any) -> Any:
     """The gates a diagnosis has to pass before it is reported.
 
@@ -233,7 +234,8 @@ def _judged(answer: Any, index: dict, not_checked: tuple, deps: Any) -> Any:
     if invented:
         log.warning(
             "task %s: diagnosis points at lines it was not shown: %s",
-            deps.task.id, invented,
+            deps.task.id,
+            invented,
         )
         return envelope(
             "empty",
@@ -301,10 +303,19 @@ async def _reading(
     placement = ctx.domain
     evidence = Evidence()
     # `mcp` is filled by the core per toolset (`caps.build_tools`).
-    tools = [] if build_tools is None else build_tools(RunContext(
-        task_id=deps.task.id, domain=placement, evidence=evidence, mcp={},
-        reported_at=_reported_at(deps.task),
-    ))
+    tools = (
+        []
+        if build_tools is None
+        else build_tools(
+            RunContext(
+                task_id=deps.task.id,
+                domain=placement,
+                evidence=evidence,
+                mcp={},
+                reported_at=_reported_at(deps.task),
+            )
+        )
+    )
     harness = make_harness(tools=tools)
     if harness is None:
         return envelope(
@@ -352,7 +363,8 @@ async def _reading(
 
 
 def diagnose_node(
-    *, agent: str | None = None,
+    *,
+    agent: str | None = None,
     #: Build a harness per run, with this run's tools — the tools carry this
     #: run's placement and numbering, so a harness built once at boot would
     #: read the previous case's service. `None` when no `diagnose` agent is
@@ -379,6 +391,4 @@ def diagnose_node(
             )
         return await _reading(state, deps, make_harness, build_tools)
 
-    return Node(
-        "diagnose", _diagnose, agent=agent
-    )
+    return Node("diagnose", _diagnose, agent=agent)

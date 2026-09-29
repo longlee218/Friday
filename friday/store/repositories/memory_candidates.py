@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class MemoryCandidatesRepo:
-
     # ---- candidate memories (board `what-the-room-already-knows`,
     # ticket 12, D19, D20) --------------------------------------------------
     #
@@ -109,16 +108,18 @@ class MemoryCandidatesRepo:
             written = await self.memory_add(state, candidate.text, kind=candidate.kind)
             if written is None:
                 log.warning(
-                    "candidate %s accepted but not written — channel %s "
-                    "is at its cap",
-                    candidate.id, candidate.channel_id,
+                    "candidate %s accepted but not written — channel %s is at its cap",
+                    candidate.id,
+                    candidate.channel_id,
                 )
             else:
                 memory_id = written.id
         async with self._sessions.begin() as session:
             row = await session.get(schema.MemoryCandidate, candidate.id)
             assert row is not None, f"candidate {candidate.id} vanished mid-resolve"
-            row.status = CandidateStatus.ACCEPTED if accepted else CandidateStatus.REJECTED
+            row.status = (
+                CandidateStatus.ACCEPTED if accepted else CandidateStatus.REJECTED
+            )
             row.resolved_at = _now()
             row.resolved_by = by
             row.memory_id = memory_id

@@ -28,8 +28,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import subprocess
 import re
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -37,11 +37,14 @@ from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS
 from friday.sdk.toolset import RunContext, ToolsetSpec, tool
 from plugins.backend.placement import Placement
 from plugins.backend.toolsets.evidence import Evidence
-from plugins.backend.toolsets.release import RELEASE_SERVER, ReleaseSource, RunningVersion
+from plugins.backend.toolsets.release import (
+    RELEASE_SERVER,
+    ReleaseSource,
+    RunningVersion,
+)
 
 __all__ = [
     "CODE",
-    "unknown_repo",
     "CONTAINER_ROOTS",
     "at_ref",
     "code_tools",
@@ -50,6 +53,7 @@ __all__ = [
     "meanings",
     "original",
     "repo_file",
+    "unknown_repo",
 ]
 
 log = logging.getLogger(__name__)
@@ -73,7 +77,10 @@ AFTER = 15
 
 
 def repo_file(
-    frame: str, repo_path: str, *, container_roots: tuple[str, ...],
+    frame: str,
+    repo_path: str,
+    *,
+    container_roots: tuple[str, ...],
     exists: bool = True,
 ) -> Path | None:
     """The frame's file inside this clone, or `None` if it is not in it.
@@ -91,7 +98,7 @@ def repo_file(
     relative = frame
     for prefix in sorted(container_roots, key=len, reverse=True):
         if frame.startswith(prefix + "/"):
-            relative = frame[len(prefix) + 1:]
+            relative = frame[len(prefix) + 1 :]
             break
     else:
         if frame.startswith("/"):
@@ -133,7 +140,9 @@ def at_ref(repo_path: str, path: Path, ref: str) -> str | None:
     try:
         done = subprocess.run(
             ["git", "-C", str(root), "show", f"{ref}:{relative.as_posix()}"],
-            capture_output=True, text=True, timeout=TOOL_CALL_TIMEOUT_SECONDS,
+            capture_output=True,
+            text=True,
+            timeout=TOOL_CALL_TIMEOUT_SECONDS,
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -164,15 +173,16 @@ def numbered(text: str, line: int, *, before: int = BEFORE, after: int = AFTER) 
 
 def excerpt(path: Path, line: int, *, before: int = BEFORE, after: int = AFTER) -> str:
     """The lines around `line`, numbered, so a diagnosis can cite one."""
-    return numbered(
-        path.read_text(errors="replace"), line, before=before, after=after
-    )
+    return numbered(path.read_text(errors="replace"), line, before=before, after=after)
 
 
 #: Base64 VLQ, as source maps encode every number in `mappings`.
-_VLQ = {c: i for i, c in enumerate(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-)}
+_VLQ = {
+    c: i
+    for i, c in enumerate(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    )
+}
 
 
 def _numbers(segment: str) -> list[int]:
@@ -240,8 +250,12 @@ def original(compiled: Path, line: int, root: Path | str) -> tuple[Path, int] | 
 
 
 def _walk(
-    loaded: dict, sources: list, mappings: str,
-    compiled: Path, line: int, root: Path,
+    loaded: dict,
+    sources: list,
+    mappings: str,
+    compiled: Path,
+    line: int,
+    root: Path,
 ) -> tuple[Path, int] | None:
     # Walk to the generated line, carrying the deltas: every field in a
     # source map is relative to the previous segment, and `source` and
@@ -260,7 +274,8 @@ def _walk(
                 # the caller already turns that into the same `None`. Two
                 # roads to one answer is one branch more than the behaviour.
                 where = (
-                    compiled.parent / (loaded.get("sourceRoot") or "")
+                    compiled.parent
+                    / (loaded.get("sourceRoot") or "")
                     / sources[source_index]
                 ).resolve()
                 try:
@@ -280,9 +295,7 @@ def _walk(
 _ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$")
 
 
-def meanings(
-    doc: Path | str, codes: Sequence[str], root: Path | str
-) -> dict[str, str]:
+def meanings(doc: Path | str, codes: Sequence[str], root: Path | str) -> dict[str, str]:
     """What the repo says each of these error codes means.
 
     **Only the codes that turned up.** Ticket 16 measured every one of 2,104
@@ -314,7 +327,9 @@ def meanings(
         row = _ROW.match(line)
         if row is None:
             continue
-        cells = [cell.strip().strip("`").strip() for cell in row.group("cells").split("|")]
+        cells = [
+            cell.strip().strip("`").strip() for cell in row.group("cells").split("|")
+        ]
         # **Two cells or three.** The real document has both: 130 rows of
         # `code | name | meaning` and 69 of `code | meaning`, and a parser
         # that wanted three silently dropped every Midas code — `ERR306`
@@ -342,8 +357,11 @@ def grep(repo_path: str, query: str, ref: str = "") -> tuple[list[str], bool] | 
     args.append("--")
     try:
         done = subprocess.run(
-            args, capture_output=True, text=True,
-            timeout=TOOL_CALL_TIMEOUT_SECONDS, check=False,
+            args,
+            capture_output=True,
+            text=True,
+            timeout=TOOL_CALL_TIMEOUT_SECONDS,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("git grep %r: %s", query, exc)
@@ -354,7 +372,7 @@ def grep(repo_path: str, query: str, ref: str = "") -> tuple[list[str], bool] | 
         return None
     prefix = f"{ref}:" if ref else ""
     found = [
-        line[len(prefix):] if prefix and line.startswith(prefix) else line
+        line[len(prefix) :] if prefix and line.startswith(prefix) else line
         for line in done.stdout.splitlines()
     ]
     return [line[:HIT_CHARS] for line in found[:MAX_HITS]], len(found) > MAX_HITS
@@ -364,8 +382,7 @@ def unknown_repo(repo: str, placement: Placement) -> str:
     """The refusal every `repo`-taking tool gives a name that is not the room's."""
     names = sorted(p.name for p in placement.projects)
     return (
-        f"{repo!r} is not one of this room's projects: "
-        f"{names or 'none are recorded'}."
+        f"{repo!r} is not one of this room's projects: {names or 'none are recorded'}."
     )
 
 
@@ -404,14 +421,20 @@ def _read_code(evidence: Evidence, placement: Placement, running: RunningVersion
                 f"or outside the repository."
             )
         shown, at, mapped_note = found, int(line), ""
-        mapped = original(found, int(line), project.repo_path) if found.is_file() else None
+        mapped = (
+            original(found, int(line), project.repo_path) if found.is_file() else None
+        )
         if mapped is not None:
             shown, at = mapped
             if tag:
                 # The map is the checkout's build, not the tag's: if the two
                 # differ, the line can be off. Said, not guessed around.
                 mapped_note = "; line mapped with the checkout's source map"
-        text = await asyncio.to_thread(at_ref, project.repo_path, shown, tag) if tag else None
+        text = (
+            await asyncio.to_thread(at_ref, project.repo_path, shown, tag)
+            if tag
+            else None
+        )
         if tag and text is None:
             why = f"the clone has no {shown.name} at {tag} — fetch its tags"
         if text is not None:
@@ -457,7 +480,11 @@ def _search_code(evidence: Evidence, placement: Placement, running: RunningVersi
             return "Give a string to search for."
         evidence.reads += 1
         tag, why = await running.of(repo)
-        hits = await asyncio.to_thread(grep, project.repo_path, query, tag) if tag else None
+        hits = (
+            await asyncio.to_thread(grep, project.repo_path, query, tag)
+            if tag
+            else None
+        )
         where = f"at {tag}"
         if hits is None:
             if tag:

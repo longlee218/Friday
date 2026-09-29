@@ -33,8 +33,8 @@ from typing import Any
 import httpx2
 from dotenv import load_dotenv
 
-from friday.kernel.harness.auth import TokenStore
 from friday.kernel.config import load_config
+from friday.kernel.harness.auth import TokenStore
 
 
 def pkce() -> tuple[str, str]:
@@ -103,8 +103,7 @@ def register(endpoint: str, redirect: str) -> str:
     client_id = said.get("client_id")
     if not client_id:
         raise ValueError(
-            f"{endpoint} registered no client "
-            f"({said.get('error', answer.status_code)})"
+            f"{endpoint} registered no client ({said.get('error', answer.status_code)})"
         )
     return str(client_id)
 
@@ -119,7 +118,7 @@ class Caught(http.server.BaseHTTPRequestHandler):
     code: str = ""
     state: str = ""
 
-    def do_GET(self) -> None:  # noqa: N802 - the stdlib's spelling
+    def do_GET(self) -> None:
         asked = urllib.parse.urlparse(self.path)
         found = urllib.parse.parse_qs(asked.query)
         Caught.code = (found.get("code") or [""])[0]
@@ -199,16 +198,18 @@ def authorize(name: str) -> int:
             return 1
         print(f"Registered this machine with {name} as client {client_id}.")
 
-    asked = urllib.parse.urlencode({
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": redirect,
-        "scope": auth.get("scope") or "openid",
-        "state": state,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-        **({"resource": auth["resource"]} if auth.get("resource") else {}),
-    })
+    asked = urllib.parse.urlencode(
+        {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect,
+            "scope": auth.get("scope") or "openid",
+            "state": state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            **({"resource": auth["resource"]} if auth.get("resource") else {}),
+        }
+    )
     where = f"{authorize_url}?{asked}"
 
     print(f"Opening your browser to sign in to {name}.")
@@ -234,7 +235,11 @@ def authorize(name: str) -> int:
             "code": Caught.code,
             "redirect_uri": redirect,
             "code_verifier": verifier,
-            **({"client_secret": auth["client_secret"]} if auth.get("client_secret") else {}),
+            **(
+                {"client_secret": auth["client_secret"]}
+                if auth.get("client_secret")
+                else {}
+            ),
         },
         timeout=30.0,
     )

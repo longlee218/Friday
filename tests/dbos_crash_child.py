@@ -14,10 +14,11 @@ from __future__ import annotations
 import os
 import sys
 import time
+from pathlib import Path
 
+from friday.kernel.dag import adapter
 from friday.sdk.actions import Ask
 from friday.sdk.workflow import DAG, Deps, Edge, Node, envelope
-from friday.kernel.dag import adapter
 
 CRASH_DAG = "crash-box8"
 
@@ -59,7 +60,7 @@ def _main() -> None:
         # Wait until `ask` has run and the workflow is suspended on recv, then
         # kill the process hard — power-loss while waiting for the operator.
         for _ in range(500):
-            if os.path.exists(marker) and open(marker).read().count("a") >= 1:
+            if os.path.exists(marker) and Path(marker).read_text().count("a") >= 1:
                 time.sleep(0.2)  # let the recv suspension checkpoint
                 os._exit(1)
             await asyncio.sleep(0.02)

@@ -7,7 +7,7 @@ called and the process simply goes quiet.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from friday.kernel.domain.conversation import ConversationId
@@ -140,7 +140,7 @@ def stub_message(message_id, text="hello", author_id=2, channel=None, created_at
         author=SimpleNamespace(id=author_id, display_name="reporter", bot=False),
         channel=channel or SimpleNamespace(id=55, type=None),
         guild=None,
-        created_at=created_at or datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc),
+        created_at=created_at or datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
         mentions=[],
         role_mentions=[],
     )
@@ -237,7 +237,9 @@ def test_the_unofficial_library_stays_in_one_module():
     allowed = {"friday/kernel/providers/discord/user.py"}
     hits = subprocess.run(
         ["grep", "-rlE", r"^\s*(from discord_self|import discord_self)\b", "friday/"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.split()
 
     assert set(hits) <= allowed, f"unexpected importer: {set(hits) - allowed}"
@@ -249,9 +251,7 @@ def test_the_unofficial_library_stays_in_one_module():
 def _at(hours_ago: float):
     from datetime import timedelta
 
-    return datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc) - timedelta(
-        hours=hours_ago
-    )
+    return datetime(2026, 9, 15, 12, 0, tzinfo=UTC) - timedelta(hours=hours_ago)
 
 
 async def test_a_cold_cursor_reads_the_newest_end_and_stops_at_the_lookback():
@@ -268,10 +268,7 @@ async def test_a_cold_cursor_reads_the_newest_end_and_stops_at_the_lookback():
     client.get_channel = lambda _id: channel
     provider = DiscordUserProvider("token", client=client)
 
-    seen = [
-        event
-        async for event in provider.history("55", after=None, since=_at(24))
-    ]
+    seen = [event async for event in provider.history("55", after=None, since=_at(24))]
 
     assert [e.provider_message_id for e in seen] == ["12", "13"]
     assert channel.calls[0]["oldest_first"] is False
@@ -290,10 +287,7 @@ async def test_a_cold_cursor_hands_them_over_oldest_first():
     client.get_channel = lambda _id: channel
     provider = DiscordUserProvider("token", client=client)
 
-    seen = [
-        event
-        async for event in provider.history("55", after=None, since=_at(24))
-    ]
+    seen = [event async for event in provider.history("55", after=None, since=_at(24))]
 
     assert [e.provider_message_id for e in seen] == ["10", "11", "12"]
 

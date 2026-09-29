@@ -17,9 +17,21 @@ system sends with no person reading it first. Five rules; the one the incident
 called for was `_PROMISES`, a list of promising phrases:
 
 ```python
-_PROMISES = ("để anh", "để em", "để tôi", "để mình",
-             "anh sẽ", "em sẽ", "tôi sẽ", "mình sẽ",
-             "i'll", "i will", "let me", "we'll", "we will")
+_PROMISES = (
+    "để anh",
+    "để em",
+    "để tôi",
+    "để mình",
+    "anh sẽ",
+    "em sẽ",
+    "tôi sẽ",
+    "mình sẽ",
+    "i'll",
+    "i will",
+    "let me",
+    "we'll",
+    "we will",
+)
 ```
 
 It was drawn from one incident, recorded in `Responder.draft`'s docstring:

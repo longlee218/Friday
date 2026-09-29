@@ -33,21 +33,20 @@ Revises: f81f63e7d3ce
 Create Date: 2026-09-20
 
 """
-from typing import Sequence, Union
 
 import json
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 from friday.kernel.ops.redact import scrub
 
-
 # revision identifiers, used by Alembic.
-revision: str = 'b7c1a4e93f02'
-down_revision: Union[str, Sequence[str], None] = 'f81f63e7d3ce'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "b7c1a4e93f02"
+down_revision: str | Sequence[str] | None = "f81f63e7d3ce"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 #: Named rather than reflected, so this migration keeps working against a
@@ -84,9 +83,7 @@ def upgrade() -> None:
         }
         if cleaned != params:
             connection.execute(
-                _tasks.update()
-                .where(_tasks.c.id == row.id)
-                .values(params=cleaned)
+                _tasks.update().where(_tasks.c.id == row.id).values(params=cleaned)
             )
 
     for row in connection.execute(sa.select(_outbox.c.id, _outbox.c.text)):

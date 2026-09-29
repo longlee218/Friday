@@ -1,9 +1,9 @@
 """Scoring a set of triage predictions against their expected labels.
 
 Pure and synchronous: nothing here calls a model or touches the database, so
-it is unit-tested without either. `run_triage_eval.py` is the only real
+it is unit-tested without either. `friday.kernel.evals.triage` is the only real
 caller, and it supplies predictions from a live run against
-`evals/triage.jsonl`.
+`evals/datasets/triage/`.
 """
 
 from __future__ import annotations
@@ -11,10 +11,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 __all__ = [
-    "Prediction", "accuracy", "confusion_matrix", "out_of_set", "threshold_table",
+    "Prediction",
+    "accuracy",
+    "confusion_matrix",
+    "out_of_set",
+    "threshold_table",
 ]
 
-#: The values `run_triage_eval.report` prints a row for. `0.5` is not a
+#: The values `friday.kernel.evals.triage.report` prints a row for. `0.5` is not a
 #: number anyone has settled on; it is the low end of the range
 #: `confidence_threshold` might plausibly move to.
 DEFAULT_THRESHOLDS: tuple[float, ...] = (0.5, 0.6, 0.7, 0.8, 0.9)

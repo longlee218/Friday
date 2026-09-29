@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 
 from friday.kernel.config import IngestConfig
-from friday.store.db import Database
+from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.messages import InboundEvent, MentionType
+from friday.store.db import Database
 
 __all__ = ["Inbox"]
 
@@ -55,7 +56,7 @@ class Inbox:
     """
 
     @classmethod
-    def build(cls, config, *, provider, db: Database) -> "Inbox":
+    def build(cls, config, *, provider, db: Database) -> Inbox:
         """The inbox, read from configuration here.
 
         The same shape `TriageRunner.build` uses, for the same reason: which
@@ -223,9 +224,7 @@ class Inbox:
                     channel_id,
                 )
             return None
-        since = datetime.now(timezone.utc) - timedelta(
-            seconds=self._cold_start_lookback
-        )
+        since = datetime.now(UTC) - timedelta(seconds=self._cold_start_lookback)
         if first_time:
             log.info(
                 "%s has no cursor — reading back %.0fh, to %s; "
@@ -248,7 +247,7 @@ class Inbox:
         )
         if seen is None:
             return False
-        age = (datetime.now(timezone.utc) - seen).total_seconds()
+        age = (datetime.now(UTC) - seen).total_seconds()
         return age < self._turn_seconds
 
     def tally(self) -> str:

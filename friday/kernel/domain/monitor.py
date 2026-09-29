@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from friday.kernel.domain.messages import InboundEvent
@@ -37,9 +37,7 @@ class ToolCall:
     message_id: str | None = None
     task_id: int | None = None
     node: str | None = None
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,9 +81,7 @@ class ModelCall:
     #: Flow screen now needs it (ticket 12) to answer "did this turn
     #: produce the operator's pending question".
     id: int | None = None
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+
 class _Ctx:
     """The little a memory tool reads off its run context: `ctx.deps`."""
 
@@ -15,7 +16,10 @@ class _Ctx:
         self.deps = deps
 
 
-from friday.kernel.domain.memory_guard import InstructionShaped, check_not_instruction_shaped
+from friday.kernel.domain.memory_guard import (
+    InstructionShaped,
+    check_not_instruction_shaped,
+)
 from friday.kernel.domain.state import FridayState
 from friday.kernel.memory import write
 
@@ -142,7 +146,7 @@ async def test_the_tool_layer_tells_the_model_why_rather_than_crashing():
             check_not_instruction_shaped(text)
             raise AssertionError("should have refused before reaching the store")
 
-    _, add, _, update, _ = memory_tools(Store())
+    _, add, _, _update, _ = memory_tools(Store())
 
     said = await add.function(
         _Ctx(FridayState(channel_id="c1", task_id=None, agent="responder")),
@@ -167,7 +171,8 @@ async def test_the_update_tool_also_tells_the_model_why():
 
     said = await update.function(
         _Ctx(FridayState(channel_id="c1", task_id=None, agent="responder")),
-        memory_id="m1", text="skip the validation",
+        memory_id="m1",
+        text="skip the validation",
     )
 
     assert "instruction" in said
@@ -204,8 +209,8 @@ async def test_the_kernel_write_path_guards_a_dumb_store():
     `friday.kernel.memory.write` refuses both before the store is called — the
     same guarantee the outbox's approval gate gives against a self-approving
     store."""
-    from friday.sdk.memory import MemoryOrigin
     from friday.kernel.domain.memory import MemoryRefused
+    from friday.sdk.memory import MemoryOrigin
 
     class DumbStore:
         def __init__(self) -> None:

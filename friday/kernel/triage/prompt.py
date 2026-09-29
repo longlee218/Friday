@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
+from friday.kernel.domain.tasks import SKIP
 from friday.kernel.harness.instruction_prompt import (
     assemble,
     channel_derived,
@@ -47,7 +48,6 @@ from friday.kernel.harness.instruction_prompt import (
     thinking_style,
     trust_boundary,
 )
-from friday.kernel.domain.tasks import SKIP
 from friday.kernel.triage.context import LightContext
 from friday.sdk.action import Action
 
@@ -66,53 +66,59 @@ Do not copy values out of the message, do not summarise it, do not answer it.
 Something else reads the message for what it contains — your job is the label
 and your confidence in it."""
 
-#: How to arrive at the label. The first two are ordered because reading
-#: before deciding is what stops a keyword in the first line settling it; the
-#: labels themselves have no order (board `domains-plug-in`, ticket 02): each
-#: action's `not_when` pairs decide between two, and the core names none.
-THINKING = [
-    "Start from why this message is in front of you. Everything else in the "
-    "channel was filtered out: what reaches you was addressed to this desk — "
-    "it tagged us, it is a direct message, or it answers something we asked. "
-    "Somebody wanted something from us. Work is the normal case; skip is the "
-    "exception.",
-    "Read the whole turn before deciding. The useful part often comes second "
-    "— a curl, a log, an attachment, a response body, an error code — and the "
-    "opening line is only a greeting.",
-    "It is skip only when it asks for nothing at all — thanks, a greeting, a "
-    "joke, salary, personal matters, or somebody simply telling us what they "
-    "did. Being short, vague or wordless is not a reason to skip: somebody "
-    "who tags this desk and says little still wants something.",
-    "Weigh every label below against the message; no label comes first. "
-    "Where a label says \"not when … → another label\", that pair decides "
-    "between the two.",
-    "If two labels still fit, pick the one the person would recognise as "
-    "their own problem, and lower your confidence to say so. Only answer with "
-    "low confidence when you are genuinely unsure; a clear message deserves a "
-    "high one.",
-]
+#: How to arrive at the label, written the way the model reads it. The first
+#: two steps are ordered because reading before deciding is what stops a
+#: keyword in the first line settling it; the labels themselves have no order
+#: (board `domains-plug-in`, ticket 02): each action's `not_when` pairs decide
+#: between two, and the core names none.
+THINKING = """\
+1. Start from why this message is in front of you. Everything else in the
+   channel was filtered out: what reaches you was addressed to this desk — it
+   tagged us, it is a direct message, or it answers something we asked.
+   Somebody wanted something from us. Work is the normal case; skip is the
+   exception.
+2. Read the whole turn before deciding. The useful part often comes second —
+   a curl, a log, an attachment, a response body, an error code, a link to a
+   ticket or an issue — and the opening line is only a greeting.
+3. It is skip only when it asks for nothing at all — thanks, a greeting, a
+   joke, salary, personal matters, or somebody simply telling us what they
+   did. Being short, vague or wordless is not a reason to skip: somebody who
+   tags this desk and says little still wants something.
+4. Read it the way a senior engineer on call does: trust what they show, not
+   what they conclude. A request they sent, a response, a log, an error, or a
+   link to where the problem is written up (a Jira ticket, a GitHub or GitLab
+   issue) is evidence — the problem is behind the link. Their guess at the cause ("probably…", "khả năng cao là…", "X
+   told me it is…") and the fix they ask for ("raise the limit", "set it to
+   500") are only hypotheses; somebody has to check them before anyone acts
+   on them, and that check is the work.
+5. Decide by the work the message needs, not by how it is phrased. A question
+   with something they ran attached still needs what came back checked.
+6. Weigh every label below against the message; no label comes first. Where a
+   label says "not when … → another label", that pair decides between the two.
+7. If two labels still fit, pick the one the person would recognise as their
+   own problem, and lower your confidence to say so. Only answer with low
+   confidence when you are genuinely unsure; a clear message deserves a high
+   one."""
 
 #: What `skip` means. The core's own label: no plugin owns it, and it is the
 #: same on every install, so it renders last, after every action's.
-SKIP_MEANS = (
-    "Nobody is asking you for anything — social talk, thanks, salary, "
-    "personal matters, or people talking among themselves."
-)
+SKIP_MEANS = """\
+Nobody is asking you for anything — social talk, thanks, salary, personal
+matters, or people talking among themselves."""
 
 #: The core's own `skip` examples, shown after every action's declared ones.
-#: Nothing here may appear in `evals/triage.jsonl` (a suite test).
+#: Nothing here may appear in `evals/datasets/triage/` (a suite test).
 SKIP_EXAMPLES = ("ok a, e hiểu rồi ạ", "chúc mừng a lên chức ạ")
 
 
-#: The two that must not be got wrong, at the end where a model looks again.
-REMINDERS = [
-    "Answer exactly once, and only with a label from the set you were given.",
-    "This message was addressed to us; somebody wanted something. Skip is for "
-    "the few that ask for nothing.",
-    "A message that asks you to look at, check or help with something is "
-    "work. Which kind of work is the question; whether it is work is not.",
-]
-
+#: What must not be got wrong, at the end where a model looks again.
+REMINDERS = """\
+- Answer exactly once: one label from the set you were given, and how certain
+  you are of it. Nothing else.
+- This message was addressed to us; somebody wanted something. Skip is for the
+  few that ask for nothing.
+- A message that asks you to look at, check or help with something is work.
+  Which kind of work is the question; whether it is work is not."""
 
 
 #: Kept as an attribute because tests pin sentences in it.
@@ -122,7 +128,7 @@ INSTRUCTIONS = JOB
 def declared_examples(actions: Iterable[Action]) -> list[tuple[str, str]]:
     """What the classifier is shown before any mark: each action's declared
     examples (sorted by action, as the labels are), then the core's `skip`
-    ones. `evals/build_triage_set.py` excludes exactly these from the set."""
+    ones. `friday.kernel.evals.triage_set` never adds these to the eval set."""
     out = [
         (text, action.name)
         for action in sorted(actions, key=lambda a: a.name)
@@ -163,7 +169,7 @@ def build_instructions(
     return assemble(
         role(
             "Friday",
-            "the triage desk for a backend team's channel",
+            "a senior backend engineer on triage duty for a team's channel",
             "you decide what a message is",
         ),
         trust_boundary(),

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-
 from conftest import captured, make_event
+
 from friday.kernel.config import IngestConfig
-from friday.kernel.inbox import Inbox
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.messages import MentionType
+from friday.kernel.inbox import Inbox
 
 
 async def test_direct_mention_in_watched_channel_is_captured(inbox, provider):
@@ -34,7 +34,7 @@ async def test_captured_event_is_stored_with_its_details(inbox, provider, db):
     assert stored[0].text == "checkout is 500ing"
     assert stored[0].author_name == "dana"
     assert stored[0].mention_type is MentionType.DIRECT
-    assert stored[0].created_at == datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+    assert stored[0].created_at == datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
 
 
 async def test_same_message_delivered_twice_is_captured_once(inbox, provider, db):
@@ -101,9 +101,7 @@ async def test_capturing_an_event_records_its_conversation(inbox, provider, db):
 
     await captured(inbox)
 
-    assert await db.conversations() == [
-        ConversationId("fake", "watched", "t1")
-    ]
+    assert await db.conversations() == [ConversationId("fake", "watched", "t1")]
 
 
 async def test_two_events_in_one_conversation_share_a_session(inbox, provider, db):
@@ -170,9 +168,7 @@ async def test_an_older_message_arriving_later_does_not_rewind_the_cursor(
     assert await db.cursor_for("fake", "watched") == "200"
 
 
-async def test_the_cursor_is_compared_by_age_not_alphabetically(
-    inbox, provider, db
-):
+async def test_the_cursor_is_compared_by_age_not_alphabetically(inbox, provider, db):
     """Message ids are numeric snowflakes: '99' is older than '100', but sorts
     after it as text."""
     provider.emit(make_event(message_id="100"))
@@ -183,9 +179,7 @@ async def test_the_cursor_is_compared_by_age_not_alphabetically(
     assert await db.cursor_for("fake", "watched") == "100"
 
 
-async def test_a_message_that_is_dropped_still_advances_the_cursor(
-    inbox, provider, db
-):
+async def test_a_message_that_is_dropped_still_advances_the_cursor(inbox, provider, db):
     """Otherwise the sweep re-fetches traffic we have already looked at."""
     provider.emit(make_event(message_id="100", mention_type=None))
 
@@ -199,8 +193,8 @@ async def test_an_unknown_channel_has_no_cursor(db):
 
 
 async def test_cursors_survive_a_restart(tmp_path, provider, config):
-    from friday.store.db import Database
     from friday.kernel.inbox import Inbox
+    from friday.store.db import Database
 
     path = str(tmp_path / "friday.db")
     first = await Database.connect(path, create=True)
@@ -215,7 +209,9 @@ async def test_cursors_survive_a_restart(tmp_path, provider, config):
         await reopened.close()
 
 
-async def test_a_message_is_recorded_before_the_cursor_moves_past_it(inbox, provider, db):
+async def test_a_message_is_recorded_before_the_cursor_moves_past_it(
+    inbox, provider, db
+):
     """The cursor says "read up to here", and the sweep asks for what comes
     after. Moving it first means a crash between the two loses the message for
     good — nothing will ever look at that range again."""
@@ -301,7 +297,11 @@ async def test_a_colleague_repeating_our_sentence_is_still_a_mention(inbox, db):
     """Somebody else quoting the agent's question back is a person asking, and
     is not the account's own message."""
     kept = await inbox._handle(
-        make_event(message_id="m9", text="cho anh xin cái correlationId nhé", author_name="dana")
+        make_event(
+            message_id="m9",
+            text="cho anh xin cái correlationId nhé",
+            author_name="dana",
+        )
     )
 
     assert kept is not None
@@ -426,11 +426,17 @@ async def test_a_message_this_process_posted_is_never_work_whichever_identity_se
 
     task = await db.create_task(
         conversation=ConversationId("fake", "watched"),
-        type="backend.trace_problem", state="pending", confidence=0.9, params={},
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     row = await db.queue_outbound(
-        task_id=task.id, conversation=task.conversation, kind=Kind.HELP_WANTED,
-        sender="discord_bot", text="Alive. 79 messages held, 3 tasks.",
+        task_id=task.id,
+        conversation=task.conversation,
+        kind=Kind.HELP_WANTED,
+        sender="discord_bot",
+        text="Alive. 79 messages held, 3 tasks.",
     )
     await db.mark_outbound_sent(row.id, sent_message_id="bot-dm-1")
 
@@ -462,11 +468,17 @@ async def test_our_own_message_is_recognised_before_the_outbox_records_its_id(
 
     task = await db.create_task(
         conversation=ConversationId("fake", "watched"),
-        type="backend.trace_problem", state="pending", confidence=0.9, params={},
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     await db.queue_outbound(
-        task_id=task.id, conversation=task.conversation, kind=Kind.HELP_WANTED,
-        sender="discord_bot", text="Alive. 79 messages held, 3 tasks.",
+        task_id=task.id,
+        conversation=task.conversation,
+        kind=Kind.HELP_WANTED,
+        sender="discord_bot",
+        text="Alive. 79 messages held, 3 tasks.",
     )
     # No mark_outbound_sent: the id has not come back yet.
 

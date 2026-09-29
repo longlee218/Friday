@@ -3,16 +3,14 @@ import logging
 import os
 from logging.config import fileConfig
 
+from alembic import context
+from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from alembic import context
-
-from dotenv import load_dotenv
-
-from friday.store import schema
 from friday.kernel.config import load_config
+from friday.store import schema
 
 # config.yaml interpolates secrets from .env, so they have to be present
 # before it can be read — even though a migration needs none of them.
@@ -58,6 +56,7 @@ def render_item(type_, obj, autogen_context):
     if type_ == "type" and isinstance(obj, schema.IsoDateTime):
         return "sa.String()"
     return False
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

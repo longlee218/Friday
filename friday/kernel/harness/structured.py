@@ -46,6 +46,7 @@ __all__ = ["Unfit", "describe", "find_json", "fits"]
 
 log = logging.getLogger(__name__)
 
+
 def find_json(output: str) -> dict[str, Any] | None:
     """The JSON object in what a model returned, or `None` if there is none.
 
@@ -241,17 +242,13 @@ def fits(data: dict[str, Any], schema: type) -> tuple[Any | None, Unfit | None]:
                 f"{'.'.join(str(p) for p in e['loc']) or 'the object'}: {e['msg']}"
                 for e in errors
             ),
-            fields=frozenset(
-                str(e["loc"][0]) for e in errors if e["loc"]
-            ),
+            fields=frozenset(str(e["loc"][0]) for e in errors if e["loc"]),
             # `missing` is pydantic's own word for a field that never arrived.
             # Everything else is a value the model sent and this shape turned
             # down — which is the only thing "the model named something wrong"
             # can honestly mean.
             rejected=frozenset(
-                str(e["loc"][0])
-                for e in errors
-                if e["loc"] and e["type"] != "missing"
+                str(e["loc"][0]) for e in errors if e["loc"] and e["type"] != "missing"
             ),
         )
 
@@ -297,7 +294,7 @@ def describe(schema: type, *, omit: Any = None) -> str:
         # so the `or {}` this was written with is not a guard, it is what
         # makes the type of the expression `dict[Never, Never]`.
         doc = field.metadata.get("doc")
-        annotation = hints[field.name] if field.name in hints else field.type
+        annotation = hints.get(field.name, field.type)
         rendered = f"- {field.name}: {_type_name(annotation)}"
         lines.append(f"{rendered} — {doc}" if doc else rendered)
     return "\n".join(lines)
@@ -311,7 +308,10 @@ def _type_name(annotation: Any) -> str:
     which is the whole of what `MODEL_AUTHORED`'s absent fields rely on.
     """
     plain = {
-        str: "string", int: "integer", float: "number", bool: "true or false",
+        str: "string",
+        int: "integer",
+        float: "number",
+        bool: "true or false",
         type(None): "null",
     }
     if isinstance(annotation, str):

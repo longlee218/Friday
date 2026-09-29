@@ -64,13 +64,21 @@ from __future__ import annotations
 import html
 import json
 import logging
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-from collections.abc import Callable, Iterable
-from typing import Any, Sequence
+from datetime import UTC, datetime
+from typing import Any
 
+from friday.kernel.domain.memory import Memory, RoomSummary
+from friday.kernel.domain.messages import InboundEvent
+from friday.kernel.domain.tasks import Params
+from friday.kernel.harness.skills import Skill
+from friday.sdk.action import Action
+from friday.sdk.memory import MemoryOrigin
 from friday.sdk.prompt import (
     Section,
+    _escape,
+    _quoted,
     assemble,
     base,
     counterpart,
@@ -83,13 +91,6 @@ from friday.sdk.prompt import (
     trust_boundary,
     user_input,
 )
-from friday.sdk.prompt import _QUOTE_CLOSE, _QUOTE_OPEN, _escape, _quoted
-from friday.kernel.harness.skills import Skill
-from friday.sdk.action import Action
-from friday.sdk.memory import MemoryOrigin
-from friday.kernel.domain.messages import InboundEvent
-from friday.kernel.domain.memory import Memory, RoomSummary
-from friday.kernel.domain.tasks import Params
 
 log = logging.getLogger(__name__)
 
@@ -142,9 +143,7 @@ def channel_derived(summary: Memory | None) -> Section:
     all — a room nobody has summarised costs an agent not a byte.
     """
     data = (summary.data or {}) if summary is not None else {}
-    said = {
-        f: data[f] for f in RoomSummary.__dataclass_fields__ if data.get(f)
-    }
+    said = {f: data[f] for f in RoomSummary.__dataclass_fields__ if data.get(f)}
     if not said:
         return Section("channel_derived")
     return Section("channel_derived", _render_yaml_escaped({"summary": said}))
@@ -277,7 +276,7 @@ def _when(at) -> str:
     """
     if at is None:
         return "no time"
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     return at.strftime("%H:%M" if at.date() == today else "%d %b %H:%M")
 
 
@@ -403,9 +402,7 @@ def skill_metadata(skill: Skill, location: str) -> str:
     so, therefore, does anything that needs it. The library hands over the
     values and the path, and knows nothing about how they are shown.
     """
-    mutability = (
-        "[custom, editable]" if skill.mutability == "custom" else "[built-in]"
-    )
+    mutability = "[custom, editable]" if skill.mutability == "custom" else "[built-in]"
     tools = ", ".join(skill.allowed_tools) if skill.allowed_tools else "(all)"
     return (
         f"name: {_escape(skill.name)}\n"
@@ -441,13 +438,15 @@ def memory_lines(found) -> str:
     """
     if not found:
         return "nothing remembered about that yet"
-    return "\n".join(
-        f"{m.id}: {_escape(' '.join(m.text.split()))}" for m in found
-    )
+    return "\n".join(f"{m.id}: {_escape(' '.join(m.text.split()))}" for m in found)
 
 
 MEMORY_TOOLS = (
-    "memory_search", "memory_add", "memory_propose", "memory_update", "memory_delete",
+    "memory_search",
+    "memory_add",
+    "memory_propose",
+    "memory_update",
+    "memory_delete",
 )
 
 _MEMORY_TOOL_SYSTEM = """You can reach for what has been remembered rather than
@@ -755,9 +754,7 @@ def _render_yaml_escaped(d: dict[str, Any]) -> str:
     )
 
 
-def _render_pairs(
-    d: dict[str, Any], *, transform: Callable[[Any], str]
-) -> str:
+def _render_pairs(d: dict[str, Any], *, transform: Callable[[Any], str]) -> str:
     """`key: value`, one per line, both halves through `transform`.
 
     Extracted so a caller that must *not* escape here could share the shape
@@ -820,8 +817,7 @@ def outstanding_questions(asked: Sequence[str]) -> str:
         return ""
     asked_lines = "\n".join(f"{n}. {q}" for n, q in enumerate(lines, 1))
     return (
-        "already asked and not yet answered — do not ask these again:\n"
-        + asked_lines
+        "already asked and not yet answered — do not ask these again:\n" + asked_lines
     )
 
 

@@ -17,6 +17,7 @@ import pytest
 
 from plugins.backend.toolsets.db import DbSource, redacted_name
 
+
 #: The shape measured against the live server on 2026-09-21: an object whose
 #: `result` is a JSON *string*, and inside it `{rows, count}`.
 def answered(inner) -> dict:
@@ -36,9 +37,7 @@ class FakeServer:
 
 
 def source(*answers, allowed=("reelme",), **kwargs) -> DbSource:
-    return DbSource(
-        server=FakeServer(*answers), allowed=frozenset(allowed), **kwargs
-    )
+    return DbSource(server=FakeServer(*answers), allowed=frozenset(allowed), **kwargs)
 
 
 # --- which database ---------------------------------------------------------
@@ -77,7 +76,7 @@ async def test_only_a_read_is_sent():
 async def test_a_common_table_expression_is_a_read():
     db = source(answered({"rows": [{"n": 1}], "count": 1}))
 
-    found = await db.query("reelme", 'WITH x AS (SELECT 1 AS n) SELECT * FROM x')
+    found = await db.query("reelme", "WITH x AS (SELECT 1 AS n) SELECT * FROM x")
 
     assert found.rows == ({"n": 1},)
 
@@ -103,14 +102,14 @@ async def test_a_statement_that_hides_behind_a_comment_is_still_not_a_read():
     db = source(answered({"rows": []}))
 
     with pytest.raises(PermissionError, match="does not start a read"):
-        await db.query("reelme", "/* select */ drop table \"Purchase\"")
+        await db.query("reelme", '/* select */ drop table "Purchase"')
 
 
 async def test_two_statements_are_refused_rather_than_half_run():
     db = source(answered({"rows": []}))
 
     with pytest.raises(PermissionError, match="one statement at a time"):
-        await db.query("reelme", "select 1; drop table \"Purchase\"")
+        await db.query("reelme", 'select 1; drop table "Purchase"')
 
 
 async def test_a_trailing_semicolon_is_not_two_statements():
@@ -150,15 +149,31 @@ def test_the_columns_that_carry_people_are_known_by_name():
     schema on one day, and the next migration adds a column nobody updates it
     for."""
     for column in (
-        "email", "receiptEmail", "ipAddress", "purchaseToken",
-        "appAccountToken", "rawPayload", "decodedPayload", "userAgent",
-        "shippingAddress", "idfa", "gpsAdid", "headers",
+        "email",
+        "receiptEmail",
+        "ipAddress",
+        "purchaseToken",
+        "appAccountToken",
+        "rawPayload",
+        "decodedPayload",
+        "userAgent",
+        "shippingAddress",
+        "idfa",
+        "gpsAdid",
+        "headers",
     ):
         assert redacted_name(column), column
 
     for column in (
-        "id", "userId", "status", "transactionId", "createdAt", "amount",
-        "description", "retryCount", "eventType",
+        "id",
+        "userId",
+        "status",
+        "transactionId",
+        "createdAt",
+        "amount",
+        "description",
+        "retryCount",
+        "eventType",
     ):
         assert not redacted_name(column), column
 
@@ -167,13 +182,21 @@ async def test_a_value_that_is_a_person_never_leaves_the_database():
     """`scrub` catches a credential and not an address. A model free to query
     a payment database pulls real people into a prompt and into a report file
     on disk."""
-    db = source(answered({
-        "rows": [{
-            "userId": "u-1", "status": "FAILED",
-            "email": "someone@real.example", "ipAddress": "1.2.3.4",
-        }],
-        "count": 1,
-    }))
+    db = source(
+        answered(
+            {
+                "rows": [
+                    {
+                        "userId": "u-1",
+                        "status": "FAILED",
+                        "email": "someone@real.example",
+                        "ipAddress": "1.2.3.4",
+                    }
+                ],
+                "count": 1,
+            }
+        )
+    )
 
     found = await db.query("reelme", 'select * from "PSPLedgerTransaction"')
 
@@ -212,10 +235,14 @@ async def test_a_schema_can_be_asked_for_one_table():
     """Measured: the payment database answers with fifteen tables including
     `pg_stat_statements` and its forty columns, which is not a thing to put
     in a prompt to find out where `userId` lives."""
-    db = source(answered({
-        "Purchase": [{"column": "userId", "type": "text"}],
-        "pg_stat_statements": [{"column": "queryid", "type": "bigint"}],
-    }))
+    db = source(
+        answered(
+            {
+                "Purchase": [{"column": "userId", "type": "text"}],
+                "pg_stat_statements": [{"column": "queryid", "type": "bigint"}],
+            }
+        )
+    )
 
     found = await db.schema("reelme", table="Purchase")
 
@@ -236,5 +263,7 @@ def test_it_declares_the_tools_it_calls_and_not_the_one_it_does_not():
     obvious fourth. Nothing reads Mongo yet, and a tool declared ahead of a
     caller is a tool nobody can say the shape of."""
     assert DbSource.TOOLS == {
-        "list_databases", "describe_schema", "execute_query",
+        "list_databases",
+        "describe_schema",
+        "execute_query",
     }

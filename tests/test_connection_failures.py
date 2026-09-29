@@ -11,8 +11,8 @@ import asyncio
 
 import discord_self
 import pytest
-
 from conftest import captured
+
 from friday.kernel.inbox import Inbox
 from friday.kernel.providers.discord.user import is_credential_rejected
 

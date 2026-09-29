@@ -23,7 +23,9 @@ class _Params:
 def test_a_plugin_registers_its_contributions_through_the_api():
     def register(api: PluginAPI) -> None:
         api.task_type(TaskTypeSpec(name="demo:thing", params=_Params))
-        api.memory_kind(MemoryKindSpec(name="demo.kind", writers=frozenset({Origin.ADMIN})))
+        api.memory_kind(
+            MemoryKindSpec(name="demo.kind", writers=frozenset({Origin.ADMIN}))
+        )
 
     registry = Registry()
     registry.apply(Plugin(id="demo", register=register))

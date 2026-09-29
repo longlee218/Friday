@@ -129,9 +129,7 @@ _INFLECTION = r"(?:e|es|ed|s|ing)?"
 #: A word the responder is told not to translate. `camelCase` catches
 #: `correlationId` and anything shaped like it without a list to maintain; the
 #: literals are the rest of what `friday/kernel/responder/prompt.py` names.
-_KEPT = re.compile(
-    r"\b([a-z]+[A-Z]\w*|curl|staging|production|deploy|merge|timeout)\b"
-)
+_KEPT = re.compile(r"\b([a-z]+[A-Z]\w*|curl|staging|production|deploy|merge|timeout)\b")
 
 #: Everything from the first bracket on. Both question builders put their
 #: *reason* there and nothing else — `_question_from_clarify` appends the
@@ -147,7 +145,7 @@ _KEPT = re.compile(
 #: free text an extractor wrote and can contain a bracket of its own — and a
 #: strip that stops at the first `)` leaves half the clause behind, which is
 #: the same bug wearing a different input.
-_REASON = re.compile(r"\(.*$", re.S)
+_REASON = re.compile(r"\(.*$", re.DOTALL)
 
 #: Anything that looks like somewhere to go rather than something to say.
 #: Matched against the folded text, not the raw draft: Discord linkifies

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class VerdictsRepo:
-
     # ---- what the operator said about a classification -------------------
 
     async def record_verdict(
@@ -45,9 +44,7 @@ class VerdictsRepo:
                 )
             )
 
-    async def clear_verdict(
-        self, *, provider: str, provider_message_id: str
-    ) -> None:
+    async def clear_verdict(self, *, provider: str, provider_message_id: str) -> None:
         """The operator took the mark back. The row goes with it.
 
         Deleted rather than recorded as a third state, because "unmarked" and
@@ -67,13 +64,11 @@ class VerdictsRepo:
     ) -> tuple[str, str] | None:
         """The mark and who left it, or None if nobody has."""
         async with self._sessions() as session:
-            row = await session.get(
-                schema.Verdict, (provider, provider_message_id)
-            )
+            row = await session.get(schema.Verdict, (provider, provider_message_id))
             return (row.mark, row.marked_by) if row else None
 
     async def confirmed_classifications(
-        self, *, limit: int = 20, decisions: "tuple[str, ...] | None" = None
+        self, *, limit: int = 20, decisions: tuple[str, ...] | None = None
     ) -> list[tuple[str, str]]:
         """Message text and the type it was marked *right* as.
 

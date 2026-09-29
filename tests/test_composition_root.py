@@ -76,9 +76,9 @@ def test_nothing_in_the_composition_root_is_read_before_it_is_built():
 SEAMS = ("record",)
 
 AGENT_BUILDERS = (
-    "register_extractors",   # the three extractors
-    "TriageRunner.build",    # triage
-    "Responder.build",       # the responder
+    "register_extractors",  # the three extractors
+    "TriageRunner.build",  # triage
+    "Responder.build",  # the responder
     "ContextRebuilder.build",  # the summariser
 )
 
@@ -205,9 +205,7 @@ def test_every_name_a_module_level_coroutine_uses_is_one_it_can_see():
         elif isinstance(node, ast.ImportFrom):
             module_level |= {a.asname or a.name for a in node.names}
         elif isinstance(node, ast.Assign):
-            module_level |= {
-                t.id for t in node.targets if isinstance(t, ast.Name)
-            }
+            module_level |= {t.id for t in node.targets if isinstance(t, ast.Name)}
 
     for func in tree.body:
         if not isinstance(func, ast.AsyncFunctionDef) or func.name == "_run":
@@ -225,9 +223,7 @@ def test_every_name_a_module_level_coroutine_uses_is_one_it_can_see():
                 visible.add(inner.name)
                 visible |= {a.arg for a in inner.args.args}
             elif isinstance(inner, ast.Import):
-                visible |= {
-                    (a.asname or a.name).split(".")[0] for a in inner.names
-                }
+                visible |= {(a.asname or a.name).split(".")[0] for a in inner.names}
             elif isinstance(inner, ast.ImportFrom):
                 visible |= {a.asname or a.name for a in inner.names}
             elif isinstance(inner, ast.Assign):

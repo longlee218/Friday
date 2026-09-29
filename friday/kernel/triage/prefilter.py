@@ -72,7 +72,7 @@ class Sensitive:
             # diacritics of its own. `luồng` must not match `lương` because
             # both fold to `luong`; `luong` still must.
             for hit in folded_pattern.finditer(folded):
-                if not any(accented[hit.start():hit.end()]):
+                if not any(accented[hit.start() : hit.end()]):
                     return word
         return None
 

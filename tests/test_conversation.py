@@ -7,8 +7,8 @@ off it, and a bare platform id says nothing about which platform it came from.
 from __future__ import annotations
 
 import pytest
-
 from conftest import make_event
+
 from friday.kernel.domain.conversation import ConversationId, resolve
 
 

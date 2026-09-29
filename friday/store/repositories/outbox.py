@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class OutboxRepo:
-
     # ---- outbox --------------------------------------------------------
 
     async def queue_outbound(
@@ -189,7 +188,9 @@ class OutboxRepo:
         if state is not None:
             query = query.where(schema.Outbound.state == state)
         async with self._sessions() as session:
-            rows = await session.scalars(query.order_by(schema.Outbound.id).limit(limit))
+            rows = await session.scalars(
+                query.order_by(schema.Outbound.id).limit(limit)
+            )
             return [_outbound(row) for row in rows]
 
     async def outbound_count(self, task_id: int, *, kind: str) -> int:
@@ -244,15 +245,18 @@ class OutboxRepo:
         is newer — as text, '99' would sort after '100'.
         """
         async with self._sessions() as session:
-            return await session.scalar(
-                select(func.count())
-                .select_from(schema.Message)
-                .where(
-                    schema.Message.conversation_id == str(conversation),
-                    cast(schema.Message.provider_message_id, Integer)
-                    > cast(literal(message_id), Integer),
+            return (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(schema.Message)
+                    .where(
+                        schema.Message.conversation_id == str(conversation),
+                        cast(schema.Message.provider_message_id, Integer)
+                        > cast(literal(message_id), Integer),
+                    )
                 )
-            ) > 0
+                > 0
+            )
 
     async def _set_outbound(self, outbound_id: int, **values) -> None:
         async with self._sessions.begin() as session:
@@ -286,7 +290,10 @@ class OutboxRepo:
         row = await self.outbound_row(outbound_id)
         frozen = payload_hash_of(row) if row is not None else None
         await self._set_outbound(
-            outbound_id, approved_at=_now(), approved_by=by, approved_payload_hash=frozen
+            outbound_id,
+            approved_at=_now(),
+            approved_by=by,
+            approved_payload_hash=frozen,
         )
 
     async def mark_outbound_dispatching(self, outbound_id: int) -> None:
@@ -295,7 +302,9 @@ class OutboxRepo:
         startup was interrupted, and the outbox reads it as delivery-unknown."""
         await self._set_outbound(outbound_id, state=OUTBOUND_DISPATCHING)
 
-    async def mark_outbound_delivery_unknown(self, outbound_id: int, reason: str) -> None:
+    async def mark_outbound_delivery_unknown(
+        self, outbound_id: int, reason: str
+    ) -> None:
         """Interrupted mid-send on a channel that cannot dedupe: kept apart from
         `failed` because it may already have gone out, so it waits for the
         operator rather than being retried."""

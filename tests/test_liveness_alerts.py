@@ -7,12 +7,12 @@ rather than in a log they are not reading.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from friday.kernel.ops.liveness import Liveness
 from friday.kernel.outbox import Kind
 
-NOW = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
 
 
 class Gateway:

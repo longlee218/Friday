@@ -17,9 +17,9 @@ from __future__ import annotations
 from dataclasses import replace
 
 from conftest import make_event
+
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.messages import MentionType
-
 
 CURL = "curl -X GET /pay -H 'x-request-id: c0rr3l4t10n'"
 
@@ -43,7 +43,9 @@ async def test_a_curl_becomes_an_artifact_when_the_message_is_recorded(db):
 
     await db.record_message(event)
 
-    (artifact,) = await db.artifacts_for_message(event.provider, event.provider_message_id)
+    (artifact,) = await db.artifacts_for_message(
+        event.provider, event.provider_message_id
+    )
     assert artifact.content == CURL
     assert artifact.channel_id == event.channel_id
     assert artifact.source_message_id == event.provider_message_id
@@ -55,7 +57,9 @@ async def test_a_message_with_no_code_gets_no_artifact(db):
 
     await db.record_message(event)
 
-    assert await db.artifacts_for_message(event.provider, event.provider_message_id) == []
+    assert (
+        await db.artifacts_for_message(event.provider, event.provider_message_id) == []
+    )
 
 
 async def test_two_code_spans_become_two_artifacts_in_order(db):
@@ -94,7 +98,9 @@ async def test_the_description_never_quotes_the_content_however_short(db):
 
     await db.record_message(event)
 
-    (artifact,) = await db.artifacts_for_message(event.provider, event.provider_message_id)
+    (artifact,) = await db.artifacts_for_message(
+        event.provider, event.provider_message_id
+    )
     assert CURL not in artifact.description
     assert "c0rr3l4t10n" not in artifact.description
     assert "\n" not in artifact.description
@@ -110,7 +116,9 @@ async def test_the_description_says_how_big_the_artifact_is(db):
 
     await db.record_message(event)
 
-    (artifact,) = await db.artifacts_for_message(event.provider, event.provider_message_id)
+    (artifact,) = await db.artifacts_for_message(
+        event.provider, event.provider_message_id
+    )
     assert "3 line" in artifact.description
     assert str(len(body)) in artifact.description
     assert "line one" not in artifact.description
@@ -128,7 +136,9 @@ async def test_the_summariser_never_sees_an_artifacts_content(db):
     )
 
     assert CURL not in through_summariser.text
-    (artifact,) = await db.artifacts_for_message(event.provider, event.provider_message_id)
+    (artifact,) = await db.artifacts_for_message(
+        event.provider, event.provider_message_id
+    )
     assert artifact.id in through_summariser.text
     assert artifact.description in through_summariser.text
 
@@ -150,8 +160,11 @@ async def test_the_current_tasks_own_build_still_sees_the_curl_whole(db):
     the person who will run it exactly as typed (the ticket's own words)."""
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={},
+        conversation=conversation,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
@@ -180,8 +193,11 @@ async def test_every_other_reader_of_text_is_unaffected(db):
 async def test_a_correlation_id_reaches_the_extractor_character_for_character(db):
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={},
+        conversation=conversation,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
@@ -199,15 +215,19 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
     instance, the same seam `tests/test_extraction.py` drives its own
     end-to-end tests through."""
     from conftest import ScriptedHarness
-    from plugins.backend.params import ApiIssueParams
+
     from friday.kernel.extraction import build_extractor
     from friday.kernel.extraction.answer import answer_shape
+    from plugins.backend.params import TraceProblemParams
     from tests.test_extraction import _context
 
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={},
+        conversation=conversation,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
@@ -233,11 +253,11 @@ async def test_a_correlation_id_reaches_the_params_object_itself(db):
             return StubResult()
 
     ext = build_extractor(
-        params_cls=ApiIssueParams,
-        harness=StubHarness(answers=answer_shape(ApiIssueParams)),  # type: ignore[arg-type]
+        params_cls=TraceProblemParams,
+        harness=StubHarness(answers=answer_shape(TraceProblemParams)),  # type: ignore[arg-type]
         name="stub",
     )
-    filled, _ = await ext.run(_context(text, ApiIssueParams), task_id=task.id)
+    filled, _ = await ext.run(_context(text, TraceProblemParams), task_id=task.id)
 
     assert "c0rr3l4t10n" in seen_prompts[0], (
         "the id never reached the model's own input"
@@ -300,7 +320,9 @@ async def test_a_split_that_disagrees_on_re_read_degrades_rather_than_crashes(
     recorded = await db.record_message(event)
 
     assert recorded is True
-    assert await db.artifacts_for_message(event.provider, event.provider_message_id) == []
+    assert (
+        await db.artifacts_for_message(event.provider, event.provider_message_id) == []
+    )
     (through_summariser,) = await db.relevant_messages_in_channel(
         event.provider, event.channel_id
     )
@@ -328,8 +350,11 @@ async def test_the_extractor_is_shown_each_span_under_its_artifact_id(db):
     """
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={},
+        conversation=conversation,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
@@ -346,8 +371,11 @@ async def test_the_extractor_is_shown_each_span_under_its_artifact_id(db):
 async def test_the_artifact_a_task_carries_is_reachable_by_its_id(db):
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={},
+        conversation=conversation,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
@@ -361,16 +389,20 @@ async def test_the_artifact_a_task_carries_is_reachable_by_its_id(db):
 async def test_a_named_artifact_becomes_the_parameter_byte_for_byte(db):
     """The end this ticket exists for: what the model names, code copies."""
     from conftest import ScriptedHarness
-    from plugins.backend.params import ApiIssueParams
+
+    from friday.kernel.dag.prepare import resolve_artifacts
     from friday.kernel.extraction import build_extractor
     from friday.kernel.extraction.answer import answer_shape
-    from friday.kernel.dag.prepare import resolve_artifacts
+    from plugins.backend.params import TraceProblemParams
     from tests.test_extraction import _context
 
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={},
+        conversation=conversation,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     event = _curl_event(message_id="m1")
     await db.record_message(event)
@@ -379,7 +411,7 @@ async def test_a_named_artifact_becomes_the_parameter_byte_for_byte(db):
     said = await db.original_text_for(task.id)
 
     class StubResult:
-        output = '{"curl": "%s"}' % artifact.id
+        output = f'{{"curl": "{artifact.id}"}}'
 
     class StubHarness(ScriptedHarness):
         last_error = None
@@ -388,11 +420,11 @@ async def test_a_named_artifact_becomes_the_parameter_byte_for_byte(db):
             return StubResult()
 
     ext = build_extractor(
-        params_cls=ApiIssueParams,
-        harness=StubHarness(answers=answer_shape(ApiIssueParams)),  # type: ignore[arg-type]
+        params_cls=TraceProblemParams,
+        harness=StubHarness(answers=answer_shape(TraceProblemParams)),  # type: ignore[arg-type]
         name="stub",
     )
-    filled, _ = await ext.run(_context(said, ApiIssueParams), task_id=task.id)
+    filled, _ = await ext.run(_context(said, TraceProblemParams), task_id=task.id)
     filled = await resolve_artifacts(db, task.id, filled)
 
     assert filled.curl == CURL
@@ -401,17 +433,20 @@ async def test_a_named_artifact_becomes_the_parameter_byte_for_byte(db):
 async def test_a_parameter_that_names_no_artifact_is_left_alone(db):
     """A reporter who typed their curl inline rather than in a fence has no
     artifact, and what the model copied is all there is."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.dag.prepare import resolve_artifacts
+    from plugins.backend.params import TraceProblemParams
 
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={},
+        conversation=conversation,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
 
     filled = await resolve_artifacts(
-        db, task.id, ApiIssueParams(curl="curl https://x/y", environment="dev")
+        db, task.id, TraceProblemParams(curl="curl https://x/y", environment="dev")
     )
 
     assert filled.curl == "curl https://x/y"
@@ -422,17 +457,15 @@ async def test_a_parameter_that_names_no_artifact_is_left_alone(db):
 
 TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImJmYzViOGQyIn0.m825WQCL"
 TOKENED = (
-    "curl -X POST -H 'Authorization: Bearer %s' "
-    "https://api-reelme-v2.dev.aperogroup.ai/v1/pod/orders/init" % TOKEN
+    f"curl -X POST -H 'Authorization: Bearer {TOKEN}' "
+    "https://api-reelme-v2.dev.aperogroup.ai/v1/pod/orders/init"
 )
 
 
 def _tokened_event(**kwargs):
     kwargs.setdefault("mention_type", MentionType.DIRECT)
     event = make_event(**kwargs)
-    return _with_code(
-        event, code=(TOKENED,), text=f"lỗi rồi\n```\n{TOKENED}\n```\n"
-    )
+    return _with_code(event, code=(TOKENED,), text=f"lỗi rồi\n```\n{TOKENED}\n```\n")
 
 
 async def test_an_artifact_never_stores_the_reporters_token(db):
@@ -455,12 +488,15 @@ async def test_the_token_reaches_neither_the_prompt_nor_the_parameters(db):
     """The two places finding C names that `scrub` did not cover: the prompt
     sent to the provider, and the task's stored parameters."""
     from friday.kernel.dag.prepare import resolve_artifacts
-    from plugins.backend.params import ApiIssueParams
+    from plugins.backend.params import TraceProblemParams
 
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={},
+        conversation=conversation,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     event = _tokened_event(message_id="m1")
     await db.record_message(event)
@@ -468,7 +504,7 @@ async def test_the_token_reaches_neither_the_prompt_nor_the_parameters(db):
     (artifact,) = await db.artifacts_for_message("fake", "m1")
 
     shown = await db.original_text_for(task.id)
-    filled = await resolve_artifacts(db, task.id, ApiIssueParams(curl=artifact.id))
+    filled = await resolve_artifacts(db, task.id, TraceProblemParams(curl=artifact.id))
 
     assert TOKEN not in shown
     assert TOKEN not in (filled.curl or "")
@@ -480,8 +516,11 @@ async def test_a_token_typed_inline_with_no_fence_is_covered_too(db):
     artifact, so the artifact path cannot be the only place this runs."""
     conversation = ConversationId("fake", "watched")
     task = await db.create_task(
-        conversation=conversation, type="backend.trace_problem", state="pending",
-        confidence=0.9, params={},
+        conversation=conversation,
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     event = make_event(message_id="m1", text=f"em gọi thế này: {TOKENED}")
     await db.record_message(event)

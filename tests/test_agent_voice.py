@@ -38,8 +38,9 @@ def _shipped():
 def _every_node_built():
     from types import SimpleNamespace
 
-    from friday.kernel.config import AgentConfig
     from plugins.backend.graph.graph import NODES, build_agents
+
+    from friday.kernel.config import AgentConfig
 
     config = SimpleNamespace(
         agents={
@@ -50,8 +51,6 @@ def _every_node_built():
         }
     )
     return build_agents(config)
-
-
 
 
 def test_the_responder_speaks_in_that_voice_too():

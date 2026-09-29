@@ -4,11 +4,10 @@ its retrieval read is `case_memories`, core Intake's (build-the-spine ticket 07)
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class MemoryRepo:
-
     async def memory_search(
         self, state: FridayState, query: str, *, kind: str, limit: int
     ) -> list[Memory]:
@@ -49,9 +48,7 @@ class MemoryRepo:
                 .order_by(schema.Memory.created_at.desc())
             )
             matched = [
-                row
-                for row in rows
-                if all(word in row.text.lower() for word in words)
+                row for row in rows if all(word in row.text.lower() for word in words)
             ]
             return [_memory(row) for row in matched[:limit]]
 
@@ -146,7 +143,9 @@ class MemoryRepo:
                     return fitted
                 log.warning(
                     "memory %s: a %s row no longer fits its schema — %s",
-                    row.id, kind, unfit.why,
+                    row.id,
+                    kind,
+                    unfit.why,
                 )
             return None
 
@@ -172,13 +171,15 @@ class MemoryRepo:
             if not value:
                 continue
             found = await session.scalar(
-                select(schema.Memory.id).where(
+                select(schema.Memory.id)
+                .where(
                     schema.Memory.channel_id.in_([channel_id, "*"]),
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
                     schema.Memory.kind == names_kind,
                     schema.Memory.key == value,
-                ).limit(1)
+                )
+                .limit(1)
             )
             if found is None:
                 raise MemoryRefused(
@@ -269,7 +270,9 @@ class MemoryRepo:
                 else:
                     log.warning(
                         "memory %s: a %s row no longer fits its schema — %s",
-                        row.id, kind, unfit.why,
+                        row.id,
+                        kind,
+                        unfit.why,
                     )
             return found
 
@@ -280,13 +283,15 @@ class MemoryRepo:
         model raw (ticket 10)."""
         async with self._sessions() as session:
             found = await session.scalar(
-                select(schema.Memory.id).where(
+                select(schema.Memory.id)
+                .where(
                     schema.Memory.channel_id.in_([channel_id, "*"]),
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
                     schema.Memory.kind == memory_kinds.PERSON,
                     schema.Memory.key == discord_id,
-                ).limit(1)
+                )
+                .limit(1)
             )
             return found is not None
 
@@ -327,15 +332,18 @@ class MemoryRepo:
                     .order_by(schema.Memory.created_at)
                 )
             )
-        admin_first = lambda row: row.origin != MemoryOrigin.ADMIN  # noqa: E731
+        admin_first = lambda row: row.origin != MemoryOrigin.ADMIN
         known = sorted((r for r in rows if r.kind in domain), key=admin_first)
         runbooks = [
-            r for r in rows
+            r
+            for r in rows
             if r.kind == memory_kinds.SKILL and _runbook_matches(r.data, keys, text)
         ]
         findings = [
-            r for r in reversed(rows)
-            if r.kind == memory_kinds.FINDING and keys
+            r
+            for r in reversed(rows)
+            if r.kind == memory_kinds.FINDING
+            and keys
             and all((r.data or {}).get(name) == value for name, value in keys.items())
         ][: self.CASE_FINDINGS]
         return [_memory(r) for r in (*known, *runbooks, *findings)]
@@ -390,7 +398,9 @@ class MemoryRepo:
         async with self._memory_slots, self._sessions.begin() as session:
             await self._refuse_dangling(session, state.channel_id, kind, stored)
             count = await session.scalar(
-                select(func.count()).select_from(schema.Memory).where(
+                select(func.count())
+                .select_from(schema.Memory)
+                .where(
                     schema.Memory.channel_id == state.channel_id,
                     schema.Memory.deleted_at.is_(None),
                     schema.Memory.status == MemoryStatus.ACTIVE,
@@ -456,7 +466,10 @@ class MemoryRepo:
                 )
                 if row.key != was:
                     await self._refuse_orphaning(
-                        session, state.channel_id, row.kind, was,
+                        session,
+                        state.channel_id,
+                        row.kind,
+                        was,
                         f"renaming this {row.kind} to {row.key!r}",
                     )
             row.text = text[: self.TEXT_CHARS]
@@ -516,12 +529,13 @@ class MemoryRepo:
                 # `memory_update` has, reached by a different door. Found by
                 # review rather than by a test, which is why it is checked
                 # here rather than argued about in a comment on the other.
-                await self._refuse_dangling(
-                    session, state.channel_id, old.kind, stored
-                )
+                await self._refuse_dangling(session, state.channel_id, old.kind, stored)
                 if key != old.key:
                     await self._refuse_orphaning(
-                        session, state.channel_id, old.kind, old.key,
+                        session,
+                        state.channel_id,
+                        old.kind,
+                        old.key,
                         f"superseding this {old.kind} with one called {key!r}",
                     )
             now = _now()
@@ -562,7 +576,10 @@ class MemoryRepo:
             if row is None:
                 return False
             await self._refuse_orphaning(
-                session, state.channel_id, row.kind, row.key,
+                session,
+                state.channel_id,
+                row.kind,
+                row.key,
                 f"removing this {row.kind}",
             )
             row.deleted_at = _now()

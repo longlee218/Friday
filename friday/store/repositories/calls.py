@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class CallsRepo:
-
     # ---- model calls ---------------------------------------------------
 
     async def record_model_call(self, **values) -> None:
@@ -20,6 +19,7 @@ class CallsRepo:
         # bus — `publish` is sync and never blocks — so a slow
         # subscriber cannot stall a model call.
         from friday.kernel.ops.events import get_bus
+
         task_id = values.get("task_id")
         message_id: str | None = None
         if task_id is not None:
@@ -44,6 +44,7 @@ class CallsRepo:
         async with self._sessions.begin() as session:
             session.add(schema.ToolCall(**values))
         from friday.kernel.ops.events import get_bus
+
         task_id = values.get("task_id")
         message_id: str | None = None
         if task_id is not None:
@@ -79,6 +80,7 @@ class CallsRepo:
         # panel refreshes its DBOS snapshot. Sync and non-blocking like the
         # others, so a slow SSE subscriber cannot stall a node's recording.
         from friday.kernel.ops.events import get_bus
+
         get_bus().publish(
             type_="workflow",
             payload={
@@ -163,7 +165,11 @@ class CallsRepo:
             for task_id, provider, message_id, text in rows:
                 found.setdefault(
                     task_id,
-                    {"provider": provider, "provider_message_id": message_id, "text": text},
+                    {
+                        "provider": provider,
+                        "provider_message_id": message_id,
+                        "text": text,
+                    },
                 )
             return found
 
@@ -329,13 +335,11 @@ class CallsRepo:
             query = query.where(schema.ModelCall.message_id.is_(None))
         async with self._sessions() as session:
             rows = await session.scalars(
-                query.order_by(schema.ModelCall.created_at.desc(),
-                               schema.ModelCall.id.desc()).limit(limit)
+                query.order_by(
+                    schema.ModelCall.created_at.desc(), schema.ModelCall.id.desc()
+                ).limit(limit)
             )
-            return [
-                _model_call(row)
-                for row in rows
-            ]
+            return [_model_call(row) for row in rows]
 
     async def trim_model_calls(self, *, keep_days: float) -> int:
         """Prompts are large and nobody reads old ones. A container that never

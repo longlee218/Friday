@@ -50,14 +50,14 @@ from __future__ import annotations
 
 import logging
 
+from friday.kernel.domain.memory import CandidateStatus, ModelMemoryKind
+from friday.kernel.domain.memory_guard import InstructionShaped
+from friday.kernel.domain.state import FridayState
 from friday.kernel.harness.harness import ToolContext, tool
 from friday.kernel.harness.instruction_prompt import memory_lines
-from friday.kernel.domain.memory_guard import InstructionShaped
-from friday.kernel.domain.memory import CandidateStatus, ModelMemoryKind
-from friday.kernel.domain.state import FridayState
 from friday.kernel.memory import write
 
-__all__ = ["NotWired", "RESULTS", "TEXT_CHARS", "FridayState", "memory_tools"]
+__all__ = ["RESULTS", "TEXT_CHARS", "FridayState", "NotWired", "memory_tools"]
 
 log = logging.getLogger(__name__)
 
@@ -218,16 +218,18 @@ def memory_tools(db):
         state = _state(ctx)
         kept = _bounded(text)
         proposed = await write.propose(db, state, kept, kind=ModelMemoryKind.VOICE)
-        log.info(
-            "memory proposed by %s: %r (%s)", state.agent, kept, proposed.status
-        )
+        log.info("memory proposed by %s: %r (%s)", state.agent, kept, proposed.status)
         if proposed.status != CandidateStatus.PENDING:
             # `propose_memory` resolves immediately when the message it is
             # scoped to already carries a verdict — the operator marked the
             # classification before this run got here. Reporting the actual
             # outcome is more useful than telling the model to wait for a
             # mark that has already happened.
-            outcome = "accepted" if proposed.status == CandidateStatus.ACCEPTED else "rejected"
+            outcome = (
+                "accepted"
+                if proposed.status == CandidateStatus.ACCEPTED
+                else "rejected"
+            )
             return f"proposed as {proposed.id} — already marked {outcome}"
         return f"proposed as {proposed.id} — waiting for a mark"
 

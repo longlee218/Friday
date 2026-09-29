@@ -15,13 +15,11 @@ text.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
+from datetime import UTC
 
 import pytest
-
 from conftest import ScriptedHarness
-from friday.kernel.harness.harness import Harness
-from dataclasses import dataclass, field
-from typing import Optional
 
 from friday.kernel.extraction import (
     build_extractor,
@@ -30,7 +28,7 @@ from friday.kernel.extraction import (
 )
 from friday.kernel.extraction.answer import answer_shape
 from friday.kernel.extraction.context import FullContext
-from friday.sdk.validation import Matches
+from friday.kernel.harness.harness import Harness
 
 
 def _context(text="", params_cls=None, *, asked=(), memories=(), known=None):
@@ -61,7 +59,7 @@ def _context(text="", params_cls=None, *, asked=(), memories=(), known=None):
 def test_extractor_decorator_registers_under_task_type():
     @dataclass
     class FakeParams:
-        environment: Optional[str] = None
+        environment: str | None = None
 
     class StubHarness(ScriptedHarness):
         #: What a real `Harness` with no skill library has. A stub with
@@ -96,7 +94,7 @@ def test_registering_twice_replaces_rather_than_raises():
 
     @dataclass
     class Fake:
-        environment: Optional[str] = None
+        environment: str | None = None
 
     class Silent:
         answers = answer_shape(Fake)
@@ -127,7 +125,7 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
         #: `ask` and not only a name: a field with no phrase beside it is not
         #: askable (`askable_fields`), and a stub with nothing askable builds
         #: an empty enum for `ask_about`, which pydantic refuses.
-        environment: Optional[str] = field(
+        environment: str | None = field(
             default=None, metadata={"ask": "which environment you're on"}
         )
 
@@ -135,14 +133,15 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
         output = '{"environment": "production"}'
 
     class StubHarness(ScriptedHarness):
-
         last_error = None
 
         async def run(self, prompt, **kwargs):
             return StubResult()
 
     ext = build_extractor(
-        params_cls=ParamsWithRules, harness=StubHarness(answers=answer_shape(ParamsWithRules)), name="stub"  # type: ignore[arg-type]
+        params_cls=ParamsWithRules,
+        harness=StubHarness(answers=answer_shape(ParamsWithRules)),
+        name="stub",  # type: ignore[arg-type]
     )
     _install("stub_test_31", ext)
 
@@ -159,7 +158,6 @@ def test_an_extractor_returns_a_params_instance_filled_from_model_output():
 
 def test_an_extractor_returns_none_when_harness_fails():
     class FailingHarness(ScriptedHarness):
-
         last_error = "boom"
 
         async def run(self, prompt, **kwargs):
@@ -167,10 +165,12 @@ def test_an_extractor_returns_none_when_harness_fails():
 
     @dataclass
     class Params:
-        environment: Optional[str] = None
+        environment: str | None = None
 
     ext = build_extractor(
-        params_cls=Params, harness=FailingHarness(answers=answer_shape(Params)), name="fail"  # type: ignore[arg-type]
+        params_cls=Params,
+        harness=FailingHarness(answers=answer_shape(Params)),
+        name="fail",  # type: ignore[arg-type]
     )
     _install("failing_test_31", ext)
 
@@ -187,7 +187,6 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
         output = "not even close to JSON"
 
     class StubHarness(ScriptedHarness):
-
         async def run(self, prompt, **kwargs):
             return StubResult()
 
@@ -196,7 +195,9 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
         required_id: str  # not Optional - missing raises TypeError
 
     ext = build_extractor(
-        params_cls=StrictParams, harness=StubHarness(answers=answer_shape(StrictParams)), name="bad"  # type: ignore[arg-type]
+        params_cls=StrictParams,
+        harness=StubHarness(answers=answer_shape(StrictParams)),
+        name="bad",  # type: ignore[arg-type]
     )
     _install("bad_output_test_31", ext)
 
@@ -205,7 +206,9 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
         # The Params constructor then fails with TypeError on the missing
         # required field; Extractor returns None.
         params, clarify = asyncio.run(
-            extract("bad_output_test_31", _context("x", known=StrictParams(required_id="")))
+            extract(
+                "bad_output_test_31", _context("x", known=StrictParams(required_id=""))
+            )
         )
         assert params is None
         assert clarify is None
@@ -214,9 +217,10 @@ def test_an_extractor_returns_none_when_output_does_not_parse():
 
 
 async def test_extract_returns_none_for_unregistered_task_type():
-    assert await extract(
-        "not_a_real_task_type_31_xyz", _context("anything")
-    ) == (None, None)
+    assert await extract("not_a_real_task_type_31_xyz", _context("anything")) == (
+        None,
+        None,
+    )
 
 
 # --- what it wants to ask about is part of the answer (D7) ------------------
@@ -233,35 +237,46 @@ async def test_the_extractor_can_ask_for_specific_fields_it_read_it_needs():
     capture the caller read back afterwards — so neither half was the return
     value of anything.
     """
-    from friday.sdk.testing import ScriptedModel, function_call
-
     from friday.kernel.config import AgentConfig
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.answer import Clarify, answer_shape
+    from friday.sdk.testing import ScriptedModel, function_call
+    from plugins.backend.params import TraceProblemParams
 
     ext = build_extractor(
-        params_cls=ApiIssueParams,
+        params_cls=TraceProblemParams,
         harness=Harness(
             config=AgentConfig(
-                name="api_issue_ext", api_key="k",
-                base_url="https://example.invalid/v1", model="test-model",
+                name="trace_problem_ext",
+                api_key="k",
+                base_url="https://example.invalid/v1",
+                model="test-model",
             ),
             instructions="extract",
-            answers=answer_shape(ApiIssueParams),
-            model=ScriptedModel([[function_call("answer", {
-                "summary": "api trả 500",
-                "environment": "production",
-                "ask_about": ["curl"],
-                "because": "no request anywhere in the report",
-            }, call_id="1")]]),
+            answers=answer_shape(TraceProblemParams),
+            model=ScriptedModel(
+                [
+                    [
+                        function_call(
+                            "answer",
+                            {
+                                "summary": "api trả 500",
+                                "environment": "production",
+                                "ask_about": ["curl"],
+                                "because": "no request anywhere in the report",
+                            },
+                            call_id="1",
+                        )
+                    ]
+                ]
+            ),
         ),
-        name="api_issue_ext",
+        name="trace_problem_ext",
     )
     _install("clarify_test_31", ext)
 
     try:
         params, clarify = await extract(
-            "clarify_test_31", _context("the api is broken", ApiIssueParams)
+            "clarify_test_31", _context("the api is broken", TraceProblemParams)
         )
         assert params.environment == "production", (
             "the fields it did read came back in the same answer"
@@ -277,31 +292,43 @@ async def test_asking_about_nothing_is_not_a_request_with_no_fields_in_it():
     """An empty `ask_about` is the model saying there is nothing worth asking,
     which the graph must not turn into a question. `because` on its own is not
     a request either — the fields are what a question gets built from."""
-    from friday.sdk.testing import ScriptedModel, function_call
-
     from friday.kernel.config import AgentConfig
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.answer import answer_shape
+    from friday.sdk.testing import ScriptedModel, function_call
+    from plugins.backend.params import TraceProblemParams
 
     ext = build_extractor(
-        params_cls=ApiIssueParams,
+        params_cls=TraceProblemParams,
         harness=Harness(
             config=AgentConfig(
-                name="api_issue_ext", api_key="k",
-                base_url="https://example.invalid/v1", model="test-model",
+                name="trace_problem_ext",
+                api_key="k",
+                base_url="https://example.invalid/v1",
+                model="test-model",
             ),
             instructions="extract",
-            answers=answer_shape(ApiIssueParams),
-            model=ScriptedModel([[function_call("answer", {
-                "summary": "api trả 500", "because": "everything was there",
-            }, call_id="1")]]),
+            answers=answer_shape(TraceProblemParams),
+            model=ScriptedModel(
+                [
+                    [
+                        function_call(
+                            "answer",
+                            {
+                                "summary": "api trả 500",
+                                "because": "everything was there",
+                            },
+                            call_id="1",
+                        )
+                    ]
+                ]
+            ),
         ),
         name="quiet",
     )
     _install("quiet_test", ext)
 
     try:
-        _, clarify = await extract("quiet_test", _context("x", ApiIssueParams))
+        _, clarify = await extract("quiet_test", _context("x", TraceProblemParams))
         assert clarify is None
     finally:
         registered().pop("quiet_test", None)
@@ -320,14 +347,17 @@ def test_an_extractor_cannot_ask_about_a_field_that_does_not_exist():
     messages this system has ever sent asking for one had to teach the
     reporter where to look.
     """
-    from friday.kernel.harness.model_client import _answer_params
-    from plugins.ops.params import AccessRequestParams
-    from plugins.backend.answer_question import DocQuestionParams
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.answer import answer_shape
+    from friday.kernel.harness.model_client import _answer_params
+    from plugins.backend.answer_question import DocQuestionParams
+    from plugins.backend.params import TraceProblemParams
+    from plugins.ops.params import AccessRequestParams
 
     for params_cls, askable in (
-        (ApiIssueParams, {"environment", "response", "endpoint", "identifier", "curl"}),
+        (
+            TraceProblemParams,
+            {"environment", "response", "endpoint", "identifier", "curl"},
+        ),
         (AccessRequestParams, {"project", "permission"}),
         (DocQuestionParams, {"question", "doc_ref"}),
     ):
@@ -342,11 +372,13 @@ async def test_a_field_the_type_does_not_have_is_refused_rather_than_asked_about
     what makes this safe is that the arguments are validated in this process,
     and an invented name costs the model its correction turn rather than
     costing the reporter a question about nothing."""
-    from friday.kernel.harness.structured import fits
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.answer import answer_shape
+    from friday.kernel.harness.structured import fits
+    from plugins.backend.params import TraceProblemParams
 
-    value, problem = fits({"ask_about": ["deployment_colour"]}, answer_shape(ApiIssueParams))
+    value, problem = fits(
+        {"ask_about": ["deployment_colour"]}, answer_shape(TraceProblemParams)
+    )
 
     assert value is None
     assert "ask_about" in problem.fields
@@ -360,7 +392,7 @@ def test_one_extractor_declaration_serves_every_classifiable_type():
     parameters at all and the reporter is asked for what they just said — so
     the shipped config must carry the extractor's tier.
 
-    **One declaration, not one per type.** It was `extractor_api_issue`,
+    **One declaration, not one per type.** It was `extractor_trace_problem`,
     `extractor_access_request` and `extractor_doc_question`, on the argument
     that the jobs differ — reading a correlationId is not reading a repo name
     — and that a type could therefore want its own model. In practice all
@@ -415,16 +447,18 @@ def test_the_string_null_is_treated_as_absent():
     workflow that believes it has a correlationId never asks for the one it
     needs. The check used to live in triage, which no longer produces values."""
     from friday.kernel.extraction import _hygiene
-    from plugins.backend.params import ApiIssueParams
+    from plugins.backend.params import TraceProblemParams
 
     cleaned = _hygiene(
-        ApiIssueParams(
+        TraceProblemParams(
             summary="s", environment="null", correlation_id="N/A", curl="   "
         )
     )
 
     assert (cleaned.environment, cleaned.correlation_id, cleaned.curl) == (
-        None, None, None
+        None,
+        None,
+        None,
     )
 
 
@@ -451,7 +485,6 @@ def _install(task_type, ext):
     _EXTRACTORS[task_type] = ext
 
 
-
 def test_every_extraction_field_tells_the_model_what_it_means():
     """The prompt's schema line for a field is its `doc` metadata. Without it
     the model was shown "- summary: summary" — the mechanism existed and
@@ -472,10 +505,10 @@ def test_every_extraction_field_tells_the_model_what_it_means():
 
 
 def test_the_doc_reaches_the_extractors_prompt():
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
-    prompt = build_input(_context("API lỗi", ApiIssueParams))
+    prompt = build_input(_context("API lỗi", TraceProblemParams))
 
     assert "copied exactly" in prompt
     assert "- summary: summary" not in prompt
@@ -485,10 +518,10 @@ def test_the_doc_reaches_the_extractors_prompt():
 
 
 def test_a_field_already_known_drops_out_of_the_schema():
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
-    known = ApiIssueParams(environment="production")
+    known = TraceProblemParams(environment="production")
 
     prompt = build_input(_context("API lỗi", known=known))
 
@@ -502,10 +535,10 @@ def test_a_freshly_constructed_known_shows_every_field():
     so this, not an absent `known`, is what "nothing known yet" looks like
     now. A room with no rows already gets the same guarantee for
     `room_facts`."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
-    prompt = build_input(_context("API lỗi", ApiIssueParams))
+    prompt = build_input(_context("API lỗi", TraceProblemParams))
 
     assert "- environment:" in prompt
     assert "- correlation_id:" in prompt
@@ -515,10 +548,10 @@ def test_an_empty_string_field_is_not_treated_as_known():
     """`_fill`'s own rule — an empty string is not a value someone supplied —
     applies here too: a field the model once wrote `""` for is still blank
     and still worth asking the schema to name."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
-    known = ApiIssueParams(environment="")
+    known = TraceProblemParams(environment="")
 
     prompt = build_input(_context("API lỗi", known=known))
 
@@ -532,15 +565,21 @@ def _rows(*lines, origin="admin", channel_id="watched", kind="fact"):
     """What `db.domain_memories` hands back for a room — the operator's rows
     by default, which is what a channel file's `overrides` were until board
     `read-it-the-way-the-operator-does`, ticket 10."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from friday.kernel.domain.memory import Memory
 
-    now = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 1, tzinfo=UTC)
     return tuple(
         Memory(
-            id=f"r{n}", channel_id=channel_id, agent="operator", text=line,
-            kind=kind, created_at=now, updated_at=now, origin=origin,
+            id=f"r{n}",
+            channel_id=channel_id,
+            agent="operator",
+            text=line,
+            kind=kind,
+            created_at=now,
+            updated_at=now,
+            origin=origin,
         )
         for n, line in enumerate(lines)
     )
@@ -550,13 +589,13 @@ def test_a_room_with_no_rows_leaves_the_prompt_exactly_as_it_was():
     """The tracer bullet must not change the prompt of a room nobody has
     written anything about, and "not much" is not the same as "not at all":
     every extractor in every unconfigured install shares this prefix."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
-    said = build_input(_context("API lỗi", ApiIssueParams, memories=()))
+    said = build_input(_context("API lỗi", TraceProblemParams, memories=()))
 
     assert "<memory>" not in said
-    assert said == build_input(_context("API lỗi", ApiIssueParams))
+    assert said == build_input(_context("API lỗi", TraceProblemParams))
 
 
 def test_the_rooms_facts_reach_the_input_and_not_the_instructions():
@@ -566,11 +605,11 @@ def test_the_rooms_facts_reach_the_input_and_not_the_instructions():
     its own operator. Instructions are built once per *type* and shared by
     every conversation, so a room's facts could not live there even if the
     authority question did not settle it."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input, build_instructions
+    from plugins.backend.params import TraceProblemParams
 
     said = build_input(
-        _context("API lỗi", ApiIssueParams, memories=_rows("test.apero: staging"))
+        _context("API lỗi", TraceProblemParams, memories=_rows("test.apero: staging"))
     )
 
     assert "test.apero" in said
@@ -581,11 +620,11 @@ def test_the_rooms_facts_reach_the_input_and_not_the_instructions():
 def test_the_rooms_facts_arrive_through_the_memory_section():
     """Criterion: "through the existing memory section builder's channel
     slot, which gains its first caller since it was written"."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
     said = build_input(
-        _context("API lỗi", ApiIssueParams, memories=_rows("register: thân mật"))
+        _context("API lỗi", TraceProblemParams, memories=_rows("register: thân mật"))
     )
 
     assert "<memory>" in said
@@ -597,14 +636,16 @@ def test_the_field_schema_comes_before_the_room():
     task type serves every conversation, so the field schema is identical
     across every call that agent makes and the room is not. Putting the room
     first would break the shared prefix for every conversation but one."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
     said = build_input(
-        _context("API lỗi", ApiIssueParams, memories=_rows("register: thân mật"))
+        _context("API lỗi", TraceProblemParams, memories=_rows("register: thân mật"))
     )
 
-    assert said.index("Fields:") < said.index("<memory>") < said.index("What they said:")
+    assert (
+        said.index("Fields:") < said.index("<memory>") < said.index("What they said:")
+    )
 
 
 def test_what_the_operator_wrote_is_labelled_apart_from_what_a_model_did():
@@ -613,13 +654,13 @@ def test_what_the_operator_wrote_is_labelled_apart_from_what_a_model_did():
     what survives of the rule is provenance: the operator's rows, here and
     everywhere, under one label and first, a model's under another, and
     nothing dropped — a mutation that lost one kind of row stays red."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
     said = build_input(
         _context(
             "API lỗi",
-            ApiIssueParams,
+            TraceProblemParams,
             memories=(
                 *_rows("the reelme team is busiest", origin="model"),
                 *_rows("company: apero", channel_id="*"),
@@ -640,11 +681,11 @@ def test_outstanding_questions_reach_the_conversation_slot_not_the_channel():
     """`memory()`'s two slots are the two halves of "what do I already know?"
     — this room, and this exchange. Ticket 01 filled the channel slot with the
     room's facts; a question this task already asked is about the exchange."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
     said = build_input(
-        _context("API lỗi", ApiIssueParams, asked=("em gửi anh curl với",))
+        _context("API lỗi", TraceProblemParams, asked=("em gửi anh curl với",))
     )
 
     assert "[conversation" in said
@@ -655,24 +696,24 @@ def test_outstanding_questions_reach_the_conversation_slot_not_the_channel():
 def test_a_task_that_asked_nothing_renders_no_such_content():
     """Absent contributes nothing, not an empty heading — and the prompt of a
     task nobody has asked anything stays what it was."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
-    assert build_input(_context("API lỗi", ApiIssueParams, asked=())) == build_input(
-        _context("API lỗi", ApiIssueParams)
-    )
+    assert build_input(
+        _context("API lỗi", TraceProblemParams, asked=())
+    ) == build_input(_context("API lỗi", TraceProblemParams))
 
 
 def test_the_room_and_the_outstanding_questions_are_both_labelled():
     """Both slots at once, each still saying which is which — the property
     `memory()` was written for and the reason it is one section."""
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
 
     said = build_input(
         _context(
             "API lỗi",
-            ApiIssueParams,
+            TraceProblemParams,
             memories=_rows("test.apero: staging"),
             asked=("còn environment nào em?",),
         )
@@ -700,12 +741,12 @@ def test_an_extractor_whose_harness_answers_a_different_shape_is_refused():
     declares a different `answers=` produces the wrong type at runtime, in the
     middle of a task, where the only symptom is fields that never fill in.
     Refusing at wiring time costs a restart."""
+    from plugins.backend.params import TraceProblemParams
     from plugins.ops.params import AccessRequestParams
-    from plugins.backend.params import ApiIssueParams
 
-    with pytest.raises(ValueError, match="ApiIssueParams"):
+    with pytest.raises(ValueError, match="TraceProblemParams"):
         build_extractor(
-            params_cls=ApiIssueParams,
+            params_cls=TraceProblemParams,
             harness=ScriptedHarness(answers=answer_shape(AccessRequestParams)),  # type: ignore[arg-type]
             name="mismatched",
         )
@@ -721,41 +762,49 @@ async def test_a_skill_fetch_and_a_correction_both_fit_in_one_extraction():
     Three model calls: reach for a skill, answer wrongly, answer again. All
     three land inside one run.
     """
-    from friday.sdk.testing import ScriptedModel, function_call
+    from pathlib import Path
 
-    from friday.kernel.harness.skills import SkillLibrary
     from friday.kernel.config import AgentConfig
     from friday.kernel.extraction import EXTRACTOR
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.answer import answer_shape
-    from pathlib import Path
+    from friday.kernel.harness.skills import SkillLibrary
+    from friday.sdk.testing import ScriptedModel, function_call
+    from plugins.backend.params import TraceProblemParams
 
     library = SkillLibrary(Path(__file__).resolve().parents[1] / "skills").load()
     catalogue = list(library.catalogue())
     assert catalogue, "this repo ships skills"
 
-    model = ScriptedModel([
-        [function_call("search_skills", {"query": "correlation"}, call_id="1")],
-        [function_call("answer", {"correlation_id": ["not", "a", "string"]}, call_id="2")],
-        [function_call("answer", {"correlation_id": "3f7a1e22"}, call_id="3")],
-    ])
+    model = ScriptedModel(
+        [
+            [function_call("search_skills", {"query": "correlation"}, call_id="1")],
+            [
+                function_call(
+                    "answer", {"correlation_id": ["not", "a", "string"]}, call_id="2"
+                )
+            ],
+            [function_call("answer", {"correlation_id": "3f7a1e22"}, call_id="3")],
+        ]
+    )
     ext = build_extractor(
-        params_cls=ApiIssueParams,
+        params_cls=TraceProblemParams,
         harness=Harness(
             config=AgentConfig(
-                name="api_issue_ext", api_key="k",
-                base_url="https://example.invalid/v1", model="test-model",
+                name="trace_problem_ext",
+                api_key="k",
+                base_url="https://example.invalid/v1",
+                model="test-model",
                 max_turns=EXTRACTOR.max_turns,
             ),
             instructions="extract",
-            answers=answer_shape(ApiIssueParams),
+            answers=answer_shape(TraceProblemParams),
             skills=library,
             model=model,
         ),
         name="budgeted",
     )
 
-    params, _ = await ext.run(_context("api lỗi", ApiIssueParams))
+    params, _ = await ext.run(_context("api lỗi", TraceProblemParams))
 
     assert params is not None and params.correlation_id == "3f7a1e22"
     assert len(model.calls) == 3

@@ -15,17 +15,17 @@ Revises: 527334fcabc2
 Create Date: 2026-09-18 15:38:01.397384
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'f81f63e7d3ce'
-down_revision: Union[str, Sequence[str], None] = '527334fcabc2'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "f81f63e7d3ce"
+down_revision: str | Sequence[str] | None = "527334fcabc2"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 _OLD = "status = 'active' AND deleted_at IS NULL"
@@ -33,11 +33,13 @@ _NEW = "status = 'active' AND deleted_at IS NULL AND kind != 'finding'"
 
 
 def _rebuild(where: str) -> None:
-    with op.batch_alter_table('memories', schema=None) as batch_op:
-        batch_op.drop_index('uq_memories_active_key')
+    with op.batch_alter_table("memories", schema=None) as batch_op:
+        batch_op.drop_index("uq_memories_active_key")
         batch_op.create_index(
-            'uq_memories_active_key', ['channel_id', 'kind', 'key'],
-            unique=True, sqlite_where=sa.text(where),
+            "uq_memories_active_key",
+            ["channel_id", "kind", "key"],
+            unique=True,
+            sqlite_where=sa.text(where),
         )
 
 

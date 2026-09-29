@@ -3,7 +3,7 @@
 `EDGE_ROUTER` maps a task type to its `DAG`; `register_dags` fills it at boot
 from the registry (`friday.kernel.dag.task_types`), which each task type registers
 itself into — so this module names no task type. Ticket 11 moved the
-per-type building (`api_issue`'s investigation graph, the one-node graph for the
+per-type building (`trace_problem`'s investigation graph, the one-node graph for the
 rest) out to `task_types.py`; what stays here is the map, the clock checks, and
 the one-node graph builder every simple type shares.
 
@@ -18,10 +18,10 @@ import logging
 from typing import Any
 
 from friday.kernel.config import ConfigError
-from friday.sdk.workflow import DAG
 from friday.kernel.dag import registry
 from friday.kernel.dag.prepare import plan_by_required_parameters, prepare_node
 from friday.kernel.domain.tasks import Params
+from friday.sdk.workflow import DAG
 
 __all__ = [
     "EDGE_ROUTER",
@@ -142,7 +142,7 @@ def check_deps() -> None:
             continue
         try:
             enrich(Deps())
-        except Exception as exc:  # noqa: BLE001 - re-raised with the type named
+        except Exception as exc:
             raise ConfigError(
                 f"task type {name!r}: its deps factory cannot build a run's "
                 f"Deps — {type(exc).__name__}: {exc}"
@@ -203,8 +203,8 @@ def register_dags(
 def _register_on_adapter(db: Any) -> None:
     from dataclasses import asdict
 
-    from friday.sdk.workflow import Deps, NodeRun
     from friday.kernel.dag import adapter
+    from friday.sdk.workflow import Deps, NodeRun
 
     async def deps_factory(scope_key: dict[str, Any]) -> Deps:
         task_id = scope_key.get("task_id")

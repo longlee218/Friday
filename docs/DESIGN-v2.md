@@ -235,10 +235,12 @@ edge.
 # friday/sdk/plugin.py
 @dataclass(frozen=True)
 class Plugin:
-    id: str                                   # "devops"; namespace of everything it registers
-    register: Callable[[PluginAPI], None]     # the one entrypoint
-    requires: tuple[str, ...] = ()            # plugin ids: load order + presence, never imports
-    config: type | None = None                # dataclass for its block under `config.<id>`; None = takes none
+    id: str  # "devops"; namespace of everything it registers
+    register: Callable[[PluginAPI], None]  # the one entrypoint
+    requires: tuple[str, ...] = ()  # plugin ids: load order + presence, never imports
+    config: type | None = (
+        None  # dataclass for its block under `config.<id>`; None = takes none
+    )
 ```
 
 A plugin is a package whose `__init__.py` exposes one `PLUGIN`. Everything
@@ -264,14 +266,16 @@ A small plugin (`docs`) may be `__init__.py` and `params.py` alone.
 ```python
 # plugins/devops/__init__.py
 def register(api: PluginAPI) -> None:
-    api.task_type(TaskTypeSpec(
-        name="devops:api_issue",
-        params=ApiIssueParams,
-        extractor=build_extractor,
-        graph=build_graph,
-        deps=ApiIssueDeps,
-        needs=frozenset({"source:loki", "devops.service"}),
-    ))
+    api.task_type(
+        TaskTypeSpec(
+            name="devops:api_issue",
+            params=ApiIssueParams,
+            extractor=build_extractor,
+            graph=build_graph,
+            deps=ApiIssueDeps,
+            needs=frozenset({"source:loki", "devops.service"}),
+        )
+    )
     api.source(LogSource, "loki", lambda deps: LokiSource(api.config.loki))
     api.toolset(logs)
     api.toolset(code)
@@ -360,13 +364,20 @@ and the board labels every plugin with its tier.
 
 ```python
 class PluginAPI(Protocol):
-    config: Any                                     # an instance of PLUGIN.config, already validated (None if it takes none)
-    def task_type(self, spec: TaskTypeSpec) -> None: ...          # §6.1
-    def toolset(self, toolset: Toolset) -> None: ...              # §6.2
-    def skills(self, directory: Path) -> None: ...                # §6.3
-    def source(self, port: type[P], name: str, factory: Callable[[Deps], P]) -> None: ...  # §6.4
-    def memory_kind(self, spec: MemoryKindSpec) -> None: ...      # §9.2
-    def check(self, probe: Callable[[], Awaitable[str | None]]) -> None: ...  # boot health: None = ok
+    config: (
+        Any  # an instance of PLUGIN.config, already validated (None if it takes none)
+    )
+
+    def task_type(self, spec: TaskTypeSpec) -> None: ...  # §6.1
+    def toolset(self, toolset: Toolset) -> None: ...  # §6.2
+    def skills(self, directory: Path) -> None: ...  # §6.3
+    def source(
+        self, port: type[P], name: str, factory: Callable[[Deps], P]
+    ) -> None: ...  # §6.4
+    def memory_kind(self, spec: MemoryKindSpec) -> None: ...  # §9.2
+    def check(
+        self, probe: Callable[[], Awaitable[str | None]]
+    ) -> None: ...  # boot health: None = ok
 ```
 
 **Later**, each added when its trigger fires (§16): `channel`, `approval`,
@@ -450,16 +461,16 @@ every field can be satisfied. v1's `DAG_DEPS_EXTRA` (one producer,
 ```python
 @dataclass(frozen=True)
 class TaskTypeSpec:
-    name: str                               # "devops:api_issue"
-    params: type                            # docstring = the type's description to triage
+    name: str  # "devops:api_issue"
+    params: type  # docstring = the type's description to triage
     extractor: Callable[[Deps], Extractor]
-    graph: Callable[[Deps], DAG] | None     # None → the one-node simple graph
-    deps: type | None                       # §5.2
-    needs: frozenset[str]                   # sources, kinds, agents it uses
-    accepts: frozenset[str] = {"message"}   # message | email | file | calendar | trigger
-    examples: tuple[Example, ...] = ()      # few-shot seeds for triage
-    contrasts: tuple[str, ...] = ()         # "not devops:api_issue when …": similar types
-    eval_cases: Path | None = None          # labelled rows for the triage eval (§10)
+    graph: Callable[[Deps], DAG] | None  # None → the one-node simple graph
+    deps: type | None  # §5.2
+    needs: frozenset[str]  # sources, kinds, agents it uses
+    accepts: frozenset[str] = {"message"}  # message | email | file | calendar | trigger
+    examples: tuple[Example, ...] = ()  # few-shot seeds for triage
+    contrasts: tuple[str, ...] = ()  # "not devops:api_issue when …": similar types
+    eval_cases: Path | None = None  # labelled rows for the triage eval (§10)
 ```
 
 A task type whose plugin is removed: its open tasks go to `needs_human`
@@ -470,8 +481,11 @@ with a reason; its memory rows stay dormant, not deleted.
 ```python
 logs = Toolset("devops:logs", instructions="Read service logs around a request.")
 
+
 @logs.tool(side_effect="read", needs={"source:loki"})
-async def query_logs(ctx: ToolContext[LogsDeps], service: str, since: datetime, until: datetime) -> Lines:
+async def query_logs(
+    ctx: ToolContext[LogsDeps], service: str, since: datetime, until: datetime
+) -> Lines:
     """Log lines for one service inside a window."""
 ```
 
@@ -701,14 +715,16 @@ Order among plugins is explicit (`after=[plugin_id]`).
 ```python
 @dataclass(frozen=True)
 class MemoryKindSpec:
-    name: str                          # core: "fact"; pack: "devops.service"
-    data: type | None                  # structured shape, validated with `fits`; None = prose
-    schema_version: int = 1            # stored on each row
-    upgrade: Callable[[int, dict], dict] | None = None   # old rows readable after a plugin upgrade
+    name: str  # core: "fact"; pack: "devops.service"
+    data: type | None  # structured shape, validated with `fits`; None = prose
+    schema_version: int = 1  # stored on each row
+    upgrade: Callable[[int, dict], dict] | None = (
+        None  # old rows readable after a plugin upgrade
+    )
     audience: Literal["model", "code"] = "model"
     writers: frozenset[Origin] = frozenset({"admin"})
     cardinality: Literal["one-per-key", "append"] = "one-per-key"
-    injected: bool = False             # rendered into a prompt section (behind trust_boundary) vs tool/code only
+    injected: bool = False  # rendered into a prompt section (behind trust_boundary) vs tool/code only
     max_chars: int = 500
     sensitivity: Literal["public", "internal", "personal", "restricted"] = "internal"
     allowed_scopes: frozenset[str] = frozenset({"room", "team", "*"})

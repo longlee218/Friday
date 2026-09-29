@@ -12,7 +12,7 @@ import asyncio
 import inspect
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -22,7 +22,7 @@ from plugins.backend.placement import Placement, Project
 from plugins.backend.toolsets import CODE, DB, DOCS, LOGS, TOOLSETS
 from plugins.backend.toolsets.evidence import Evidence
 
-AT = datetime(2026, 9, 29, 10, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
 
 class Devops:
@@ -68,8 +68,11 @@ def clone(tmp_path):
 
 def _placement(clone, *, service="backend-reelme-v2") -> Placement:
     return Placement(
-        env="production", service=service, project="reelme",
-        repo_path=str(clone), clone_path=str(clone),
+        env="production",
+        service=service,
+        project="reelme",
+        repo_path=str(clone),
+        clone_path=str(clone),
         projects=(
             Project(name="reelme", repo_path=str(clone), docs_paths=("docs",)),
             Project(name="other", repo_path=str(clone), docs_paths=("docs",)),
@@ -79,13 +82,17 @@ def _placement(clone, *, service="backend-reelme-v2") -> Placement:
 
 def _tools(toolsets, placement, servers, evidence=None):
     run = RunContext(
-        task_id=1, domain=placement, evidence=evidence or Evidence(), mcp={},
+        task_id=1,
+        domain=placement,
+        evidence=evidence or Evidence(),
+        mcp={},
         reported_at=AT,
     )
     from friday.kernel.harness.harness import _bind_tool_spec
 
     return {
-        t.name: t for t in (_bind_tool_spec(x) for x in build_tools(toolsets, run, servers))
+        t.name: t
+        for t in (_bind_tool_spec(x) for x in build_tools(toolsets, run, servers))
     }
 
 
@@ -110,9 +117,17 @@ def test_a_factory_cannot_reach_release_rollback():
 
     from dataclasses import replace
 
-    build_tools([replace(CODE, factory=factory)], RunContext(
-        task_id=1, domain=None, evidence=None, mcp={}, reported_at=AT,
-    ), {"devops-generic": server})
+    build_tools(
+        [replace(CODE, factory=factory)],
+        RunContext(
+            task_id=1,
+            domain=None,
+            evidence=None,
+            mcp={},
+            reported_at=AT,
+        ),
+        {"devops-generic": server},
+    )
 
     reads = seen["devops-generic"]
     assert reads.allowed == frozenset({"release_status"})
@@ -135,7 +150,10 @@ def test_each_toolset_is_narrowed_to_its_own_reads():
 
 def test_the_plugin_registers_every_toolset_under_its_own_name():
     assert [t.name for t in TOOLSETS] == [
-        "backend.logs", "backend.code", "backend.docs", "backend.db",
+        "backend.logs",
+        "backend.code",
+        "backend.docs",
+        "backend.db",
     ]
     assert all(t.domain_type is Placement for t in TOOLSETS)
 
@@ -200,7 +218,9 @@ def test_another_repo_of_the_room_has_no_known_version(clone):
 
 def test_search_code_finds_at_the_running_tag(clone):
     evidence = Evidence()
-    tools = _tools([CODE], _placement(clone), {"devops-generic": Devops("1.0.0")}, evidence)
+    tools = _tools(
+        [CODE], _placement(clone), {"devops-generic": Devops("1.0.0")}, evidence
+    )
 
     said = call(tools["search_code"], repo="reelme", query="Token()")
 
@@ -307,9 +327,10 @@ def test_a_file_deleted_since_the_release_is_still_read_at_the_tag(clone):
 def test_a_docs_path_of_the_whole_clone_opens_nothing(clone):
     """`docs_paths: ["."]` would make `.env` and `.git/config` docs."""
     (clone / ".env").write_text("SECRET=1\n")
-    placement = Placement(env="dev", projects=(
-        Project(name="reelme", repo_path=str(clone), docs_paths=(".", "")),
-    ))
+    placement = Placement(
+        env="dev",
+        projects=(Project(name="reelme", repo_path=str(clone), docs_paths=(".", "")),),
+    )
     tools = _tools([DOCS], placement, {})
 
     assert "is not a document" in call(tools["read_docs"], repo="reelme", path=".env")

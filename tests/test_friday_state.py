@@ -65,8 +65,12 @@ def test_a_named_change_alters_exactly_one_thing():
     it would put us back where a mutable field was — "what can change, and
     where" stops being a list anybody can read."""
     state = _state(
-        thread_id="t1", message_id="m1", author_id="u1", author_name="Nhím",
-        reply_to="m0", task_id=1,
+        thread_id="t1",
+        message_id="m1",
+        author_id="u1",
+        author_name="Nhím",
+        reply_to="m0",
+        task_id=1,
     )
 
     for changed, field in [
@@ -170,6 +174,5 @@ def test_every_field_holds_something_that_cannot_be_changed_in_place():
     ]
 
     assert mutable == [], (
-        f"a field that can be changed in place reopens the run context: "
-        f"{mutable}"
+        f"a field that can be changed in place reopens the run context: {mutable}"
     )

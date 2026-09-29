@@ -21,8 +21,8 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from friday.kernel.domain.messages import InboundEvent
 from friday.kernel.domain.memory import Memory
+from friday.kernel.domain.messages import InboundEvent
 
 __all__ = ["LightContext", "build_light_context"]
 

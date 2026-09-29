@@ -3,7 +3,7 @@
 The one guard that matters here: **the decisive line survives.** Every other
 assertion in this file is about what the rule is allowed to cut instead.
 
-Its own module rather than a section of `test_api_issue.py`, because ticket
+Its own module rather than a section of `test_trace_problem.py`, because ticket
 16's coverage test lands here: for each labelled case the operator names the
 line they say decided it, and a pure-code test asserts the rule keeps it.
 """
@@ -31,7 +31,11 @@ def test_a_line_carrying_the_correlation_id_survives():
 def test_every_error_line_survives_even_without_a_correlation_id():
     """D2's other half: a report with no id is still investigable, and the
     loud lines are what it is investigated from."""
-    lines = log(*[f"info {i}" for i in range(300)], "ERROR boom", *[f"info {i}" for i in range(300)])
+    lines = log(
+        *[f"info {i}" for i in range(300)],
+        "ERROR boom",
+        *[f"info {i}" for i in range(300)],
+    )
 
     kept = distil(lines, max_lines=20)
 
@@ -132,8 +136,8 @@ def test_the_error_codes_in_the_window_are_counted_not_quoted():
     real run kept 61 lines of other requests' errors and called it a
     dossier."""
     lines = log(
-        *[f'{{"errorCode":"ERR951"}}' for _ in range(40)],
-        *[f'{{"errorCode":"ERR19"}}' for _ in range(3)],
+        *['{"errorCode":"ERR951"}' for _ in range(40)],
+        *['{"errorCode":"ERR19"}' for _ in range(3)],
         '{"errorCode":"ERR306","correlationId":"abc"}',
     )
 
@@ -145,7 +149,7 @@ def test_the_error_codes_in_the_window_are_counted_not_quoted():
 def test_the_histogram_counts_the_whole_window_not_what_survived():
     """Counting what survived would be counting the cut, which says nothing
     about the window it was cut from."""
-    lines = log(*[f'{{"errorCode":"ERR951"}}' for _ in range(40)], "ERROR abc")
+    lines = log(*['{"errorCode":"ERR951"}' for _ in range(40)], "ERROR abc")
 
     kept = distil(lines, correlation_id="abc", other_error_cap=1)
 
@@ -154,7 +158,7 @@ def test_the_histogram_counts_the_whole_window_not_what_survived():
 
 
 def test_the_sample_of_other_requests_says_how_many_it_stands_for():
-    """"8 of N", not a silent 8. A sample nobody is told is a sample reads as
+    """ "8 of N", not a silent 8. A sample nobody is told is a sample reads as
     everything."""
     lines = log(*[f"ERROR {i}" for i in range(30)], "the request abc")
 

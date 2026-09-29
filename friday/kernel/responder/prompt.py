@@ -14,28 +14,28 @@ better is a silent cost on every call; a test holds the prefix property.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from friday.kernel.domain.messages import InboundEvent
+from friday.kernel.domain.tasks import Params
 from friday.kernel.harness.instruction_prompt import (
     SkillMeta,
     assemble,
-    critical_reminder,
-    memory_tool_system,
-    skill_system,
-    counterpart,
-    job,
-    response_style,
-    role,
-    soul,
     base,
     channel_derived,
     conversation,
+    counterpart,
+    critical_reminder,
+    job,
+    memory_tool_system,
+    response_style,
+    role,
+    skill_system,
+    soul,
     task,
     tone_examples,
     trust_boundary,
 )
-from friday.kernel.domain.messages import InboundEvent
-from friday.kernel.domain.tasks import Params
 
 __all__ = ["build_input", "build_instructions"]
 
@@ -228,7 +228,7 @@ def build_input(
 ) -> str:
     """Everything one draft call knows, rendered stable-first."""
     parts = [
-        base(now or datetime.now(timezone.utc)),
+        base(now or datetime.now(UTC)),
         channel_derived(summary),
         counterpart(COUNTERPART if stranger else ""),
         # `has_memory` is decided the same way, by `__init__`: whether a

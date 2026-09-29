@@ -79,7 +79,7 @@ _EMOJI = re.compile(
 
 #: Zero-width and directional marks. Invisible to a person, tokens to a model,
 #: and they arrive from copy-paste more often than anyone expects.
-_INVISIBLE = re.compile("[​‌‎‏⁠﻿]")
+_INVISIBLE = re.compile("[\u200b\u200c\u200e\u200f\u2060\ufeff]")
 
 #: Discord's own noise: a custom emoji is markup, not a word.
 _CUSTOM_EMOJI = re.compile(r"<a?:\w+:\d+>")
@@ -121,7 +121,7 @@ def redact(raw: str | None, refs: Sequence[str]) -> str:
     should say — that is the caller's business (an id, a description,
     whatever a build wants to show for material it will not inline).
     """
-    cleaned, code, fenced = _split(raw)
+    cleaned, code, _fenced = _split(raw)
     if cleaned is None:
         return ""
     if len(refs) != len(code):

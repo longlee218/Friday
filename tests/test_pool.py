@@ -4,17 +4,13 @@ it costs someone one unnecessary question."""
 
 from __future__ import annotations
 
-import pytest
-
-from friday.kernel.domain.tasks import Task
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from conftest import ScriptedHarness, make_event
+
 from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.pool.pool import ASKED, Pool
 from friday.kernel.domain.states import TaskState
-
-
+from friday.kernel.pool.pool import ASKED, Pool
 
 
 async def make_task(db, **params):
@@ -23,8 +19,13 @@ async def make_task(db, **params):
         type="backend.trace_problem",
         state="pending",
         confidence=0.9,
-        params={"summary": "checkout 500", "environment": None,
-                "correlation_id": None, "curl": None, **params},
+        params={
+            "summary": "checkout 500",
+            "environment": None,
+            "correlation_id": None,
+            "curl": None,
+            **params,
+        },
     )
 
 
@@ -35,7 +36,7 @@ async def make_request_permission(db, **params):
 
     Stands in for `backend.trace_problem` below wherever a test is really about
     the *generic* ask/escalate/responder mechanics, not about anything
-    `api_issue` investigates: `Intake` (ticket 6) replaced `prepare` for that
+    `trace_problem` investigates: `Intake` (ticket 6) replaced `prepare` for that
     type, makes no model call, and never asks or hands over at node 0 — so a
     task with nothing in it no longer produces the "missing details" `Ask`
     these tests are for.
@@ -100,8 +101,13 @@ async def test_a_report_that_can_be_traced_waits_for_a_human(db, workflows):
 
 
 async def test_types_without_a_workflow_wait_for_a_human(db):
-    await db.create_task(conversation=ConversationId("fake", "watched"), type="backend.answer_question",
-                         state="pending", confidence=0.9, params={"question": "?"})
+    await db.create_task(
+        conversation=ConversationId("fake", "watched"),
+        type="backend.answer_question",
+        state="pending",
+        confidence=0.9,
+        params={"question": "?"},
+    )
 
     await Pool(db=db, auto_ask=True).run_once()
 
@@ -133,8 +139,9 @@ class StubResponder:
         self.strangers: list[bool] = []
         self.states: list = []
 
-    async def draft(self, *, asking, params=None, state=None,
-                    stranger=False, context=(), tone=()):
+    async def draft(
+        self, *, asking, params=None, state=None, stranger=False, context=(), tone=()
+    ):
         self.strangers.append(stranger)
         self.states.append(state)
         from friday.kernel.responder import Draft
@@ -206,7 +213,9 @@ async def test_a_task_it_cannot_handle_is_brought_to_the_operator(db, workflows)
     the operator's card is one of several rows rather than the only one —
     the acknowledgement and the report's own finding card precede it.
     """
-    task = await make_task(db, curl="curl https://api.aperogroup.ai/v1/pay")  # findable, unactionable
+    await make_task(
+        db, curl="curl https://api.aperogroup.ai/v1/pay"
+    )  # findable, unactionable
     runner = Pool(db=db, auto_ask=True)
 
     await runner.run_once()
@@ -233,7 +242,9 @@ async def test_the_operator_is_told_once(db, workflows):
     await runner.run_once()
 
     assert [r.kind for r in await db.outbound()] == [
-        "acknowledged", "finding", "help_wanted",
+        "acknowledged",
+        "finding",
+        "help_wanted",
     ]
 
 
@@ -246,18 +257,20 @@ async def test_an_answer_from_a_workflow_waits_for_approval(db):
     """This is the producer the approval path never had. A workflow that can
     actually answer something says so, and the operator decides whether it goes
     out under their name."""
-    from friday.sdk.workflow import DAG, Node
     from friday.kernel.dag.router import EDGE_ROUTER, register_dag
     from friday.sdk.actions import Reply
+    from friday.sdk.workflow import DAG, Node
 
     async def answers(state, deps):
         return Reply("cache đầy thôi, anh clear rồi nhé")
 
     # A graph standing in for the real one. This test is about the approval
-    # machinery, not about what `api_issue` investigates — it needs a route
+    # machinery, not about what `trace_problem` investigates — it needs a route
     # that produces a `Reply` and nothing more.
     EDGE_ROUTER.pop("backend.trace_problem", None)
-    register_dag("backend.trace_problem", DAG(name="answers", nodes=(Node("answer", answers),)))
+    register_dag(
+        "backend.trace_problem", DAG(name="answers", nodes=(Node("answer", answers),))
+    )
 
     await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     runner = Pool(db=db, auto_ask=True)
@@ -283,15 +296,17 @@ async def test_a_drafted_reply_is_redacted_and_the_card_tells_the_truth(db):
     is scrubbed before the reply is queued, so it never leaves even if approved.
     The card shows those exact scrubbed bytes and flags that a redaction
     happened — the operator approves what will go out, told the truth about it."""
-    from friday.sdk.workflow import DAG, Node
     from friday.kernel.dag.router import EDGE_ROUTER, register_dag
     from friday.sdk.actions import Reply
+    from friday.sdk.workflow import DAG, Node
 
     async def leaks(state, deps):
         return Reply("cleared it — key was sk-abcdefghijklmnopqrstuvwxyz01")
 
     EDGE_ROUTER.pop("backend.trace_problem", None)
-    register_dag("backend.trace_problem", DAG(name="leaks", nodes=(Node("answer", leaks),)))
+    register_dag(
+        "backend.trace_problem", DAG(name="leaks", nodes=(Node("answer", leaks),))
+    )
 
     await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
     try:
@@ -309,7 +324,9 @@ async def test_a_drafted_reply_is_redacted_and_the_card_tells_the_truth(db):
     assert f"reply {reply.id}" in card.text
 
 
-async def test_announcing_costs_the_same_whether_there_are_five_tasks_or_one(db, workflows):
+async def test_announcing_costs_the_same_whether_there_are_five_tasks_or_one(
+    db, workflows
+):
     """It ran a count per task, every two seconds, for something that almost
     never has anything to do — twenty-one queries to usually find nothing.
 
@@ -327,7 +344,9 @@ async def test_announcing_costs_the_same_whether_there_are_five_tasks_or_one(db,
         setattr(db, name, counted)
 
     for _ in range(5):
-        task = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+        task = await make_task(
+            db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789"
+        )
         await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
     await Pool(db=db, auto_ask=True).run_once()
@@ -349,18 +368,14 @@ async def test_extraction_runs_when_a_message_is_linked(db):
     generic node-0-extraction mechanism this guards is no longer reachable
     through it.
     """
-    from dataclasses import dataclass
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from sqlalchemy import update as sa_update
 
-    from friday.store import schema
-    from friday.kernel.config import AgentConfig
-    from friday.kernel.domain.conversation import ConversationId
+    from friday.kernel.domain.messages import InboundEvent, MentionType
     from friday.kernel.extraction import _EXTRACTORS, build_extractor
     from friday.kernel.extraction.answer import answer_shape
-    from friday.kernel.harness.harness import Harness
-    from friday.kernel.domain.messages import InboundEvent, MentionType
+    from friday.store import schema
     from plugins.ops.params import AccessRequestParams
 
     class StubResult:
@@ -368,9 +383,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
         # filled, because returning null would cancel triage's value. That is
         # what the extraction prompt instructs and the test mirrors.
         final_output = (
-            '{"project": "payments repo", '
-            '"permission": "write", '
-            '"summary": null}'
+            '{"project": "payments repo", "permission": "write", "summary": null}'
         )
 
     prompts_seen: list[str] = []
@@ -385,12 +398,6 @@ async def test_extraction_runs_when_a_message_is_linked(db):
             prompts_seen.append(prompt)
             return StubResult()
 
-    cfg = AgentConfig(
-        name="request_permission_ext",
-        api_key="sk-secret",
-        base_url="https://example.invalid/v1",
-        model="test-model",
-    )
     ext = build_extractor(
         params_cls=AccessRequestParams,
         harness=StubHarness(answers=answer_shape(AccessRequestParams)),  # type: ignore[arg-type]
@@ -409,7 +416,7 @@ async def test_extraction_runs_when_a_message_is_linked(db):
             author_id="u-reporter",
             author_name="reporter",
             text="cần quyền write vào repo payments",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             mention_type=MentionType.DIRECT,
         )
         await db.record_message(event)
@@ -445,7 +452,7 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
     write from.
 
     This mechanism — `prepare` node 0, an extractor's own `ask_about` beyond
-    the structural floor — is generic, and `ApiIssueParams` is the one type
+    the structural floor — is generic, and `TraceProblemParams` is the one type
     with a field (`environment`) that is optional structurally but still has
     an `ask` phrase, which is what this needs. `backend.trace_problem`'s *real*
     graph no longer runs `prepare` at all (ticket 6: `Intake` replaced it), so
@@ -453,36 +460,51 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
     shape every type with no investigation past node 0 already uses — rather
     than testing a mechanism the live graph does not have.
     """
-    from friday.sdk.testing import ScriptedModel, assistant_message, function_call
     from sqlalchemy import update as sa_update
 
-    from friday.kernel.dag.router import EDGE_ROUTER, build_simple_dag, register_dag
-    from friday.kernel.harness.harness import Harness
     from friday.kernel.config import AgentConfig
+    from friday.kernel.dag.router import EDGE_ROUTER, build_simple_dag, register_dag
     from friday.kernel.domain.messages import InboundEvent, MentionType
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction import _EXTRACTORS, build_extractor
     from friday.kernel.extraction.answer import answer_shape
+    from friday.kernel.harness.harness import Harness
+    from friday.sdk.testing import ScriptedModel, function_call
     from friday.store import schema
+    from plugins.backend.params import TraceProblemParams
 
     EDGE_ROUTER.pop("backend.trace_problem", None)
-    register_dag("backend.trace_problem", build_simple_dag("backend.trace_problem", ApiIssueParams))
+    register_dag(
+        "backend.trace_problem",
+        build_simple_dag("backend.trace_problem", TraceProblemParams),
+    )
 
     ext = build_extractor(
-        params_cls=ApiIssueParams,
+        params_cls=TraceProblemParams,
         harness=Harness(
             config=AgentConfig(
-                name="api_issue_ext", api_key="k",
-                base_url="https://example.invalid/v1", model="test-model",
+                name="trace_problem_ext",
+                api_key="k",
+                base_url="https://example.invalid/v1",
+                model="test-model",
             ),
             instructions="extract",
-            answers=answer_shape(ApiIssueParams),
-            model=ScriptedModel([[function_call("answer", {
-                "ask_about": ["environment"],
-                "because": "the curl doesn't say which server",
-            }, call_id="1")]]),
+            answers=answer_shape(TraceProblemParams),
+            model=ScriptedModel(
+                [
+                    [
+                        function_call(
+                            "answer",
+                            {
+                                "ask_about": ["environment"],
+                                "because": "the curl doesn't say which server",
+                            },
+                            call_id="1",
+                        )
+                    ]
+                ]
+            ),
         ),
-        name="api_issue_ext",
+        name="trace_problem_ext",
     )
     _EXTRACTORS["backend.trace_problem"] = ext
 
@@ -492,9 +514,14 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
 
     try:
         event = InboundEvent(
-            provider="fake", provider_message_id="m-clarify-1", channel_id="watched",
-            thread_id=None, author_id="u-reporter", author_name="reporter",
-            text="checkout API bị lỗi rồi, curl -X GET /pay", created_at=datetime.now(timezone.utc),
+            provider="fake",
+            provider_message_id="m-clarify-1",
+            channel_id="watched",
+            thread_id=None,
+            author_id="u-reporter",
+            author_name="reporter",
+            text="checkout API bị lỗi rồi, curl -X GET /pay",
+            created_at=datetime.now(UTC),
             mention_type=MentionType.DIRECT,
         )
         await db.record_message(event)
@@ -567,7 +594,7 @@ async def _said(db, message_id, text, *, secs, mention=None, author="u-reporter"
     )
 
 
-BURST_START = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
+BURST_START = datetime(2026, 9, 2, 3, 0, tzinfo=UTC)
 
 
 async def test_the_extractor_reads_the_rest_of_the_burst(db):
@@ -689,7 +716,9 @@ async def test_over_budget_the_oldest_messages_are_dropped_first(db):
     await db.mark_triaged(
         make_event(message_id="m1"), task.id, decision={"type": "backend.trace_problem"}
     )
-    await _said(db, "m2", "correlationId là abcdef01-2345-6789-abcd-ef0123456789", secs=3)
+    await _said(
+        db, "m2", "correlationId là abcdef01-2345-6789-abcd-ef0123456789", secs=3
+    )
 
     said = await db.original_text_for(task.id, budget_tokens=20)
 
@@ -764,7 +793,7 @@ async def _operator_said(db, message_id, text, *, reply_to=None, secs=10, author
             author_id=author,
             author_name="Long",
             text=text,
-            created_at=datetime.now(timezone.utc) + timedelta(seconds=secs),
+            created_at=datetime.now(UTC) + timedelta(seconds=secs),
             mention_type=None,
             is_own=True,
             reply_to=reply_to,
@@ -822,8 +851,8 @@ async def test_a_message_this_process_posted_is_not_the_operator_answering(db):
 async def test_with_several_open_tasks_and_no_reply_nothing_closes(db, workflows):
     """Guessing which one they meant loses work. When it is not clear, the
     answer is a person, not a guess."""
-    a = await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
-    b = await make_task(db, curl="curl -X GET /pay")
+    await make_task(db, correlation_id="abcdef01-2345-6789-abcd-ef0123456789")
+    await make_task(db, curl="curl -X GET /pay")
     await _operator_said(db, "op-1", "để anh xem")
 
     await Pool(db=db, auto_ask=False).run_once()
@@ -840,7 +869,11 @@ async def test_a_reply_picks_the_task_out_of_several(db):
     a = await make_request_permission(db)
     b = await make_request_permission(db)
     await db.record_message(make_event(message_id="report-b", text="curl lỗi"))
-    await db.mark_triaged(make_event(message_id="report-b"), b.id, decision={"type": "ops.request_permission"})
+    await db.mark_triaged(
+        make_event(message_id="report-b"),
+        b.id,
+        decision={"type": "ops.request_permission"},
+    )
     await _operator_said(db, "op-1", "cái curl đó thiếu header", reply_to="report-b")
 
     await Pool(db=db, auto_ask=False).run_once()
@@ -869,7 +902,11 @@ async def test_someone_the_operator_never_wrote_to_is_a_stranger(db):
     responder = StubResponder("dạ anh/chị gửi mình correlationId nhé")
     task = await make_request_permission(db)
     await db.record_message(make_event(message_id="m1", author_id="newcomer"))
-    await db.mark_triaged(make_event(message_id="m1", author_id="newcomer"), task.id, decision={"type": "ops.request_permission"})
+    await db.mark_triaged(
+        make_event(message_id="m1", author_id="newcomer"),
+        task.id,
+        decision={"type": "ops.request_permission"},
+    )
 
     await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
@@ -882,11 +919,23 @@ async def test_an_exchange_in_either_direction_makes_them_known(db):
     responder = StubResponder("cho anh xin correlationId nhé")
     task = await make_request_permission(db)
     await db.record_message(make_event(message_id="m1", author_id="dana"))
-    await db.mark_triaged(make_event(message_id="m1", author_id="dana"), task.id, decision={"type": "ops.request_permission"})
+    await db.mark_triaged(
+        make_event(message_id="m1", author_id="dana"),
+        task.id,
+        decision={"type": "ops.request_permission"},
+    )
     # Long once replied to something dana said.
-    await db.record_message(make_event(message_id="old", author_id="dana", text="hi"), context_only=True)
     await db.record_message(
-        make_event(message_id="long-said", author_id="me", is_own=True, text="hi em", reply_to="old"),
+        make_event(message_id="old", author_id="dana", text="hi"), context_only=True
+    )
+    await db.record_message(
+        make_event(
+            message_id="long-said",
+            author_id="me",
+            is_own=True,
+            text="hi em",
+            reply_to="old",
+        ),
         context_only=True,
     )
 
@@ -899,18 +948,24 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
     """Written down is a `person` row keyed on their Discord id — a name in a
     channel file's `people:` map until the files went (board
     `read-it-the-way-the-operator-does`, ticket 10)."""
-    from friday.sdk.memory import MemoryOrigin
     from friday.kernel.domain.state import FridayState
+    from friday.sdk.memory import MemoryOrigin
 
     await db.memory_add(
-        FridayState(channel_id="watched", agent="operator"), "",
-        kind="person", origin=MemoryOrigin.ADMIN,
+        FridayState(channel_id="watched", agent="operator"),
+        "",
+        kind="person",
+        origin=MemoryOrigin.ADMIN,
         data={"discord_id": "dana", "name": "Dana", "role": "qa", "team": "orders"},
     )
     responder = StubResponder("ok")
     task = await make_request_permission(db)
     await db.record_message(make_event(message_id="m1", author_id="dana"))
-    await db.mark_triaged(make_event(message_id="m1", author_id="dana"), task.id, decision={"type": "ops.request_permission"})
+    await db.mark_triaged(
+        make_event(message_id="m1", author_id="dana"),
+        task.id,
+        decision={"type": "ops.request_permission"},
+    )
 
     await Pool(db=db, auto_ask=True, responder=responder).run_once()
 
@@ -918,10 +973,9 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
 
 
 async def test_the_stranger_line_reaches_the_prompt_and_only_then(tmp_path):
-    from friday.sdk.testing import FunctionModel
-
     from friday.kernel.config import AgentConfig
     from friday.kernel.responder import Responder
+    from friday.sdk.testing import FunctionModel
 
     prompts: list[str] = []
 
@@ -954,12 +1008,17 @@ async def _reporter_said(db, message_id, text, *, secs, task_id=None, reply_to=N
     from datetime import timedelta
 
     event = make_event(
-        message_id=message_id, text=text, mention_type=None, reply_to=reply_to,
-        created_at=datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc) + timedelta(seconds=secs),
+        message_id=message_id,
+        text=text,
+        mention_type=None,
+        reply_to=reply_to,
+        created_at=datetime(2026, 9, 2, 3, 0, tzinfo=UTC) + timedelta(seconds=secs),
     )
     await db.record_message(event, context_only=task_id is None)
     if task_id is not None:
-        await db.mark_triaged(event, task_id, decision={"type": "backend.trace_problem"})
+        await db.mark_triaged(
+            event, task_id, decision={"type": "backend.trace_problem"}
+        )
 
 
 async def test_the_operator_is_told_what_the_reporter_asked(db):
@@ -969,7 +1028,9 @@ async def test_the_operator_is_told_what_the_reporter_asked(db):
     waiting on a sentence they could type in five seconds."""
     task = await make_task(db)
     await _reporter_said(db, "m1", "API lỗi rồi", secs=0, task_id=task.id)
-    await _reporter_said(db, "m2", "correlationId là cái gì a nhỉ?", secs=30, reply_to="m1")
+    await _reporter_said(
+        db, "m2", "correlationId là cái gì a nhỉ?", secs=30, reply_to="m1"
+    )
     await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
     await Pool(db=db, auto_ask=False).run_once()
@@ -995,11 +1056,16 @@ async def test_our_own_question_is_not_what_they_last_said(db):
     task = await make_task(db)
     await _reporter_said(db, "m1", "API lỗi rồi", secs=0, task_id=task.id)
     row = await db.queue_outbound(
-        task_id=task.id, conversation=task.conversation, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="cho anh xin correlationId",
+        task_id=task.id,
+        conversation=task.conversation,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="cho anh xin correlationId",
     )
     await db.mark_outbound_sent(row.id, sent_message_id="ours")
-    await _reporter_said(db, "ours", "cho anh xin correlationId", secs=10, reply_to="m1")
+    await _reporter_said(
+        db, "ours", "cho anh xin correlationId", secs=10, reply_to="m1"
+    )
     await db.move_task(task.id, TaskState.NEEDS_HUMAN)
 
     await Pool(db=db, auto_ask=False).run_once()
@@ -1023,10 +1089,6 @@ async def test_talking_about_something_else_is_not_about_this_task(db):
     assert "trưa nay" not in told.text
 
 
-
-
-
-
 async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
     """The reason `task_id` exists, driven where it actually happens.
 
@@ -1042,22 +1104,25 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
     node 0 is `Intake` now (ticket 6), which never calls `prepare` or an
     extractor, so the chain this guards is not reachable through it any more.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    from friday.sdk.testing import ScriptedModel, assistant_message
     from sqlalchemy import update as sa_update
 
-    from friday.kernel.dag.router import EDGE_ROUTER, build_simple_dag, register_dag
-    from friday.kernel.harness.harness import Harness
     from friday.kernel.config import AgentConfig
+    from friday.kernel.dag.router import EDGE_ROUTER, build_simple_dag, register_dag
     from friday.kernel.domain.messages import InboundEvent, MentionType
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction import _EXTRACTORS, build_extractor
     from friday.kernel.extraction.answer import answer_shape
+    from friday.kernel.harness.harness import Harness
+    from friday.sdk.testing import ScriptedModel, assistant_message
     from friday.store import schema
+    from plugins.backend.params import TraceProblemParams
 
     EDGE_ROUTER.pop("backend.trace_problem", None)
-    register_dag("backend.trace_problem", build_simple_dag("backend.trace_problem", ApiIssueParams))
+    register_dag(
+        "backend.trace_problem",
+        build_simple_dag("backend.trace_problem", TraceProblemParams),
+    )
 
     recorded: list = []
 
@@ -1069,18 +1134,20 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
     # that stamps a task id, and the one that writes text a person reads.
     filled = '{"summary": "checkout 500", "environment": "production", "curl": null}'
     ext = build_extractor(
-        params_cls=ApiIssueParams,
+        params_cls=TraceProblemParams,
         harness=Harness(
             config=AgentConfig(
-                name="api_issue_extractor", api_key="k",
-                base_url="https://example.invalid/v1", model="test-model",
+                name="trace_problem_extractor",
+                api_key="k",
+                base_url="https://example.invalid/v1",
+                model="test-model",
             ),
             instructions="lift the fields out",
-            answers=answer_shape(ApiIssueParams),
+            answers=answer_shape(TraceProblemParams),
             model=ScriptedModel([[assistant_message(filled)]]),
             record=sink,
         ),
-        name="api_issue_extractor",
+        name="trace_problem_extractor",
     )
     kept = _EXTRACTORS.get("backend.trace_problem")
     _EXTRACTORS["backend.trace_problem"] = ext
@@ -1088,10 +1155,14 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
     try:
         await db.record_message(
             InboundEvent(
-                provider="fake", provider_message_id="m-1", channel_id="watched",
-                thread_id=None, author_id="u", author_name="reporter",
+                provider="fake",
+                provider_message_id="m-1",
+                channel_id="watched",
+                thread_id=None,
+                author_id="u",
+                author_name="reporter",
                 text="production broke at noon",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
                 mention_type=MentionType.DIRECT,
             )
         )
@@ -1112,12 +1183,12 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
         EDGE_ROUTER.pop("backend.trace_problem", None)
 
     by_agent = {c.agent: c for c in recorded}
-    assert set(by_agent) == {"api_issue_extractor", "responder"}, (
+    assert set(by_agent) == {"trace_problem_extractor", "responder"}, (
         "both legs of the chain, because either can come apart on its own"
     )
-    assert by_agent["api_issue_extractor"].task_id == task.id
-    assert by_agent["api_issue_extractor"].node == "prepare"
-    assert by_agent["api_issue_extractor"].message_id is None, (
+    assert by_agent["trace_problem_extractor"].task_id == task.id
+    assert by_agent["trace_problem_extractor"].node == "prepare"
+    assert by_agent["trace_problem_extractor"].message_id is None, (
         "an extractor reads a task, not one message"
     )
     assert by_agent["responder"].task_id == task.id
@@ -1127,15 +1198,16 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
 def _responder(sink):
     """A real `Responder` over a scripted model, so the whole path from
     `Pool` to `Harness` is exercised rather than stubbed at the first joint."""
-    from friday.sdk.testing import ScriptedModel, assistant_message
-
     from friday.kernel.config import AgentConfig
     from friday.kernel.responder import Responder
+    from friday.sdk.testing import ScriptedModel, assistant_message
 
     return Responder(
         config=AgentConfig(
-            name="responder", api_key="k",
-            base_url="https://example.invalid/v1", model="test-model",
+            name="responder",
+            api_key="k",
+            base_url="https://example.invalid/v1",
+            model="test-model",
         ),
         model=ScriptedModel([[assistant_message("cho anh xin correlationId nhé")]]),
         record=sink,
@@ -1196,7 +1268,7 @@ async def _reported(db, task_id, message_id, *, secs, text="@Lee API lỗi rồi
     event = make_event(
         message_id=message_id,
         text=text,
-        created_at=datetime.now(timezone.utc) + timedelta(seconds=secs),
+        created_at=datetime.now(UTC) + timedelta(seconds=secs),
     )
     await db.record_message(event)
     await db.mark_triaged(event, task_id, decision={"type": "backend.trace_problem"})
@@ -1275,22 +1347,26 @@ async def test_a_task_with_no_message_attached_still_uses_its_own_row(db):
 
 # Ticket 13 (board read-it-the-way-the-operator-does): a long graph must not
 # hold the pool. Every graph used to be awaited in turn, so a five-minute
-# `api_issue` meant five minutes in which nothing else was asked, drafted or
+# `trace_problem` meant five minutes in which nothing else was asked, drafted or
 # handed over.
 
 
 def _graph(task_type, node):
-    from friday.sdk.workflow import DAG, Node
     from friday.kernel.dag.router import EDGE_ROUTER, register_dag
+    from friday.sdk.workflow import DAG, Node
 
     EDGE_ROUTER.pop(task_type, None)
     register_dag(task_type, DAG(name=f"{task_type}-test", nodes=(Node("only", node),)))
 
 
 async def _doc_task(db):
-    return await db.create_task(conversation=ConversationId("fake", "watched"),
-                                type="backend.answer_question", state="pending",
-                                confidence=0.9, params={"question": "?"})
+    return await db.create_task(
+        conversation=ConversationId("fake", "watched"),
+        type="backend.answer_question",
+        state="pending",
+        confidence=0.9,
+        params={"question": "?"},
+    )
 
 
 async def test_a_quick_graph_is_not_held_behind_a_slow_one(db):
@@ -1405,8 +1481,9 @@ async def test_the_bound_is_the_one_configured(db):
     _graph("backend.trace_problem", counted)
     for _ in range(4):
         await make_task(db)
-    config = SimpleNamespace(workflows=SimpleNamespace(
-        auto_ask_for_details=True, max_asks=3, concurrency=3))
+    config = SimpleNamespace(
+        workflows=SimpleNamespace(auto_ask_for_details=True, max_asks=3, concurrency=3)
+    )
 
     await Pool.build(config, db=db).run_once()
 

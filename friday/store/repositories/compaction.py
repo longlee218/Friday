@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class CompactionRepo:
-
     async def record_ineffective_compaction(self, task_id: int) -> int:
         """One more pass where truncating this task's transcript still left
         it over budget. Returns the new count.
@@ -19,7 +18,9 @@ class CompactionRepo:
         async with self._sessions.begin() as session:
             existing = await session.get(schema.CompactionState, task_id)
             if existing is None:
-                session.add(schema.CompactionState(task_id=task_id, ineffective_count=1))
+                session.add(
+                    schema.CompactionState(task_id=task_id, ineffective_count=1)
+                )
                 return 1
             existing.ineffective_count += 1
             return existing.ineffective_count
@@ -29,7 +30,10 @@ class CompactionRepo:
         this task — `COMPACTION_COOLDOWN_AFTER` ineffective passes reached.
         `False` for a task nothing has recorded against, which is every task
         before its first ineffective pass."""
-        return await self.compaction_ineffective_count(task_id) >= self.COMPACTION_COOLDOWN_AFTER
+        return (
+            await self.compaction_ineffective_count(task_id)
+            >= self.COMPACTION_COOLDOWN_AFTER
+        )
 
     async def compaction_ineffective_count(self, task_id: int) -> int:
         """How many passes in a row truncation has failed to help — `0` for a

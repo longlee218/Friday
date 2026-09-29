@@ -20,12 +20,17 @@ a module moved.
 from __future__ import annotations
 
 import pytest
-from friday.kernel.harness import harness as harness_module
+
 from friday.kernel.config import AgentConfig
+from friday.kernel.harness import harness as harness_module
 
 CONFIG = AgentConfig(
-    name="an-agent", api_key="k", base_url="https://example.invalid/v1",
-    model="test-model", max_turns=1, settings={},
+    name="an-agent",
+    api_key="k",
+    base_url="https://example.invalid/v1",
+    model="test-model",
+    max_turns=1,
+    settings={},
 )
 
 
@@ -55,7 +60,7 @@ def spy(monkeypatch):
             """Inert. Every construction here is real; no execution is — the
             summariser builds its harness inside the call that uses it, so
             reaching that construction means letting the call happen."""
-            return None
+            return
 
     for module in (
         "friday.kernel.harness.harness",
@@ -149,4 +154,3 @@ class _LoudChannel:
         from tests.conftest import make_event
 
         return [make_event(text="anything at all")]
-

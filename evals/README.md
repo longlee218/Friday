@@ -1,190 +1,161 @@
-# The classifier's regression net
+# Evals
 
-`docs/DESIGN.md`, under Repo conventions: *"Triage gets a fixture set of real
-messages with expected labels — the regression net for prompt changes."* This
-is that, built for ticket 06 on `.scratch/nothing-runs-unmeasured/`.
+The regression net for what the suite cannot judge: whether the model's
+answers are right. An eval calls the configured provider, so it costs money
+and is read by a person; the suite checks only the wiring and the arithmetic.
 
-## What is here
+This folder holds **data only**, and the data is **not in git**:
+`evals/datasets/` is gitignored, like `data/cases/`, because cases are real
+channel traffic — pasted curls carry Bearer tokens, pasted tickets carry
+customer names, addresses and payment ids. Only this README is committed. The
+code lives where it runs:
 
-- **`triage.jsonl`** — the frozen set, one `{"text": ..., "expected": ...}`
-  object per line. Frozen, not queried (D7): scoring never re-reads the
-  database, so a prompt edit and a change in what the operator has since
-  marked land in two different numbers, not one number nobody can attribute.
-- **`dataset.py`** / **`scoring.py`** — pure functions, unit-tested under
-  `tests/test_eval_dataset.py` and `tests/test_eval_scoring.py`. No network,
-  no database.
-- **The runners are `pydantic-evals`** (ticket 18): `run_triage_eval.py` and
-  `run_api_issue_eval.py` build a `Dataset` of `Case`s and run each through a
-  task that calls the live agent, sequentially. The framework owns the plumbing
-  and the per-case report; the aggregate domain metrics — the confusion matrix,
-  the threshold table, the out-of-set number, the `Scored` report — stay in
-  `scoring.py` / `api_issue.py`, fed the run's collected outputs. `triage.jsonl`
-  and those scoring modules did not change; the numbers a run prints did not
-  change either.
-- **`build_triage_set.py`** — refreshes `triage.jsonl` from live data. Run by
-  hand, when there is new data worth freezing in:
+| What | Where |
+| --- | --- |
+| The declaration a plugin registers (`EvalSpec`, `EvalCase`) | `friday/sdk/eval.py`, `api.eval(...)` |
+| Running an eval on Pydantic Evals — the one module importing `pydantic_evals` | `friday/kernel/evals/run.py` |
+| The case format below (loader, writer) | `friday/kernel/evals/cases.py` |
+| `core.triage` — the classifier | `friday/kernel/evals/triage.py`, `triage_scoring.py`, `triage_set.py` |
+| `backend.trace_problem` — the diagnosis | `plugins/backend/evals/trace_problem.py` |
+| The command, and the task each case runs through | `run_eval.py` |
 
-  ```bash
-  uv run python -m evals.build_triage_set
-  FRIDAY_DB=/path/to/db uv run python -m evals.build_triage_set   # a different db
-  ```
+```bash
+uv run run_eval.py                               # list the registered evals
+uv run run_eval.py core.triage                   # score triage
+uv run run_eval.py core.triage --add-confirmed   # add ✅-marked verdicts as cases
+uv run run_eval.py backend.trace_problem             # replay data/cases/ and score
+FRIDAY_DB=/path/to/db uv run run_eval.py core.triage
+```
 
-  Pulls `db.confirmed_classifications()` (verdicts the operator marked ✅)
-  and a small hand-written `SEED`, and drops anything that is also in
-  the declared examples (each action's `Recognition.examples` and the core's
-  `skip` ones) — an example already shown to the model as a few-shot cannot
-  also be something the model is scored against.
+## `core.triage` — did it classify the mention right?
 
-  **A real marked verdict overwrites the seed row that says the same thing.**
-  The seed is the floor, not the set: it exists to give this tool something to
-  score on day one, and a refresh is the moment it stops being the only thing
-  there. (It read the other way round until board `every-answer-has-a-shape`,
-  ticket 02 — the seed silently won every collision, which is exactly backwards
-  from what the refresh is for.)
+### The set: `datasets/triage/`
 
-  A refresh also reports what it produced and warns when the result is not fit
-  to score against, by the rule in the next section. It still writes the file:
-  an operator halfway through a rebuild needs something to look at, not a
-  refusal.
+One markdown file per case, one folder per label. The folder is the label the
+case expects; the frontmatter says it again, and a file whose two disagree is
+refused.
 
-- **`run_triage_eval.py`** — scores the live classifier against
-  `triage.jsonl`:
+```
+datasets/triage/
+  backend.trace_problem/001-a-check-ho-e-xem-sao.md
+  backend.answer_question/…
+  ops.request_permission/…
+  skip/…
+  _messages/be-ticket-pod-submit-failed.md    a long message a case names — not a case
+```
 
-  ```bash
-  uv run python -m evals.run_triage_eval
-  ```
+A case with one message: the body is the message, pasted as is — a paragraph,
+a curl, a log, anything.
 
-  Builds a real `friday.triage.Triage`, the same way `TriageRunner.build`
-  does — same few-shot examples, same `friday.triage.prompt` assembly — and
-  calls the configured provider once per row. Prints accuracy, a confusion
-  matrix, and how many rows each confidence threshold from 0.5 to 0.9 would
-  escalate to a human, which is what `confidence_threshold` in `config.yaml`
-  is checked against.
+```markdown
+---
+expected_task: backend.trace_problem
+---
 
-## What the set has to cover
+a check giúp e với, curl này trả 500:
 
-`evals/dataset.py`'s `unfit` is the guard, and
-`tests/test_eval_dataset.py::test_the_frozen_set_this_repo_ships_is_fit_to_score_against`
-runs it against the committed file. Three things it can decide for itself, and
-a failure names which:
+    curl -X POST https://api.example.com/v1/orders -d '{"sku":"A1"}'
+```
 
-- **Every decision triage may reach has at least one row** — the members of
-  `friday.dag.registry.decisions()`, every registered task type plus `skip`. A
-  value nothing is scored against is a value nothing protects, and the day a
-  fourth task type is registered this is what says the set has not caught up.
-- **At least one row carries a turn of more than one message.** A turn is what
-  the classifier is actually shown; a set of single strings scores it on a
-  shape it never meets in a real channel.
-- **No text appears twice.** A duplicate doubles its own weight in the accuracy
-  figure without saying it does.
+A case that is a turn — several messages in a row, as the channel shows them.
+A long message (a pasted ticket, a curl) lives in `_messages/` and is named by
+`file:`; `own: true` marks a message the operator's own account sent.
 
-Three more are asked of the set and **cannot be checked by code**, because
-each is a judgement about a row's content. They are the operator's, and they
-are the difference between a number that means something and a number that
-only looks healthy:
+```markdown
+---
+expected_task: backend.trace_problem
+turn:
+  - text: "Cứu @Lee (Long Lê) ơi"
+  - file: _messages/be-ticket-pod-submit-failed.md
+  - text: "check xem nguyên nhân là gì nhé"
+    own: true
+---
+```
 
-- **Rows near the boundary between two task types.** "Xin quyền vào repo để
-  fix cái lỗi 500" is both an access request and an API issue depending on
-  what the team means by it. Accuracy on obvious rows says nothing about the
-  decisions that are actually hard.
-- **Rows a correct classifier should call `skip`.** A change that makes the
-  model eager to open work has no other detector — it shows up as tasks nobody
-  wanted, weeks later, rather than as a number.
-- **Rows that read like the channel does.** Vietnamese, a pasted stack trace,
-  a `curl`, a correlationId — not an English summary of one. The set is
-  supposed to resemble the traffic.
+A malformed case — no frontmatter, an empty message, a `file:` that is missing
+or empty — is refused with its path, never skipped. **Frozen, not queried**:
+a run never reads the database, so a prompt edit and a change in what the
+operator has since marked land in two numbers, not one nobody can attribute.
 
-**The rows are the operator's to write** (board `every-answer-has-a-shape`,
-D18). A classifier scored against labels a model chose is measuring nothing:
-the labels have to be somebody's judgement. What the code here delivers is the
-shape, the tooling and the coverage requirement — filling the set in is a data
-change to `triage.jsonl`, not a code change.
+### What the set has to cover
 
-## What a run costs
+`unfit` (`friday/kernel/evals/triage.py`) is the guard, and
+`tests/test_triage_eval.py::test_the_set_this_repo_ships_is_fit_to_score_against`
+runs it over the local set (skipped on a machine without it):
 
-Measured against the original 16-row seed set, on `MiniMax-M3` (the
-`triage` agent's configured model): **~15,000 input tokens, ~1,100 output
-tokens**, one call per row. Convert with your own provider's per-token
-price — this file states the token count because that number does not
-depend on which provider `config.yaml` points at; a dollar figure would.
+- **Every label triage may reach has a case** — every registered action plus
+  `skip`. The day an action is added, this says the set has not caught up.
+- **At least one case is a turn of more than one message** — what the
+  classifier is shown in a real channel.
+- **No turn appears twice** — a duplicate doubles its own weight.
+- **No example the prompt shows the model is a case**
+  (`tests/test_assembled_triage_prompt.py`) — scoring it on a sentence it was
+  told the answer to measures nothing.
 
-`SEED` is 18 rows as of ticket 09 (two rows carrying a multi-message `turn`,
-added to exercise what a single line cannot — see `docs/DESIGN.md`'s note on
-triage's light context). The token figures above predate that change and were
-not re-measured against the new set — `run_triage_eval.py` does not record
-per-call cost (`_build_triage` passes no `record=`/`spent=`), so the number
-above is the last one actually measured, not a guess scaled by row count.
-Re-measure directly if the estimate needs to be precise; do not multiply the
-old figure by 18/16 — the two new rows are each a multi-message turn, larger
-than the average of the sixteen they were measured against.
+Three more are the operator's judgement, not code's: cases near the boundary
+between two labels, cases a correct classifier calls `skip`, and cases that
+read like the channel does — Vietnamese, a pasted stack trace, a curl. **The
+cases are the operator's to write** (board `every-answer-has-a-shape`, D18): a
+classifier scored against labels a model chose measures nothing.
 
-Cost scales with the size of `triage.jsonl` and with how many few-shot
-examples `config.yaml`'s `triage: examples:` setting shows the model (the
-input side, since those are read once and included on every call) — not with
-anything in `run_triage_eval.py` itself.
+### Adding what was marked ✅
 
-## When to run this
+`--add-confirmed` reads the verdicts the operator marked right and writes a
+case for each one not already in the set. **It only adds**: a hand-written
+case is never rewritten or deleted, and an example the prompt shows the model
+is left out. It warns when the set is left unfit, and still writes.
 
-Per `CLAUDE.md`'s Verifying a change: a change to `friday/triage/prompt.py`
-or to anything upstream of it is not done until this has been run and the
-numbers — accuracy, the confusion matrix, and the threshold table — are
-reported alongside the change. A probe written by hand once and thrown away
-is what this replaced (see ticket 06 on `.scratch/nothing-runs-unmeasured/`
-for why that was not repeatable).
+### What a run prints
+
+Accuracy, the confusion matrix, how many cases each confidence threshold from
+0.5 to 0.9 would escalate to a human (what `CONFIDENCE_THRESHOLD` is checked
+against), how many answers named a label that does not exist, and **every
+wrong case by file**.
+
+### When to run it
+
+Per `CLAUDE.md` § Verifying a change: a change to
+`friday/kernel/triage/prompt.py`, or to anything upstream of it, is not done
+until this has run and its numbers are reported with the change.
+
+### What a run costs
+
+One call per case, plus its one output correction when the answer's shape is
+wrong. Measured once, against the original 16-row set on `MiniMax-M3`: ~15,000
+input tokens and ~1,100 output tokens for the whole run. The set has grown
+since, and a turn or a pasted ticket is much longer than a one-line message;
+the run does not record its own cost, so re-measure before relying on it.
 
 ---
 
-## `api_issue` — is the diagnosis any good?
+## `backend.trace_problem` — did the investigation reach the right cause?
 
-    uv run python -m evals.run_api_issue_eval
+The suite checks that code does what it was told to; nothing in it notices
+the model's causes getting worse. Under architecture v3.3 the model drives its
+own reads, so "the suite is green" says nothing about which way diagnoses
+better.
 
-`triage.jsonl` answers "did it classify the mention right". This answers the
-other question, which nothing was asking: **did the investigation reach the
-right cause.**
+**The cases are not in this repository.** A captured case holds raw log lines
+carrying `userId`, `ip` and `deviceId`, so cases live in `data/cases/`
+(gitignored), one JSON file each. What is here is how a case is scored.
 
-The suite cannot answer it. It checks that code does what it was told to;
-there is nothing in it that notices the model's causes getting worse. Three
-changes to the distillation landed on 2026-09-21 alone, each verified by one
-person reading one cause and nodding.
-
-Under architecture v3.3 that stops being tolerable. The model drives its own
-reads, so the same case may be investigated two ways — and "the suite is
-green" says nothing at all about which architecture diagnoses better.
-
-### The set is not in this repository
-
-A captured case holds the raw answers a log back end gave, and those lines
-carry `userId`, `ip` and `deviceId`. Cases live in `data/cases/`, which is
-gitignored. What is in the repository is `evals/api_issue.py` — *how* a case
-is scored, which is the part worth arguing with.
-
-### What a case is labelled with
-
-Written when it is captured and confirmed by the operator:
-
-| | |
+| Label | |
 | --- | --- |
 | `decisive` | a substring of the log line they call decisive |
 | `cause` | the true cause, in their words |
 | `cause_mentions` | the tokens any correct answer must contain |
 | `conclusive` | whether the evidence really did settle it |
 
-**Friday proposes all four; the operator confirms or corrects.** The same
-shape as `friday/memory/verdicts.py`. What cannot be delegated is the
-judgement — the true cause of a production incident is a fact about their
-system.
+Friday proposes all four; the operator confirms or corrects — the true cause
+of a production incident is a fact about their system.
 
-### What it measures, and where it is weak
+**Substring matching, not a judge model**: an LLM critic is an eval variant
+until its scores agree with the operator's marks. It cannot tell a right
+answer phrased unusually from a wrong one; it is deterministic, costs nothing,
+and catches the cause drifting off what the evidence was about. An unlabelled
+case scores zero, not full marks. Under ten cases the report says it is a
+regression check, not a score.
 
-Cause accuracy is **substring matching, not a judge model**: the spec's rule
-is that an LLM critic is an eval variant until its scores agree with the
-operator's marks. So it cannot tell a right answer phrased unusually from a
-wrong one, and it cannot tell "categoryId is empty" from "categoryId is not
-empty". It is deterministic, it costs nothing, and it catches the failure
-that matters — the cause drifting off what the evidence was about.
-
-An unlabelled case scores zero rather than full marks. That is the one way a
-growing set could get quieter as it got weaker.
-
-**Under ten cases it prints that it is a regression check and not a score.**
-One case is where it stands today.
+A case is replayed through the DAG (`replay_case.run_captured`), which only
+the composition root can reach — so `run_eval.py` builds this eval's task
+until build-the-spine ticket 14 lets the core run an action on a case.

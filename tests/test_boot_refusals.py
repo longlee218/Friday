@@ -21,6 +21,7 @@ from friday.sdk import (
     ActionContract,
     AgentSpec,
     Budget,
+    EvalSpec,
     Limits,
     Plugin,
     Recognition,
@@ -52,53 +53,86 @@ def enrich(seed: object) -> Place:
 
 def _toolset(name: str = "demo.logs", **kw) -> ToolsetSpec:
     return ToolsetSpec(
-        **{"name": name, "description": "log lines for the case window",
-           "factory": lambda run: [], "mcp": {"devops-generic": frozenset({"loki_query"})},
-           "domain_type": Place, **kw}
+        **{
+            "name": name,
+            "description": "log lines for the case window",
+            "factory": lambda run: [],
+            "mcp": {"devops-generic": frozenset({"loki_query"})},
+            "domain_type": Place,
+            **kw,
+        }
     )
 
 
 def _agent(name: str = "demo.diagnose", **kw) -> AgentSpec:
     return AgentSpec(
-        **{"name": name, "description": "reads logs to find why a request failed",
-           "instructions": "find the cause", "result": Finding, "tier": "strong",
-           "toolsets": ("demo.logs",), "budget": Budget(max_turns=10, tokens=10_000),
-           "temperature": 0.0, **kw}
+        **{
+            "name": name,
+            "description": "reads logs to find why a request failed",
+            "instructions": "find the cause",
+            "result": Finding,
+            "tier": "strong",
+            "toolsets": ("demo.logs",),
+            "budget": Budget(max_turns=10, tokens=10_000),
+            "temperature": 0.0,
+            **kw,
+        }
     )
 
 
 def _contract(**kw) -> ActionContract:
     return ActionContract(
-        **{"allowed_step_types": frozenset({"agent", "draft"}),
-           "allowed_agents": frozenset({"demo.diagnose"}),
-           "allowed_toolsets": frozenset({"demo.logs"}),
-           "constraints": ("every ref points at a line that was read",),
-           "approval_policy": "a reply waits for approval",
-           "acceptance_template": "the cause, with refs",
-           "limits": Limits(max_replans=1, max_steps=3), **kw}
+        **{
+            "allowed_step_types": frozenset({"agent", "draft"}),
+            "allowed_agents": frozenset({"demo.diagnose"}),
+            "allowed_toolsets": frozenset({"demo.logs"}),
+            "constraints": ("every ref points at a line that was read",),
+            "approval_policy": "a reply waits for approval",
+            "acceptance_template": "the cause, with refs",
+            "limits": Limits(max_replans=1, max_steps=3),
+            **kw,
+        }
     )
 
 
 def _recognition(**kw) -> Recognition:
     return Recognition(
-        **{"means": "a request of ours fails", "pick_when": ("an error, a status",),
-           "not_when": (("asks how, not why", "demo.explain"),),
-           "examples": ("POST /v1/x returns 400",), **kw}
+        **{
+            "means": "a request of ours fails",
+            "pick_when": ("an error, a status",),
+            "not_when": (("asks how, not why", "demo.explain"),),
+            "examples": ("POST /v1/x returns 400",),
+            **kw,
+        }
     )
 
 
 def _explain() -> Action:
     return Action(
         "demo.explain",
-        Recognition("how a rule works", ("a how question",), (), ("how is x counted?",)),
+        Recognition(
+            "how a rule works", ("a how question",), (), ("how is x counted?",)
+        ),
         _contract(allowed_agents=frozenset(), allowed_toolsets=frozenset()),
     )
 
 
-def _demo(*, toolsets=None, agents=None, actions=None, readers=None, enricher=enrich) -> Plugin:
+def _eval(name: str = "demo.trace") -> EvalSpec:
+    return EvalSpec(
+        name, "each case's label", cases=lambda: (), checks={}, report=lambda r: ""
+    )
+
+
+def _demo(
+    *, toolsets=None, agents=None, actions=None, readers=None, evals=(), enricher=enrich
+) -> Plugin:
     toolsets = [_toolset()] if toolsets is None else toolsets
     agents = [_agent()] if agents is None else agents
-    actions = [Action("demo.trace", _recognition(), _contract()), _explain()] if actions is None else actions
+    actions = (
+        [Action("demo.trace", _recognition(), _contract()), _explain()]
+        if actions is None
+        else actions
+    )
     readers = {"demo.diagnose": frozenset({"fact"})} if readers is None else readers
 
     def register(api) -> None:
@@ -110,6 +144,8 @@ def _demo(*, toolsets=None, agents=None, actions=None, readers=None, enricher=en
             api.action(a)
         for name, kinds in readers.items():
             api.reader(name, kinds)
+        for e in evals:
+            api.eval(e)
 
     return Plugin(id="demo", register=register, enricher=enricher)
 
@@ -132,12 +168,13 @@ def test_the_demo_plugin_boots_clean():
 
 
 # 1 ─ a duplicate name
-@pytest.mark.parametrize("kind", ["action", "agent", "toolset"])
+@pytest.mark.parametrize("kind", ["action", "agent", "toolset", "eval"])
 def test_1_a_duplicate_name_refuses(kind):
     dup = {
         "action": dict(actions=[_explain(), _explain()]),
         "agent": dict(agents=[_agent(), _agent()]),
         "toolset": dict(toolsets=[_toolset(), _toolset()]),
+        "eval": dict(evals=[_eval(), _eval()]),
     }[kind]
     with pytest.raises(DuplicateRegistration):
         _refusals(_demo(**dup))
@@ -147,6 +184,12 @@ def test_1_a_duplicate_name_refuses(kind):
 def test_2_a_name_outside_the_plugins_namespace_refuses():
     assert "not named under 'demo'" in _one(
         _demo(toolsets=[_toolset(), _toolset("core.extra")])
+    )
+
+
+def test_2_an_eval_outside_the_plugins_namespace_refuses():
+    assert "'core.triage' is registered by plugin 'demo'" in _one(
+        _demo(evals=[_eval(), _eval("core.triage")])
     )
 
 
@@ -163,14 +206,20 @@ def test_4_an_agent_naming_an_unregistered_toolset_refuses():
 
 
 def test_4_a_contract_granting_an_unregistered_agent_refuses():
-    action = Action("demo.trace", _recognition(),
-                    _contract(allowed_agents=frozenset({"demo.diagnose", "demo.ghost"})))
+    action = Action(
+        "demo.trace",
+        _recognition(),
+        _contract(allowed_agents=frozenset({"demo.diagnose", "demo.ghost"})),
+    )
     assert "grants agent 'demo.ghost'" in _one(_demo(actions=[action, _explain()]))
 
 
 def test_4_a_contract_granting_an_unregistered_toolset_refuses():
-    action = Action("demo.trace", _recognition(),
-                    _contract(allowed_toolsets=frozenset({"demo.logs", "demo.db"})))
+    action = Action(
+        "demo.trace",
+        _recognition(),
+        _contract(allowed_toolsets=frozenset({"demo.logs", "demo.db"})),
+    )
     assert "grants toolset 'demo.db'" in _one(_demo(actions=[action, _explain()]))
 
 
@@ -183,8 +232,17 @@ def test_4_a_reader_naming_no_agent_refuses():
 def test_4_a_plugin_with_no_agent_specs_yet_keeps_its_dag_readers():
     """Temporary until ticket 16: a plugin still on the DAG path names readers
     that have no `AgentSpec`; the reader check waits for its first spec."""
-    assert _refusals(_demo(toolsets=[], agents=[], actions=[],
-                           readers={"demo.old_agent": frozenset({"fact"})})) == []
+    assert (
+        _refusals(
+            _demo(
+                toolsets=[],
+                agents=[],
+                actions=[],
+                readers={"demo.old_agent": frozenset({"fact"})},
+            )
+        )
+        == []
+    )
 
 
 # 5 ─ a toolset of another domain type
@@ -207,7 +265,9 @@ def test_6_an_undeclared_mcp_server_refuses():
 
 # 7 ─ the recognition checks
 def _with_recognition(**kw) -> Plugin:
-    return _demo(actions=[Action("demo.trace", _recognition(**kw), _contract()), _explain()])
+    return _demo(
+        actions=[Action("demo.trace", _recognition(**kw), _contract()), _explain()]
+    )
 
 
 def test_7_not_when_naming_an_unregistered_action_refuses():
@@ -241,7 +301,9 @@ def test_8_a_contract_granting_another_plugins_toolset_refuses():
     ops_action = Action(
         "ops.grant",
         Recognition("access", ("grant me",), (), ("let me in",)),
-        _contract(allowed_agents=frozenset(), allowed_toolsets=frozenset({"demo.logs"})),
+        _contract(
+            allowed_agents=frozenset(), allowed_toolsets=frozenset({"demo.logs"})
+        ),
     )
 
     def ops_register(api) -> None:
@@ -274,7 +336,10 @@ def test_granting_core_shell_with_no_shell_hosts_refuses(monkeypatch):
     )
     with pytest.raises(BootRefused) as info:
         load_plugins(SimpleNamespace(shell_hosts=()))
-    assert "action 'demo.trace' grants 'core.shell', but config.yaml declares no shell_hosts" in str(info.value)
+    assert (
+        "action 'demo.trace' grants 'core.shell', but config.yaml declares no shell_hosts"
+        in str(info.value)
+    )
 
     load_plugins(SimpleNamespace(shell_hosts=("dev",)))
     load_plugins(SimpleNamespace())  # no config in hand: skipped
@@ -286,7 +351,9 @@ def test_the_host_refuses_the_boot_with_every_reason(monkeypatch):
     monkeypatch.setattr(
         "friday.kernel.plugin_host.configured_plugins", lambda config: [(broken, None)]
     )
-    config = SimpleNamespace(tiers={"strong": None}, mcp_servers=(SimpleNamespace(name="devops-generic"),))
+    config = SimpleNamespace(
+        tiers={"strong": None}, mcp_servers=(SimpleNamespace(name="devops-generic"),)
+    )
     with pytest.raises(BootRefused) as info:
         load_plugins(config)
     assert "tier 'super'" in str(info.value)

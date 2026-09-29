@@ -15,8 +15,7 @@ from dataclasses import asdict
 from typing import Any
 
 from friday.sdk.intake import ArtifactRef, Hints, IntakeContext
-from friday.sdk.workflow import DAGState, Node, envelope
-from friday.sdk.workflow import Deps
+from friday.sdk.workflow import DAGState, Deps, Node, envelope
 from plugins.backend.graph.logs import _reported_at
 from plugins.backend.placement import Placement, Project, enrich
 

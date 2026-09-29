@@ -23,46 +23,50 @@ Revises: e2218d1e422c
 Create Date: 2026-09-06 01:42:54.991889
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '9ea20fff4445'
-down_revision: Union[str, Sequence[str], None] = 'e2218d1e422c'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "9ea20fff4445"
+down_revision: str | Sequence[str] | None = "e2218d1e422c"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.drop_table('notes')
-    with op.batch_alter_table('observations', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_observations_task_id'))
+    op.drop_table("notes")
+    with op.batch_alter_table("observations", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_observations_task_id"))
 
-    op.drop_table('observations')
+    op.drop_table("observations")
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.create_table('observations',
-    sa.Column('id', sa.INTEGER(), nullable=False),
-    sa.Column('task_id', sa.INTEGER(), nullable=False),
-    sa.Column('category', sa.VARCHAR(), nullable=False),
-    sa.Column('text', sa.VARCHAR(), nullable=False),
-    sa.Column('created_at', sa.VARCHAR(), nullable=False),
-    sa.Column('promoted_at', sa.VARCHAR(), nullable=True),
-    sa.PrimaryKeyConstraint('id')
+    op.create_table(
+        "observations",
+        sa.Column("id", sa.INTEGER(), nullable=False),
+        sa.Column("task_id", sa.INTEGER(), nullable=False),
+        sa.Column("category", sa.VARCHAR(), nullable=False),
+        sa.Column("text", sa.VARCHAR(), nullable=False),
+        sa.Column("created_at", sa.VARCHAR(), nullable=False),
+        sa.Column("promoted_at", sa.VARCHAR(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
     )
-    with op.batch_alter_table('observations', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_observations_task_id'), ['task_id'], unique=False)
+    with op.batch_alter_table("observations", schema=None) as batch_op:
+        batch_op.create_index(
+            batch_op.f("ix_observations_task_id"), ["task_id"], unique=False
+        )
 
-    op.create_table('notes',
-    sa.Column('category', sa.VARCHAR(), nullable=False),
-    sa.Column('text', sa.VARCHAR(), nullable=False),
-    sa.Column('support', sa.INTEGER(), nullable=False),
-    sa.Column('created_at', sa.VARCHAR(), nullable=False),
-    sa.PrimaryKeyConstraint('category', 'text')
+    op.create_table(
+        "notes",
+        sa.Column("category", sa.VARCHAR(), nullable=False),
+        sa.Column("text", sa.VARCHAR(), nullable=False),
+        sa.Column("support", sa.INTEGER(), nullable=False),
+        sa.Column("created_at", sa.VARCHAR(), nullable=False),
+        sa.PrimaryKeyConstraint("category", "text"),
     )

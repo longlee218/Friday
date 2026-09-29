@@ -6,24 +6,19 @@
 
 ```python
 def establish_baseline(prompt, test_cases):
-    results = {
-        'accuracy': 0,
-        'avg_tokens': 0,
-        'avg_latency': 0,
-        'success_rate': 0
-    }
+    results = {"accuracy": 0, "avg_tokens": 0, "avg_latency": 0, "success_rate": 0}
 
     for test_case in test_cases:
-        response = llm.complete(prompt.format(**test_case['input']))
+        response = llm.complete(prompt.format(**test_case["input"]))
 
-        results['accuracy'] += evaluate_accuracy(response, test_case['expected'])
-        results['avg_tokens'] += count_tokens(response)
-        results['avg_latency'] += measure_latency(response)
-        results['success_rate'] += is_valid_response(response)
+        results["accuracy"] += evaluate_accuracy(response, test_case["expected"])
+        results["avg_tokens"] += count_tokens(response)
+        results["avg_latency"] += measure_latency(response)
+        results["success_rate"] += is_valid_response(response)
 
     # Average across test cases
     n = len(test_cases)
-    return {k: v/n for k, v in results.items()}
+    return {k: v / n for k, v in results.items()}
 ```
 
 ### 2. Iterative Refinement Workflow
@@ -43,14 +38,12 @@ class PromptOptimizer:
         for i in range(max_iterations):
             # Test current prompt
             results = self.evaluate_prompt(self.prompt)
-            self.history.append({
-                'iteration': i,
-                'prompt': self.prompt,
-                'results': results
-            })
+            self.history.append(
+                {"iteration": i, "prompt": self.prompt, "results": results}
+            )
 
             # Stop if good enough
-            if results['accuracy'] > 0.95:
+            if results["accuracy"] > 0.95:
                 break
 
             # Analyze failures
@@ -73,19 +66,16 @@ class PromptABTest:
         self.variant_a = variant_a
         self.variant_b = variant_b
 
-    def run_test(self, test_queries, metrics=['accuracy', 'latency']):
-        results = {
-            'A': {m: [] for m in metrics},
-            'B': {m: [] for m in metrics}
-        }
+    def run_test(self, test_queries, metrics=["accuracy", "latency"]):
+        results = {"A": {m: [] for m in metrics}, "B": {m: [] for m in metrics}}
 
         for query in test_queries:
             # Randomly assign variant (50/50 split)
-            variant = 'A' if random.random() < 0.5 else 'B'
-            prompt = self.variant_a if variant == 'A' else self.variant_b
+            variant = "A" if random.random() < 0.5 else "B"
+            prompt = self.variant_a if variant == "A" else self.variant_b
 
             response, metrics_data = self.execute_with_metrics(
-                prompt.format(query=query['input'])
+                prompt.format(query=query["input"])
             )
 
             for metric in metrics:
@@ -97,20 +87,21 @@ class PromptABTest:
         from scipy import stats
 
         analysis = {}
-        for metric in results['A'].keys():
-            a_values = results['A'][metric]
-            b_values = results['B'][metric]
+        for metric in results["A"].keys():
+            a_values = results["A"][metric]
+            b_values = results["B"][metric]
 
             # Statistical significance test
             t_stat, p_value = stats.ttest_ind(a_values, b_values)
 
             analysis[metric] = {
-                'A_mean': np.mean(a_values),
-                'B_mean': np.mean(b_values),
-                'improvement': (np.mean(b_values) - np.mean(a_values)) / np.mean(a_values),
-                'statistically_significant': p_value < 0.05,
-                'p_value': p_value,
-                'winner': 'B' if np.mean(b_values) > np.mean(a_values) else 'A'
+                "A_mean": np.mean(a_values),
+                "B_mean": np.mean(b_values),
+                "improvement": (np.mean(b_values) - np.mean(a_values))
+                / np.mean(a_values),
+                "statistically_significant": p_value < 0.05,
+                "p_value": p_value,
+                "winner": "B" if np.mean(b_values) > np.mean(a_values) else "A",
             }
 
         return analysis
@@ -124,20 +115,17 @@ class PromptABTest:
 def optimize_for_tokens(prompt):
     optimizations = [
         # Remove redundant phrases
-        ('in order to', 'to'),
-        ('due to the fact that', 'because'),
-        ('at this point in time', 'now'),
-
+        ("in order to", "to"),
+        ("due to the fact that", "because"),
+        ("at this point in time", "now"),
         # Consolidate instructions
-        ('First, ...\\nThen, ...\\nFinally, ...', 'Steps: 1) ... 2) ... 3) ...'),
-
+        ("First, ...\\nThen, ...\\nFinally, ...", "Steps: 1) ... 2) ... 3) ..."),
         # Use abbreviations (after first definition)
-        ('Natural Language Processing (NLP)', 'NLP'),
-
+        ("Natural Language Processing (NLP)", "NLP"),
         # Remove filler words
-        (' actually ', ' '),
-        (' basically ', ' '),
-        (' really ', ' ')
+        (" actually ", " "),
+        (" basically ", " "),
+        (" really ", " "),
     ]
 
     optimized = prompt
@@ -152,15 +140,15 @@ def optimize_for_tokens(prompt):
 ```python
 def optimize_for_latency(prompt):
     strategies = {
-        'shorter_prompt': reduce_token_count(prompt),
-        'streaming': enable_streaming_response(prompt),
-        'caching': add_cacheable_prefix(prompt),
-        'early_stopping': add_stop_sequences(prompt)
+        "shorter_prompt": reduce_token_count(prompt),
+        "streaming": enable_streaming_response(prompt),
+        "caching": add_cacheable_prefix(prompt),
+        "early_stopping": add_stop_sequences(prompt),
     }
 
     # Test each strategy
     best_strategy = None
-    best_latency = float('inf')
+    best_latency = float("inf")
 
     for name, modified_prompt in strategies.items():
         latency = measure_average_latency(modified_prompt)
@@ -188,7 +176,9 @@ def improve_accuracy(prompt, failure_cases):
 
     # Add verification step
     if has_logical_errors(failure_cases):
-        improvements.append("Before responding, verify your answer is logically consistent.")
+        improvements.append(
+            "Before responding, verify your answer is logically consistent."
+        )
 
     # Strengthen instructions
     if has_ambiguity_errors(failure_cases):
@@ -211,6 +201,7 @@ class PromptMetrics:
     def consistency(responses):
         # Measure how often identical inputs produce identical outputs
         from collections import defaultdict
+
         input_responses = defaultdict(list)
 
         for inp, resp in responses:
@@ -227,8 +218,10 @@ class PromptMetrics:
 
     @staticmethod
     def token_efficiency(prompt, responses):
-        avg_prompt_tokens = np.mean([count_tokens(prompt.format(**r['input'])) for r in responses])
-        avg_response_tokens = np.mean([count_tokens(r['output']) for r in responses])
+        avg_prompt_tokens = np.mean(
+            [count_tokens(prompt.format(**r["input"])) for r in responses]
+        )
+        avg_response_tokens = np.mean([count_tokens(r["output"]) for r in responses])
         return avg_prompt_tokens + avg_response_tokens
 
     @staticmethod
@@ -241,11 +234,11 @@ class PromptMetrics:
 ```python
 def evaluate_prompt_comprehensively(prompt, test_suite):
     results = {
-        'accuracy': [],
-        'consistency': [],
-        'latency': [],
-        'tokens': [],
-        'success_rate': []
+        "accuracy": [],
+        "consistency": [],
+        "latency": [],
+        "tokens": [],
+        "success_rate": [],
     }
 
     # Run each test case multiple times for consistency measurement
@@ -253,29 +246,29 @@ def evaluate_prompt_comprehensively(prompt, test_suite):
         runs = []
         for _ in range(3):  # 3 runs per test case
             start = time.time()
-            response = llm.complete(prompt.format(**test_case['input']))
+            response = llm.complete(prompt.format(**test_case["input"]))
             latency = time.time() - start
 
             runs.append(response)
-            results['latency'].append(latency)
-            results['tokens'].append(count_tokens(prompt) + count_tokens(response))
+            results["latency"].append(latency)
+            results["tokens"].append(count_tokens(prompt) + count_tokens(response))
 
         # Accuracy (best of 3 runs)
-        accuracies = [evaluate_accuracy(r, test_case['expected']) for r in runs]
-        results['accuracy'].append(max(accuracies))
+        accuracies = [evaluate_accuracy(r, test_case["expected"]) for r in runs]
+        results["accuracy"].append(max(accuracies))
 
         # Consistency (how similar are the 3 runs?)
-        results['consistency'].append(calculate_similarity(runs))
+        results["consistency"].append(calculate_similarity(runs))
 
         # Success rate (all runs successful?)
-        results['success_rate'].append(all(is_valid(r) for r in runs))
+        results["success_rate"].append(all(is_valid(r) for r in runs))
 
     return {
-        'avg_accuracy': np.mean(results['accuracy']),
-        'avg_consistency': np.mean(results['consistency']),
-        'p95_latency': np.percentile(results['latency'], 95),
-        'avg_tokens': np.mean(results['tokens']),
-        'success_rate': np.mean(results['success_rate'])
+        "avg_accuracy": np.mean(results["accuracy"]),
+        "avg_consistency": np.mean(results["consistency"]),
+        "p95_latency": np.percentile(results["latency"], 95),
+        "avg_tokens": np.mean(results["tokens"]),
+        "success_rate": np.mean(results["success_rate"]),
     }
 ```
 
@@ -287,19 +280,18 @@ def evaluate_prompt_comprehensively(prompt, test_suite):
 class FailureAnalyzer:
     def categorize_failures(self, test_results):
         categories = {
-            'format_errors': [],
-            'factual_errors': [],
-            'logic_errors': [],
-            'incomplete_responses': [],
-            'hallucinations': [],
-            'off_topic': []
+            "format_errors": [],
+            "factual_errors": [],
+            "logic_errors": [],
+            "incomplete_responses": [],
+            "hallucinations": [],
+            "off_topic": [],
         }
 
         for result in test_results:
-            if not result['success']:
+            if not result["success"]:
                 category = self.determine_failure_type(
-                    result['response'],
-                    result['expected']
+                    result["response"], result["expected"]
                 )
                 categories[category].append(result)
 
@@ -308,26 +300,32 @@ class FailureAnalyzer:
     def generate_fixes(self, categorized_failures):
         fixes = []
 
-        if categorized_failures['format_errors']:
-            fixes.append({
-                'issue': 'Format errors',
-                'fix': 'Add explicit format examples and constraints',
-                'priority': 'high'
-            })
+        if categorized_failures["format_errors"]:
+            fixes.append(
+                {
+                    "issue": "Format errors",
+                    "fix": "Add explicit format examples and constraints",
+                    "priority": "high",
+                }
+            )
 
-        if categorized_failures['hallucinations']:
-            fixes.append({
-                'issue': 'Hallucinations',
-                'fix': 'Add grounding instruction: "Base your answer only on provided context"',
-                'priority': 'critical'
-            })
+        if categorized_failures["hallucinations"]:
+            fixes.append(
+                {
+                    "issue": "Hallucinations",
+                    "fix": 'Add grounding instruction: "Base your answer only on provided context"',
+                    "priority": "critical",
+                }
+            )
 
-        if categorized_failures['incomplete_responses']:
-            fixes.append({
-                'issue': 'Incomplete responses',
-                'fix': 'Add: "Ensure your response fully addresses all parts of the question"',
-                'priority': 'medium'
-            })
+        if categorized_failures["incomplete_responses"]:
+            fixes.append(
+                {
+                    "issue": "Incomplete responses",
+                    "fix": 'Add: "Ensure your response fully addresses all parts of the question"',
+                    "priority": "medium",
+                }
+            )
 
         return fixes
 ```

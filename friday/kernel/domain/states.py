@@ -30,7 +30,7 @@ class TaskState(StrEnum):
     #: A draft is waiting for approval before it can be sent. Named here
     #: before anything used it, so the graph was complete rather than growing
     #: a state at the moment it was first needed — and **filled in on
-    #: 2026-09-22**, when `api_issue` began offering the reporter the cause
+    #: 2026-09-22**, when `trace_problem` began offering the reporter the cause
     #: it found instead of handing the whole task to a person.
     REVIEW = "review"
     #: Finished. Terminal, so a stray follow-up cannot reopen work someone
@@ -46,8 +46,12 @@ class TaskState(StrEnum):
 
 ALLOWED: dict[TaskState, frozenset[TaskState]] = {
     TaskState.PENDING: frozenset(
-        {TaskState.WAITING_FOR_DETAILS, TaskState.NEEDS_HUMAN, TaskState.REVIEW,
-         TaskState.DONE}
+        {
+            TaskState.WAITING_FOR_DETAILS,
+            TaskState.NEEDS_HUMAN,
+            TaskState.REVIEW,
+            TaskState.DONE,
+        }
     ),
     # Back to pending when an answer arrives, or when one is still missing and
     # the workflow has to ask again.
@@ -60,7 +64,12 @@ ALLOWED: dict[TaskState, frozenset[TaskState]] = {
     # (`REVIEW` for a reply, `WAITING_FOR_DETAILS` if the resumed run asks
     # something), without a round trip through `PENDING` to get there.
     TaskState.NEEDS_HUMAN: frozenset(
-        {TaskState.PENDING, TaskState.WAITING_FOR_DETAILS, TaskState.REVIEW, TaskState.DONE}
+        {
+            TaskState.PENDING,
+            TaskState.WAITING_FOR_DETAILS,
+            TaskState.REVIEW,
+            TaskState.DONE,
+        }
     ),
     TaskState.REVIEW: frozenset(
         {TaskState.PENDING, TaskState.NEEDS_HUMAN, TaskState.DONE}
@@ -68,7 +77,12 @@ ALLOWED: dict[TaskState, frozenset[TaskState]] = {
     TaskState.DONE: frozenset(),
     TaskState.HANDLED_BY_OPERATOR: frozenset({TaskState.PENDING}),
 }
-for _state in (TaskState.PENDING, TaskState.WAITING_FOR_DETAILS, TaskState.NEEDS_HUMAN, TaskState.REVIEW):
+for _state in (
+    TaskState.PENDING,
+    TaskState.WAITING_FOR_DETAILS,
+    TaskState.NEEDS_HUMAN,
+    TaskState.REVIEW,
+):
     ALLOWED[_state] = ALLOWED[_state] | {TaskState.HANDLED_BY_OPERATOR}
 
 #: States a task is still being worked in. `open_task_for` uses this, so adding

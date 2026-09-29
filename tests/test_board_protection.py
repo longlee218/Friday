@@ -51,13 +51,17 @@ def test_a_read_needs_no_token(raw):
 
 
 def test_the_session_secret_is_minted_per_process(db):
-    """"Minted at startup" means each process gets its own random secret, not a
+    """ "Minted at startup" means each process gets its own random secret, not a
     fixed value baked into the code — two separately built apps hand out two
     different tokens."""
     from friday.kernel.ops.api import build_api
 
-    one = TestClient(build_api(db=db, provider_status=lambda: "x"), base_url="http://127.0.0.1")
-    two = TestClient(build_api(db=db, provider_status=lambda: "x"), base_url="http://127.0.0.1")
+    one = TestClient(
+        build_api(db=db, provider_status=lambda: "x"), base_url="http://127.0.0.1"
+    )
+    two = TestClient(
+        build_api(db=db, provider_status=lambda: "x"), base_url="http://127.0.0.1"
+    )
     one.get("/api/board")
     two.get("/api/board")
     assert one.cookies["friday_csrf"] != two.cookies["friday_csrf"]

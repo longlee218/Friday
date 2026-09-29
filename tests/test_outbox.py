@@ -7,9 +7,10 @@ provider.
 
 from __future__ import annotations
 
-import pytest
+from datetime import UTC
 
 from conftest import make_event
+
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.outbound import Outbound
 from friday.kernel.domain.states import OutboundState, TaskState
@@ -40,8 +41,11 @@ class Refusing(Sender):
 
 async def task(db, *, state="pending"):
     return await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=state,
-        confidence=0.9, params={"summary": "s"},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=state,
+        confidence=0.9,
+        params={"summary": "s"},
     )
 
 
@@ -53,8 +57,12 @@ def outbox(db, sender, **kw):
 async def test_a_queued_ask_is_delivered(db):
     opened = await task(db)
     await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?", reply_to="m1",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
+        reply_to="m1",
     )
     sender = Sender()
 
@@ -68,8 +76,11 @@ async def test_a_reply_waits_to_be_approved(db):
     """The guard is the query, not a check each caller has to remember."""
     opened = await task(db)
     await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
-        sender="discord_user", text="here is your answer",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="here is your answer",
     )
     sender = Sender()
 
@@ -82,8 +93,11 @@ async def test_a_reply_waits_to_be_approved(db):
 async def test_an_approved_reply_goes_out(db):
     opened = await task(db)
     row = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
-        sender="discord_user", text="here is your answer",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="here is your answer",
     )
     await db.approve_outbound(row.id, by="operator")
     sender = Sender()
@@ -109,8 +123,11 @@ STRANGER = 999
 async def _pending_reply(db):
     opened = await task(db)
     return await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
-        sender="discord_user", text="here is your answer",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="here is your answer",
     )
 
 
@@ -118,8 +135,12 @@ async def test_the_operator_approving_makes_the_reply_sendable(db):
     row = await _pending_reply(db)
 
     applied = await record_decision(
-        db, outbound_id=row.id, approved=True,
-        by="operator", by_id=OPERATOR, operator_id=OPERATOR,
+        db,
+        outbound_id=row.id,
+        approved=True,
+        by="operator",
+        by_id=OPERATOR,
+        operator_id=OPERATOR,
     )
 
     assert applied is True
@@ -133,8 +154,12 @@ async def test_a_non_operator_decider_cannot_approve(db):
     row = await _pending_reply(db)
 
     applied = await record_decision(
-        db, outbound_id=row.id, approved=True,
-        by="a stranger", by_id=STRANGER, operator_id=OPERATOR,
+        db,
+        outbound_id=row.id,
+        approved=True,
+        by="a stranger",
+        by_id=STRANGER,
+        operator_id=OPERATOR,
     )
 
     assert applied is False
@@ -145,8 +170,12 @@ async def test_the_operator_rejecting_sends_the_task_to_a_human(db):
     row = await _pending_reply(db)
 
     applied = await record_decision(
-        db, outbound_id=row.id, approved=False,
-        by="operator", by_id=OPERATOR, operator_id=OPERATOR,
+        db,
+        outbound_id=row.id,
+        approved=False,
+        by="operator",
+        by_id=OPERATOR,
+        operator_id=OPERATOR,
     )
 
     assert applied is True
@@ -157,8 +186,12 @@ async def test_a_non_operator_decider_cannot_reject_either(db):
     row = await _pending_reply(db)
 
     applied = await record_decision(
-        db, outbound_id=row.id, approved=False,
-        by="a stranger", by_id=STRANGER, operator_id=OPERATOR,
+        db,
+        outbound_id=row.id,
+        approved=False,
+        by="a stranger",
+        by_id=STRANGER,
+        operator_id=OPERATOR,
     )
 
     assert applied is False
@@ -168,8 +201,11 @@ async def test_a_non_operator_decider_cannot_reject_either(db):
 async def test_a_row_is_never_sent_twice(db):
     opened = await task(db)
     await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     sender = Sender()
     box = outbox(db, sender)
@@ -183,8 +219,11 @@ async def test_a_row_is_never_sent_twice(db):
 async def test_a_failed_send_is_retried_rather_than_dropped(db):
     opened = await task(db)
     await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
 
     await outbox(db, Refusing(), backoff_seconds=0).run_once()
@@ -200,13 +239,16 @@ async def test_backoff_holds_a_row_back_before_the_next_attempt(db):
     ban."""
     opened = await task(db)
     await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     box = outbox(db, Refusing(), backoff_seconds=60)
 
     await box.run_once()
-    assert await box.run_once() == []          # held back
+    assert await box.run_once() == []  # held back
     assert (await db.outbound())[0].attempts == 1
 
 
@@ -215,8 +257,11 @@ async def test_giving_up_records_why_and_asks_a_human(db):
     has to look like work."""
     opened = await task(db)
     await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     box = outbox(db, Refusing(), max_attempts=2, backoff_seconds=0)
 
@@ -233,8 +278,11 @@ async def test_an_unknown_sender_is_given_up_on_immediately(db):
     """Retrying a name that does not exist cannot ever succeed."""
     opened = await task(db)
     await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="carrier_pigeon", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="carrier_pigeon",
+        text="which environment?",
     )
 
     await outbox(db, Sender()).run_once()
@@ -245,8 +293,11 @@ async def test_an_unknown_sender_is_given_up_on_immediately(db):
 async def test_sending_by_hand_is_recorded_apart_from_abandoning(db):
     opened = await task(db)
     queued = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     await db.fail_outbound(queued.id, "gave up")
 
@@ -261,8 +312,11 @@ async def test_approving_a_reply_releases_it(db):
     waiting."""
     opened = await task(db)
     row = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
-        sender="discord_user", text="cho anh xin correlationId",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="cho anh xin correlationId",
     )
     sender = Sender()
 
@@ -280,13 +334,19 @@ async def test_approving_one_reply_does_not_approve_the_next(db):
     the one that asserts a cause. The operator approved a row, not a task."""
     opened = await task(db)
     first = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
-        sender="discord_user", text="đang xử lý",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="đang xử lý",
     )
     await db.approve_outbound(first.id, by="longle_")
     await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
-        sender="discord_user", text="nguyên nhân là cache đầy",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="nguyên nhân là cache đầy",
     )
 
     assert [r.text for r in await db.sendable_outbound()] == ["đang xử lý"]
@@ -297,13 +357,16 @@ async def test_an_answer_the_conversation_has_moved_past_is_not_posted(db):
     approval arrives minutes or hours later. Answering a question that has since
     been withdrawn, corrected, or answered by someone else is worse than saying
     nothing."""
-    from conftest import make_event
 
     opened = await task(db)
     await db.record_message(make_event(message_id="10", text="api is broken"))
     row = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
-        sender="discord_user", text="here is your answer", reply_to="10",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="here is your answer",
+        reply_to="10",
     )
     await db.approve_outbound(row.id, by="operator")
     # They said something else while it waited to be approved.
@@ -320,13 +383,16 @@ async def test_an_answer_the_conversation_has_moved_past_is_not_posted(db):
 async def test_an_ask_is_not_held_back_by_a_newer_message(db):
     """Asking for a correlationId is still worth asking after they have said
     something else. Only an *answer* goes stale."""
-    from conftest import make_event
 
     opened = await task(db)
     await db.record_message(make_event(message_id="10", text="api is broken"))
     await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?", reply_to="10",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
+        reply_to="10",
     )
     await db.record_message(make_event(message_id="20", text="anyone?"))
     sender = Sender()
@@ -363,7 +429,7 @@ async def _replied(db, task, message_id, text, *, to, at=None):
     reply built with it always predates the question it answers. "Answered"
     is a question of ordering, so the ordering has to be constructible.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from friday.kernel.domain.messages import InboundEvent
 
@@ -376,7 +442,7 @@ async def _replied(db, task, message_id, text, *, to, at=None):
             author_id="u-reporter",
             author_name="dana",
             text=text,
-            created_at=at or datetime.now(timezone.utc),
+            created_at=at or datetime.now(UTC),
             mention_type=None,
             reply_to=to,
         )
@@ -386,12 +452,13 @@ async def _replied(db, task, message_id, text, *, to, at=None):
 async def _opened_by(db, task, message_id="m1"):
     """Link an opening message to the task, so the store can tell who the
     reporter is."""
-    from conftest import make_event
     from tests.test_pool import _said
 
     await _said(db, message_id, "@Lee API lỗi", secs=0, mention=True)
     await db.mark_triaged(
-        make_event(message_id=message_id), task.id, decision={"type": "backend.trace_problem"}
+        make_event(message_id=message_id),
+        task.id,
+        decision={"type": "backend.trace_problem"},
     )
 
 
@@ -513,8 +580,11 @@ async def test_a_policy_approved_kind_is_frozen_at_enqueue(db):
     against, the same as a reply gets at approval."""
     opened = await task(db)
     await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
 
     (row,) = await db.outbound()
@@ -527,8 +597,11 @@ async def test_a_reply_edited_after_approval_is_not_sent(db):
     reply goes to a person instead of out."""
     opened = await task(db)
     row = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
-        sender="discord_user", text="here is your answer",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="here is your answer",
     )
     await db.approve_outbound(row.id, by="operator")
     # Something changed the message after it was approved.
@@ -548,8 +621,11 @@ async def test_a_send_interrupted_mid_call_becomes_delivery_unknown(db):
     so it goes to the operator — never an automatic retry that might double-post."""
     opened = await task(db)
     row = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     # The marker a crash mid-send would leave behind.
     await db.mark_outbound_dispatching(row.id)
@@ -569,8 +645,11 @@ async def test_an_idempotent_channel_resends_a_dispatching_row(db):
     row is delivered rather than handed to the operator."""
     opened = await task(db)
     row = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     await db.mark_outbound_dispatching(row.id)
     sender = Idempotent()
@@ -578,7 +657,9 @@ async def test_an_idempotent_channel_resends_a_dispatching_row(db):
     outcome = await outbox(db, sender).deliver_once(row.id)
 
     assert outcome == "sent"
-    assert sender.keys == [f"outbox-{row.id}"], "the key is the row, stable across resends"
+    assert sender.keys == [f"outbox-{row.id}"], (
+        "the key is the row, stable across resends"
+    )
     assert (await db.outbound())[0].state == "sent"
 
 
@@ -587,8 +668,11 @@ async def test_the_delivery_step_marks_dispatching_before_it_calls_the_channel(d
     story rests on. A sender that reads the row's state as it is called sees it."""
     opened = await task(db)
     row = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     seen = {}
 
@@ -607,8 +691,11 @@ async def test_a_row_already_resolved_is_not_delivered_again(db):
     no-op — the guard that lets DBOS re-run the step safely."""
     opened = await task(db)
     row = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     await db.mark_outbound_delivery_unknown(row.id, "already handled")
     sender = Sender()
@@ -625,8 +712,11 @@ async def test_a_reply_approved_before_the_hash_existed_is_not_sent(db):
     to re-approve rather than out unchecked."""
     opened = await task(db)
     row = await db.queue_outbound(
-        task_id=opened.id, conversation=WATCHED, kind=Kind.REPLY,
-        sender="discord_user", text="here is your answer",
+        task_id=opened.id,
+        conversation=WATCHED,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="here is your answer",
     )
     await db.approve_outbound(row.id, by="operator")
     # A legacy row: approved, but with no hash the migration could backfill.
@@ -653,7 +743,6 @@ def test_the_two_lists_of_what_needs_approval_cannot_drift():
     2026-09-22 and it was luck that neither needed approval.
     """
     import friday.store.db as store
-
     from friday.kernel.outbox import Kind
 
     assert {k.value for k in Kind if k.needs_approval} == set(store._NEEDS_APPROVAL)
@@ -690,9 +779,18 @@ async def test_a_store_that_approves_a_reply_on_its_own_is_ignored():
     handed to a human — the channel is never called — however sendable the store
     claimed it was."""
     reply = Outbound(
-        id=1, task_id=7, conversation=WATCHED, kind=Kind.REPLY, sender="discord_user",
-        text="the cause is a null tx", reply_to="m1", state=OutboundState.QUEUED,
-        attempts=0, last_error=None, approves=None, approved_payload_hash=None,
+        id=1,
+        task_id=7,
+        conversation=WATCHED,
+        kind=Kind.REPLY,
+        sender="discord_user",
+        text="the cause is a null tx",
+        reply_to="m1",
+        state=OutboundState.QUEUED,
+        attempts=0,
+        last_error=None,
+        approves=None,
+        approved_payload_hash=None,
     )
     store = SelfApprovingStore(reply)
     sender = Sender()

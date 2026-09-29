@@ -21,6 +21,7 @@ from typing import Any
 
 from friday.sdk.action import Action
 from friday.sdk.agent import AgentSpec
+from friday.sdk.eval import EvalSpec
 from friday.sdk.memory import MemoryKindSpec
 from friday.sdk.plugin import Plugin, TaskTypeSpec
 from friday.sdk.toolset import ToolsetSpec
@@ -55,6 +56,7 @@ class Registry:
         self._actions: dict[str, Action] = {}
         self._agents: dict[str, AgentSpec] = {}
         self._toolsets: dict[str, ToolsetSpec] = {}
+        self._evals: dict[str, EvalSpec] = {}
         #: Which plugin registered each name (the spine's surface and memory
         #: kinds), for the checks that need a name's domain.
         self._owners: dict[str, Plugin] = {}
@@ -79,7 +81,9 @@ class Registry:
         if owner is not None:
             self._owners[spec.name] = owner
 
-    def reader(self, name: str, needs: frozenset[str], owner: Plugin | None = None) -> None:
+    def reader(
+        self, name: str, needs: frozenset[str], owner: Plugin | None = None
+    ) -> None:
         """Declare that a reader reads these kinds (DESIGN-v2 §9.2). Merges, so a
         plugin adds its kinds to a reader the core already routes to."""
         self._readers[name] = self._readers.get(name, frozenset()) | frozenset(needs)
@@ -96,6 +100,10 @@ class Registry:
 
     def toolset(self, spec: ToolsetSpec, owner: Plugin) -> None:
         _claim(self._toolsets, "toolset", spec.name, spec)
+        self._owners[spec.name] = owner
+
+    def eval(self, spec: EvalSpec, owner: Plugin) -> None:
+        _claim(self._evals, "eval", spec.name, spec)
         self._owners[spec.name] = owner
 
     # ── what the kernel reads back ───────────────────────────────────────────
@@ -120,6 +128,9 @@ class Registry:
 
     def toolsets(self) -> Mapping[str, ToolsetSpec]:
         return dict(self._toolsets)
+
+    def evals(self) -> Mapping[str, EvalSpec]:
+        return dict(self._evals)
 
     def owner_of(self, name: str) -> Plugin | None:
         return self._owners.get(name)
@@ -152,6 +163,9 @@ class PluginRegistration:
 
     def toolset(self, spec: ToolsetSpec) -> None:
         self._registry.toolset(spec, self.plugin)
+
+    def eval(self, spec: EvalSpec) -> None:
+        self._registry.eval(spec, self.plugin)
 
     def memory_kind(self, spec: MemoryKindSpec) -> None:
         self._registry.memory_kind(spec, self.plugin)

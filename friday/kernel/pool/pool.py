@@ -21,19 +21,19 @@ import logging
 from dataclasses import asdict
 from typing import Any
 
-from friday.kernel.dag import registry
-from friday.kernel.dag.router import dag_for
-from friday.sdk.workflow import DAGState, Deps as DAGDeps, NodeRun, status_of
-from friday.store.db import Database
-from friday.kernel.dag import adapter
-from friday.sdk.actions import Ask, HandOver, Outcome, Reply
-from friday.kernel.domain.states import TaskState
-from friday.kernel.domain.state import FridayState
-from friday.kernel.domain.tasks import Task
 from friday.kernel import outbox_card as card
-from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind
+from friday.kernel.dag import adapter, registry
+from friday.kernel.dag.router import dag_for
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.states import TaskState
+from friday.kernel.domain.tasks import Task
 from friday.kernel.ops.redact import scrub
+from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER, Kind
 from friday.kernel.responder.check import rejected
+from friday.sdk.actions import Ask, HandOver, Outcome, Reply
+from friday.sdk.workflow import DAGState, NodeRun, status_of
+from friday.sdk.workflow import Deps as DAGDeps
+from friday.store.db import Database
 
 __all__ = ["ASKED", "NEEDS_HUMAN", "PENDING", "REVIEW", "Pool"]
 
@@ -60,7 +60,7 @@ class Pool:
     """
 
     @classmethod
-    def build(cls, config, *, db: Database, responder=None) -> "Pool":
+    def build(cls, config, *, db: Database, responder=None) -> Pool:
         """The pool, built from the `workflows:` block.
 
         Nothing about an agent reaches here: an agent is a node inside a graph,
@@ -336,7 +336,7 @@ class Pool:
         **Only `Ask` comes through here, and that is not an inconsistency.**
         A `Reply` arrives already written in the operator's voice by whatever
         produced it — nothing does today, since the graph node that did went
-        with the five-node `api_issue`. An `Ask` was assembled
+        with the five-node `trace_problem`. An `Ask` was assembled
         by `_question()` — code, no model — so it has no voice until this
         gives it one. This brings asking up to where answering already starts;
         it does not treat the two differently.
@@ -370,9 +370,7 @@ class Pool:
             # `FridayState.message_id` and the Rooms screen joins its
             # enrichment glyph on it. Without that, every enrichment marker
             # on the screen is wrong.
-            state=FridayState.for_conversation(
-                task.conversation, agent="responder"
-            )
+            state=FridayState.for_conversation(task.conversation, agent="responder")
             .for_task(task.id)
             .about_message(await self._db.source_message_of(task.id)),
             stranger=await self._stranger(task),
@@ -385,9 +383,7 @@ class Pool:
             # Logged, because a fallback nobody sees hides a prompt
             # regression — and somebody thought the wording was worth a model
             # call, so it is worth a line when it is thrown away.
-            log.info(
-                "task %d: the drafted question was not sent — %s", task.id, reason
-            )
+            log.info("task %d: the drafted question was not sent — %s", task.id, reason)
             return template
         return draft.text
 
@@ -437,7 +433,7 @@ class Pool:
         If it decides the answer — an `Ask`/`Reply`/`HandOver`, which a one-node
         graph always does — that is the outcome and no workflow runs.
 
-        Past that (`api_issue`'s investigation) the graph runs as a durable
+        Past that (`trace_problem`'s investigation) the graph runs as a durable
         DBOS workflow, `prepare` pre-seeded so the walk starts at `resolve`.
         The workflow persists across passes: a node that must ask the reporter
         suspends it, and a later pass — after the reporter's answer re-planned
@@ -449,7 +445,10 @@ class Pool:
         if status_of(prepared) in _FAILED:
             log.warning(
                 "task %d: %s's %s failed — %s",
-                task.id, dag.name, dag.entry, prepared["reason"],
+                task.id,
+                dag.name,
+                dag.entry,
+                prepared["reason"],
             )
             return HandOver(f"{dag.name} failed: {prepared['reason']}")
         if isinstance(prepared, (Ask, Reply, HandOver)):
@@ -472,7 +471,9 @@ class Pool:
         st = await adapter.status(wfid)
         if st is None:
             await adapter.start(
-                dag.name, self._scope(task, seed={dag.entry: prepared}), workflow_id=wfid
+                dag.name,
+                self._scope(task, seed={dag.entry: prepared}),
+                workflow_id=wfid,
             )
         else:
             waiting = await adapter.pending(wfid)

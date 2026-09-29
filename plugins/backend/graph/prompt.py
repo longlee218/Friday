@@ -14,6 +14,8 @@ diagnosis that is warm, which is not a property a diagnosis should have.
 
 from __future__ import annotations
 
+from typing import Any
+
 from friday.sdk.prompt import (
     assemble,
     critical_reminder,
@@ -138,13 +140,17 @@ def build_reads_input(
         where.append(f"stack: {placement.stack}")
 
     said = [
-        "## What was reported", report or "(nothing beyond the parameters)",
-        "", "## Where this service lives", *where,
+        "## What was reported",
+        report or "(nothing beyond the parameters)",
+        "",
+        "## Where this service lives",
+        *where,
     ]
     if not_checked:
         said += ["", "## Already known not to have been checked", *not_checked]
     said += [
-        "", "## Your job",
+        "",
+        "## Your job",
         "Read what you need with the tools, then answer the shape. Nothing "
         "has been read for you. If you genuinely cannot diagnose this and a "
         "person must take it — the fix needs an action you may not take, or "

@@ -23,13 +23,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from friday.kernel.config import AgentConfig
-from friday.sdk.agent import AgentDeclaration
-from friday.kernel.responder.prompt import build_input, build_instructions
-from friday.kernel.harness.harness import Harness
-from friday.kernel.domain.state import FridayState
-from friday.kernel.toolsets.memory import memory_tools
-from friday.kernel.domain.tasks import Params
 from friday.kernel.domain.messages import InboundEvent
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.tasks import Params
+from friday.kernel.harness.harness import Harness
+from friday.kernel.responder.prompt import build_input, build_instructions
+from friday.kernel.toolsets.memory import memory_tools
+from friday.sdk.agent import AgentDeclaration
 
 __all__ = ["Draft", "Responder"]
 
@@ -44,8 +44,12 @@ INSTRUCTIONS = build_instructions()
 #: ceiling, not a target — it costs nothing to a run that answers in one turn.
 #: 60s a request: it writes prose, and the slowest measured was 31s.
 RESPONDER = AgentDeclaration(
-    name="responder", tier="flash", temperature=0.7, max_turns=13,
-    tokens=300_000, request_timeout_seconds=60.0,
+    name="responder",
+    tier="flash",
+    temperature=0.7,
+    max_turns=13,
+    tokens=300_000,
+    request_timeout_seconds=60.0,
 )
 #: How many of the operator's real messages to show as tone examples.
 TONE_EXAMPLES = 8
@@ -61,8 +65,13 @@ class Draft:
 class Responder:
     @classmethod
     def build(
-        cls, config, *, skills=None, db=None, record=None,
-    ) -> "Responder | None":
+        cls,
+        config,
+        *,
+        skills=None,
+        db=None,
+        record=None,
+    ) -> Responder | None:
         """The responder, or None when it is off or unconfigured.
 
         `None` is a working state, not a failure: the workflow falls back to
@@ -177,7 +186,7 @@ class Responder:
         self,
         *,
         asking: str,
-        params: "Params | None" = None,
+        params: Params | None = None,
         #: What this run is about: the room, the task, and the message that
         #: opened it. **One object rather than the three parameters this
         #: replaced** (board `every-answer-has-a-shape`, D8/D22) — `channel_id`

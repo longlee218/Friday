@@ -14,6 +14,7 @@ The numbers match the audit's "make it snappy" rule — at 200KB
 gzipped the page renders in under a second over a fast 3G, and
 no single file at 100KB forces the parser to wait on a chunk.
 """
+
 from __future__ import annotations
 
 import gzip
@@ -70,9 +71,7 @@ def test_single_js_file_under_budget() -> None:
         size = _gz_size(js)
         if size > SINGLE_BUDGET_GZ:
             offenders.append((js.name, size))
-    assert not offenders, (
-        f"JS files over {SINGLE_BUDGET_GZ // 1024}KB: {offenders}"
-    )
+    assert not offenders, f"JS files over {SINGLE_BUDGET_GZ // 1024}KB: {offenders}"
 
 
 def test_total_js_bundle_under_budget() -> None:
@@ -82,9 +81,7 @@ def test_total_js_bundle_under_budget() -> None:
     ship in development only)."""
     files = _js_files()
     if not files:
-        pytest.skip(
-            "no JS in web/dist — has `npm run build` been run?"
-        )
+        pytest.skip("no JS in web/dist — has `npm run build` been run?")
     total = sum(_gz_size(js) for js in files)
     assert total <= TOTAL_BUDGET_GZ, (
         f"total JS bundle is {total // 1024}KB gzipped, "
@@ -99,6 +96,4 @@ def test_no_duplicate_chunks() -> None:
     build config emits `index.js` twice, the route would serve
     both and the page would render twice."""
     names = [js.name for js in _js_files()]
-    assert len(names) == len(set(names)), (
-        f"duplicate JS chunks in {ASSETS}: {names}"
-    )
+    assert len(names) == len(set(names)), f"duplicate JS chunks in {ASSETS}: {names}"

@@ -80,7 +80,7 @@ class FridayState:
     task_id: int | None = None
 
     @classmethod
-    def for_event(cls, event: "InboundEvent", *, agent: str) -> "FridayState":
+    def for_event(cls, event: InboundEvent, *, agent: str) -> FridayState:
         """The state a message's journey starts with.
 
         Seven of the nine fields are facts the inbound message already carries,
@@ -107,8 +107,8 @@ class FridayState:
 
     @classmethod
     def for_conversation(
-        cls, conversation: "ConversationId", *, agent: str
-    ) -> "FridayState":
+        cls, conversation: ConversationId, *, agent: str
+    ) -> FridayState:
         """The state for work about a conversation rather than about one
         message — a task being worked on, which is what the pool has.
 
@@ -125,14 +125,14 @@ class FridayState:
             thread_id=conversation.thread_id,
         )
 
-    def as_agent(self, agent: str) -> "FridayState":
+    def as_agent(self, agent: str) -> FridayState:
         """Hand the run on to a different agent."""
         return replace(self, agent=agent)
 
-    def for_task(self, task_id: int | None) -> "FridayState":
+    def for_task(self, task_id: int | None) -> FridayState:
         """The message became this task."""
         return replace(self, task_id=task_id)
 
-    def about_message(self, message_id: str | None) -> "FridayState":
+    def about_message(self, message_id: str | None) -> FridayState:
         """This step is about a different message than the last one was."""
         return replace(self, message_id=message_id)

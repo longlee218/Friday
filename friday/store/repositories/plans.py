@@ -7,11 +7,10 @@ The runner (`friday/kernel/spine/runner.py`) is the only caller of
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class PlansRepo:
-
     async def put_step_result(
         self,
         *,
@@ -26,8 +25,13 @@ class PlansRepo:
         a stored result is never rewritten, so a step re-run after a crash
         between its end and this write cannot replace what readers saw."""
         statement = insert(schema.StepResult).values(
-            task_id=task_id, step_key=step_key, step_id=step_id,
-            plan_version=plan_version, kind=kind, body=body, created_at=_now(),
+            task_id=task_id,
+            step_key=step_key,
+            step_id=step_id,
+            plan_version=plan_version,
+            kind=kind,
+            body=body,
+            created_at=_now(),
         )
         async with self._sessions.begin() as session:
             await session.execute(statement.on_conflict_do_nothing())

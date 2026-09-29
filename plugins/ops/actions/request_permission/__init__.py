@@ -16,10 +16,17 @@ __all__ = ["ACTION"]
 ACTION = Action(
     name="ops.request_permission",
     recognition=Recognition(
-        means="They want to be let in somewhere, for themselves or a newcomer.",
+        means="They want access: to be let in somewhere, for themselves or a newcomer.",
         pick_when=(
             "a repository, environment, dashboard, channel, key, role or permission",
-            "asked outright, or told as a complaint (\"I cannot open the staging repo\")",
+            'asked outright, or told as a complaint ("I cannot open the staging repo")',
+        ),
+        not_when=(
+            (
+                "they ask to raise a limit, a quota or a config value — that is a "
+                "problem to trace, not access",
+                "backend.trace_problem",
+            ),
         ),
         examples=(
             "cho em xin quyền vào repo BE-Midas với ạ",

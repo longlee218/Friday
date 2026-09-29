@@ -9,7 +9,6 @@ facts stay in `config.yaml`.
 from __future__ import annotations
 
 import asyncio
-import re
 from pathlib import Path
 
 import pytest
@@ -39,7 +38,7 @@ def test_the_attempts_are_core_constants():
 def test_each_agent_declares_its_tier_and_budget():
     """`(max_turns, tokens)` is the whole per-agent budget; `max_turns` counts
     tool turns, so each is what the agent had when tool turns were added on
-    top. Changing triage's needs `run_triage_eval` first."""
+    top. Changing triage's needs the `core.triage` eval first."""
     from friday.kernel.extraction import EXTRACTOR
     from friday.kernel.memory.channel_context import room_summary
     from friday.kernel.responder import RESPONDER
@@ -59,7 +58,10 @@ def test_each_agent_declares_its_tier_and_budget():
 
 def test_rooms_are_not_summarised_until_a_tier_is_named():
     """As shipped: no summary tier, so no summaries (fog review, 2026-09-28)."""
-    from friday.kernel.memory.channel_context import ROOM_SUMMARY_TIER, SUMMARY_MAX_CHARS
+    from friday.kernel.memory.channel_context import (
+        ROOM_SUMMARY_TIER,
+        SUMMARY_MAX_CHARS,
+    )
 
     assert ROOM_SUMMARY_TIER is None
     assert SUMMARY_MAX_CHARS == 6000
@@ -77,7 +79,11 @@ def test_triage_and_responder_knobs():
 
 
 def test_ingest_and_ops_knobs():
-    from friday.kernel.inbox import CONTEXT_MESSAGES, SWEEP_INTERVAL_SECONDS, TURN_SECONDS
+    from friday.kernel.inbox import (
+        CONTEXT_MESSAGES,
+        SWEEP_INTERVAL_SECONDS,
+        TURN_SECONDS,
+    )
     from friday.kernel.ops.backup import KEEP_BACKUPS
     from friday.kernel.ops.liveness import (
         DOWN_AFTER_SECONDS,
@@ -103,8 +109,13 @@ def test_the_only_time_limit_is_on_a_tool_call():
 #: The names a time budget or a daily ceiling went by. `timeout_seconds=` as a
 #: DBOS keyword argument is the library's own API, not a budget of ours, and
 #: `request_timeout_seconds` bounds one model request, not a run.
-_GONE = ("check_node_clocks", "check_graph_clocks", "context_window",
-         "daily_token_budget", "NODE_CLOCK_MARGIN_SECONDS")
+_GONE = (
+    "check_node_clocks",
+    "check_graph_clocks",
+    "context_window",
+    "daily_token_budget",
+    "NODE_CLOCK_MARGIN_SECONDS",
+)
 
 
 def test_no_time_budget_is_left_in_the_code():
@@ -115,10 +126,44 @@ def test_no_time_budget_is_left_in_the_code():
             for name in _GONE:
                 if name in text:
                     offenders.append(f"{path.relative_to(ROOT)}: {name}")
-            for line in text.splitlines():
-                if re.search(r"\btimeout_seconds\b", line) and "DBOS." not in line:
-                    offenders.append(f"{path.relative_to(ROOT)}: {line.strip()}")
+            offenders += [
+                f"{path.relative_to(ROOT)}:{line}" for line in _time_budget_uses(text)
+            ]
     assert offenders == []
+
+
+def _time_budget_uses(source: str) -> list[int]:
+    """Lines naming `timeout_seconds`, except as a keyword argument to a
+    `DBOS.*` call. Read from the syntax tree, not line by line, so a formatter
+    wrapping `DBOS.recv_async(..., timeout_seconds=...)` over two lines cannot
+    turn the library's own API into a false alarm."""
+    import ast
+
+    allowed = set()
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "DBOS"
+        ):
+            allowed |= {id(k) for k in node.keywords if k.arg == "timeout_seconds"}
+    uses = []
+    for node in ast.walk(tree):
+        named = (
+            (
+                isinstance(node, ast.keyword)
+                and node.arg == "timeout_seconds"
+                and id(node) not in allowed
+            )
+            or (isinstance(node, ast.Name) and node.id == "timeout_seconds")
+            or (isinstance(node, ast.Attribute) and node.attr == "timeout_seconds")
+            or (isinstance(node, ast.arg) and node.arg == "timeout_seconds")
+        )
+        if named:
+            uses.append(node.lineno)
+    return uses
 
 
 def test_the_shipped_config_holds_only_tiers_and_install_facts():
@@ -131,14 +176,29 @@ def test_the_shipped_config_holds_only_tiers_and_install_facts():
     raw = yaml.safe_load((ROOT / "config.yaml").read_text())
 
     assert set(raw) <= {
-        "database_path", "tiers", "backend", "operator_id", "board_host",
-        "board_port", "board_origins", "repo_root", "backup_dir", "mcp_servers", "shell_hosts",
-        "workflows", "ingest", "context", "sensitive_words",
+        "database_path",
+        "tiers",
+        "backend",
+        "operator_id",
+        "board_host",
+        "board_port",
+        "board_origins",
+        "repo_root",
+        "backup_dir",
+        "mcp_servers",
+        "shell_hosts",
+        "workflows",
+        "ingest",
+        "context",
+        "sensitive_words",
     }
     assert set(raw["ingest"]) == {"mention_types", "watched_channels"}
     assert set(raw["context"]) == {"skills_directory"}
     assert set(raw["workflows"]) <= {
-        "concurrency", "max_asks", "use_responder", "auto_ask_for_details",
+        "concurrency",
+        "max_asks",
+        "use_responder",
+        "auto_ask_for_details",
     }
     for tier in raw["tiers"].values():
         assert set(tier) <= {"api_key", "provider", "base_url", "model", "settings"}
@@ -150,7 +210,7 @@ def test_the_shipped_config_holds_only_tiers_and_install_facts():
 async def test_a_hung_tool_call_is_cut_by_the_per_call_timeout(monkeypatch):
     """A tool server that never answers cannot hold a pool slot: the call is
     cut at `TOOL_CALL_TIMEOUT_SECONDS`, the one time limit left."""
-    import friday.sdk.sources as sources
+    from friday.sdk import sources
 
     monkeypatch.setattr(sources, "TOOL_CALL_TIMEOUT_SECONDS", 0.05)
 
@@ -169,7 +229,7 @@ async def test_a_hung_tool_call_is_cut_by_the_per_call_timeout(monkeypatch):
 
 
 async def test_a_hung_ssh_read_is_cut_by_the_per_call_timeout(monkeypatch):
-    import plugins.backend.toolsets.logs as logs
+    from plugins.backend.toolsets import logs
 
     monkeypatch.setattr(logs, "TOOL_CALL_TIMEOUT_SECONDS", 0.05)
 

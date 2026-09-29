@@ -9,10 +9,14 @@ def chain(input, prompts: list[str]) -> str:
         result = llm_call(f"{prompt}\nInput: {result}")
     return result
 
+
 def route(input, routes: dict[str, str]) -> str:
     # one classification call picks a key from routes.keys() — HARDCODED set
-    selection = llm_call(routing_prompt(input, routes.keys()))  # <reasoning>/<selection>
+    selection = llm_call(
+        routing_prompt(input, routes.keys())
+    )  # <reasoning>/<selection>
     return llm_call(routes[selection], input)
+
 
 def parallel(prompt, inputs: list[str], n_workers=3) -> list[str]:
     # same prompt fanned out over a thread pool; no synthesis step

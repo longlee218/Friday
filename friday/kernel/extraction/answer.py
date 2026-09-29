@@ -20,9 +20,9 @@ been the move's one real cost.
 
 from __future__ import annotations
 
-from dataclasses import MISSING, dataclass, field, fields as dataclass_fields
-from dataclasses import make_dataclass
-from functools import lru_cache
+from dataclasses import MISSING, dataclass, field, make_dataclass
+from dataclasses import fields as dataclass_fields
+from functools import cache
 from typing import Any, Literal, get_type_hints
 
 from friday.kernel.domain.tasks import Params, askable_fields
@@ -61,7 +61,7 @@ _BECAUSE = (
 )
 
 
-@lru_cache(maxsize=None)
+@cache
 def answer_shape(params_cls: type[Params]) -> type:
     """The dataclass one task type's extractor answers.
 
@@ -74,7 +74,7 @@ def answer_shape(params_cls: type[Params]) -> type:
     **Flat, not nested.** A `{"params": {...}, "ask_about": [...]}` wrapper
     would be one less generated class and would tell the model less: the
     shape's description and the tool's parameters are both generated from the
-    fields, and a field called `params` of type `ApiIssueParams` describes
+    fields, and a field called `params` of type `TraceProblemParams` describes
     nothing. Flat also means `fits` refuses an object whose keys are all
     unknown, which a wrapper would quietly turn into an empty answer — the
     exact failure that rule exists for.
@@ -121,7 +121,7 @@ def answer_shape(params_cls: type[Params]) -> type:
         # **So a traceback names somewhere a reader can go.** A generated
         # class defaults its `__module__` to whatever called `make_dataclass`,
         # and appears in a stack trace as a name with no file behind it —
-        # `ApiIssueParamsAnswer`, which greps to nothing. Both of these exist
+        # `TraceProblemParamsAnswer`, which greps to nothing. Both of these exist
         # for the person reading the failure, not for the code.
         namespace={
             "__module__": __name__,

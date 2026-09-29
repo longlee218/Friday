@@ -18,45 +18,51 @@ Revises: 9ea20fff4445
 Create Date: 2026-09-06 01:52:27.094646
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'f43e90e01c01'
-down_revision: Union[str, Sequence[str], None] = '9ea20fff4445'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "f43e90e01c01"
+down_revision: str | Sequence[str] | None = "9ea20fff4445"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.create_table('memories',
-    sa.Column('id', sa.String(), nullable=False),
-    sa.Column('channel_id', sa.String(), nullable=False),
-    sa.Column('agent', sa.String(), nullable=False),
-    sa.Column('text', sa.String(), nullable=False),
-    sa.Column('task_id', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.String(), nullable=False),
-    sa.Column('updated_at', sa.String(), nullable=False),
-    sa.Column('deleted_at', sa.String(), nullable=True),
-    sa.Column('deleted_by', sa.String(), nullable=True),
-    sa.PrimaryKeyConstraint('id')
+    op.create_table(
+        "memories",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("channel_id", sa.String(), nullable=False),
+        sa.Column("agent", sa.String(), nullable=False),
+        sa.Column("text", sa.String(), nullable=False),
+        sa.Column("task_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.String(), nullable=False),
+        sa.Column("updated_at", sa.String(), nullable=False),
+        sa.Column("deleted_at", sa.String(), nullable=True),
+        sa.Column("deleted_by", sa.String(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
     )
-    with op.batch_alter_table('memories', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_memories_channel_id'), ['channel_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_memories_created_at'), ['created_at'], unique=False)
-        batch_op.create_index(batch_op.f('ix_memories_task_id'), ['task_id'], unique=False)
-
+    with op.batch_alter_table("memories", schema=None) as batch_op:
+        batch_op.create_index(
+            batch_op.f("ix_memories_channel_id"), ["channel_id"], unique=False
+        )
+        batch_op.create_index(
+            batch_op.f("ix_memories_created_at"), ["created_at"], unique=False
+        )
+        batch_op.create_index(
+            batch_op.f("ix_memories_task_id"), ["task_id"], unique=False
+        )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    with op.batch_alter_table('memories', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_memories_task_id'))
-        batch_op.drop_index(batch_op.f('ix_memories_created_at'))
-        batch_op.drop_index(batch_op.f('ix_memories_channel_id'))
+    with op.batch_alter_table("memories", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_memories_task_id"))
+        batch_op.drop_index(batch_op.f("ix_memories_created_at"))
+        batch_op.drop_index(batch_op.f("ix_memories_channel_id"))
 
-    op.drop_table('memories')
+    op.drop_table("memories")

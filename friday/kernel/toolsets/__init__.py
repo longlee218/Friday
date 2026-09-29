@@ -64,7 +64,9 @@ def core_toolsets(
         from friday.kernel.audit import AuditLog
         from friday.kernel.toolsets.shell import shell_tools
 
-        return shell_tools(run, hosts=hosts, audit=AuditLog(_needs(db, "a store", "core.shell")))
+        return shell_tools(
+            run, hosts=hosts, audit=AuditLog(_needs(db, "a store", "core.shell"))
+        )
 
     def workspace(run: RunContext) -> list:
         from friday.kernel.toolsets.workspace import workspace_tools
@@ -100,11 +102,15 @@ def core_toolsets(
 
 
 def core_plugin(**deps: Any) -> Plugin:
-    """The core as a registrant: the owner the `core.*` toolsets are
-    recorded under, so the boot refusals treat them like any plugin's."""
+    """The core as a registrant: the owner the `core.*` toolsets and the
+    core's own eval (`core.triage`) are recorded under, so the boot refusals
+    treat them like any plugin's."""
 
     def register(api: Any) -> None:
+        from friday.kernel.evals.triage import TRIAGE_EVAL
+
         for spec in core_toolsets(**deps):
             api.toolset(spec)
+        api.eval(TRIAGE_EVAL)
 
     return Plugin(id="core", register=register)

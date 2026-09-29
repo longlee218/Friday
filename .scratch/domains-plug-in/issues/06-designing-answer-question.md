@@ -103,3 +103,19 @@ sending a conclusive answer without approval once the judge is calibrated.
 ## Amended 2026-09-28 by ticket 17
 
 The contract's `total_time 10 min` goes: there is no time limit; `max_replans 1` and `max_steps 3` stay. See [The budget in three groups](17-the-budget-in-three-groups.md).
+
+## Amended 2026-09-29 (operator, after a prompt review and an eval on deepseek)
+
+§9 stands in substance and is sharpened by the operator's rulings on three eval
+cases: **anything they ran, attached, makes it `trace_problem`** — a real
+request, response, log or error — even when the words only ask where something
+is ("which part adds the AI tool icon?" + a `200` response: what we returned
+may be wrong, and only reading it and the code can tell). `answer_question` is
+a **pure** question with nothing of theirs attached. **The reporter's
+conclusion is not evidence**: a guessed cause ("khả năng cao là…", "Claude bảo
+là…") or a requested fix ("raise the free limit to 500") is a hypothesis a
+senior backend traces before acting on — `trace_problem`, not
+`ops.request_permission`. The core's thinking says the same (trust what they
+show, not what they conclude; decide by the work the message needs); no label
+order is added (ticket 02 §6 stands). An earlier same-day wording that sent a
+quoted curl or response to `answer_question` is withdrawn.

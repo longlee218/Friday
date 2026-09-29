@@ -8,8 +8,6 @@ is supposed to have.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from friday.kernel.config import ConfigError, MCPServerConfig, load_config

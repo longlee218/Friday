@@ -26,10 +26,10 @@ import asyncio
 import uvicorn
 from dotenv import load_dotenv
 
-from friday.kernel.ops.api import bind, build_api, check_exposure
 from friday.kernel.config import load_config
-from friday.store.db import Database
+from friday.kernel.ops.api import bind, build_api, check_exposure
 from friday.kernel.triage.runner import CONFIDENCE_THRESHOLD
+from friday.store.db import Database
 
 
 async def main() -> None:
@@ -47,7 +47,7 @@ async def main() -> None:
     check_graphs(config)
     check_exposure(config.board_host)
     db = await Database.connect(config.database_path)
-    status = lambda: "not connected (board only)"  # noqa: E731
+    status = lambda: "not connected (board only)"
     # Writable, like the agent's own board: this is the copy pointed at the
     # live database while `web/` is being built, and a page that cannot write
     # is not the page being built.

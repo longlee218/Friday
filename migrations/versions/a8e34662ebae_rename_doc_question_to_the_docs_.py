@@ -18,17 +18,17 @@ task-type name, each grep-checked against `friday/store/schema.py`:
   doc_question -> docs.doc_question
     tasks.type, messages.decision_type, node_runs.dag_name, dag_state.dag_name
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'a8e34662ebae'
-down_revision: Union[str, Sequence[str], None] = '7f31db1381ef'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "a8e34662ebae"
+down_revision: str | Sequence[str] | None = "7f31db1381ef"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 #: The columns that hold the task-type name, and the one rename applied to each.

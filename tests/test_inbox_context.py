@@ -62,7 +62,9 @@ async def test_later_messages_in_a_seeded_conversation_are_kept_even_without_a_m
 ):
     """'still broken btw' is the message that makes the next one classifiable."""
     provider.emit(make_event(message_id="30"))
-    provider.emit(make_event(message_id="40", text="still broken btw", mention_type=None))
+    provider.emit(
+        make_event(message_id="40", text="still broken btw", mention_type=None)
+    )
 
     await captured(inbox)
 
@@ -103,9 +105,7 @@ async def test_our_own_messages_are_kept_as_context_once_a_conversation_matters(
     """The responder learns tone from real replies, and a stored conversation
     missing one side of itself reads strangely to a model."""
     provider.emit(make_event(message_id="30"))
-    provider.emit(
-        make_event(message_id="40", text="checking now", is_own=True)
-    )
+    provider.emit(make_event(message_id="40", text="checking now", is_own=True))
 
     await captured(inbox)
 

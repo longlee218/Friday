@@ -41,9 +41,13 @@ class Found:
 
 AGENTS = {
     "backend.diagnose": AgentSpec(
-        name="backend.diagnose", description="finds the cause",
-        instructions="find it", result=Found, tier="flash",
-        toolsets=("backend.logs",), budget=Budget(max_turns=5, tokens=1000),
+        name="backend.diagnose",
+        description="finds the cause",
+        instructions="find it",
+        result=Found,
+        tier="flash",
+        toolsets=("backend.logs",),
+        budget=Budget(max_turns=5, tokens=1000),
         temperature=0.0,
     ),
 }
@@ -54,16 +58,24 @@ def _contract(max_replans: int = 2) -> ActionContract:
         allowed_step_types=frozenset({"agent", "ask", "hand_over", "draft"}),
         allowed_agents=frozenset({"backend.diagnose"}),
         allowed_toolsets=frozenset({"backend.logs"}),
-        constraints=(), approval_policy="always", acceptance_template="",
+        constraints=(),
+        approval_policy="always",
+        acceptance_template="",
         limits=Limits(max_replans=max_replans, max_steps=5),
     )
 
 
 def _frozen(*steps, version: int = 1, max_replans: int = 2) -> Frozen:
     got = gate_plan(
-        Plan(task_id=7, action="backend.trace_problem", plan_version=version,
-             replaces=None, contract=_contract(max_replans), goal="find the 400",
-             steps=tuple(steps)),
+        Plan(
+            task_id=7,
+            action="backend.trace_problem",
+            plan_version=version,
+            replaces=None,
+            contract=_contract(max_replans),
+            goal="find the 400",
+            steps=tuple(steps),
+        ),
         AGENTS,
     )
     assert isinstance(got, Frozen), got
@@ -71,8 +83,13 @@ def _frozen(*steps, version: int = 1, max_replans: int = 2) -> Frozen:
 
 
 def _agent(id: str, brief: str, reads=()) -> AgentStep:
-    return AgentStep(id=id, agent="backend.diagnose", toolsets=("backend.logs",),
-                     brief=brief, reads=tuple(reads))
+    return AgentStep(
+        id=id,
+        agent="backend.diagnose",
+        toolsets=("backend.logs",),
+        brief=brief,
+        reads=tuple(reads),
+    )
 
 
 class Script:
@@ -109,8 +126,14 @@ class Script:
 
 
 async def _run(db, frozen, script, **kwargs):
-    return await run_plan(db, frozen, agents=AGENTS, placement_identity=PLACEMENT,
-                          steps=script.steps(), **kwargs)
+    return await run_plan(
+        db,
+        frozen,
+        agents=AGENTS,
+        placement_identity=PLACEMENT,
+        steps=script.steps(),
+        **kwargs,
+    )
 
 
 # ---- the walk -------------------------------------------------------------
@@ -145,17 +168,25 @@ async def test_a_changed_placement_runs_the_step_again(db):
     frozen = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)))
 
     await _run(db, frozen, script)
-    await run_plan(db, frozen, agents=AGENTS, placement_identity=("dev", "other"),
-                   steps=script.steps())
+    await run_plan(
+        db,
+        frozen,
+        agents=AGENTS,
+        placement_identity=("dev", "other"),
+        steps=script.steps(),
+    )
 
     assert len(script.agent_calls) == 2
 
 
-@pytest.mark.parametrize("outcome", [
-    Ask("which correlationId?", history=[{"kind": "request"}]),
-    HandOver("nothing to read"),
-    Retriage(reason="it is a question", found="L2 says so"),
-])
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        Ask("which correlationId?", history=[{"kind": "request"}]),
+        HandOver("nothing to read"),
+        Retriage(reason="it is a question", found="L2 says so"),
+    ],
+)
 async def test_an_agent_outcome_is_stored_and_stops_the_plan(db, outcome):
     script = Script({"look": outcome})
     frozen = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)))
@@ -180,7 +211,9 @@ async def test_a_stored_ask_keeps_its_history_but_not_its_evidence(db):
 
 async def test_the_planners_ask_and_hand_over_steps_stop_the_plan(db):
     asked = await _run(db, _frozen(AskStep(id="p1", question="which env?")), Script())
-    handed = await _run(db, _frozen(HandOverStep(id="p1", reason="prod write")), Script())
+    handed = await _run(
+        db, _frozen(HandOverStep(id="p1", reason="prod write")), Script()
+    )
 
     assert asked.outcome == Ask("which env?")
     assert handed.outcome == HandOver("prod write")
@@ -219,8 +252,9 @@ WRONG = Replan(reason="the 400 is upstream", found="L4: gateway rejects it")
 
 
 async def test_change_direction_runs_the_new_step_and_not_the_old_one(db):
-    v2 = _frozen(_agent("p1b", "look upstream"), DraftStep(id="p2", reads=("p1b",)),
-                 version=2)
+    v2 = _frozen(
+        _agent("p1b", "look upstream"), DraftStep(id="p2", reads=("p1b",)), version=2
+    )
     script = Script({"look": WRONG, "look upstream": Found("gateway")}, plans=[v2])
     v1 = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)))
 
@@ -234,8 +268,12 @@ async def test_change_direction_runs_the_new_step_and_not_the_old_one(db):
 
 
 async def test_build_on_reuses_the_replan_as_data_for_the_next_step(db):
-    v2 = _frozen(_agent("p1", "look"), _agent("p1b", "look upstream", reads=["p1"]),
-                 DraftStep(id="p2", reads=("p1b",)), version=2)
+    v2 = _frozen(
+        _agent("p1", "look"),
+        _agent("p1b", "look upstream", reads=["p1"]),
+        DraftStep(id="p2", reads=("p1b",)),
+        version=2,
+    )
     script = Script({"look": WRONG, "look upstream": Found("gateway")}, plans=[v2])
     v1 = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)))
 
@@ -278,8 +316,9 @@ async def test_a_replan_stored_before_the_planner_answered_is_still_the_signal(d
     with pytest.raises(RuntimeError):
         await _run(db, v1, crashed)
 
-    v2 = _frozen(_agent("p1b", "look upstream"), DraftStep(id="p2", reads=("p1b",)),
-                 version=2)
+    v2 = _frozen(
+        _agent("p1b", "look upstream"), DraftStep(id="p2", reads=("p1b",)), version=2
+    )
     resumed = Script({"look upstream": Found("gateway")}, plans=[v2])
     end = await _run(db, v1, resumed)
 
@@ -294,6 +333,7 @@ def _raising(planner):
         if isinstance(got, Exception):
             raise got
         return got
+
     return wrapped
 
 
@@ -311,8 +351,12 @@ async def test_a_planner_hand_over_ends_the_run(db):
 
 async def test_replans_past_max_replans_hand_over_replans_exhausted(db):
     last = Replan(reason="still wrong", found="L9: the proxy")
-    v2 = _frozen(_agent("p1b", "look upstream"), DraftStep(id="p2", reads=("p1b",)),
-                 version=2, max_replans=1)
+    v2 = _frozen(
+        _agent("p1b", "look upstream"),
+        DraftStep(id="p2", reads=("p1b",)),
+        version=2,
+        max_replans=1,
+    )
     script = Script({"look": WRONG, "look upstream": last}, plans=[v2])
     v1 = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)), max_replans=1)
 
@@ -350,6 +394,8 @@ def test_only_the_runner_writes_step_results():
             writers.append(rel)
         if re.search(r"\bschema\.StepResult\b", text):
             mappers.append(rel)
-    assert sorted(writers) == ["friday/kernel/spine/runner.py",
-                               "friday/store/repositories/plans.py"]
+    assert sorted(writers) == [
+        "friday/kernel/spine/runner.py",
+        "friday/store/repositories/plans.py",
+    ]
     assert mappers == ["friday/store/repositories/plans.py"]

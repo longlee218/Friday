@@ -14,13 +14,12 @@ its caller is invisible to the next person asking the same question.
 from __future__ import annotations
 
 import ast
-from datetime import datetime, timezone
 import importlib
 import inspect
 import pkgutil
+from datetime import UTC, datetime
 from pathlib import Path
-
-import friday.kernel.toolsets
+from typing import ClassVar
 
 REPO = Path(__file__).resolve().parents[1]
 TOOLS = REPO / "friday" / "kernel" / "toolsets"
@@ -84,8 +83,11 @@ def _factories() -> dict[str, object]:
 
     library = SkillLibrary(REPO / "skills")
     run = RunContext(
-        task_id=1, domain=None, evidence=Evidence(), mcp={},
-        reported_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
+        task_id=1,
+        domain=None,
+        evidence=Evidence(),
+        mcp={},
+        reported_at=datetime(2026, 9, 21, tzinfo=UTC),
     )
     # `core.workspace` hands back one Pydantic AI toolset, not tools: listed by
     # the names inside it. Built under a throwaway root, not `/tmp/friday`.
@@ -107,11 +109,15 @@ def _factories() -> dict[str, object]:
         *(
             built
             for toolset in TOOLSETS
-            for built in toolset.factory(RunContext(
-                task_id=1, domain=Placement(env="dev", service="s"),
-                evidence=Evidence(), mcp={},
-                reported_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
-            ))
+            for built in toolset.factory(
+                RunContext(
+                    task_id=1,
+                    domain=Placement(env="dev", service="s"),
+                    evidence=Evidence(),
+                    mcp={},
+                    reported_at=datetime(2026, 9, 21, tzinfo=UTC),
+                )
+            )
         ),
     ]
     # A plugin declares a tool as a neutral `ToolSpec` (`friday.sdk.toolset`); the
@@ -119,7 +125,9 @@ def _factories() -> dict[str, object]:
     # so the test inspects what the model actually sees (ticket 14).
     from friday.kernel.harness.harness import _bind_tool_spec
 
-    return {tool.name: tool for tool in (_bind_tool_spec(t) for t in built)} | dict(files.tools)
+    return {tool.name: tool for tool in (_bind_tool_spec(t) for t in built)} | dict(
+        files.tools
+    )
 
 
 def _tool_objects() -> dict[str, object]:
@@ -279,7 +287,9 @@ def test_no_tool_is_declared_outside_the_tools_package():
         if lines:
             offenders[str(path.relative_to(REPO))] = lines
 
-    assert offenders == {}, f"a tool declared outside friday/kernel/toolsets/: {offenders}"
+    assert offenders == {}, (
+        f"a tool declared outside friday/kernel/toolsets/: {offenders}"
+    )
 
 
 def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
@@ -313,7 +323,9 @@ def test_nothing_outside_the_package_looks_like_a_tool_without_being_one():
         if named:
             offenders[str(path.relative_to(root.parent))] = named
 
-    assert offenders == {}, f"tool-shaped and not in friday/kernel/toolsets/: {offenders}"
+    assert offenders == {}, (
+        f"tool-shaped and not in friday/kernel/toolsets/: {offenders}"
+    )
 
 
 def test_the_answer_is_a_run_s_output_not_a_door_an_agent_chooses():
@@ -334,7 +346,9 @@ def test_the_answer_is_a_run_s_output_not_a_door_an_agent_chooses():
     import ast
     from dataclasses import fields
 
-    source = ast.parse((REPO / "friday" / "kernel" / "harness" / "harness.py").read_text())
+    source = ast.parse(
+        (REPO / "friday" / "kernel" / "harness" / "harness.py").read_text()
+    )
     tool_shaped = [
         node.name
         for node in ast.walk(source)
@@ -347,13 +361,13 @@ def test_the_answer_is_a_run_s_output_not_a_door_an_agent_chooses():
     )
 
     from friday.kernel.harness.model_client import ANSWER, _answer_params
-    from plugins.backend.params import ApiIssueParams
+    from plugins.backend.params import TraceProblemParams
 
     assert ANSWER not in _tool_objects(), (
         "the answer is a run's output, not one of the doors an agent chooses"
     )
-    assert set(_answer_params(ApiIssueParams)["properties"]) == {
-        f.name for f in fields(ApiIssueParams)
+    assert set(_answer_params(TraceProblemParams)["properties"]) == {
+        f.name for f in fields(TraceProblemParams)
     }, "the parameters are the shape's own fields, generated from it"
 
 
@@ -364,9 +378,11 @@ def test_the_skill_tools_ask_the_model_for_what_their_names_promise():
     through the library underneath, which would keep passing if a tool asked
     for the wrong thing or stopped asking at all."""
     from friday.kernel.harness.skills import SkillLibrary
-    from friday.kernel.toolsets.skills import describe_skill_tool
-    from friday.kernel.toolsets.skills import read_skill_file_tool
-    from friday.kernel.toolsets.skills import search_skills_tool
+    from friday.kernel.toolsets.skills import (
+        describe_skill_tool,
+        read_skill_file_tool,
+        search_skills_tool,
+    )
 
     library = SkillLibrary(REPO / "skills")
     schema = lambda built: set(_props(built))
@@ -389,14 +405,14 @@ def test_the_field_names_an_extractor_may_ask_about_are_a_closed_set():
     lost it would have cost more than it saved — an extractor that invents a
     field name asks the reporter a question about nothing.
     """
-    from friday.kernel.harness.model_client import _answer_params
     from friday.kernel.domain.tasks import askable_fields
-    from plugins.backend.params import ApiIssueParams
     from friday.kernel.extraction.answer import answer_shape
+    from friday.kernel.harness.model_client import _answer_params
+    from plugins.backend.params import TraceProblemParams
 
-    asked = _answer_params(answer_shape(ApiIssueParams))["properties"]["ask_about"]
+    asked = _answer_params(answer_shape(TraceProblemParams))["properties"]["ask_about"]
 
-    assert asked["items"]["enum"] == list(askable_fields(ApiIssueParams))
+    assert asked["items"]["enum"] == list(askable_fields(TraceProblemParams))
 
 
 def test_a_tool_that_raises_tells_the_model_nothing_it_should_not_see():
@@ -410,7 +426,7 @@ def test_a_tool_that_raises_tells_the_model_nothing_it_should_not_see():
     recording now live (`friday/kernel/harness/llm_log.py`); a full run through it is
     `test_harness.py::test_a_tool_that_failed_is_recorded_as_having_failed`.
     """
-    from friday.kernel.harness.llm_log import LogHooks, UNAVAILABLE
+    from friday.kernel.harness.llm_log import UNAVAILABLE, LogHooks
 
     reached: list = []
     hooks = LogHooks([], tools=reached, agent="responder")
@@ -418,7 +434,7 @@ def test_a_tool_that_raises_tells_the_model_nothing_it_should_not_see():
     class _Call:
         tool_name = "explode"
         tool_call_id = "1"
-        args = {"x": "a"}
+        args: ClassVar[dict] = {"x": "a"}
 
     said = hooks._tool_error(
         _Ctx(None),
@@ -452,11 +468,14 @@ def test_a_deliberate_correction_is_not_turned_into_unavailable():
     class _Call:
         tool_name = "plain"
         tool_call_id = "1"
-        args = {"x": "a"}
+        args: ClassVar[dict] = {"x": "a"}
 
     with pytest.raises(ModelRetry):
         hooks._tool_error(
-            _Ctx(None), call=_Call(), tool_def=None, args={"x": "a"},
+            _Ctx(None),
+            call=_Call(),
+            tool_def=None,
+            args={"x": "a"},
             error=ModelRetry("call it again with a valid x"),
         )
 
@@ -497,7 +516,8 @@ async def test_memory_tools_say_so_when_they_were_wired_without_a_scope():
     assert "scope" not in seen, "the store must not be reached without a scope"
 
     said = await _call(
-        search, FridayState(channel_id="c1", task_id=7, agent="responder"),
+        search,
+        FridayState(channel_id="c1", task_id=7, agent="responder"),
         query="anything",
     )
     assert seen["scope"].channel_id == "c1"
@@ -530,13 +550,16 @@ async def test_memory_add_tells_the_model_the_channel_is_full_rather_than_losing
     from friday.kernel.toolsets.memory import memory_tools
 
     class FullChannel:
-        async def memory_add(self, scope, text, *, kind, origin=None, key=None, data=None):
+        async def memory_add(
+            self, scope, text, *, kind, origin=None, key=None, data=None
+        ):
             return None
 
     _, add, _, _, _ = memory_tools(FullChannel())
 
     said = await _call(
-        add, FridayState(channel_id="c1", task_id=None, agent="responder"),
+        add,
+        FridayState(channel_id="c1", task_id=None, agent="responder"),
         text="one more fact",
     )
 
@@ -555,14 +578,16 @@ async def test_memory_add_writes_under_the_voice_kind():
     seen = {}
 
     class Store:
-        async def memory_add(self, scope, text, *, kind, origin=None, key=None, data=None):
+        async def memory_add(
+            self, scope, text, *, kind, origin=None, key=None, data=None
+        ):
             seen["kind"] = kind
-            return None
 
     _, add, _, _, _ = memory_tools(Store())
 
     await _call(
-        add, FridayState(channel_id="c1", task_id=None, agent="responder"),
+        add,
+        FridayState(channel_id="c1", task_id=None, agent="responder"),
         text="they like short replies",
     )
 
@@ -574,24 +599,31 @@ async def test_memory_propose_tells_the_model_it_is_waiting_for_a_mark():
     says nothing is decided yet — a model reading "proposed" and stopping
     there would treat a candidate as remembered, which it is not until
     marked."""
+    from datetime import datetime
+
     from friday.kernel.domain.memory import CandidateStatus, MemoryCandidate
     from friday.kernel.domain.state import FridayState
     from friday.kernel.toolsets.memory import memory_tools
-    from datetime import datetime, timezone
 
     class Store:
         async def propose_memory(self, scope, text, kind):
             return MemoryCandidate(
-                id="cand1", channel_id=scope.channel_id, agent=scope.agent,
-                text=text, kind=kind, task_id=scope.task_id,
-                source_message_id=scope.message_id, status=CandidateStatus.PENDING,
-                proposed_at=datetime.now(timezone.utc),
+                id="cand1",
+                channel_id=scope.channel_id,
+                agent=scope.agent,
+                text=text,
+                kind=kind,
+                task_id=scope.task_id,
+                source_message_id=scope.message_id,
+                status=CandidateStatus.PENDING,
+                proposed_at=datetime.now(UTC),
             )
 
     _, _, propose, _, _ = memory_tools(Store())
 
     said = await _call(
-        propose, FridayState(channel_id="c1", task_id=None, agent="responder"),
+        propose,
+        FridayState(channel_id="c1", task_id=None, agent="responder"),
         text="they might prefer shorter replies",
     )
 
@@ -603,24 +635,32 @@ async def test_memory_propose_reports_an_immediate_resolution():
     """`propose_memory` resolves on the spot when the message it is scoped to
     already carries a verdict — the tool has to say what actually happened,
     not the generic "waiting" answer."""
+    from datetime import datetime
+
     from friday.kernel.domain.memory import CandidateStatus, MemoryCandidate
     from friday.kernel.domain.state import FridayState
     from friday.kernel.toolsets.memory import memory_tools
-    from datetime import datetime, timezone
 
     class Store:
         async def propose_memory(self, scope, text, kind):
             return MemoryCandidate(
-                id="cand1", channel_id=scope.channel_id, agent=scope.agent,
-                text=text, kind=kind, task_id=scope.task_id,
-                source_message_id=scope.message_id, status=CandidateStatus.ACCEPTED,
-                proposed_at=datetime.now(timezone.utc), memory_id="m9",
+                id="cand1",
+                channel_id=scope.channel_id,
+                agent=scope.agent,
+                text=text,
+                kind=kind,
+                task_id=scope.task_id,
+                source_message_id=scope.message_id,
+                status=CandidateStatus.ACCEPTED,
+                proposed_at=datetime.now(UTC),
+                memory_id="m9",
             )
 
     _, _, propose, _, _ = memory_tools(Store())
 
     said = await _call(
-        propose, FridayState(channel_id="c1", task_id=None, agent="responder"),
+        propose,
+        FridayState(channel_id="c1", task_id=None, agent="responder"),
         text="they might prefer shorter replies",
     )
 
@@ -636,21 +676,28 @@ async def test_memory_propose_writes_under_the_voice_kind():
 
     class Store:
         async def propose_memory(self, scope, text, kind):
+            from datetime import datetime
+
             from friday.kernel.domain.memory import CandidateStatus, MemoryCandidate
-            from datetime import datetime, timezone
 
             seen["kind"] = kind
             return MemoryCandidate(
-                id="cand1", channel_id=scope.channel_id, agent=scope.agent,
-                text=text, kind=kind, task_id=scope.task_id,
-                source_message_id=scope.message_id, status=CandidateStatus.PENDING,
-                proposed_at=datetime.now(timezone.utc),
+                id="cand1",
+                channel_id=scope.channel_id,
+                agent=scope.agent,
+                text=text,
+                kind=kind,
+                task_id=scope.task_id,
+                source_message_id=scope.message_id,
+                status=CandidateStatus.PENDING,
+                proposed_at=datetime.now(UTC),
             )
 
     _, _, propose, _, _ = memory_tools(Store())
 
     await _call(
-        propose, FridayState(channel_id="c1", task_id=None, agent="responder"),
+        propose,
+        FridayState(channel_id="c1", task_id=None, agent="responder"),
         text="they might prefer shorter replies",
     )
 
@@ -671,7 +718,8 @@ async def test_memory_search_reads_only_the_voice_kind():
     search, _, _, _, _ = memory_tools(Store())
 
     await _call(
-        search, FridayState(channel_id="c1", task_id=None, agent="responder"),
+        search,
+        FridayState(channel_id="c1", task_id=None, agent="responder"),
         query="anything",
     )
 
@@ -719,7 +767,8 @@ async def test_a_hostile_memory_cannot_close_a_section_in_the_responders_prompt(
     search, _, _, _, _ = memory_tools(Store())
 
     said = await _call(
-        search, FridayState(channel_id="c1", task_id=None, agent="responder"),
+        search,
+        FridayState(channel_id="c1", task_id=None, agent="responder"),
         query="anything",
     )
 

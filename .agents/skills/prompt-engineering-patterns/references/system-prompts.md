@@ -122,15 +122,15 @@ def build_adaptive_system_prompt(task_type, difficulty):
     base = "You are an expert assistant"
 
     roles = {
-        'code': 'software engineer',
-        'write': 'professional writer',
-        'analyze': 'data analyst'
+        "code": "software engineer",
+        "write": "professional writer",
+        "analyze": "data analyst",
     }
 
     expertise_levels = {
-        'beginner': 'Explain concepts simply with examples',
-        'intermediate': 'Balance detail with clarity',
-        'expert': 'Use technical terminology and advanced concepts'
+        "beginner": "Explain concepts simply with examples",
+        "intermediate": "Balance detail with clarity",
+        "expert": "Use technical terminology and advanced concepts",
     }
 
     return f"""{base} specializing as a {roles[task_type]}.
@@ -178,18 +178,17 @@ def test_system_prompt(system_prompt, test_cases):
     results = []
 
     for test in test_cases:
-        response = llm.complete(
-            system=system_prompt,
-            user_message=test['input']
-        )
+        response = llm.complete(system=system_prompt, user_message=test["input"])
 
-        results.append({
-            'test': test['name'],
-            'follows_role': check_role_adherence(response, system_prompt),
-            'follows_format': check_format(response, system_prompt),
-            'meets_constraints': check_constraints(response, system_prompt),
-            'quality': rate_quality(response, test['expected'])
-        })
+        results.append(
+            {
+                "test": test["name"],
+                "follows_role": check_role_adherence(response, system_prompt),
+                "follows_format": check_format(response, system_prompt),
+                "meets_constraints": check_constraints(response, system_prompt),
+                "quality": rate_quality(response, test["expected"]),
+            }
+        )
 
     return results
 ```

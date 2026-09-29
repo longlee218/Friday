@@ -28,26 +28,64 @@ CORRELATION = "8f14e45f-ceea-467a-9b3a-1e0e4a1b2c3d"
 async def _rows(db) -> None:
     state = FridayState(channel_id=ROOM, agent="admin")
     for suffix, env in (("aperogroup.ai", "production"), ("dev.aperogroup.ai", "dev")):
-        await db.memory_add(state, f"{suffix} is {env}", kind="backend.environment",
-                            origin=ADMIN, data={"suffix": suffix, "env": env})
-    await db.memory_add(state, "the ReelMe repository", kind="backend.project", origin=ADMIN,
-                        data={"name": "reelme", "repo_path": "/clone/reelme",
-                              "default_branch": "main", "stack": "NestJS"})
-    for name in ("backend-reelme-v2", "payments-api"):
-        await db.memory_add(state, name, kind="backend.service", origin=ADMIN, data={
-            "name": name, "project": "reelme",
-            "prod": {"cluster": "c", "namespace": "sw", "app": name},
-            "dev": {"kube_context": "dev", "namespace": "dev", "pod_pattern": name},
-        })
-    await db.memory_add(state, "prod logs lag two minutes", kind="fact", origin=ADMIN)
-    await db.memory_add(state.for_task(1), "ERR301 was a missing selling_region",
-                        kind="finding", data={"task_id": 1, "service": "backend-reelme-v2",
-                                              "confidence": 0.9, "error_code": "ERR301"})
+        await db.memory_add(
+            state,
+            f"{suffix} is {env}",
+            kind="backend.environment",
+            origin=ADMIN,
+            data={"suffix": suffix, "env": env},
+        )
     await db.memory_add(
-        state, "reelme onboarding needs selling_region", kind="skill", origin=ADMIN,
+        state,
+        "the ReelMe repository",
+        kind="backend.project",
+        origin=ADMIN,
+        data={
+            "name": "reelme",
+            "repo_path": "/clone/reelme",
+            "default_branch": "main",
+            "stack": "NestJS",
+        },
+    )
+    for name in ("backend-reelme-v2", "payments-api"):
+        await db.memory_add(
+            state,
+            name,
+            kind="backend.service",
+            origin=ADMIN,
+            data={
+                "name": name,
+                "project": "reelme",
+                "prod": {"cluster": "c", "namespace": "sw", "app": name},
+                "dev": {"kube_context": "dev", "namespace": "dev", "pod_pattern": name},
+            },
+        )
+    await db.memory_add(state, "prod logs lag two minutes", kind="fact", origin=ADMIN)
+    await db.memory_add(
+        state.for_task(1),
+        "ERR301 was a missing selling_region",
+        kind="finding",
+        data={
+            "task_id": 1,
+            "service": "backend-reelme-v2",
+            "confidence": 0.9,
+            "error_code": "ERR301",
+        },
+    )
+    await db.memory_add(
+        state,
+        "reelme onboarding needs selling_region",
+        kind="skill",
+        origin=ADMIN,
         key="reelme-onboarding",
-        data={"when": {"service": ["backend-reelme-v2"], "error_codes": [],
-                       "path_patterns": [], "keywords": []}},
+        data={
+            "when": {
+                "service": ["backend-reelme-v2"],
+                "error_codes": [],
+                "path_patterns": [],
+                "keywords": [],
+            }
+        },
     )
 
 
@@ -56,21 +94,33 @@ async def _said(db, *turns: str, code: tuple[str, ...] = ()) -> int:
     from conftest import make_event
 
     task = await db.create_task(
-        conversation=ConversationId("fake", ROOM), type="backend.trace_problem",
-        state="pending", confidence=0.9, params={},
+        conversation=ConversationId("fake", ROOM),
+        type="backend.trace_problem",
+        state="pending",
+        confidence=0.9,
+        params={},
     )
     for n, text in enumerate(turns):
-        event = replace(make_event(channel_id=ROOM, message_id=f"m{task.id}-{n}", text=text),
-                        code=code if n == 0 else ())
+        event = replace(
+            make_event(channel_id=ROOM, message_id=f"m{task.id}-{n}", text=text),
+            code=code if n == 0 else (),
+        )
         await db.record_message(event)
         if n == 0:
-            await db.mark_triaged(event, task.id, decision={"type": "backend.trace_problem"})
+            await db.mark_triaged(
+                event, task.id, decision={"type": "backend.trace_problem"}
+            )
     return task.id
 
 
 async def _intake(db, task_id: int, enricher=enrich):
-    return await intake(db, task_id=task_id, channel_id=ROOM,
-                        reported_at="2026-09-28T10:00:00+07:00", enricher=enricher)
+    return await intake(
+        db,
+        task_id=task_id,
+        channel_id=ROOM,
+        reported_at="2026-09-28T10:00:00+07:00",
+        enricher=enricher,
+    )
 
 
 # --- no model, no network ----------------------------------------------------
@@ -89,8 +139,14 @@ def _imports(path: Path) -> set[str]:
 
 def test_intake_and_the_enricher_import_no_model_and_no_reader():
     root = Path(__file__).resolve().parent.parent
-    banned = ("pydantic_ai", "friday.kernel.harness", "friday.kernel.providers",
-              "plugins.backend.toolsets", "httpx", "mcp")
+    banned = (
+        "pydantic_ai",
+        "friday.kernel.harness",
+        "friday.kernel.providers",
+        "plugins.backend.toolsets",
+        "httpx",
+        "mcp",
+    )
     for module in ("friday/kernel/spine/intake.py", "plugins/backend/placement.py"):
         bad = [m for m in _imports(root / module) if m.startswith(banned)]
         assert bad == [], f"{module} imports {bad}"
@@ -116,8 +172,9 @@ async def test_intake_opens_no_connection(db, monkeypatch):
 
 async def test_a_named_service_resolves_its_placement_and_its_memory(db):
     await _rows(db)
-    task_id = await _said(db, f"backend-reelme-v2 loi 500\n{DEV_URL}\n"
-                              f"correlationId {CORRELATION}")
+    task_id = await _said(
+        db, f"backend-reelme-v2 loi 500\n{DEV_URL}\ncorrelationId {CORRELATION}"
+    )
 
     ctx = await _intake(db, task_id)
 
@@ -127,8 +184,16 @@ async def test_a_named_service_resolves_its_placement_and_its_memory(db):
     assert ctx.domain.repo_path == "/clone/reelme"
     assert ctx.domain.correlation_id == CORRELATION
     assert ctx.hints.uuids == (CORRELATION,)
-    assert ctx.identity == ("dev", "backend-reelme-v2", "/clone/reelme", "/clone/reelme")
-    assert ctx.memory == ("prod logs lag two minutes", "ERR301 was a missing selling_region")
+    assert ctx.identity == (
+        "dev",
+        "backend-reelme-v2",
+        "/clone/reelme",
+        "/clone/reelme",
+    )
+    assert ctx.memory == (
+        "prod logs lag two minutes",
+        "ERR301 was a missing selling_region",
+    )
     assert ctx.skills == ("reelme onboarding needs selling_region",)
 
 

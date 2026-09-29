@@ -1,0 +1,28 @@
+# Ruff: `uv run ruff format` and `uv run ruff check`. A file of its own
+# rather than `[tool.ruff]` in pyproject.toml, which is edited only through
+# `uv add` (CLAUDE.md).
+
+target-version = "py313"
+line-length = 88
+# Vendored skills and scratch work are not this project's code.
+extend-exclude = [".agents", ".scratch", "web"]
+
+[lint]
+ignore = [
+  # Long strings are split inside tuples and lists on purpose: every prompt,
+  # recognition and example text in this repo is written that way.
+  "ISC004",
+  # `dict(a=1)` reads as keyword arguments; not a defect.
+  "C408",
+  # Swapping `ValueError` for `TypeError` changes what callers catch.
+  "TRY004",
+]
+
+[lint.flake8-bugbear]
+# FastAPI's own idiom: `Body()` / `Query()` in a signature is a declaration.
+extend-immutable-calls = ["fastapi.Body", "fastapi.Query", "fastapi.params.Body"]
+
+[lint.per-file-ignores]
+# Tests and their crash-child scripts use blocking I/O inside async functions
+# on purpose: they drive a process and read its files, nothing else runs.
+"tests/**" = ["ASYNC221", "ASYNC230", "ASYNC251"]

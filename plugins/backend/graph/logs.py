@@ -11,7 +11,7 @@ the reporter said something, which is what a window is measured back from.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 __all__ = ["_reported_at"]
@@ -40,5 +40,5 @@ def _reported_at(task: Any) -> datetime:
             "instead, which is not when this was reported",
             getattr(task, "id", "?"),
         )
-        return datetime.now(timezone.utc)
-    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+        return datetime.now(UTC)
+    return at if at.tzinfo else at.replace(tzinfo=UTC)

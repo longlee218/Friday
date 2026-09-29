@@ -24,8 +24,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from friday.kernel.registry import Registry
-from friday.sdk.workflow import DAG, Deps
 from friday.sdk.plugin import TaskTypeSpec
+from friday.sdk.workflow import DAG, Deps
 
 __all__ = [
     "DAGS",
@@ -101,5 +101,3 @@ def deps_of(task_type: str) -> Callable[[Deps], Deps] | None:
     enough. The adapter applies it to the base `Deps` it builds per run."""
     spec = TASK_TYPES.task_types().get(task_type)
     return spec.deps if spec is not None else None
-
-

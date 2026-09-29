@@ -34,12 +34,12 @@ import logging
 from dataclasses import fields
 from typing import TYPE_CHECKING
 
-from friday.sdk.agent import AgentDeclaration
-from friday.kernel.harness.harness import Harness
+from friday.kernel.domain.tasks import Params
 from friday.kernel.extraction.answer import Clarify, answer_shape, params_and_clarify
 from friday.kernel.extraction.context import FullContext
-from friday.kernel.domain.tasks import MODEL_AUTHORED, Params
 from friday.kernel.extraction.prompt import build_input, build_instructions
+from friday.kernel.harness.harness import Harness
+from friday.sdk.agent import AgentDeclaration
 
 if TYPE_CHECKING:
     # `friday.kernel.config` sits above the packages because it is read before any of
@@ -56,17 +56,21 @@ if TYPE_CHECKING:
 #: (search, then fetch) — what it had when tool turns were added on top.
 #: 30s a request: the slowest measured was 10.2s.
 EXTRACTOR = AgentDeclaration(
-    name="extractor", tier="flash", temperature=0.0, max_turns=3,
-    tokens=100_000, request_timeout_seconds=30.0,
+    name="extractor",
+    tier="flash",
+    temperature=0.0,
+    max_turns=3,
+    tokens=100_000,
+    request_timeout_seconds=30.0,
 )
 
 __all__ = [
     "EXTRACTOR",
-    "input_fingerprint",
     "Clarify",
     "Extractor",
     "build_extractor",
     "extract",
+    "input_fingerprint",
     "register",
     "register_extractors",
     "registered",
@@ -76,7 +80,7 @@ log = logging.getLogger(__name__)
 
 #: Task type -> the extractor that fills its parameters. Written by
 #: `register()`, read by `extract()` from inside `prepare()`.
-_EXTRACTORS: dict[str, "Extractor"] = {}
+_EXTRACTORS: dict[str, Extractor] = {}
 
 
 class Extractor:
@@ -119,7 +123,11 @@ class Extractor:
         return build_input(context)
 
     async def run(
-        self, context: FullContext, *, task_id: int | None = None, node: str | None = None
+        self,
+        context: FullContext,
+        *,
+        task_id: int | None = None,
+        node: str | None = None,
     ) -> tuple[Params | None, Clarify | None]:
         """Ask the model to fill the fields. `(None, None)` if the call failed.
 
@@ -175,7 +183,7 @@ def build_extractor(
     shortcut.
 
     The `task_type` for which this extractor is registered must match
-    `params_cls`: registering an `api_issue` extractor with
+    `params_cls`: registering a `trace_problem` extractor with
     `params_cls=DocQuestionParams` would silently produce the wrong type at
     runtime. The check is enforced at registration, not at extraction, so a
     misconfigured system fails to start rather than producing a wrong answer.
@@ -226,9 +234,6 @@ async def extract(
     return await ext.run(context, task_id=task_id, node=node)
 
 
-
-
-
 async def input_fingerprint(task_type: str, context: FullContext) -> str:
     """One string standing for everything this extractor is about to be shown.
 
@@ -267,7 +272,7 @@ async def input_fingerprint(task_type: str, context: FullContext) -> str:
 def register(
     task_type: str,
     params_cls: type[Params],
-    config: "AgentConfig",  # type: ignore[name-defined]  # noqa: F821
+    config: AgentConfig,  # type: ignore[name-defined]  # noqa: F821
     *,
     #: The skill library, if this install has one. Handed to the harness,
     #: which wires the four tools and grants the turn they need — an
@@ -294,7 +299,6 @@ def register(
     model to a schema.
     """
     from friday.kernel.harness.harness import Harness
-
     from friday.kernel.harness.instruction_prompt import SkillMeta
 
     skills_meta = None
@@ -341,7 +345,8 @@ def _hygiene(params: Params) -> Params:
 
     return type(params)(
         **{
-            f.name: clean(value) if isinstance(value := getattr(params, f.name), str)
+            f.name: clean(value)
+            if isinstance(value := getattr(params, f.name), str)
             else value
             for f in fields(params)
         }
@@ -383,9 +388,8 @@ def register_extractors(
 
     An undeclared tier refuses the boot (`Config.agent`).
 
-    **One block for every type, not one per type.** There were three —
-    `extractor_api_issue`, `extractor_access_request`, `extractor_doc_question`
-    — on the argument that the jobs differ enough to want different models:
+    **One block for every type, not one per type.** There were three, one per
+    task type, on the argument that the jobs differ enough to want different models:
     reading a correlationId out of a stack trace is not reading a repo name
     out of a request. That argument was never wrong, it was just never
     *taken*: all three blocks held identical values for as long as they

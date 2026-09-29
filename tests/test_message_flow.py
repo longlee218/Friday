@@ -108,7 +108,9 @@ async def test_a_path_reaches_through_the_task_to_what_it_reached_for(db):
         params={},
     )
     await db.mark_triaged(
-        event, task.id, decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}}
+        event,
+        task.id,
+        decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}},
     )
     await db.record_model_call(
         message_id=None,
@@ -149,7 +151,9 @@ async def test_a_path_ends_at_what_was_sent(db):
         params={},
     )
     await db.mark_triaged(
-        event, task.id, decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}}
+        event,
+        task.id,
+        decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}},
     )
     await db.queue_outbound(
         task_id=task.id,
@@ -201,7 +205,9 @@ async def test_calls_from_before_and_after_the_task_read_as_one_sequence(db):
         params={},
     )
     await db.mark_triaged(
-        event, task.id, decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}}
+        event,
+        task.id,
+        decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}},
     )
     await db.record_model_call(
         message_id=None,
@@ -273,7 +279,9 @@ async def test_a_call_naming_both_a_message_and_its_task_is_listed_once(db):
         params={},
     )
     await db.mark_triaged(
-        event, task.id, decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}}
+        event,
+        task.id,
+        decision={"type": "backend.trace_problem", "confidence": 0.9, "params": {}},
     )
     await db.record_model_call(
         message_id="m1",
@@ -330,8 +338,7 @@ def test_there_is_still_only_one_provider_name():
                 if (
                     isinstance(stmt, ast.Assign)
                     and any(
-                        isinstance(t, ast.Name) and t.id == "name"
-                        for t in stmt.targets
+                        isinstance(t, ast.Name) and t.id == "name" for t in stmt.targets
                     )
                     and isinstance(stmt.value, ast.Constant)
                     and isinstance(stmt.value.value, str)

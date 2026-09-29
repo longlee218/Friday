@@ -9,16 +9,16 @@ needs the reporter's raw text to extract from; storing it on the
 message row avoids re-fetching from Discord on every plan.
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = '31a1b5c8e7d4'
-down_revision: Union[str, Sequence[str], None] = '71a2c91fa3b0'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "31a1b5c8e7d4"
+down_revision: str | Sequence[str] | None = "71a2c91fa3b0"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -56,4 +56,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column('messages', 'original_text')
+    op.drop_column("messages", "original_text")

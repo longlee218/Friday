@@ -17,16 +17,15 @@ class PromptTemplate:
 
         return self.template.format(**kwargs)
 
+
 # Usage
 template = PromptTemplate(
     template_string="Translate {text} from {source_lang} to {target_lang}",
-    variables=['text', 'source_lang', 'target_lang']
+    variables=["text", "source_lang", "target_lang"],
 )
 
 prompt = template.render(
-    text="Hello world",
-    source_lang="English",
-    target_lang="Spanish"
+    text="Hello world", source_lang="English", target_lang="Spanish"
 )
 ```
 
@@ -40,28 +39,30 @@ class ConditionalTemplate(PromptTemplate):
 
         # Handle if-blocks: {{#if variable}}content{{/if}}
         import re
-        if_pattern = r'\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}'
+
+        if_pattern = r"\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}"
 
         def replace_if(match):
             var_name = match.group(1)
             content = match.group(2)
-            return content if kwargs.get(var_name) else ''
+            return content if kwargs.get(var_name) else ""
 
         result = re.sub(if_pattern, replace_if, result, flags=re.DOTALL)
 
         # Handle for-loops: {{#each items}}{{this}}{{/each}}
-        each_pattern = r'\{\{#each (\w+)\}\}(.*?)\{\{/each\}\}'
+        each_pattern = r"\{\{#each (\w+)\}\}(.*?)\{\{/each\}\}"
 
         def replace_each(match):
             var_name = match.group(1)
             content = match.group(2)
             items = kwargs.get(var_name, [])
-            return '\\n'.join(content.replace('{{this}}', str(item)) for item in items)
+            return "\\n".join(content.replace("{{this}}", str(item)) for item in items)
 
         result = re.sub(each_pattern, replace_each, result, flags=re.DOTALL)
 
         # Finally, render remaining variables
         return result.format(**kwargs)
+
 
 # Usage
 template = ConditionalTemplate("""
@@ -102,34 +103,35 @@ class ModularTemplate:
                 component = self.components[component_name]
                 parts.append(component.format(**kwargs))
 
-        return '\\n\\n'.join(parts)
+        return "\\n\\n".join(parts)
+
 
 # Usage
 builder = ModularTemplate()
 
-builder.register_component('system', "You are a {role}.")
-builder.register_component('context', "Context: {context}")
-builder.register_component('instruction', "Task: {task}")
-builder.register_component('examples', "Examples:\\n{examples}")
-builder.register_component('input', "Input: {input}")
-builder.register_component('format', "Output format: {format}")
+builder.register_component("system", "You are a {role}.")
+builder.register_component("context", "Context: {context}")
+builder.register_component("instruction", "Task: {task}")
+builder.register_component("examples", "Examples:\\n{examples}")
+builder.register_component("input", "Input: {input}")
+builder.register_component("format", "Output format: {format}")
 
 # Compose different templates for different scenarios
 basic_prompt = builder.render(
-    ['system', 'instruction', 'input'],
-    role='helpful assistant',
-    instruction='Summarize the text',
-    input='...'
+    ["system", "instruction", "input"],
+    role="helpful assistant",
+    instruction="Summarize the text",
+    input="...",
 )
 
 advanced_prompt = builder.render(
-    ['system', 'context', 'examples', 'instruction', 'input', 'format'],
-    role='expert analyst',
-    context='Financial analysis',
-    examples='...',
-    instruction='Analyze sentiment',
-    input='...',
-    format='JSON'
+    ["system", "context", "examples", "instruction", "input", "format"],
+    role="expert analyst",
+    context="Financial analysis",
+    examples="...",
+    instruction="Analyze sentiment",
+    input="...",
+    format="JSON",
 )
 ```
 
@@ -244,18 +246,26 @@ class TemplateRegistry:
         # Child overwrites parent sections
         return {**parent, **child}
 
+
 # Usage
 registry = TemplateRegistry()
 
-registry.register('base_analysis', {
-    'system': 'You are an expert analyst.',
-    'format': 'Provide analysis in structured format.'
-})
+registry.register(
+    "base_analysis",
+    {
+        "system": "You are an expert analyst.",
+        "format": "Provide analysis in structured format.",
+    },
+)
 
-registry.register('sentiment_analysis', {
-    'instruction': 'Analyze sentiment',
-    'format': 'Provide sentiment score from -1 to 1.'
-}, parent='base_analysis')
+registry.register(
+    "sentiment_analysis",
+    {
+        "instruction": "Analyze sentiment",
+        "format": "Provide sentiment score from -1 to 1.",
+    },
+    parent="base_analysis",
+)
 ```
 
 ### Variable Validation
@@ -272,33 +282,36 @@ class ValidatedTemplate:
                 value = kwargs[var_name]
 
                 # Type validation
-                if 'type' in var_schema:
-                    expected_type = var_schema['type']
+                if "type" in var_schema:
+                    expected_type = var_schema["type"]
                     if not isinstance(value, expected_type):
                         raise TypeError(f"{var_name} must be {expected_type}")
 
                 # Range validation
-                if 'min' in var_schema and value < var_schema['min']:
+                if "min" in var_schema and value < var_schema["min"]:
                     raise ValueError(f"{var_name} must be >= {var_schema['min']}")
 
-                if 'max' in var_schema and value > var_schema['max']:
+                if "max" in var_schema and value > var_schema["max"]:
                     raise ValueError(f"{var_name} must be <= {var_schema['max']}")
 
                 # Enum validation
-                if 'choices' in var_schema and value not in var_schema['choices']:
-                    raise ValueError(f"{var_name} must be one of {var_schema['choices']}")
+                if "choices" in var_schema and value not in var_schema["choices"]:
+                    raise ValueError(
+                        f"{var_name} must be one of {var_schema['choices']}"
+                    )
 
     def render(self, **kwargs):
         self.validate_vars(**kwargs)
         return self.template.format(**kwargs)
 
+
 # Usage
 template = ValidatedTemplate(
     template="Summarize in {length} words with {tone} tone",
     schema={
-        'length': {'type': int, 'min': 10, 'max': 500},
-        'tone': {'type': str, 'choices': ['formal', 'casual', 'technical']}
-    }
+        "length": {"type": int, "min": 10, "max": 500},
+        "tone": {"type": str, "choices": ["formal", "casual", "technical"]},
+    },
 )
 ```
 
@@ -341,20 +354,20 @@ class ConversationTemplate:
         self.history = []
 
     def add_user_message(self, message):
-        self.history.append({'role': 'user', 'content': message})
+        self.history.append({"role": "user", "content": message})
 
     def add_assistant_message(self, message):
-        self.history.append({'role': 'assistant', 'content': message})
+        self.history.append({"role": "assistant", "content": message})
 
     def render_for_api(self):
-        messages = [{'role': 'system', 'content': self.system_prompt}]
+        messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(self.history)
         return messages
 
     def render_as_text(self):
         result = f"System: {self.system_prompt}\\n\\n"
         for msg in self.history:
-            role = msg['role'].capitalize()
+            role = msg["role"].capitalize()
             result += f"{role}: {msg['content']}\\n\\n"
         return result
 ```
@@ -374,7 +387,7 @@ class StatefulTemplate:
         self.templates[state_name] = template
 
     def render(self):
-        current_state = self.state.get('current_state', 'default')
+        current_state = self.state.get("current_state", "default")
         template = self.templates.get(current_state)
 
         if not template:
@@ -382,26 +395,36 @@ class StatefulTemplate:
 
         return template.format(**self.state)
 
+
 # Usage for multi-step workflows
 workflow = StatefulTemplate()
 
-workflow.register_state_template('init', """
+workflow.register_state_template(
+    "init",
+    """
 Welcome! Let's {task}.
 What is your {first_input}?
-""")
+""",
+)
 
-workflow.register_state_template('processing', """
+workflow.register_state_template(
+    "processing",
+    """
 Thanks! Processing {first_input}.
 Now, what is your {second_input}?
-""")
+""",
+)
 
-workflow.register_state_template('complete', """
+workflow.register_state_template(
+    "complete",
+    """
 Great! Based on:
 - {first_input}
 - {second_input}
 
 Here's the result: {result}
-""")
+""",
+)
 ```
 
 ## Best Practices
@@ -421,26 +444,24 @@ Here's the result: {result}
 
 ```python
 QA_TEMPLATES = {
-    'factual': """Answer the question based on the context.
+    "factual": """Answer the question based on the context.
 
 Context: {context}
 Question: {question}
 Answer:""",
-
-    'multi_hop': """Answer the question by reasoning across multiple facts.
+    "multi_hop": """Answer the question by reasoning across multiple facts.
 
 Facts: {facts}
 Question: {question}
 
 Reasoning:""",
-
-    'conversational': """Continue the conversation naturally.
+    "conversational": """Continue the conversation naturally.
 
 Previous conversation:
 {history}
 
 User: {question}
-Assistant:"""
+Assistant:""",
 }
 ```
 
@@ -448,7 +469,7 @@ Assistant:"""
 
 ```python
 GENERATION_TEMPLATES = {
-    'blog_post': """Write a blog post about {topic}.
+    "blog_post": """Write a blog post about {topic}.
 
 Requirements:
 - Length: {word_count} words
@@ -456,22 +477,20 @@ Requirements:
 - Include: {key_points}
 
 Blog post:""",
-
-    'product_description': """Write a product description for {product}.
+    "product_description": """Write a product description for {product}.
 
 Features: {features}
 Benefits: {benefits}
 Target audience: {audience}
 
 Description:""",
-
-    'email': """Write a {type} email.
+    "email": """Write a {type} email.
 
 To: {recipient}
 Context: {context}
 Key points: {key_points}
 
-Email:"""
+Email:""",
 }
 ```
 

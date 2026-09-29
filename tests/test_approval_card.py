@@ -9,8 +9,8 @@ same however it is delivered — the Discord adapter only transports it.
 
 from __future__ import annotations
 
-from friday.kernel.domain.conversation import ConversationId
 from friday.kernel import outbox_card as card
+from friday.kernel.domain.conversation import ConversationId
 from friday.sdk.redact import clear_secret_values, register_secret_values
 
 WHERE = ConversationId("discord", "999")
@@ -24,8 +24,8 @@ def test_it_shows_the_bytes_the_destination_and_the_audience():
     body = render("the checkout api is back up")
 
     assert "the checkout api is back up" in body
-    assert str(WHERE) in body           # discord:999
-    assert "public" in body             # a reply posts into the conversation
+    assert str(WHERE) in body  # discord:999
+    assert "public" in body  # a reply posts into the conversation
     assert "goes out as you" in body
     assert "reply 12" in body
 

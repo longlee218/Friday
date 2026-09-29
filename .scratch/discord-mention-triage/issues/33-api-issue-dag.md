@@ -92,8 +92,12 @@ Loki server inside its own `async with` block; `find_code_path` and `fix_bug`
 share a source-tree server; `compose_reply` does not need any.
 
 ```python
-async with MCPServerStdio(params={"command": "npx", "args": ["-y", "loki-mcp"]}) as loki, \
-           MCPServerStdio(params={"command": "npx", "args": ["-y", "fs-mcp", repo_path]}) as fs:
+async with (
+    MCPServerStdio(params={"command": "npx", "args": ["-y", "loki-mcp"]}) as loki,
+    MCPServerStdio(
+        params={"command": "npx", "args": ["-y", "fs-mcp", repo_path]}
+    ) as fs,
+):
     dag = build_api_issue_dag(loki=loki, fs=fs)
     await dag.run(state)
 ```

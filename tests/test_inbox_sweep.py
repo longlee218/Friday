@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from conftest import captured, make_event
+
 from friday.kernel.domain.messages import MentionType
 
 
@@ -41,9 +44,7 @@ async def test_a_sweep_asks_only_for_messages_after_the_cursor(inbox, provider):
     assert provider.history_calls == [("watched", "100", None)]
 
 
-async def test_a_sweep_asks_from_the_beginning_when_there_is_no_cursor(
-    inbox, provider
-):
+async def test_a_sweep_asks_from_the_beginning_when_there_is_no_cursor(inbox, provider):
     await inbox.sweep_once()
 
     assert provider.history_calls == [("watched", None, None)]
@@ -61,9 +62,7 @@ async def test_a_sweep_covers_only_watched_channels(inbox, provider):
 async def test_a_swept_message_that_does_not_address_the_account_is_dropped(
     inbox, provider, db
 ):
-    provider.emit_history(
-        "watched", make_event(message_id="100", mention_type=None)
-    )
+    provider.emit_history("watched", make_event(message_id="100", mention_type=None))
 
     assert await inbox.sweep_once() == []
     assert await db.mentions() == []
@@ -141,25 +140,25 @@ async def test_the_sweep_also_runs_on_a_timer(provider, db, config):
 def _cold(provider, db, config, *, lookback):
     from friday.kernel.inbox import Inbox
 
-    return Inbox(
-        provider=provider, db=db, config=config, cold_start_lookback=lookback
-    )
+    return Inbox(provider=provider, db=db, config=config, cold_start_lookback=lookback)
 
 
 async def test_a_cold_cursor_looks_back_as_far_as_the_lookback(provider, db, config):
     """D8. With no cursor there is no message to start after, so the sweep
     says how far back it is willing to read instead of reading from the day
     the channel was created."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     await _cold(provider, db, config, lookback=24 * 3600).sweep_once()
 
     (channel, after, since) = provider.history_calls[0]
     assert (channel, after) == ("watched", None)
     assert since is not None
-    assert before - timedelta(hours=24, seconds=5) <= since <= before - timedelta(
-        hours=23, minutes=59
+    assert (
+        before - timedelta(hours=24, seconds=5)
+        <= since
+        <= before - timedelta(hours=23, minutes=59)
     )
 
 

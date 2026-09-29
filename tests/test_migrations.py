@@ -35,9 +35,7 @@ def test_the_models_and_the_migrations_describe_the_same_database(tmp_path):
 
     engine = create_engine(f"sqlite:///{path}")
     with engine.connect() as connection:
-        context = MigrationContext.configure(
-            connection, opts={"render_as_batch": True}
-        )
+        context = MigrationContext.configure(connection, opts={"render_as_batch": True})
         assert compare_metadata(context, schema.Base.metadata) == []
         _assert_primary_keys_match(connection)
         _assert_partial_index_predicates_match(connection)
@@ -116,8 +114,8 @@ def test_a_migration_that_already_half_applied_can_still_finish(tmp_path):
     opened the database. `env.py` runs migrations transactionally now, and
     this migration can finish the job it left half done.
     """
-    import subprocess
     import sqlite3
+    import subprocess
 
     db = tmp_path / "half.db"
     env = {**os.environ, "FRIDAY_DB": str(db)}
@@ -125,7 +123,11 @@ def test_a_migration_that_already_half_applied_can_still_finish(tmp_path):
     def alembic(*args):
         return subprocess.run(
             ["uv", "run", "alembic", *args],
-            cwd=ROOT, env=env, capture_output=True, text=True,
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
     # The state the live database was in: one revision short, with that
@@ -173,22 +175,51 @@ def test_an_approved_task_carries_its_approval_onto_its_reply_rows(tmp_path):
     live = MetaData()
     live.reflect(bind=engine)
     tasks, outbox = live.tables["tasks"], live.tables["outbox"]
-    common = dict(conversation_id="discord:1", state="queued", attempts=0,
-                  created_at="2026-09-01T00:00:00+00:00", sender="discord_user")
+    common = dict(
+        conversation_id="discord:1",
+        state="queued",
+        attempts=0,
+        created_at="2026-09-01T00:00:00+00:00",
+        sender="discord_user",
+    )
     with engine.begin() as connection:
-        connection.execute(tasks.insert(), [
-            dict(id=1, conversation_id="discord:1", type="backend.trace_problem", state="review",
-                 confidence=0.9, params={}, created_at="2026-09-01T00:00:00+00:00",
-                 approved_at="2026-09-02T00:00:00+00:00", approved_by="longle_"),
-            dict(id=2, conversation_id="discord:1", type="backend.trace_problem", state="review",
-                 confidence=0.9, params={}, created_at="2026-09-01T00:00:00+00:00",
-                 approved_at=None, approved_by=None),
-        ])
-        connection.execute(outbox.insert(), [
-            dict(id=10, task_id=1, kind="reply", text="đang xử lý", **common),
-            dict(id=11, task_id=1, kind="approval_card", text="đang xử lý", **common),
-            dict(id=20, task_id=2, kind="reply", text="chưa duyệt", **common),
-        ])
+        connection.execute(
+            tasks.insert(),
+            [
+                dict(
+                    id=1,
+                    conversation_id="discord:1",
+                    type="backend.trace_problem",
+                    state="review",
+                    confidence=0.9,
+                    params={},
+                    created_at="2026-09-01T00:00:00+00:00",
+                    approved_at="2026-09-02T00:00:00+00:00",
+                    approved_by="longle_",
+                ),
+                dict(
+                    id=2,
+                    conversation_id="discord:1",
+                    type="backend.trace_problem",
+                    state="review",
+                    confidence=0.9,
+                    params={},
+                    created_at="2026-09-01T00:00:00+00:00",
+                    approved_at=None,
+                    approved_by=None,
+                ),
+            ],
+        )
+        connection.execute(
+            outbox.insert(),
+            [
+                dict(id=10, task_id=1, kind="reply", text="đang xử lý", **common),
+                dict(
+                    id=11, task_id=1, kind="approval_card", text="đang xử lý", **common
+                ),
+                dict(id=20, task_id=2, kind="reply", text="chưa duyệt", **common),
+            ],
+        )
     engine.dispose()
 
     _alembic(path, "upgrade", "head")
@@ -227,11 +258,20 @@ def _insert_task(path, id: int, params) -> None:
     live = MetaData()
     live.reflect(bind=engine)
     with engine.begin() as connection:
-        connection.execute(live.tables["tasks"].insert(), [
-            dict(id=id, conversation_id="discord:1", type="backend.trace_problem",
-                 state="needs_human", confidence=0.9, params=params,
-                 created_at="2026-09-01T00:00:00+00:00"),
-        ])
+        connection.execute(
+            live.tables["tasks"].insert(),
+            [
+                dict(
+                    id=id,
+                    conversation_id="discord:1",
+                    type="backend.trace_problem",
+                    state="needs_human",
+                    confidence=0.9,
+                    params=params,
+                    created_at="2026-09-01T00:00:00+00:00",
+                ),
+            ],
+        )
     engine.dispose()
 
 
@@ -241,7 +281,13 @@ def test_scrubbing_a_credential_leaves_the_params_an_object(tmp_path):
     and the pool died on `'str' object has no attribute 'items'` at boot."""
     path = tmp_path / "scrubbed.db"
     _alembic(path, "upgrade", "f81f63e7d3ce")
-    _insert_task(path, 1, {"curl": "curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl' https://x"})
+    _insert_task(
+        path,
+        1,
+        {
+            "curl": "curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl' https://x"
+        },
+    )
     _insert_task(path, 2, {"summary": "nothing to scrub"})
 
     # Not `head`: the repair after it would hide this revision's own bug.

@@ -125,8 +125,9 @@ def _plain(value: Any) -> Any:
 
 
 def _sha256(value: Any) -> str:
-    body = json.dumps(_plain(value), sort_keys=True, ensure_ascii=False,
-                      separators=(",", ":"))
+    body = json.dumps(
+        _plain(value), sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    )
     return hashlib.sha256(body.encode()).hexdigest()
 
 
@@ -144,11 +145,13 @@ def step_keys(plan: Plan, placement_identity: tuple) -> dict[str, str]:
     keys: dict[str, str] = {}
     for step in plan.steps:
         body = {k: v for k, v in _plain(step).items() if k not in ("id", "reads")}
-        keys[step.id] = _sha256({
-            "step": body,
-            "reads": [keys[r] for r in step.reads],
-            "placement": placement_identity,
-        })
+        keys[step.id] = _sha256(
+            {
+                "step": body,
+                "reads": [keys[r] for r in step.reads],
+                "placement": placement_identity,
+            }
+        )
     return keys
 
 
@@ -162,7 +165,9 @@ def _field_type_errors(step: Step) -> list[str]:
     for f in fields(step):
         value = getattr(step, f.name)
         if f.name in _TUPLE_FIELDS:
-            if not (isinstance(value, tuple) and all(isinstance(v, str) for v in value)):
+            if not (
+                isinstance(value, tuple) and all(isinstance(v, str) for v in value)
+            ):
                 errors.append(f"{step.id!r}: {f.name} must be a tuple of strings")
         elif not isinstance(value, str):
             errors.append(f"{step.id!r}: {f.name} must be a string")
@@ -183,15 +188,23 @@ def shape_errors(plan: Plan) -> list[str]:
         return mistyped
     errors: list[str] = []
     ids = [s.id for s in plan.steps]
-    errors += [f"duplicate step id {i}" for i in sorted({i for i in ids if ids.count(i) > 1})]
-    errors += [f"{s.id}: {s.type} only as the last step"
-               for s in plan.steps[:-1] if s.type in _TERMINAL]
+    errors += [
+        f"duplicate step id {i}" for i in sorted({i for i in ids if ids.count(i) > 1})
+    ]
+    errors += [
+        f"{s.id}: {s.type} only as the last step"
+        for s in plan.steps[:-1]
+        if s.type in _TERMINAL
+    ]
     last = plan.steps[-1]
     if last.type not in _TERMINAL:
         errors.append(f"the last step must be {' | '.join(_TERMINAL)}")
     for i, step in enumerate(plan.steps):
-        errors += [f"{step.id}: reads {r}, not an earlier step"
-                   for r in step.reads if r not in ids[:i]]
+        errors += [
+            f"{step.id}: reads {r}, not an earlier step"
+            for r in step.reads
+            if r not in ids[:i]
+        ]
     if isinstance(last, DraftStep) and not last.reads:
         errors.append(f"{last.id}: a draft must read at least one step")
     return errors

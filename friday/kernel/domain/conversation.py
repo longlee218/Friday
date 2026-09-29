@@ -51,7 +51,7 @@ class ConversationId:
         return f"{self.provider}{_PROVIDER}{self.channel_id}{thread}"
 
     @classmethod
-    def parse(cls, raw: str) -> "ConversationId":
+    def parse(cls, raw: str) -> ConversationId:
         provider, _, place = raw.partition(_PROVIDER)
         channel, _, thread = place.partition(_THREAD)
         return cls(provider, channel, thread or None)
@@ -66,5 +66,5 @@ class ConversationId:
         return self.thread_id or self.channel_id
 
 
-def resolve(event: "InboundEvent") -> ConversationId:
+def resolve(event: InboundEvent) -> ConversationId:
     return ConversationId(event.provider, event.channel_id, event.thread_id)

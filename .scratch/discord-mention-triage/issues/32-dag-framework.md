@@ -60,10 +60,12 @@ multi-agent routing, retries, tracing. Each node is one `Agent` instance:
 ```python
 from agents import Agent, Runner, function_tool
 
+
 @function_tool
 async def query_loki(query: str, since: str) -> str:
     """Query Loki logs. `query` is a LogQL selector, `since` is RFC3339."""
     return await loki_mcp.call("query_range", {"query": query, "since": since})
+
 
 read_logs = Agent(
     name="read_logs",
@@ -127,6 +129,7 @@ class Edge:
 def has_cause(state) -> bool:
     return "analyze_stack" in state and "traceback" in state["analyze_stack"]
 
+
 dag = DAG(
     nodes=[read_logs, find_code_path, analyze_stack, fix_bug, compose_reply],
     edges=[
@@ -162,9 +165,9 @@ operator can act without reading the runner log:
 ```python
 @dataclass
 class PauseForHuman(Exception):
-    question: str              # what the operator is being asked
+    question: str  # what the operator is being asked
     options: list[str] = field(default_factory=list)  # possible answers
-    state_dump: dict = field(default_factory=dict)   # what the node had
+    state_dump: dict = field(default_factory=dict)  # what the node had
 ```
 
 The `Park(reason=f"{question}\nOptions: {options}")` carries enough for the

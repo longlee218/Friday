@@ -64,9 +64,7 @@ class ReleaseSource:
         this ever holds a rendered chart in memory or in a prompt.
         """
         try:
-            answer = await self.server.call(
-                self.tool, {"project": project, "env": env}
-            )
+            answer = await self.server.call(self.tool, {"project": project, "env": env})
         except Exception as exc:  # noqa: BLE001 — not knowing is an answer
             log.warning("release_status(%s, %s) failed: %s", project, env, exc)
             return ""
@@ -140,8 +138,7 @@ class RunningVersion:
         tag = await self.release.running_tag(placement.service, placement.env)
         if not tag:
             return "", (
-                f"release_status gave no tag for {placement.service} in "
-                f"{placement.env}"
+                f"release_status gave no tag for {placement.service} in {placement.env}"
             )
         return tag, ""
 

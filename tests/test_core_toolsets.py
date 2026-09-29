@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,8 +35,11 @@ def root(tmp_path, monkeypatch) -> Path:
 
 def _run(task_id: int = 7) -> RunContext:
     return RunContext(
-        task_id=task_id, domain=None, evidence=Evidence(), mcp={},
-        reported_at=datetime(2026, 9, 29, tzinfo=timezone.utc),
+        task_id=task_id,
+        domain=None,
+        evidence=Evidence(),
+        mcp={},
+        reported_at=datetime(2026, 9, 29, tzinfo=UTC),
     )
 
 
@@ -56,7 +59,9 @@ def test_kubectl_is_refused_outside_its_read_verbs():
     assert "kubectl reads only" in refusal("kubectl delete pod api-0")
 
 
-@pytest.mark.parametrize("command", ["ls; rm x", "ls && rm x", "ls || rm x", "ls & rm x", "(ls)"])
+@pytest.mark.parametrize(
+    "command", ["ls; rm x", "ls && rm x", "ls || rm x", "ls & rm x", "(ls)"]
+)
 def test_a_control_operator_is_refused(command):
     assert "only `|` between read commands" in refusal(command)
 
@@ -93,167 +98,187 @@ def test_a_write_flag_is_refused(command):
     assert "is refused" in refusal(command)
 
 
-@pytest.mark.parametrize("command", [
-    "kubectl get pods --kubeconfig=/tmp/friday/7/k.yaml",
-    "kubectl get pods --kubeconfig /tmp/friday/7/k.yaml",
-    "kubectl get pods --server=https://elsewhere",
-    "kubectl get pods -shttps://elsewhere",
-    "kubectl logs api-0 --token abc",
-    "kubectl get pods --cache-dir=/etc",
-    "journalctl --cursor-file=/etc/x",
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "kubectl get pods --kubeconfig=/tmp/friday/7/k.yaml",
+        "kubectl get pods --kubeconfig /tmp/friday/7/k.yaml",
+        "kubectl get pods --server=https://elsewhere",
+        "kubectl get pods -shttps://elsewhere",
+        "kubectl logs api-0 --token abc",
+        "kubectl get pods --cache-dir=/etc",
+        "journalctl --cursor-file=/etc/x",
+    ],
+)
 def test_a_credential_or_write_flag_is_refused(command):
     """`--kubeconfig` names a file whose `exec` entry runs any binary — and
     the workspace can write that file."""
     assert "is refused" in refusal(command)
 
 
-@pytest.mark.parametrize("command", [
-    "kubectl get secrets -n api",
-    "kubectl get secret/db-creds -o yaml",
-    "kubectl get pods,secrets",
-    "kubectl describe secret db-creds",
-    "kubectl get secrets.v1 -o json",
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "kubectl get secrets -n api",
+        "kubectl get secret/db-creds -o yaml",
+        "kubectl get pods,secrets",
+        "kubectl describe secret db-creds",
+        "kubectl get secrets.v1 -o json",
+    ],
+)
 def test_the_secret_resource_is_refused(command):
     assert "secret resource" in refusal(command)
     assert refusal("kubectl get pods -o wide") is None
 
 
-@pytest.mark.parametrize("command", [
-    "cat /srv/app/.env",
-    "cat /srv/app/.env.production",
-    "head /Users/op/.ssh/id_ed25519",
-    "cat /etc/nginx/tls/server.key",
-    "cat /home/op/.aws/credentials",
-    "grep --file=/srv/app/.env x /srv/app/log",
-    "tail /home/op/.config/gcloud/credentials.db",
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat /srv/app/.env",
+        "cat /srv/app/.env.production",
+        "head /Users/op/.ssh/id_ed25519",
+        "cat /etc/nginx/tls/server.key",
+        "cat /home/op/.aws/credentials",
+        "grep --file=/srv/app/.env x /srv/app/log",
+        "tail /home/op/.config/gcloud/credentials.db",
+    ],
+)
 def test_a_credential_path_is_refused(command):
     assert "credential file or directory" in refusal(command)
 
 
-@pytest.mark.parametrize("command", [
-    # kubectl around the resource check
-    "kubectl get --raw /api/v1/namespaces/default/secrets/db",
-    "kubectl get --raw=/api/v1/secrets",
-    "kubectl get -f /tmp/friday/7/s.yaml -o yaml",
-    "kubectl get --filename=/tmp/friday/7/s.yaml",
-    "kubectl get -k /tmp/friday/7/kust",
-    # grep around its excludes
-    "grep -r --include=* x /home/u",
-    "grep -R x /home/u/link",
-    "grep -nR x /home/u/link",
-    "grep --dereference-recursive x /home/u",
-    "grep -r x /home/u/gcloud",
-    # names the first lists missed, and case
-    "cat /Users/u/.SSH/ID_RSA",
-    "cat /var/run/secrets/kubernetes.io/serviceaccount/token",
-    "cat /etc/kubernetes/admin.conf",
-    "cat /etc/ssh/ssh_host_ed25519_key",
-    "cat /app/prod.env",
-    "cat /home/u/.npmrc",
-    "cat /infra/terraform.tfstate",
-    "cat /proc/1234/environ",
-    # process environments
-    "ps eww",
-    "ps auxe",
-    "ps -E",
-    # the second review's
-    "grep -ie. /root/.aws/credentials",
-    "grep --regex=. /root/.aws/credentials",
-    "grep --inc=* -r x /home",
-    "kubectl get -Af m.yaml",
-    "kubectl get -Rk dir",
-    "kubectl get pods -o jsonpath-file=/root/.ssh/id_rsa",
-    "kubectl get pods -o=go-template-file=/app/.env",
-    "kubectl get pods --template={{.x}}",
-    "cat /etc/kubernetes/super-admin.conf",
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        # kubectl around the resource check
+        "kubectl get --raw /api/v1/namespaces/default/secrets/db",
+        "kubectl get --raw=/api/v1/secrets",
+        "kubectl get -f /tmp/friday/7/s.yaml -o yaml",
+        "kubectl get --filename=/tmp/friday/7/s.yaml",
+        "kubectl get -k /tmp/friday/7/kust",
+        # grep around its excludes
+        "grep -r --include=* x /home/u",
+        "grep -R x /home/u/link",
+        "grep -nR x /home/u/link",
+        "grep --dereference-recursive x /home/u",
+        "grep -r x /home/u/gcloud",
+        # names the first lists missed, and case
+        "cat /Users/u/.SSH/ID_RSA",
+        "cat /var/run/secrets/kubernetes.io/serviceaccount/token",
+        "cat /etc/kubernetes/admin.conf",
+        "cat /etc/ssh/ssh_host_ed25519_key",
+        "cat /app/prod.env",
+        "cat /home/u/.npmrc",
+        "cat /infra/terraform.tfstate",
+        "cat /proc/1234/environ",
+        # process environments
+        "ps eww",
+        "ps auxe",
+        "ps -E",
+        # the second review's
+        "grep -ie. /root/.aws/credentials",
+        "grep --regex=. /root/.aws/credentials",
+        "grep --inc=* -r x /home",
+        "kubectl get -Af m.yaml",
+        "kubectl get -Rk dir",
+        "kubectl get pods -o jsonpath-file=/root/.ssh/id_rsa",
+        "kubectl get pods -o=go-template-file=/app/.env",
+        "kubectl get pods --template={{.x}}",
+        "cat /etc/kubernetes/super-admin.conf",
+    ],
+)
 def test_a_reported_bypass_is_refused(command):
     assert refusal(command) is not None, command
 
 
-@pytest.mark.parametrize("command", [
-    "grep -c KEY /srv/app/.env.example",
-    "grep -A 2 timeout /var/log/app.log",
-    "ps -o user",
-    "ps -u deploy",
-    "ps -C sleep",
-    "find . -name *.env",
-    "ls /home/u/.ssh",
-    "cat /etc/pki/tls/certs/ca-bundle.crt",
-    "grep -rn timeout /srv/app/config",
-    "ps aux",
-    "ps -ef",
-    "kubectl logs api-0 --follow",
-    "kubectl get pods -l app=api -o wide",
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grep -c KEY /srv/app/.env.example",
+        "grep -A 2 timeout /var/log/app.log",
+        "ps -o user",
+        "ps -u deploy",
+        "ps -C sleep",
+        "find . -name *.env",
+        "ls /home/u/.ssh",
+        "cat /etc/pki/tls/certs/ca-bundle.crt",
+        "grep -rn timeout /srv/app/config",
+        "ps aux",
+        "ps -ef",
+        "kubectl logs api-0 --follow",
+        "kubectl get pods -l app=api -o wide",
+    ],
+)
 def test_ordinary_debugging_still_passes(command):
     assert refusal(command) is None, refusal(command)
 
 
-@pytest.mark.parametrize("command", [
-    "grep id_rsa /var/log/auth.log",
-    'grep "\\.pem" /etc/nginx/nginx.conf',
-    "grep -A 2 id_rsa /var/log/auth.log",
-    "grep -iA2 id_rsa /var/log/auth.log",
-    "grep -iA 2 id_rsa /var/log/auth.log",
-    "grep --max-count 5 id_rsa /var/log/auth.log",
-    "grep --files-with-matches id_rsa /var/log",
-    "grep -- .env /srv/app/README.md",
-    "kubectl get pods -n secrets",
-    "kubectl get pods --namespace secrets -o wide",
-    "kubectl get pods -A -n secrets --no-headers",
-    "kubectl get pods --namespace=secrets -n secrets",
-    "kubectl logs -f api-0",
-    "kubectl logs -fp api-0",
-    "kubectl get -ojsonpath={.status.phase} pods",
-    "kubectl get pods -lapp=frontend",
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grep id_rsa /var/log/auth.log",
+        'grep "\\.pem" /etc/nginx/nginx.conf',
+        "grep -A 2 id_rsa /var/log/auth.log",
+        "grep -iA2 id_rsa /var/log/auth.log",
+        "grep -iA 2 id_rsa /var/log/auth.log",
+        "grep --max-count 5 id_rsa /var/log/auth.log",
+        "grep --files-with-matches id_rsa /var/log",
+        "grep -- .env /srv/app/README.md",
+        "kubectl get pods -n secrets",
+        "kubectl get pods --namespace secrets -o wide",
+        "kubectl get pods -A -n secrets --no-headers",
+        "kubectl get pods --namespace=secrets -n secrets",
+        "kubectl logs -f api-0",
+        "kubectl logs -fp api-0",
+        "kubectl get -ojsonpath={.status.phase} pods",
+        "kubectl get pods -lapp=frontend",
+    ],
+)
 def test_the_four_false_refusals_are_allowed(command):
     """grep's pattern is a search term; `-n secrets` a namespace; `logs -f`
     is --follow; a value written into a kubectl cluster is that value."""
     assert refusal(command) is None, refusal(command)
 
 
-@pytest.mark.parametrize("command", [
-    # the pattern comes from an option: every word is a file
-    "grep -e x /srv/app/.env",
-    "grep -ie. /root/.aws/credentials",
-    "grep -e. -i /root/.aws/credentials",
-    "grep --regex=. /root/.aws/credentials",
-    "grep --reg . /root/.aws/credentials",
-    "grep -if/tmp/p /root/.aws/credentials",
-    "grep --fil=/tmp/p /root/.aws/credentials",
-    # only the first word after the options is the pattern
-    "grep id_rsa /home/u/.ssh/id_rsa",
-    "grep -A 2 x /root/.env",
-    "grep -m 5 x /root/.env",
-    "grep x -r /home/u/.ssh",
-    # the namespace skip and the cluster walk do not open the resource
-    "kubectl get -n default secrets",
-    "kubectl get secrets -n default",
-    "kubectl get -An secrets",
-    "kubectl get -Af m.yaml",
-    "kubectl get -Rk dir",
-    "kubectl logs -fs https://elsewhere api-0",
-    "kubectl get pods -f m.yaml",
-    # the third review's: a misparse moved the pattern onto the file
-    "grep --binary root /home/u/.ssh/id_rsa",
-    "grep --context root /home/u/.ssh/id_rsa",
-    "grep -C root /home/u/.ssh/id_rsa",
-    "grep --line-num x /root/.env",
-    "grep -iy x /root/.env",
-    "grep --color=always x /root/.env",
-    "grep -A /root/.env x",
-    "kubectl get -L -L secrets -o yaml",
-    "kubectl get -l -n secrets",
-    "kubectl get --label-columns -n secrets",
-    "kubectl get --profile-output -n secrets",
-    "kubectl describe --tls-server-name -n secrets",
-    "kubectl get -An secrets",
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        # the pattern comes from an option: every word is a file
+        "grep -e x /srv/app/.env",
+        "grep -ie. /root/.aws/credentials",
+        "grep -e. -i /root/.aws/credentials",
+        "grep --regex=. /root/.aws/credentials",
+        "grep --reg . /root/.aws/credentials",
+        "grep -if/tmp/p /root/.aws/credentials",
+        "grep --fil=/tmp/p /root/.aws/credentials",
+        # only the first word after the options is the pattern
+        "grep id_rsa /home/u/.ssh/id_rsa",
+        "grep -A 2 x /root/.env",
+        "grep -m 5 x /root/.env",
+        "grep x -r /home/u/.ssh",
+        # the namespace skip and the cluster walk do not open the resource
+        "kubectl get -n default secrets",
+        "kubectl get secrets -n default",
+        "kubectl get -An secrets",
+        "kubectl get -Af m.yaml",
+        "kubectl get -Rk dir",
+        "kubectl logs -fs https://elsewhere api-0",
+        "kubectl get pods -f m.yaml",
+        # the third review's: a misparse moved the pattern onto the file
+        "grep --binary root /home/u/.ssh/id_rsa",
+        "grep --context root /home/u/.ssh/id_rsa",
+        "grep -C root /home/u/.ssh/id_rsa",
+        "grep --line-num x /root/.env",
+        "grep -iy x /root/.env",
+        "grep --color=always x /root/.env",
+        "grep -A /root/.env x",
+        "kubectl get -L -L secrets -o yaml",
+        "kubectl get -l -n secrets",
+        "kubectl get --label-columns -n secrets",
+        "kubectl get --profile-output -n secrets",
+        "kubectl describe --tls-server-name -n secrets",
+    ],
+)
 def test_the_allowances_open_no_bypass(command):
     assert refusal(command) is not None, command
 
@@ -267,7 +292,9 @@ async def test_a_recursive_grep_skips_credential_files(db, tmp_path):
     (tmp_path / "app" / ".ssh" / "config").write_text("MARK in ssh\n")
     (tmp_path / "app" / "main.log").write_text("MARK used\n")
 
-    got = await _run_command(db)(host="local", command=f"grep -r MARK {tmp_path / 'app'}")
+    got = await _run_command(db)(
+        host="local", command=f"grep -r MARK {tmp_path / 'app'}"
+    )
 
     assert "MARK used" in got
     assert "hunter2" not in got and "in ssh" not in got
@@ -308,7 +335,9 @@ async def test_output_is_redacted_and_enters_evidence(db, tmp_path):
     run = _run()
     register_secret_values(["s3cr3t-value"])
     try:
-        got = await _run_command(db, run)(host="local", command=f"cat {log} | grep failed")
+        got = await _run_command(db, run)(
+            host="local", command=f"cat {log} | grep failed"
+        )
     finally:
         clear_secret_values()
 
@@ -331,7 +360,9 @@ async def test_save_to_writes_the_output_into_the_workspace(db, tmp_path, root):
     log = tmp_path / "big.log"
     log.write_text("".join(f"line {n}\n" for n in range(500)))
     run = _run()
-    got = await _run_command(db, run)(host="local", command=f"cat {log}", save_to="out/big.txt")
+    got = await _run_command(db, run)(
+        host="local", command=f"cat {log}", save_to="out/big.txt"
+    )
 
     assert "500 lines" in got and "saved to out/big.txt" in got
     assert (root / "7" / "out" / "big.txt").read_text() == log.read_text()
@@ -354,7 +385,9 @@ async def test_a_timeout_kills_the_whole_pipeline(db, tmp_path, monkeypatch):
     )
 
     assert "stopped after" in got
-    alive = subprocess.run(["pgrep", "-f", str(log)], capture_output=True, text=True)
+    alive = subprocess.run(
+        ["pgrep", "-f", str(log)], capture_output=True, text=True, check=False
+    )
     assert alive.stdout.strip() == ""
 
 
@@ -439,7 +472,9 @@ def test_only_one_module_imports_pydantic_ai_harness():
 def test_boot_registers_the_core_toolsets_under_core(monkeypatch):
     from friday.kernel.plugin_host import load_plugins
 
-    monkeypatch.setattr("friday.kernel.plugin_host.configured_plugins", lambda config: [])
+    monkeypatch.setattr(
+        "friday.kernel.plugin_host.configured_plugins", lambda config: []
+    )
     loaded = load_plugins(SimpleNamespace(shell_hosts=("local",)))
     toolsets = loaded.registry.toolsets()
     assert {"core.shell", "core.workspace"} <= set(toolsets)

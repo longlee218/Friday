@@ -1,7 +1,21 @@
-"""Scoring a diagnosis against what the operator said was true.
+"""`backend.trace_problem`: a diagnosis scored against what the operator said
+was true.
 
-Pure and synchronous, like `scoring.py`: nothing here calls a model or
-touches a database, so it is unit-tested without either.
+Pure and synchronous: nothing here calls a model or touches a database, so it
+is unit-tested without either. **The cases are not in this repository**: a
+captured case holds raw log lines carrying `userId`, `ip` and `deviceId`, so
+they live under `data/cases/` (gitignored), one JSON file each, labelled when
+captured:
+
+    "decisive":       a substring of the log line they call decisive
+    "cause":          the true cause, in their words
+    "cause_mentions": the tokens any correct answer must contain
+    "conclusive":     whether the evidence really did settle it
+
+The task that runs a case (a replay through the DAG) is built by the
+composition root, `run_eval.py`, until build-the-spine ticket 14 lets the core
+run an action on a case. Its output is the diagnosis as the node answered it
+(`None` when none survived); `score` is the check, here.
 
 **Why this exists, plainly.** A change to the distillation rule, to how a
 read is narrowed, or to the answer's shape can make the model's causes
@@ -23,9 +37,24 @@ below rather than hidden.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
-__all__ = ["Scored", "report", "score"]
+from friday.sdk import EvalCase, EvalSpec
+
+__all__ = [
+    "CASES",
+    "TRACE_PROBLEM_EVAL",
+    "Scored",
+    "cases",
+    "report",
+    "score",
+    "unlabelled",
+]
+
+#: `data/cases/` at the repository root, wherever the eval is run from.
+CASES = Path(__file__).resolve().parents[3] / "data" / "cases"
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,9 +137,9 @@ def report(scored: list[Scored]) -> str:
     n = len(scored)
     causes = sum(1 for s in scored if s.cause_found)
     agreed = sum(
-        1 for s in scored
-        if s.said_conclusive is not None
-        and s.said_conclusive == s.expected_conclusive
+        1
+        for s in scored
+        if s.said_conclusive is not None and s.said_conclusive == s.expected_conclusive
     )
     grounded = sum(1 for s in scored if s.grounded)
 
@@ -138,3 +167,33 @@ def report(scored: list[Scored]) -> str:
             f"score. Ten to twenty make a number worth comparing.",
         ]
     return "\n".join(lines)
+
+
+def cases(directory: Path = CASES) -> list[EvalCase]:
+    """Every captured case, sorted by file so two runs compare."""
+    out = []
+    for path in sorted(directory.glob("*.json")):
+        case = json.loads(path.read_text())
+        out.append(EvalCase(name=str(case.get("id", path.stem)), inputs=case))
+    return out
+
+
+def unlabelled(found: list[EvalCase]) -> list[str]:
+    """Cases nobody has told the truth about yet — named, not skipped: an
+    unlabelled case scores zero for the cause, which reads as the model
+    failing when it is the set that is unfinished."""
+    return [c.name for c in found if not (c.inputs.get("cause_mentions") or ())]
+
+
+TRACE_PROBLEM_EVAL = EvalSpec(
+    name="backend.trace_problem",
+    description="Each captured case in data/cases/ replayed with the model on; "
+    "the diagnosis scored against the operator's labels.",
+    cases=cases,
+    checks={
+        "cause_found": lambda case, diagnosis: score(case.inputs, diagnosis).cause_found
+    },
+    report=lambda results: report(
+        [score(case.inputs, diagnosis) for case, diagnosis in results]
+    ),
+)

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from friday.kernel.harness.skills import Skill, SkillLibrary
+from friday.kernel.harness.skills import SkillLibrary
 from friday.kernel.toolsets.skills import describe
 
 
@@ -363,7 +363,6 @@ def test_the_catalogue_reaches_the_prompt_the_responder_builds(tmp_path):
     assert "<location>" in rendered
     # The body stays out. That is the whole economy of the thing.
     assert "Query the log store" not in rendered
-
 
 
 def test_a_file_saved_with_a_byte_order_mark_still_loads(tmp_path):

@@ -5,7 +5,9 @@ No behaviour, no validation — just the data shapes and the one open fork.
 Reacts against the real shapes: plugins/devops/params.py (ApiIssueParams),
 plugins/devops/graph/diagnose.py (Diagnosis), friday.sdk.sources.Placement.
 """
+
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -13,20 +15,22 @@ from typing import Literal
 # 1. What Intake gathers  (deterministic, NO LLM — charting Q8)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True, slots=True)
 class Placement:
     """Where this case lives. Env from the operator's domain table (never a
     model guess). See the FORK below for where `service` comes from now that
     extraction is gone."""
+
     env: Literal["production", "dev", "external"]
-    service: str                 # canonical service name
-    clone_path: str              # local checkout
+    service: str  # canonical service name
+    clone_path: str  # local checkout
     repo_path: str
-    release_tag: str = ""        # what the cluster says it runs
+    release_tag: str = ""  # what the cluster says it runs
     namespace: str = ""
     pod_selector: str = ""
     dbs: tuple[str, ...] = ()
-    error_code_doc: str = ""     # path to the project's error-code table
+    error_code_doc: str = ""  # path to the project's error-code table
     # REQUIRED by read_code: maps a compiled frame (dist/src/x.js) back to the
     # clone. Missing it = read_code can't resolve paths. (added — ticket 03)
     container_roots: tuple[str, ...] = ()
@@ -38,8 +42,9 @@ class Hints:
     ids only, NO model. The rich reading (which endpoint, what's wrong) is the
     LOOP's job, not Intake's. Mirrors the machine-matched fields of
     ApiIssueParams, minus anything that needed the extractor model."""
-    correlation_id: str | None = None   # uuid regex over the text
-    curl_artifact_id: str | None = None # `[artifact ab12cd34: …]`
+
+    correlation_id: str | None = None  # uuid regex over the text
+    curl_artifact_id: str | None = None  # `[artifact ab12cd34: …]`
     response_artifact_id: str | None = None
 
 
@@ -47,16 +52,17 @@ class Hints:
 class IntakeContext:
     """Intake's whole output. Runs fresh each pass; never checkpointed; its
     `placement_identity` is the staleness anchor (ticket 01)."""
-    request_text: str            # the reporter's turn(s), passed straight to the loop
+
+    request_text: str  # the reporter's turn(s), passed straight to the loop
     # REQUIRED by read_log: the window is measured back from here
     # (since = reported_at - minutes_back). Missing it = the loop can't time its
     # reads. (added — ticket 03)
-    reported_at: str             # ISO timestamp of the report
+    reported_at: str  # ISO timestamp of the report
     placement: Placement
     hints: Hints
     # retrieved, token-bounded, deterministic (keyword / `when:` match — no model)
-    memory: tuple[str, ...] = ()     # fact / constraint / decision / finding
-    skills: tuple[str, ...] = ()     # `when:`-matched
+    memory: tuple[str, ...] = ()  # fact / constraint / decision / finding
+    skills: tuple[str, ...] = ()  # `when:`-matched
     related_tasks: tuple[str, ...] = ()
 
     @property
@@ -74,35 +80,39 @@ class IntakeContext:
 
 CONFIDENCE = ("certain", "likely", "possible", "unlikely", "guess")
 
+
 @dataclass(frozen=True, slots=True)
 class Diagnosis:
     """DONE — the loop reached a cause. → Report (a Reply, waits approval).
     Unchanged from today's plugins/devops/graph/diagnose.py."""
+
     cause: str
-    confidence: Literal[CONFIDENCE]           # type: ignore[valid-type]
+    confidence: Literal[CONFIDENCE]  # type: ignore[valid-type]
     conclusive: bool
-    refs: list[str] = field(default_factory=list)         # line ids Lnn — grounding gate
+    refs: list[str] = field(default_factory=list)  # line ids Lnn — grounding gate
     next_checks: list[str] = field(default_factory=list)
-    alternatives: list[str] = field(default_factory=list) # ≥1 when conclusive
+    alternatives: list[str] = field(default_factory=list)  # ≥1 when conclusive
 
 
 @dataclass(frozen=True, slots=True)
 class Ask:
     """STOP-need-reporter. → Action=Ask; pool pauses; the reply resumes the loop
     from message_history iff placement_identity is unchanged (ticket 01)."""
-    question: str            # what's missing, in the reporter's language
-    missing: tuple[str, ...] = ()   # e.g. ("curl",) — what would unblock
+
+    question: str  # what's missing, in the reporter's language
+    missing: tuple[str, ...] = ()  # e.g. ("curl",) — what would unblock
 
 
 @dataclass(frozen=True, slots=True)
 class HandOver:
     """STOP-escalate. → Action=HandOver; operator only, never the reporter.
     For what the model should not decide (risky / out of depth / over budget)."""
+
     reason: str
     found_so_far: str = ""
 
 
-LoopOutput = Diagnosis | Ask | HandOver   # Diagnose agent's output_type
+LoopOutput = Diagnosis | Ask | HandOver  # Diagnose agent's output_type
 
 
 # ─────────────────────────────────────────────────────────────────────────────

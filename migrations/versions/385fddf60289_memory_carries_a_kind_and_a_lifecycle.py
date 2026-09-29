@@ -18,36 +18,34 @@ Revises: b4ba2cf5d60d
 Create Date: 2026-09-09 14:22:41.413947
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '385fddf60289'
-down_revision: Union[str, Sequence[str], None] = 'b4ba2cf5d60d'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "385fddf60289"
+down_revision: str | Sequence[str] | None = "b4ba2cf5d60d"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     """Upgrade schema."""
     op.add_column(
-        'memories',
-        sa.Column('kind', sa.String(), nullable=False, server_default='voice'),
+        "memories",
+        sa.Column("kind", sa.String(), nullable=False, server_default="voice"),
     )
     op.add_column(
-        'memories',
-        sa.Column('status', sa.String(), nullable=False, server_default='active'),
+        "memories",
+        sa.Column("status", sa.String(), nullable=False, server_default="active"),
     )
-    op.add_column(
-        'memories', sa.Column('superseded_by', sa.String(), nullable=True)
-    )
+    op.add_column("memories", sa.Column("superseded_by", sa.String(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_column('memories', 'superseded_by')
-    op.drop_column('memories', 'status')
-    op.drop_column('memories', 'kind')
+    op.drop_column("memories", "superseded_by")
+    op.drop_column("memories", "status")
+    op.drop_column("memories", "kind")

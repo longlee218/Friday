@@ -20,9 +20,13 @@ class Diagnosis:
 
 
 DIAGNOSE = AgentSpec(
-    name="demo.diagnose", description="finds why a request failed",
-    instructions="read, then say why", result=Diagnosis, tier="strong",
-    toolsets=("demo.logs", "demo.code"), budget=Budget(max_turns=20, tokens=100_000),
+    name="demo.diagnose",
+    description="finds why a request failed",
+    instructions="read, then say why",
+    result=Diagnosis,
+    tier="strong",
+    toolsets=("demo.logs", "demo.code"),
+    budget=Budget(max_turns=20, tokens=100_000),
     temperature=0.0,
 )
 ROGUE = replace(DIAGNOSE, name="demo.rogue")
@@ -42,13 +46,16 @@ def test_a_shape_failure_stops_before_the_contract_is_read():
 
 
 def test_a_contract_breach_returns_every_error_never_a_clipped_plan():
-    narrow = replace(CONTRACT, allowed_step_types=frozenset({"agent", "draft"}),
-                     limits=Limits(max_replans=2, max_steps=5))
+    narrow = replace(
+        CONTRACT,
+        allowed_step_types=frozenset({"agent", "draft"}),
+        limits=Limits(max_replans=2, max_steps=5),
+    )
     plan = _plan(
-        replace(P1, toolsets=("demo.logs", "demo.db")),         # outside the contract
+        replace(P1, toolsets=("demo.logs", "demo.db")),  # outside the contract
         AgentStep("p2", "demo.diagnose", ("core.memory",), "x"),  # outside the agent
-        AgentStep("p3", "demo.rogue", ("demo.logs",), "y"),       # agent not allowed
-        AskStep("p4", "which env?"),                             # step type not allowed
+        AgentStep("p3", "demo.rogue", ("demo.logs",), "y"),  # agent not allowed
+        AskStep("p4", "which env?"),  # step type not allowed
         contract=narrow,
     )
     result = gate_plan(plan, AGENTS)
@@ -68,16 +75,18 @@ def test_an_unregistered_agent_is_refused_not_granted_the_contract():
     """Even one the contract allows: with no spec there is no ceiling to
     intersect, and the gate fails closed."""
     wide = replace(CONTRACT, allowed_agents=CONTRACT.allowed_agents | {"demo.ghost"})
-    plan = _plan(replace(P1, agent="demo.ghost"), DraftStep("d", reads=("p1",)),
-                 contract=wide)
+    plan = _plan(
+        replace(P1, agent="demo.ghost"), DraftStep("d", reads=("p1",)), contract=wide
+    )
     assert gate_plan(plan, AGENTS) == Refused(
         errors=("p1: agent demo.ghost is not registered",)
     )
 
 
 def test_a_plan_longer_than_max_steps_is_refused():
-    plan = _plan(P1, replace(P1, id="p2"), replace(P1, id="p3"),
-                 DraftStep("d", reads=("p1",)))
+    plan = _plan(
+        P1, replace(P1, id="p2"), replace(P1, id="p3"), DraftStep("d", reads=("p1",))
+    )
     assert gate_plan(plan, AGENTS) == Refused(
         errors=("the plan has 4 steps; the contract allows at most 3",)
     )
@@ -89,8 +98,12 @@ def test_a_plan_of_exactly_max_steps_passes():
 
 
 def test_contract_and_limit_errors_are_returned_together():
-    plan = _plan(P1, replace(P1, id="p2"), replace(P1, id="p3", agent="demo.rogue"),
-                 DraftStep("d", reads=("p1",)))
+    plan = _plan(
+        P1,
+        replace(P1, id="p2"),
+        replace(P1, id="p3", agent="demo.rogue"),
+        DraftStep("d", reads=("p1",)),
+    )
     assert set(gate_plan(plan, AGENTS).errors) == {
         "p3: agent demo.rogue is not allowed by the contract (demo.diagnose)",
         "the plan has 4 steps; the contract allows at most 3",

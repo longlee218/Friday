@@ -32,7 +32,9 @@ def test_make_decided_closes_the_type_to_the_names_plus_skip():
 
 def test_make_decided_describes_no_label():
     cls = make_decided(NAMES)
-    doc = next(f for f in cls.__dataclass_fields__.values() if f.name == "type").metadata["doc"]
+    doc = next(
+        f for f in cls.__dataclass_fields__.values() if f.name == "type"
+    ).metadata["doc"]
     assert "labels above" in doc
     for name in NAMES:
         assert name not in doc

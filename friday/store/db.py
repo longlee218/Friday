@@ -20,7 +20,7 @@ stalls ingestion.
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 from friday.store.repositories.audit import AuditRepo
 from friday.store.repositories.calls import CallsRepo
 from friday.store.repositories.compaction import CompactionRepo
@@ -85,7 +85,7 @@ class Database(
         self._memory_slots = asyncio.Lock()
 
     @classmethod
-    async def connect(cls, path: str, *, create: bool = False) -> "Database":
+    async def connect(cls, path: str, *, create: bool = False) -> Database:
         """Open the store. `create` builds the schema straight from the models.
 
         Off by default, because a real database gets its shape from Alembic and

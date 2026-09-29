@@ -64,7 +64,9 @@ class MemoryKindSpec:
 
     name: str
     data: type | None = None
-    writers: frozenset[Origin] = field(default_factory=lambda: frozenset({Origin.ADMIN}))
+    writers: frozenset[Origin] = field(
+        default_factory=lambda: frozenset({Origin.ADMIN})
+    )
     cardinality: Literal["one-per-key", "append"] = "one-per-key"
     injected: bool = False
     #: `(data, given) -> key`, where `data` is the row's validated payload and

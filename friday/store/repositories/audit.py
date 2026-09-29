@@ -8,11 +8,10 @@ The kernel's `friday.kernel.audit` is the only caller.
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class AuditRepo:
-
     async def append_audit(
         self, *, event: str, actor: str | None = None, detail: dict | None = None
     ) -> None:

@@ -5,11 +5,10 @@ would scatter the one question they answer."""
 
 from __future__ import annotations
 
-from friday.store._common import *  # noqa: F401,F403 (shared store internals)
+from friday.store._common import *
 
 
 class TaskConversationRepo:
-
     async def task_answered_by(self, provider_message_id: str | None) -> Task | None:
         """The open task a reply is answering, if it is answering one of ours.
 
@@ -175,9 +174,7 @@ class TaskConversationRepo:
                 )
             )
         return tuple(
-            ask.text
-            for ask in asks
-            if not any(when > ask.sent_at for when in answers)
+            ask.text for ask in asks if not any(when > ask.sent_at for when in answers)
         )
 
     async def has_exchanged_with(self, author_id: str) -> bool:
@@ -273,8 +270,7 @@ class TaskConversationRepo:
                 since = task.created_at
             said = (
                 await session.execute(
-                    select(schema.Message.reply_to)
-                    .where(
+                    select(schema.Message.reply_to).where(
                         schema.Message.conversation_id == str(task.conversation),
                         schema.Message.is_own.is_(True),
                         schema.Message.created_at > since,
@@ -332,7 +328,9 @@ class TaskConversationRepo:
         self, task_id: int, limit: int = 20, *, budget_tokens: int | None = None
     ) -> str | None:
         """`original_turns_for`, one turn per line block — what a prompt reads."""
-        turns = await self.original_turns_for(task_id, limit, budget_tokens=budget_tokens)
+        turns = await self.original_turns_for(
+            task_id, limit, budget_tokens=budget_tokens
+        )
         return "\n".join(turns) or None
 
     async def original_turns_for(
@@ -418,9 +416,7 @@ class TaskConversationRepo:
                 schema.Outbound.sent_message_id.is_not(None)
             )
             said = await session.execute(
-                select(
-                    schema.Message.redacted_text, schema.Message.original_text
-                )
+                select(schema.Message.redacted_text, schema.Message.original_text)
                 .where(
                     schema.Message.conversation_id == conversation_id,
                     schema.Message.author_id == author_id,

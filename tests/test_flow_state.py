@@ -13,11 +13,11 @@ adds a second renderer and a class of bugs we already paid for, or to
 mirror the rules in Python. The mirror is small and the rules are
 pure; it is the cheaper of the two by a margin.
 """
+
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -32,7 +32,7 @@ class ModelCall:
 @dataclass(frozen=True)
 class ToolCall:
     failed: bool = False
-    created_at: datetime = datetime(2026, 9, 7, 12, 0)
+    created_at: datetime = datetime(2026, 9, 7, 12, 0, tzinfo=UTC)
 
 
 @dataclass(frozen=True)
@@ -101,74 +101,98 @@ def test_tool_state_failed_when_failed() -> None:
 
 
 def test_turn_state_done_when_nothing_went_wrong() -> None:
-    assert turn_state(
-        ModelCall(),
-        [ToolCall()],
-        Flow(),
-    ) == "done"
+    assert (
+        turn_state(
+            ModelCall(),
+            [ToolCall()],
+            Flow(),
+        )
+        == "done"
+    )
 
 
 def test_turn_state_failed_when_a_tool_failed() -> None:
-    assert turn_state(
-        ModelCall(),
-        [ToolCall(failed=True)],
-        Flow(),
-    ) == "failed"
+    assert (
+        turn_state(
+            ModelCall(),
+            [ToolCall(failed=True)],
+            Flow(),
+        )
+        == "failed"
+    )
 
 
 def test_turn_state_failed_when_call_was_unanswered() -> None:
-    assert turn_state(
-        ModelCall(input_tokens=0, output_tokens=0),
-        [ToolCall()],
-        Flow(),
-    ) == "failed"
+    assert (
+        turn_state(
+            ModelCall(input_tokens=0, output_tokens=0),
+            [ToolCall()],
+            Flow(),
+        )
+        == "failed"
+    )
 
 
 def test_turn_state_retrying_when_call_was_retried() -> None:
     """`attempt > 1` is the cheapest sign a provider was struggling.
     Failure beats retry in the rule order — a turn that both retried
     and has a failed tool is `failed`, not `retrying`."""
-    assert turn_state(
-        ModelCall(attempt=2),
-        [ToolCall()],
-        Flow(),
-    ) == "retrying"
+    assert (
+        turn_state(
+            ModelCall(attempt=2),
+            [ToolCall()],
+            Flow(),
+        )
+        == "retrying"
+    )
 
 
 def test_turn_state_failed_beats_retrying() -> None:
-    assert turn_state(
-        ModelCall(attempt=2),
-        [ToolCall(failed=True)],
-        Flow(),
-    ) == "failed"
+    assert (
+        turn_state(
+            ModelCall(attempt=2),
+            [ToolCall(failed=True)],
+            Flow(),
+        )
+        == "failed"
+    )
 
 
 def test_turn_state_waiting_when_outbound_asked_for_details() -> None:
     """The agent asked the reporter for a field it could not lift."""
-    assert turn_state(
-        ModelCall(),
-        [ToolCall()],
-        Flow(outbound=(Outbound(id=200, kind="ask_for_details"),)),
-    ) == "waiting"
+    assert (
+        turn_state(
+            ModelCall(),
+            [ToolCall()],
+            Flow(outbound=(Outbound(id=200, kind="ask_for_details"),)),
+        )
+        == "waiting"
+    )
 
 
 def test_turn_state_waiting_when_outbound_is_approval_card() -> None:
     """The agent drafted a reply and is waiting for the operator's OK."""
-    assert turn_state(
-        ModelCall(),
-        [ToolCall()],
-        Flow(outbound=(Outbound(id=200, kind="approval_card"),)),
-    ) == "waiting"
+    assert (
+        turn_state(
+            ModelCall(),
+            [ToolCall()],
+            Flow(outbound=(Outbound(id=200, kind="approval_card"),)),
+        )
+        == "waiting"
+    )
 
 
 def test_turn_state_done_for_ordinary_reply_outbound() -> None:
     """A `reply` outbound that has already been sent does not make a
     turn `waiting` — the conversation moved on."""
-    assert turn_state(
-        ModelCall(),
-        [ToolCall()],
-        Flow(outbound=(Outbound(id=200, kind="reply"),)),
-    ) == "done"
+    assert (
+        turn_state(
+            ModelCall(),
+            [ToolCall()],
+            Flow(outbound=(Outbound(id=200, kind="reply"),)),
+        )
+        == "done"
+    )
 
 
 def test_turn_state_done_when_outbound_is_before_the_call() -> None:
@@ -176,33 +200,39 @@ def test_turn_state_done_when_outbound_is_before_the_call() -> None:
     an earlier turn — it does not make *this* one `waiting`. The
     default outbound id (50) is smaller than the default call id
     (100), so a plain `Outbound()` already represents "before"."""
-    assert turn_state(
-        ModelCall(),
-        [ToolCall()],
-        Flow(
-            outbound=(
-                Outbound(kind="ask_for_details"),
+    assert (
+        turn_state(
+            ModelCall(),
+            [ToolCall()],
+            Flow(
+                outbound=(Outbound(kind="ask_for_details"),),
             ),
-        ),
-    ) == "done"
+        )
+        == "done"
+    )
 
 
 def test_turn_state_retrying_beats_waiting() -> None:
     """A turn that retried and then handed off to the operator is
     `retrying` — the operator asked for that signal more loudly than
     they asked for `waiting`."""
-    assert turn_state(
-        ModelCall(attempt=2),
-        [ToolCall()],
-        Flow(outbound=(Outbound(id=200, kind="approval_card"),)),
-    ) == "retrying"
+    assert (
+        turn_state(
+            ModelCall(attempt=2),
+            [ToolCall()],
+            Flow(outbound=(Outbound(id=200, kind="approval_card"),)),
+        )
+        == "retrying"
+    )
 
 
 def test_the_ts_source_matches_this_mirror() -> None:
     """The TS source carries the same rule words in the same order.
     A change in one that does not land in the other is a regression
     in its own right."""
-    src = (Path(__file__).resolve().parents[1] / "web" / "src" / "flowState.ts").read_text()
+    src = (
+        Path(__file__).resolve().parents[1] / "web" / "src" / "flowState.ts"
+    ).read_text()
 
     # The TS function names must exist with the right names.
     assert "export function toolState" in src

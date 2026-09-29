@@ -23,11 +23,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from friday.kernel.domain.memory_guard import check_not_instruction_shaped
 from friday.kernel.domain.memory import Memory, MemoryCandidate, MemoryRefused
-from friday.sdk.memory import MemoryOrigin
+from friday.kernel.domain.memory_guard import check_not_instruction_shaped
 from friday.kernel.domain.state import FridayState
 from friday.kernel.memory import registry as memory_kinds
+from friday.sdk.memory import MemoryOrigin
 
 __all__ = ["add", "propose", "supersede", "update"]
 
@@ -52,7 +52,9 @@ async def add(
 ) -> Memory | None:
     """Guard the line, then persist it. `None` when the channel is at its cap."""
     _guard_new_line(text, kind=kind, origin=origin)
-    return await db.memory_add(state, text, kind=kind, origin=origin, key=key, data=data)
+    return await db.memory_add(
+        state, text, kind=kind, origin=origin, key=key, data=data
+    )
 
 
 async def update(

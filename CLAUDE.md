@@ -70,8 +70,8 @@ A ticket, an edit to logic, a refactor — none of them are done until:
 3. **Any guard you added has been deleted once and watched go red.** A test
    that still passes without its guard was testing nothing.
 4. **A change to `friday/kernel/triage/prompt.py`, or to anything upstream of it,
-   also needs `uv run python -m evals.run_triage_eval` run against
-   `evals/triage.jsonl`, with the accuracy, confusion matrix and threshold
+   also needs `uv run run_eval.py core.triage` run against
+   `evals/datasets/triage/`, with the accuracy, confusion matrix and threshold
    table reported alongside the change.** The suite's scripted transport
    pins wiring and says nothing about whether the classifier is right; this
    is the only thing that does. See `evals/README.md`.

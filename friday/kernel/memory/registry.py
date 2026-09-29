@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import fields as dataclass_fields
-from typing import Any
+from typing import Any, ClassVar
 
 from friday.kernel.domain.memory import (
     DecisionData,
@@ -56,8 +56,8 @@ PERSON = "person"
 
 __all__ = [
     "append_kinds",
-    "clear",
     "cardinality_of",
+    "clear",
     "data_of",
     "domain_kinds",
     "injected_of",
@@ -195,7 +195,9 @@ def named_by(kind: str) -> tuple[tuple[str, str], ...]:
     )
 
 
-def natural_key(kind: str, data: dict[str, Any] | None, given: str | None) -> str | None:
+def natural_key(
+    kind: str, data: dict[str, Any] | None, given: str | None
+) -> str | None:
     """A kind's natural key — the one row a `one-per-key` kind holds — from its
     spec's `key` derivation (`MemoryKindSpec.key`), or `None` when it has none (a
     prose kind, `decision`). The per-kind branches that used to live here moved
@@ -234,17 +236,36 @@ def register_all_memory_kinds(config: Any = None) -> None:
     for spec in (
         MemoryKindSpec(name=FACT, data=None, writers=_MODEL_AND_ADMIN, **prose),
         MemoryKindSpec(name=CONSTRAINT, data=None, writers=_MODEL_AND_ADMIN, **prose),
-        MemoryKindSpec(name=DECISION, data=DecisionData, writers=_MODEL_AND_ADMIN, **prose),
+        MemoryKindSpec(
+            name=DECISION, data=DecisionData, writers=_MODEL_AND_ADMIN, **prose
+        ),
         MemoryKindSpec(name=VOICE, data=None, writers=_MODEL_AND_ADMIN, **prose),
-        MemoryKindSpec(name=FINDING, data=FindingData, writers=_MODEL,
-                       cardinality="append", injected=True, key=_finding_key),
-        MemoryKindSpec(name=SUMMARY, data=SummaryData, writers=_MODEL,
-                       key=lambda _d, _g: "room", **prose),
-        MemoryKindSpec(name=SKILL, data=SkillData, writers=_ADMIN,
-                       key=_skill_key, **prose),
-        MemoryKindSpec(name=PERSON, data=PersonData, writers=_ADMIN,
-                       cardinality="one-per-key", injected=False,
-                       key=lambda d, _g: (d or {}).get("discord_id")),
+        MemoryKindSpec(
+            name=FINDING,
+            data=FindingData,
+            writers=_MODEL,
+            cardinality="append",
+            injected=True,
+            key=_finding_key,
+        ),
+        MemoryKindSpec(
+            name=SUMMARY,
+            data=SummaryData,
+            writers=_MODEL,
+            key=lambda _d, _g: "room",
+            **prose,
+        ),
+        MemoryKindSpec(
+            name=SKILL, data=SkillData, writers=_ADMIN, key=_skill_key, **prose
+        ),
+        MemoryKindSpec(
+            name=PERSON,
+            data=PersonData,
+            writers=_ADMIN,
+            cardinality="one-per-key",
+            injected=False,
+            key=lambda d, _g: (d or {}).get("discord_id"),
+        ),
     ):
         register_memory_kind(spec)
 
@@ -262,7 +283,7 @@ def register_all_memory_kinds(config: Any = None) -> None:
     # action in a `not_when`, and a load without ops is refused for it.
     class _DefaultConfig:
         plugins = ("plugins.backend", "plugins.ops")
-        plugin_blocks: dict = {}
+        plugin_blocks: ClassVar[dict] = {}
 
     loaded = load_plugins(config if config is not None else _DefaultConfig())
     for spec in loaded.registry.memory_kinds().values():

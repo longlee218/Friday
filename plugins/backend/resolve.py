@@ -63,7 +63,7 @@ def path_of(curl: str | None) -> str | None:
     found = _URL.search(curl)
     if not found:
         return None
-    rest = curl[found.end():]
+    rest = curl[found.end() :]
     path = rest.split()[0].split("?")[0].strip("\"'") if rest.split() else ""
     return path or None
 
@@ -84,7 +84,8 @@ def environment_of(domain: str | None, known: Sequence[Any]) -> str:
     if not domain:
         return "external"
     matched = [
-        row for row in known
+        row
+        for row in known
         if domain == row.suffix or domain.endswith(f".{row.suffix}")
     ]
     if not matched:

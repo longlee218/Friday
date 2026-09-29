@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
 
 from friday.kernel.config import IngestConfig
-from friday.store.db import Database
+from friday.kernel.domain.messages import InboundEvent, MentionType
 from friday.kernel.harness.harness import Harness
 from friday.kernel.inbox import Inbox
-from friday.kernel.domain.messages import InboundEvent, MentionType
+from friday.store.db import Database
 
 
 class FakeProvider:
@@ -101,7 +101,7 @@ def make_event(
         author_id=author_id,
         author_name=author_name,
         text=text,
-        created_at=created_at or datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc),
+        created_at=created_at or datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
         mention_type=mention_type,
         is_own=is_own,
         reply_to=reply_to,
@@ -115,13 +115,22 @@ def summary_row(channel_id: str = "watched", **fields):
     has no reason to run the summariser to get one."""
     from friday.kernel.domain.memory import Memory, RoomSummary
 
-    now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
-    data = {f: fields.get(f, [] if f != "topic" else "") for f in RoomSummary.__dataclass_fields__}
+    now = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
+    data = {
+        f: fields.get(f, [] if f != "topic" else "")
+        for f in RoomSummary.__dataclass_fields__
+    }
     data.update(summary_of=fields.get("summary_of", "m1"))
     return Memory(
-        id="s1", channel_id=channel_id, agent="summary", text=data["topic"],
-        kind="summary", created_at=now, updated_at=now,
-        key="room", data=data,
+        id="s1",
+        channel_id=channel_id,
+        agent="summary",
+        text=data["topic"],
+        kind="summary",
+        created_at=now,
+        updated_at=now,
+        key="room",
+        data=data,
     )
 
 
@@ -141,9 +150,7 @@ async def db():
 def config() -> IngestConfig:
     return IngestConfig(
         watched_channels=frozenset({"watched"}),
-        mention_types=frozenset(
-            {MentionType.DIRECT, MentionType.ROLE, MentionType.DM}
-        ),
+        mention_types=frozenset({MentionType.DIRECT, MentionType.ROLE, MentionType.DM}),
     )
 
 
@@ -172,7 +179,7 @@ class BoardClient(TestClient):
         super().__init__(app, **kw)
 
     def request(self, method, url, *args, **kw):
-        from friday.kernel.ops.api import CSRF_COOKIE, CSRF_HEADER, _WRITE_METHODS
+        from friday.kernel.ops.api import _WRITE_METHODS, CSRF_COOKIE, CSRF_HEADER
 
         if method.upper() in _WRITE_METHODS:
             if CSRF_COOKIE not in self.cookies:
@@ -188,7 +195,7 @@ def workflow_graphs():
     """Register the workflow graphs the way the composition root does.
 
     Without this the tests exercise a route production never takes: a task
-    type with no registered graph. `api_issue` moved into a graph in ticket
+    type with no registered graph. `trace_problem` moved into a graph in ticket
     33; every other classifiable type followed in ticket 04, so a runner test
     that does not register them is testing the absence of a graph rather than
     a graph.
@@ -236,8 +243,8 @@ async def workflows(db):
     import tempfile
     from types import SimpleNamespace
 
-    from friday.kernel.dag.router import register_dags
     from friday.kernel.dag import adapter
+    from friday.kernel.dag.router import register_dags
 
     tmp = tempfile.mkdtemp()
     adapter.launch("friday-test", f"{tmp}/system.db")
@@ -284,9 +291,15 @@ class ScriptedHarness(Harness):
             # A `Harness` has one, and the inherited code logs through it. A
             # stand-in rather than a mock: the only thing read off it here is
             # the agent's name in a log line.
-            ("_config", AgentConfig(
-                name="scripted", api_key="k", base_url="http://x/v1", model="m",
-            )),
+            (
+                "_config",
+                AgentConfig(
+                    name="scripted",
+                    api_key="k",
+                    base_url="http://x/v1",
+                    model="m",
+                ),
+            ),
         ):
             if not hasattr(self, name):
                 setattr(self, name, default)

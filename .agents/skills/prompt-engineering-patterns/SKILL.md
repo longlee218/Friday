@@ -78,31 +78,38 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
+
 # Define structured output schema
 class SQLQuery(BaseModel):
     query: str = Field(description="The SQL query")
     explanation: str = Field(description="Brief explanation of what the query does")
     tables_used: list[str] = Field(description="List of tables referenced")
 
+
 # Initialize model with structured output
 llm = ChatAnthropic(model="claude-sonnet-5")
 structured_llm = llm.with_structured_output(SQLQuery)
 
 # Create prompt template
-prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are an expert SQL developer. Generate efficient, secure SQL queries.
+prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            """You are an expert SQL developer. Generate efficient, secure SQL queries.
     Always use parameterized queries to prevent SQL injection.
-    Explain your reasoning briefly."""),
-    ("user", "Convert this to SQL: {query}")
-])
+    Explain your reasoning briefly.""",
+        ),
+        ("user", "Convert this to SQL: {query}"),
+    ]
+)
 
 # Create chain
 chain = prompt | structured_llm
 
 # Use
-result = await chain.ainvoke({
-    "query": "Find all users who registered in the last 30 days"
-})
+result = await chain.ainvoke(
+    {"query": "Find all users who registered in the last 30 days"}
+)
 print(result.query)
 print(result.explanation)
 ```

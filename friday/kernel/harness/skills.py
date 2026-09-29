@@ -82,7 +82,7 @@ class Skill:
 
 class SkillLibrary:
     @classmethod
-    def build(cls, config) -> "SkillLibrary":
+    def build(cls, config) -> SkillLibrary:
         """Load from the configured directory and say what could not be read.
 
         A skill the operator believes they wrote and which silently is not
@@ -108,7 +108,7 @@ class SkillLibrary:
         self._skills: dict[str, Skill] = {}
         self.problems: list[str] = []
 
-    def load(self) -> "SkillLibrary":
+    def load(self) -> SkillLibrary:
         """Read every `*/SKILL.md` under the directory. Returns self.
 
         A skill that cannot be read is recorded in `problems` and skipped. The
@@ -165,21 +165,20 @@ class SkillLibrary:
         skill = self._skills.get(skill_name)
         if skill is None:
             return (
-                f"There is no skill called {skill_name!r}. "
-                f"Available: {self.known()}."
+                f"There is no skill called {skill_name!r}. Available: {self.known()}."
             )
         if not file_name:
             if not skill.files:
                 return skill.body
             listed = ", ".join(f"{skill.name}/{f}" for f in sorted(skill.files))
-            return f"{skill.body}\n\nThis skill has more files — fetch by name: {listed}"
+            return (
+                f"{skill.body}\n\nThis skill has more files — fetch by name: {listed}"
+            )
         content = skill.files.get(file_name) if skill.files else None
         if content is not None:
             return content
         listed = ", ".join(sorted(skill.files or ())) or "none"
-        return (
-            f"Skill {skill.name!r} has no file {file_name!r}. Its files: {listed}."
-        )
+        return f"Skill {skill.name!r} has no file {file_name!r}. Its files: {listed}."
 
     def known(self) -> str:
         """What an agent could have asked for, for a sentence saying so.
@@ -281,9 +280,7 @@ class SkillLibrary:
                 scored.append((2, skill.name, skill))
             elif q in desc_lower:
                 scored.append((1, skill.name, skill))
-            elif all(
-                token in f"{name_lower} {desc_lower}" for token in q.split()
-            ):
+            elif all(token in f"{name_lower} {desc_lower}" for token in q.split()):
                 scored.append((0, skill.name, skill))
 
         scored.sort(key=lambda s: (-s[0], s[1]))
@@ -366,8 +363,7 @@ def _read(path: Path) -> Skill:
         raw = meta["allowed_tools"]
         if not isinstance(raw, list):
             raise ValueError(
-                f"frontmatter 'allowed_tools' must be a list, got "
-                f"{type(raw).__name__}"
+                f"frontmatter 'allowed_tools' must be a list, got {type(raw).__name__}"
             )
         allowed_tools = tuple(str(t) for t in raw)
     else:

@@ -24,8 +24,13 @@ def card(
     task_id: int = 7, text: str = "cho anh xin cái correlationId", approves: int = 12
 ) -> Outbound:
     return Outbound(
-        id=1, task_id=task_id, conversation=ConversationId("discord", "999"),
-        kind=Kind.APPROVAL_CARD, sender="discord_bot", text=text, approves=approves,
+        id=1,
+        task_id=task_id,
+        conversation=ConversationId("discord", "999"),
+        kind=Kind.APPROVAL_CARD,
+        sender="discord_bot",
+        text=text,
+        approves=approves,
     )
 
 
@@ -61,8 +66,8 @@ async def test_the_card_is_transported_verbatim():
     the destination, the audience, the secret flags — and carried in `row.text`.
     This adapter shows it unchanged and adds only the buttons a user account
     cannot send; it does not compose or edit the truth about a draft."""
-    from friday.kernel.domain.conversation import ConversationId
     from friday.kernel import outbox_card as card_renderer
+    from friday.kernel.domain.conversation import ConversationId
 
     body = card_renderer.render(
         "cho anh xin cái correlationId",
@@ -95,7 +100,9 @@ async def test_the_buttons_carry_the_row_they_approve():
 async def test_approving_reports_the_row_and_who_decided():
     decisions: list = []
     bot = DiscordBot(
-        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        "token",
+        operator_id=OPERATOR,
+        client=stub_client(Recipient()),
         on_decision=lambda **kw: decisions.append(kw),
     )
 
@@ -109,7 +116,9 @@ async def test_approving_reports_the_row_and_who_decided():
 async def test_rejecting_reports_it_too():
     decisions: list = []
     bot = DiscordBot(
-        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        "token",
+        operator_id=OPERATOR,
+        client=stub_client(Recipient()),
         on_decision=lambda **kw: decisions.append(kw),
     )
 
@@ -126,7 +135,9 @@ async def test_a_card_from_before_the_move_is_not_read_as_a_row():
     number, so it is ignored instead."""
     decisions: list = []
     bot = DiscordBot(
-        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        "token",
+        operator_id=OPERATOR,
+        client=stub_client(Recipient()),
         on_decision=lambda **kw: decisions.append(kw),
     )
 
@@ -138,7 +149,9 @@ async def test_a_card_from_before_the_move_is_not_read_as_a_row():
 async def test_a_button_that_is_not_ours_is_ignored():
     decisions: list = []
     bot = DiscordBot(
-        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        "token",
+        operator_id=OPERATOR,
+        client=stub_client(Recipient()),
         on_decision=lambda **kw: decisions.append(kw),
     )
 
@@ -147,10 +160,14 @@ async def test_a_button_that_is_not_ours_is_ignored():
     assert decisions == []
 
 
-def stuck(task_id: int = 7, text: str = "api_issue #7 — correlation_id: abc-123"):
+def stuck(task_id: int = 7, text: str = "trace_problem #7 — correlation_id: abc-123"):
     return Outbound(
-        id=2, task_id=task_id, conversation=ConversationId("discord", "999"),
-        kind=Kind.HELP_WANTED, sender="discord_bot", text=text,
+        id=2,
+        task_id=task_id,
+        conversation=ConversationId("discord", "999"),
+        kind=Kind.HELP_WANTED,
+        sender="discord_bot",
+        text=text,
     )
 
 
@@ -170,7 +187,9 @@ async def test_being_stuck_is_told_not_asked():
 async def test_it_says_where_to_look():
     recipient = Recipient()
     bot = DiscordBot(
-        "token", operator_id=OPERATOR, client=stub_client(recipient),
+        "token",
+        operator_id=OPERATOR,
+        client=stub_client(recipient),
         board_url="http://localhost:8086",
     )
 
@@ -190,8 +209,12 @@ async def test_telling_the_operator_about_a_row_that_belongs_to_no_task(caplog):
     recipient = Recipient()
     bot = DiscordBot("token", operator_id=OPERATOR, client=stub_client(recipient))
     alert = Outbound(
-        id=4, task_id=None, conversation=ConversationId("discord", "999"),
-        kind=Kind.ALERT, sender="discord_bot", text="Alive. 27 messages held.",
+        id=4,
+        task_id=None,
+        conversation=ConversationId("discord", "999"),
+        kind=Kind.ALERT,
+        sender="discord_bot",
+        text="Alive. 27 messages held.",
     )
 
     with caplog.at_level(logging.INFO, logger="friday.kernel.providers.discord.bot"):
@@ -241,7 +264,9 @@ async def press(bot: DiscordBot, custom_id: str) -> Pressed:
 
 async def test_a_recorded_decision_says_who_answered():
     bot = DiscordBot(
-        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        "token",
+        operator_id=OPERATOR,
+        client=stub_client(Recipient()),
         on_decision=lambda **kw: None,
     )
 
@@ -256,7 +281,9 @@ async def test_a_press_carries_the_authenticated_pressers_id():
     payload, so the kernel can check it against operator_id."""
     decisions: list = []
     bot = DiscordBot(
-        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        "token",
+        operator_id=OPERATOR,
+        client=stub_client(Recipient()),
         on_decision=lambda **kw: decisions.append(kw),
     )
 
@@ -273,7 +300,9 @@ async def test_a_card_from_before_the_move_says_nothing_was_recorded(caplog):
     import logging
 
     bot = DiscordBot(
-        "token", operator_id=OPERATOR, client=stub_client(Recipient()),
+        "token",
+        operator_id=OPERATOR,
+        client=stub_client(Recipient()),
         on_decision=lambda **kw: None,
     )
 

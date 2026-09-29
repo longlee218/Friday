@@ -13,11 +13,14 @@ So the server says which message opened each task (`Task.opening`, from
 and this file keeps the screen from going back to looking it up itself.
 There are no JavaScript tests here by design; the guard reads the source.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
-BOARD = Path(__file__).resolve().parents[1] / "web" / "src" / "screens" / "BoardScreen.tsx"
+BOARD = (
+    Path(__file__).resolve().parents[1] / "web" / "src" / "screens" / "BoardScreen.tsx"
+)
 
 
 def test_a_card_shows_and_opens_the_message_the_server_names() -> None:

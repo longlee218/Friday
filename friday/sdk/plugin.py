@@ -22,6 +22,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from friday.sdk.action import Action
 from friday.sdk.agent import AgentSpec
+from friday.sdk.eval import EvalSpec
 from friday.sdk.memory import MemoryKindSpec
 from friday.sdk.toolset import ToolsetSpec
 from friday.sdk.workflow import DAG, Deps
@@ -115,6 +116,10 @@ class PluginAPI(Protocol):
 
     def memory_kind(self, spec: MemoryKindSpec) -> None:
         """Register one memory kind. A duplicate name refuses the boot."""
+        ...
+
+    def eval(self, spec: EvalSpec) -> None:
+        """Register one eval. A duplicate name refuses the boot."""
         ...
 
     def reader(self, name: str, needs: frozenset[str]) -> None:

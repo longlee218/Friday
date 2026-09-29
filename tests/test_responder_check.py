@@ -27,9 +27,7 @@ def test_a_draft_that_promises_to_do_something_is_refused():
 
     Short, no links, and it does contain `correlationId` — so every other rule
     here would have let it through."""
-    said = rejected(
-        "ok có correlationId rồi, để anh trace thử", asking=TEMPLATE
-    )
+    said = rejected("ok có correlationId rồi, để anh trace thử", asking=TEMPLATE)
 
     assert said is not None
     assert "promise" in said
@@ -183,15 +181,22 @@ def test_a_template_with_nothing_untranslatable_binds_only_the_other_rules():
 
     The split is asserted below rather than only stated here.
     """
-    assert rejected(
-        "hoàn toàn không liên quan gì cả", asking="Could you tell me what access you need?"
-    ) is None
+    assert (
+        rejected(
+            "hoàn toàn không liên quan gì cả",
+            asking="Could you tell me what access you need?",
+        )
+        is None
+    )
     # Ticket 12 dropped "xem" from this draft: `_WORK` names it now, so the
     # draft was about to demonstrate the point through the wrong rule.
-    assert rejected(
-        "hoàn toàn không liên quan, https://x/y",
-        asking="Could you tell me what access you need?",
-    ) is not None
+    assert (
+        rejected(
+            "hoàn toàn không liên quan, https://x/y",
+            asking="Could you tell me what access you need?",
+        )
+        is not None
+    )
 
 
 def test_which_questions_this_rule_binds_is_derived_not_counted():
@@ -204,7 +209,7 @@ def test_which_questions_this_rule_binds_is_derived_not_counted():
     same pattern the rule matches on is what stops the prose drifting from the
     code a second time.
 
-    Ticket 01 reshaped `ApiIssueParams` and moved both numbers: eleven
+    Ticket 01 reshaped `TraceProblemParams` and moved both numbers: eleven
     subjects now, and `correlation_id` left the bound set because nobody is
     asked for one any more — it is read out of the response the reporter
     pasted, and "the response you got back" names no untranslatable word.
@@ -219,13 +224,17 @@ def test_which_questions_this_rule_binds_is_derived_not_counted():
     from tests.test_validation import _asks
 
     asks = _asks()
-    binds = sorted(subject for (_, subject), phrase in asks.items() if _KEPT.search(phrase))
+    binds = sorted(
+        subject for (_, subject), phrase in asks.items() if _KEPT.search(phrase)
+    )
 
     assert binds == ["_traceable", "curl", "identifier"], (
         "which questions must survive translation has changed — the docstring "
         "above states this split"
     )
-    assert len(asks) == 11, "the number of questions changed; the docstring above states it"
+    assert len(asks) == 11, (
+        "the number of questions changed; the docstring above states it"
+    )
 
 
 #: The three `ask_for_details` rows in `data/friday.db` — every message this
@@ -292,9 +301,7 @@ def test_work_is_matched_as_a_word_not_as_a_substring():
     refuses drafts for containing a longer word that happens to start the
     same way."""
     assert (
-        rejected(
-            "anh gửi em cái checklist correlationId với curl nhé", asking=TEMPLATE
-        )
+        rejected("anh gửi em cái checklist correlationId với curl nhé", asking=TEMPLATE)
         is None
     )
 
@@ -324,9 +331,7 @@ def test_a_model_cannot_switch_this_rule_off_from_inside_the_reason():
     goes out unread. The strip is the same `_REASON` the kept-words rule
     already applies, for a sharper reason than that one has.
     """
-    asking = (
-        TEMPLATE + " (the logs need a trace on the gateway before this can move)"
-    )
+    asking = TEMPLATE + " (the logs need a trace on the gateway before this can move)"
 
     said = rejected(SENT_UNDER_THE_OPERATORS_NAME[1], asking=asking)
 

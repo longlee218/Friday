@@ -15,9 +15,8 @@ import pathlib
 import re
 from types import SimpleNamespace
 
-import pytest
-
 from conftest import BoardClient
+
 from friday.kernel.dag import adapter
 from friday.kernel.ops import events as events_module
 
@@ -26,17 +25,21 @@ TYPES = pathlib.Path(__file__).resolve().parents[1] / "web" / "src" / "api-types
 
 def declared(interface: str) -> set[str]:
     body = re.search(
-        rf"export interface {interface} \{{(.*?)\n\}}", TYPES.read_text(), re.S
+        rf"export interface {interface} \{{(.*?)\n\}}", TYPES.read_text(), re.DOTALL
     )
     assert body, f"web/src/api-types.ts declares no interface {interface}"
-    return set(re.findall(r"^\s{2}(\w+)[?]?:", body.group(1), re.M))
+    return set(re.findall(r"^\s{2}(\w+)[?]?:", body.group(1), re.MULTILINE))
 
 
 def _status(**kw) -> SimpleNamespace:
     """A stand-in for a DBOS `WorkflowStatus` — only the fields the view reads."""
     base = dict(
-        workflow_id="wf-1", name="_run_graph", status="PENDING",
-        queue_name=None, created_at=1_700_000_000_000, updated_at=1_700_000_001_000,
+        workflow_id="wf-1",
+        name="_run_graph",
+        status="PENDING",
+        queue_name=None,
+        created_at=1_700_000_000_000,
+        updated_at=1_700_000_001_000,
     )
     base.update(kw)
     return SimpleNamespace(**base)
@@ -60,7 +63,9 @@ def test_dbos_vocabulary_maps_to_the_four_board_words():
         "MAX_RECOVERY_ATTEMPTS_EXCEEDED": "failed",
     }
     for dbos_status, board_word in cases.items():
-        assert adapter._workflow_view(_status(status=dbos_status))["status"] == board_word
+        assert (
+            adapter._workflow_view(_status(status=dbos_status))["status"] == board_word
+        )
 
 
 def test_epoch_millis_become_iso_strings():
@@ -86,14 +91,22 @@ async def test_a_finished_node_publishes_a_workflow_event(db):
     try:
         queue, _ = await events_module.get_bus().subscribe()
         await db.record_node_run(
-            task_id=7, dag_name="backend.trace_problem", node="resolve",
-            attempt=1, status="ok", reason="", duration_ms=12,
+            task_id=7,
+            dag_name="backend.trace_problem",
+            node="resolve",
+            attempt=1,
+            status="ok",
+            reason="",
+            duration_ms=12,
         )
         event = await asyncio.wait_for(queue.get(), 1.0)
         assert event.type == "workflow"
         assert event.payload == {
-            "task_id": 7, "dag_name": "backend.trace_problem",
-            "node": "resolve", "status": "ok", "attempt": 1,
+            "task_id": 7,
+            "dag_name": "backend.trace_problem",
+            "node": "resolve",
+            "status": "ok",
+            "attempt": 1,
         }
     finally:
         events_module.reset_bus_for_tests()
@@ -102,4 +115,6 @@ async def test_a_finished_node_publishes_a_workflow_event(db):
 def build_api_for(db):
     from friday.kernel.ops.api import build_api
 
-    return build_api(db=db, provider_status=lambda: "connected", confidence_threshold=0.7)
+    return build_api(
+        db=db, provider_status=lambda: "connected", confidence_threshold=0.7
+    )

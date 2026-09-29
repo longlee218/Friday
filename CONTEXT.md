@@ -88,11 +88,11 @@ implementation detail.
 ## Running
 
 Friday ingests Discord mentions, classifies them, opens tasks, asks for
-missing details, investigates `api_issue` (the six-node slice `Prepare →
+missing details, investigates `trace_problem` (the six-node slice `Prepare →
 Resolve → FindRequestLog → ReadFailingCode → Diagnose → Report`, plus an
 unapproved acknowledgement), and sends approved replies as the watched
 account. It runs on the operator's own machine, on `main`, with a passing
-suite. Triage scored 100% on `evals/triage.jsonl` on 2026-09-20.
+suite. Triage scored 100% on the eval set (then `evals/triage.jsonl`) on 2026-09-20.
 
 ## Technology
 
@@ -107,7 +107,7 @@ suite. Triage scored 100% on `evals/triage.jsonl` on 2026-09-20.
 | Dev logs | `kubectl` on the dev host via `ssh dev` | no kubeconfig on this machine |
 | Code reading | the operator's clones under `~/Documents/Apero/`, CodeGraph | read-only |
 | Board | **React + Vite** SPA served by FastAPI on `:8086`, SSE live feed | loopback only |
-| Tests, eval | **pytest** + pytest-asyncio; `evals/run_triage_eval.py` by hand | eval is not in the suite |
+| Tests, eval | **pytest** + pytest-asyncio; **Pydantic Evals** via `uv run run_eval.py <eval>` by hand | eval is not in the suite; one module imports `pydantic_evals` (`friday/kernel/evals/run.py`) |
 
 ## Boards — what each spec set out to do
 
@@ -144,7 +144,7 @@ is the premise each board tracks against.
   ignores `response_format`); `FridayState` is the one run state; triage is
   one closed set with `skip`. **In progress:** ticket 03 (the eval set and
   its baseline) is the operator's to label.
-- **`read-it-the-way-the-operator-does`** — `api_issue` rebuilt from the
+- **`read-it-the-way-the-operator-does`** — `trace_problem` rebuilt from the
   operator's own routine: environment from rows, production logs through the
   devops MCP, dev logs over `ssh dev`, code at the running release, a
   diagnosis that says what it did not check. Memory became one store. **In
@@ -167,7 +167,7 @@ is the premise each board tracks against.
   spine agent is wired to them until 14; triage's prompt is assembled from
   the three registered actions' recognition); 04 and 11 are takeable
   (`.scratch/build-the-spine/STATUS.md`). The triage eval and
-  `run_api_issue_eval` are deferred: an OpenRouter key exists since
+  the `backend.trace_problem` eval are deferred: an OpenRouter key exists since
   2026-09-29, but the account has no credits (every call answers 402).
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
@@ -193,7 +193,7 @@ is the premise each board tracks against.
 3. **Triage at scale** — *one task type = one distinct graph* (two types
    sharing a graph are one type with a parameter); *retrieve, then classify*
    once the enabled set grows.
-4. **`api_issue`: finish v3.3 and fold in v4's proposals** — the Prepare/Map
+4. **`trace_problem`: finish v3.3 and fold in v4's proposals** — the Prepare/Map
    split by source (the domain beats the reporter's words; `environment`
    becomes a hint), a code supervisor for grounding and coverage, layered
    ceilings on the tool loop with nothing lost when one is hit, and raw-window
@@ -283,7 +283,7 @@ transcript and to Discord's gateway.
 A piece of work derived from a message: a type, a confidence, and parameters.
 A conversation has at most one open task; later messages are follow-ups.
 **Parameters matter more than the type** — the commonest real action is
-noticing an `api_issue` arrived without what makes it findable.
+noticing a `trace_problem` arrived without what makes it findable.
 
 ## Domain
 
@@ -345,6 +345,17 @@ came back may be sent*, never *what* to do. Every pass: stand down for a task
 the operator answered, announce to the operator what nobody can act on, host
 graphs for pending tasks (bounded concurrency), and turn what came back into
 rows. Lives in `friday/kernel/pool/`, apart from the engine.
+
+## Eval
+
+A named set of **cases** and how each result is judged, run against the live
+provider by hand (`uv run run_eval.py <name>`), never by the suite. Declared
+as an **eval spec** (`EvalSpec`: cases, per-case checks, a report) and
+registered with `api.eval` under the owner's namespace (`core.triage`,
+`backend.trace_problem`); the core runs it on Pydantic Evals. A **case** is what
+one run is given and what a right answer is — for triage, a markdown file
+under `evals/datasets/triage/<label>/`: one message, or a turn of messages
+(long ones kept in `_messages/`), whose folder is its expected label.
 
 ## Action
 
@@ -429,12 +440,12 @@ name and **waits for approval**; `HandOver` goes to the operator only and
 never reaches the reporter. A task missing something it cannot work without
 has to say so: for a **single-node type** (e.g. `ops.request_permission`) required-ness
 is read off the parameter type and a precondition belongs in that gate, not in
-the last node's else branch. **`api_issue` is no longer gated on findability**
+the last node's else branch. **`trace_problem` is no longer gated on findability**
 (board `build-the-loop`, 2026-09-27; ADR 0002): its diagnose loop reads log,
 code and docs and calls `ask_reporter` only when genuinely stuck, so a missing
 correlationId/curl no longer blocks opening an investigation — the reversal of
 the old "a correlationId *or* a curl makes a request findable" precondition.
-`api_issue`'s `Report` produces a `Reply` (a brief) today.
+`trace_problem`'s `Report` produces a `Reply` (a brief) today.
 
 ## Plan
 

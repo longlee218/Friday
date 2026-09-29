@@ -31,7 +31,7 @@ def single_instance_lock(database_path: str) -> IO[str]:
     """
     lock_path = pathlib.Path(f"{database_path}.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    handle = open(lock_path, "w")
+    handle = open(lock_path, "w")  # noqa: SIM115 - the open handle is the lock
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:

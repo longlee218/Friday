@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import ClassVar
 
 import pytest
 
-from plugins.backend.params import ApiIssueParams
+from friday.kernel.dag.prepare import _problems, _question
 from friday.sdk.validation import (
     InSet,
     Matches,
@@ -17,8 +17,7 @@ from friday.sdk.validation import (
     Problem,
     validate,
 )
-from friday.kernel.dag.prepare import _problems, _question
-
+from plugins.backend.params import TraceProblemParams
 
 # --- the engine --------------------------------------------------------
 
@@ -55,9 +54,12 @@ def test_matches_with_a_string_that_does_not_match():
 
 
 def test_matches_with_a_string_that_matches():
-    assert Matches(pattern=r"^[a-f0-9-]{36}$").check(
-        "abcdef01-2345-6789-abcd-ef0123456789"
-    ) is None
+    assert (
+        Matches(pattern=r"^[a-f0-9-]{36}$").check(
+            "abcdef01-2345-6789-abcd-ef0123456789"
+        )
+        is None
+    )
 
 
 def test_in_set_rejects_a_value_outside_the_set():
@@ -84,9 +86,9 @@ def test_non_empty_rejects_non_string_values():
 def test_one_of_passes_when_any_named_field_has_a_value():
     @dataclass
     class WithTwo:
-        a: Optional[str] = None
-        b: Optional[str] = None
-        _RULES = {"_a_or_b": OneOf(fields=("a", "b"), ask="a or b")}
+        a: str | None = None
+        b: str | None = None
+        _RULES: ClassVar[dict] = {"_a_or_b": OneOf(fields=("a", "b"), ask="a or b")}
 
     assert validate(WithTwo(a="x", b=None)) == []
     assert validate(WithTwo(a=None, b="y")) == []
@@ -121,9 +123,9 @@ def test_one_of_treats_blank_strings_as_missing():
 
     @dataclass
     class WithTwo:
-        a: Optional[str] = None
-        b: Optional[str] = None
-        _RULES = {"_a_or_b": OneOf(fields=("a", "b"), ask="a or b")}
+        a: str | None = None
+        b: str | None = None
+        _RULES: ClassVar[dict] = {"_a_or_b": OneOf(fields=("a", "b"), ask="a or b")}
 
     assert len(validate(WithTwo(a="", b="   "))) == 1
 
@@ -131,10 +133,10 @@ def test_one_of_treats_blank_strings_as_missing():
 def test_validate_returns_one_problem_per_failing_field_not_stop_on_first():
     @dataclass
     class WithTwoFields:
-        env: Optional[str] = None
-        cid: Optional[str] = None
+        env: str | None = None
+        cid: str | None = None
 
-        _RULES = {
+        _RULES: ClassVar[dict] = {
             "env": InSet(frozenset({"production", "staging"})),
             "cid": Matches(r"^[a-f0-9-]{36}$", name="uuid"),
         }
@@ -163,8 +165,10 @@ def test_problems_merges_structural_and_semantic():
     @dataclass
     class Tight:
         required_id: str
-        optional_env: Optional[str] = None
-        _RULES = {"required_id": Matches(r"^[a-f0-9-]{36}$", name="uuid")}
+        optional_env: str | None = None
+        _RULES: ClassVar[dict] = {
+            "required_id": Matches(r"^[a-f0-9-]{36}$", name="uuid")
+        }
 
     # structural only: a non-Optional field with a None value
     missing_only = _problems(Tight(required_id=None))  # type: ignore[arg-type]
@@ -184,7 +188,7 @@ def test_problems_merges_structural_and_semantic():
 
 
 def test_a_params_with_no_rules_passes_validation_and_returns_no_problems():
-    """`AccessRequestParams` declares no `_RULES`. `ApiIssueParams` used to be
+    """`AccessRequestParams` declares no `_RULES`. `TraceProblemParams` used to be
     the example here and no longer can be: it has a cross-field rule, and a
     report with neither a correlationId nor a curl is not usable."""
     from plugins.ops.params import AccessRequestParams
@@ -193,14 +197,14 @@ def test_a_params_with_no_rules_passes_validation_and_returns_no_problems():
     assert _problems(good) == []
 
 
-def test_an_api_issue_with_nothing_to_trace_on_is_not_usable():
+def test_a_trace_problem_with_nothing_to_trace_on_is_not_usable():
     """The rule that is not expressible as a type: every field of this type is
     optional, and a report that names no request at all cannot be investigated.
     Without this the graph ran its whole path to discover it could do
     nothing."""
-    problems = _problems(ApiIssueParams(summary="API lỗi nè"))
+    problems = _problems(TraceProblemParams(summary="API lỗi nè"))
 
-    params = ApiIssueParams(summary="API lỗi nè")
+    params = TraceProblemParams(summary="API lỗi nè")
     assert [p.field for p in problems] == ["_traceable"]
     assert "curl" in _question(params, problems)
     assert "endpoint" in _question(params, problems)
@@ -213,15 +217,19 @@ def test_a_curl_or_an_endpoint_with_an_id_makes_a_request_findable():
     investigated. The endpoint on its own is not: it matches every caller of
     it, which on the production case of 2026-09-21 was ten other people's
     successful requests."""
-    assert _problems(ApiIssueParams(summary="s", curl="curl -X GET /pay")) == []
-    assert _problems(
-        ApiIssueParams(summary="s", endpoint="/v1/login", identifier="dev-42")
-    ) == []
+    assert _problems(TraceProblemParams(summary="s", curl="curl -X GET /pay")) == []
+    assert (
+        _problems(
+            TraceProblemParams(summary="s", endpoint="/v1/login", identifier="dev-42")
+        )
+        == []
+    )
     assert [
-        p.field for p in _problems(ApiIssueParams(summary="s", endpoint="/v1/login"))
+        p.field
+        for p in _problems(TraceProblemParams(summary="s", endpoint="/v1/login"))
     ] == ["_traceable"]
     assert [
-        p.field for p in _problems(ApiIssueParams(summary="s", identifier="dev-42"))
+        p.field for p in _problems(TraceProblemParams(summary="s", identifier="dev-42"))
     ] == ["_traceable"]
 
 
@@ -233,7 +241,7 @@ def test_a_correlation_id_alone_is_not_findability():
     cid = "abcdef01-2345-6789-abcd-ef0123456789"
 
     assert [
-        p.field for p in _problems(ApiIssueParams(summary="s", correlation_id=cid))
+        p.field for p in _problems(TraceProblemParams(summary="s", correlation_id=cid))
     ] == ["_traceable"]
 
 
@@ -242,7 +250,7 @@ def test_a_correlation_id_alone_is_not_findability():
 
 def test_question_uses_natural_language_for_known_fields():
     q = _question(
-        ApiIssueParams(summary="s"),
+        TraceProblemParams(summary="s"),
         [Problem(field="endpoint"), Problem(field="environment")],
     )
     assert "endpoint" in q
@@ -258,12 +266,12 @@ def test_a_field_with_no_phrase_is_refused_rather_than_guessed_at():
     said so. A reporter asked for "the retry after" is a worse outcome than a
     loud failure in front of whoever added the field."""
     with pytest.raises(ValueError, match="how to ask"):
-        _question(ApiIssueParams(summary="s"), [Problem(field="widget")])
+        _question(TraceProblemParams(summary="s"), [Problem(field="widget")])
 
 
 def test_question_includes_validation_message_when_it_carries_information():
     q = _question(
-        ApiIssueParams(summary="s"),
+        TraceProblemParams(summary="s"),
         [Problem(field="correlation_id", message="must be one of: 1, 2")],
     )
     assert "1, 2" in q
@@ -285,15 +293,16 @@ def test_validate_is_only_invoked_from_one_call_site():
         [
             "bash",
             "-c",
-            'grep -rnE '
+            "grep -rnE "
             '"\\b(friday\\.validation\\.validate|validate)\\s*\\(" '
-            'friday/ '
-            '--include=*.py '
+            "friday/ "
+            "--include=*.py "
             '| grep -v "^friday/sdk/validation\\.py:" '
-            '| cut -d: -f1 | sort -u',
+            "| cut -d: -f1 | sort -u",
         ],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout.split()
 
     # Imports of `from friday.sdk.validation import ...` are declarations of
@@ -311,15 +320,15 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
     Driven through the two calls `prepare_node`'s node runs, in that order,
     rather than through a wrapper only tests used.
     """
-    from friday.sdk.validation import Matches
     from friday.kernel.dag import registry
     from friday.kernel.dag.prepare import plan_by_required_parameters, prepare
     from friday.sdk.plugin import TaskTypeSpec
+    from friday.sdk.validation import Matches
 
     @dataclass
     class StrictParams:
         cid: str = field(default="", metadata={"ask": "the correlationId"})
-        _RULES = {"cid": Matches(r"^[a-f0-9-]{36}$", name="uuid")}
+        _RULES: ClassVar[dict] = {"cid": Matches(r"^[a-f0-9-]{36}$", name="uuid")}
 
     # Register a throwaway task type; the autouse fixture clears the registry
     # after the test, so it does not leak.
@@ -330,9 +339,7 @@ async def test_an_invalid_value_never_reaches_a_planner_body():
         dag=DAG(name="strict_test_type", nodes=(Node("prepare", lambda s, d: None),)),
     )
 
-    params, problem = await prepare(
-        "strict_test_type", StrictParams(cid="not-a-uuid")
-    )
+    params, problem = await prepare("strict_test_type", StrictParams(cid="not-a-uuid"))
     action = problem or plan_by_required_parameters("strict_test_type", params)
     from friday.sdk.actions import Ask
 
@@ -387,7 +394,7 @@ def test_every_askable_field_says_how_to_ask_about_it():
 
 
 def test_the_questions_this_system_can_ask_are_written_down():
-    """"What can it ask?" has to be answerable, and after ticket 13 it is not
+    """ "What can it ask?" has to be answerable, and after ticket 13 it is not
     answerable by reading one dict any more.
 
     So it is answerable here, the way "what can the agents do?" is answered by
@@ -403,20 +410,23 @@ def test_the_questions_this_system_can_ask_are_written_down():
     `tests/test_responder_check.py`.
     """
     assert _asks() == {
-        ("ApiIssueParams", "environment"): "which environment you're on",
+        ("TraceProblemParams", "environment"): "which environment you're on",
         # Not askable — `correlation_id` carries no `ask` of its own. The
         # phrase is on its `Matches` rule, for the one case that can still
         # report it: a value that came back malformed, answered by asking for
         # the response it should have been read out of.
-        ("ApiIssueParams", "correlation_id"): "the response you got back",
-        ("ApiIssueParams", "response"): "the response you got back",
-        ("ApiIssueParams", "endpoint"): "which endpoint you called",
-        ("ApiIssueParams", "identifier"):
-            "the deviceId, userId, email or order id you used",
-        ("ApiIssueParams", "curl"): "the curl you used",
-        ("ApiIssueParams", "_traceable"):
-            "the curl you used, or which endpoint you called plus one id it "
-            "carried",
+        ("TraceProblemParams", "correlation_id"): "the response you got back",
+        ("TraceProblemParams", "response"): "the response you got back",
+        ("TraceProblemParams", "endpoint"): "which endpoint you called",
+        (
+            "TraceProblemParams",
+            "identifier",
+        ): "the deviceId, userId, email or order id you used",
+        ("TraceProblemParams", "curl"): "the curl you used",
+        (
+            "TraceProblemParams",
+            "_traceable",
+        ): "the curl you used, or which endpoint you called plus one id it carried",
         ("AccessRequestParams", "project"): "which project you need access to",
         ("AccessRequestParams", "permission"): "what access you need",
         ("DocQuestionParams", "question"): "what you would like to know",

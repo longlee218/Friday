@@ -16,18 +16,18 @@ from __future__ import annotations
 
 import json
 
-import pytest
-from friday.sdk.testing import ScriptedModel, assistant_message
-
 from friday.kernel.config import AgentConfig
-from friday.sdk.memory import MemoryOrigin
-from friday.kernel.domain.state import FridayState
 from friday.kernel.domain.memory import MemoryStatus
+from friday.kernel.domain.state import FridayState
+from friday.sdk.memory import MemoryOrigin
+from friday.sdk.testing import ScriptedModel, assistant_message
 from tests.conftest import make_event
 
 ADMIN = MemoryOrigin.ADMIN
 SUMMARY_CONFIG = AgentConfig(
-    name="summary", api_key="sk-secret", base_url="https://example.invalid/v1",
+    name="summary",
+    api_key="sk-secret",
+    base_url="https://example.invalid/v1",
     model="test-model",
 )
 
@@ -46,15 +46,23 @@ def _summariser(db, model, channels=("100",)):
 
 
 async def _said(db, message_id, channel_id="100", text="api lỗi"):
-    await db.record_message(make_event(
-        provider="discord", channel_id=channel_id, message_id=message_id, text=text,
-    ))
+    await db.record_message(
+        make_event(
+            provider="discord",
+            channel_id=channel_id,
+            message_id=message_id,
+            text=text,
+        )
+    )
 
 
 async def _operator_wrote(db, channel_id, text, kind="fact", data=None):
     return await db.memory_add(
         FridayState(channel_id=channel_id, agent="operator"),
-        text, kind=kind, origin=ADMIN, data=data,
+        text,
+        kind=kind,
+        origin=ADMIN,
+        data=data,
     )
 
 
@@ -143,14 +151,20 @@ async def test_triage_is_shown_the_summary_and_not_the_operators_facts(db):
     await _operator_wrote(db, "watched", "test.apero is the staging host")
     await _operator_wrote(db, "*", "the company is apero")
     await _said(db, "m1", channel_id="watched")
-    await _summariser(db, _answer("the reelme api"), channels=("watched",)).rebuild_all()
+    await _summariser(
+        db, _answer("the reelme api"), channels=("watched",)
+    ).rebuild_all()
 
     from friday.kernel.triage.context import build_light_context
     from friday.kernel.triage.prompt import build_input
 
-    said = build_input(await build_light_context(
-        db, channel_id="watched", turn=[make_event(text="api lỗi")],
-    ))
+    said = build_input(
+        await build_light_context(
+            db,
+            channel_id="watched",
+            turn=[make_event(text="api lỗi")],
+        )
+    )
 
     assert "<channel_derived>" in said and "the reelme api" in said
     assert "staging host" not in said and "company is apero" not in said
@@ -164,23 +178,32 @@ async def test_the_extractor_reads_operator_rows_here_and_everywhere_labelled(db
     labelled by provenance — `origin` now, where it was a layer's name."""
     from friday.kernel.extraction.context import build_full_context
     from friday.kernel.extraction.prompt import build_input
-    from plugins.backend.params import ApiIssueParams
+    from plugins.backend.params import TraceProblemParams
 
     await _operator_wrote(db, "watched", "test.apero is\nthe staging host")
     await _operator_wrote(db, "*", "the company is apero", kind="constraint")
     await db.memory_add(
         FridayState(channel_id="watched", agent="responder"),
-        "500s here are usually the gateway", kind="fact",
+        "500s here are usually the gateway",
+        kind="fact",
     )
     await _operator_wrote(
-        db, "watched", "", kind="person",
+        db,
+        "watched",
+        "",
+        kind="person",
         data={"discord_id": "42", "name": "Lan Nguyen", "role": "qa", "team": "orders"},
     )
     await _said(db, "m1", channel_id="watched")
-    await _summariser(db, _answer("a summary topic"), channels=("watched",)).rebuild_all()
+    await _summariser(
+        db, _answer("a summary topic"), channels=("watched",)
+    ).rebuild_all()
 
     context = await build_full_context(
-        db, channel_id="watched", task_id=None, known=ApiIssueParams(),
+        db,
+        channel_id="watched",
+        task_id=None,
+        known=TraceProblemParams(),
     )
     said = build_input(context)
 
@@ -196,13 +219,19 @@ async def test_the_extractor_reads_operator_rows_here_and_everywhere_labelled(db
 async def test_a_room_with_no_rows_leaves_the_extractors_prompt_as_it_was(db):
     from friday.kernel.extraction.context import FullContext, build_full_context
     from friday.kernel.extraction.prompt import build_input
-    from plugins.backend.params import ApiIssueParams
+    from plugins.backend.params import TraceProblemParams
 
     gathered = await build_full_context(
-        db, channel_id="watched", task_id=None, known=ApiIssueParams(),
+        db,
+        channel_id="watched",
+        task_id=None,
+        known=TraceProblemParams(),
     )
     bare = FullContext(
-        transcript=None, domain_memories=(), asked=(), known=ApiIssueParams(),
+        transcript=None,
+        domain_memories=(),
+        asked=(),
+        known=TraceProblemParams(),
     )
 
     assert build_input(gathered) == build_input(bare)
@@ -213,8 +242,8 @@ async def test_a_room_with_no_rows_leaves_the_extractors_prompt_as_it_was(db):
 
 
 async def test_the_responder_is_shown_the_summary_and_not_the_facts(db):
-    from friday.sdk.testing import FunctionModel
     from friday.kernel.responder import Responder
+    from friday.sdk.testing import FunctionModel
 
     prompts: list[str] = []
 
@@ -230,7 +259,9 @@ async def test_the_responder_is_shown_the_summary_and_not_the_facts(db):
 
     await _operator_wrote(db, "watched", "test.apero is the staging host")
     await _said(db, "m1", channel_id="watched")
-    await _summariser(db, _answer("the reelme api"), channels=("watched",)).rebuild_all()
+    await _summariser(
+        db, _answer("the reelme api"), channels=("watched",)
+    ).rebuild_all()
 
     responder = Responder(
         config=AgentConfig(name="r", api_key="k", base_url="http://x/v1", model="m"),
@@ -250,7 +281,10 @@ async def test_a_person_row_here_or_everywhere_is_someone_known(db):
     assert not await db.knows_person("watched", "42")
 
     await _operator_wrote(
-        db, "*", "", kind="person",
+        db,
+        "*",
+        "",
+        kind="person",
         data={"discord_id": "42", "name": "Lan", "role": "qa", "team": "orders"},
     )
 

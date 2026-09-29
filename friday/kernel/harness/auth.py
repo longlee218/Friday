@@ -96,10 +96,7 @@ class TokenStore:
         and the file that has to be right is the one the sign-in wrote.
         """
         found = self._all()
-        return {
-            key: str(found.get(key) or "")
-            for key in ("token_url", "client_id")
-        }
+        return {key: str(found.get(key) or "") for key in ("token_url", "client_id")}
 
     def write(
         self, refresh_token: str, *, token_url: str = "", client_id: str = ""
@@ -245,8 +242,7 @@ class SsoTokens(httpx2.Auth):
         access = said.get("access_token")
         if not access:
             raise NotAuthorised(
-                f"{token_url} answered without an access_token "
-                f"(keys: {sorted(said)})"
+                f"{token_url} answered without an access_token (keys: {sorted(said)})"
             )
         rotated = said.get("refresh_token")
         if rotated and rotated != refresh:
@@ -257,5 +253,7 @@ class SsoTokens(httpx2.Auth):
         )
         log.info(
             "%s: access token for %s, good for %ss",
-            token_url, client_id, said.get("expires_in"),
+            token_url,
+            client_id,
+            said.get("expires_in"),
         )

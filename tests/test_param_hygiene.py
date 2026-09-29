@@ -19,7 +19,9 @@ import pytest
 from friday.kernel.text.param_hygiene import clean
 
 
-@pytest.mark.parametrize("value", ["null", "NULL", "none", "None", "N/A", "n/a", "", "   "])
+@pytest.mark.parametrize(
+    "value", ["null", "NULL", "none", "None", "N/A", "n/a", "", "   "]
+)
 def test_absent_looking_values_become_absent(value):
     """The model sometimes says "null" rather than sending null."""
     assert clean(value) is None

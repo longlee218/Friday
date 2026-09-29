@@ -31,11 +31,12 @@ practical: axe-core is a third-party auditor, and adding it as a
 hard CI gate would be a heavy lift when the per-finding guards
 already catch the regressions the operator cares about.
 """
+
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
-import re
 from pathlib import Path
 
 import pytest
@@ -75,8 +76,8 @@ def _run_axe(url: str, page_name: str) -> None:
     importable even when playwright is not installed. The skip
     below is the early-exit for environments that lack both the
     dependency and the browser binary."""
-    from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
     from axe_core_python.sync_playwright import Axe  # type: ignore[import-not-found]
+    from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -86,7 +87,8 @@ def _run_axe(url: str, page_name: str) -> None:
             axe = Axe()
             results = axe.run(page)
             serious = [
-                v for v in results.response.get("violations", [])
+                v
+                for v in results.response.get("violations", [])
                 if v.get("impact") in {"serious", "critical"}
             ]
             assert not serious, (
@@ -103,8 +105,8 @@ def test_a11y_gate_runs_when_a_browser_is_available() -> None:
     local dev trusts the per-finding grep guards in
     `test_web_tokens.py` (audit #1, #2, #3, #6) and skips this one."""
     try:
-        import playwright  # noqa: F401
         import axe_core_python  # noqa: F401
+        import playwright  # noqa: F401
     except ImportError:
         pytest.skip(
             "axe-core a11y gate skipped: install `playwright` and "
@@ -119,7 +121,6 @@ def test_a11y_gate_runs_when_a_browser_is_available() -> None:
     # `python -m http.server` serves the static files; the FastAPI
     # app is not on this path because the gate only checks the SPA,
     # not the API responses.
-    import threading
     import socket
 
     def _free_port() -> int:
@@ -160,8 +161,7 @@ def test_monitor_feed_carries_aria_live_for_screen_readers() -> None:
     else — a worse failure than no SSE at all."""
     src = (WEB / "src" / "screens" / "MonitorScreen.tsx").read_text()
     assert 'aria-live="polite"' in src, (
-        "Monitor feed lost aria-live — a screen reader no longer "
-        "hears about new events"
+        "Monitor feed lost aria-live — a screen reader no longer hears about new events"
     )
 
 
@@ -203,7 +203,7 @@ def test_no_color_only_signal_in_state_pills() -> None:
     intent — every state must be readable in greyscale."""
     src = (WEB / "src" / "screens" / "MonitorScreen.tsx").read_text()
     # The Feed renders pills with both `tone` and `label`.
-    assert 'tone={tone}' in src and 'label={event.state}' in src, (
+    assert "tone={tone}" in src and "label={event.state}" in src, (
         "Monitor feed pills carry tone but not label"
     )
 
@@ -246,9 +246,5 @@ def test_buttons_have_visible_labels() -> None:
             # attribute can contain one — `onClick={() => close()}` does.
             stripped = line.strip()
             if stripped.endswith("/>") or re.search(r">\s*</button>", stripped):
-                offenders.append(
-                    f"{path.relative_to(WEB)}:{n}: {stripped}"
-                )
-    assert not offenders, (
-        "buttons without aria-label: " + "\n".join(offenders)
-    )
+                offenders.append(f"{path.relative_to(WEB)}:{n}: {stripped}")
+    assert not offenders, "buttons without aria-label: " + "\n".join(offenders)

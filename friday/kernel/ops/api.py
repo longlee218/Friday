@@ -33,9 +33,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import pathlib
 import secrets
 import socket
-import pathlib
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import MISSING, asdict, is_dataclass
@@ -44,26 +44,24 @@ from typing import Any, Literal, get_args, get_origin, get_type_hints
 from urllib.parse import urlparse
 
 from fastapi import Body, FastAPI, HTTPException, Path, Query, Request
-from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from friday.kernel.dag import registry as task_registry
-from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.domain.memory_guard import InstructionShaped
-from friday.store.db import Database
-from friday.kernel.domain.state import FridayState
-from friday.kernel.domain.messages import InboundEvent
 from friday.kernel.domain.memory import Memory, MemoryKeyTaken, MemoryRefused
-from friday.sdk.memory import MemoryOrigin
+from friday.kernel.domain.memory_guard import InstructionShaped
+from friday.kernel.domain.messages import InboundEvent
 from friday.kernel.domain.outbound import Outbound
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.states import TaskState
 from friday.kernel.domain.tasks import Task
 from friday.kernel.memory import registry as mem_registry
 from friday.kernel.memory import write
-from friday.kernel.outbox import FAILED
 from friday.kernel.ops.redact import scrub
-from friday.kernel.domain.states import TaskState
+from friday.kernel.outbox import FAILED
+from friday.sdk.memory import MemoryOrigin
+from friday.store.db import Database
 
 log = logging.getLogger(__name__)
 
@@ -134,8 +132,7 @@ def build_api(
             host = urlparse(f"//{request.headers.get('host', '')}").hostname
             if host not in _LOOPBACK:
                 return _refused(
-                    "this board accepts writes only from its own loopback "
-                    "address"
+                    "this board accepts writes only from its own loopback address"
                 )
             origin = request.headers.get("origin")
             if origin is not None and not _origin_allowed(
@@ -148,10 +145,7 @@ def build_api(
         response = await call_next(request)
         # Hand the page the token to echo, once, on any read that has not
         # already carried the cookie back.
-        if (
-            request.method not in _WRITE_METHODS
-            and CSRF_COOKIE not in request.cookies
-        ):
+        if request.method not in _WRITE_METHODS and CSRF_COOKIE not in request.cookies:
             response.set_cookie(CSRF_COOKIE, csrf_token, samesite="strict", path="/")
         return response
 
@@ -163,9 +157,7 @@ def build_api(
         together and always read the same instant of the database.
         """
         messages = await db.page_messages(limit=BOARD_MESSAGES)
-        calls = await db.calls_by_message(
-            m.provider_message_id for m in messages
-        )
+        calls = await db.calls_by_message(m.provider_message_id for m in messages)
         tasks = await db.tasks(limit=MAX_PAGE)
         openings = await db.opening_messages(t.id for t in tasks)
         return _clean(
@@ -176,7 +168,9 @@ def build_api(
                 # D18: the model already gets the refusal; this is the
                 # operator's own view of the same condition.
                 "full_memory_channels": await db.full_memory_channels(),
-                "failed": [_outbound(row) for row in await db.outbound(FAILED, limit=50)],
+                "failed": [
+                    _outbound(row) for row in await db.outbound(FAILED, limit=50)
+                ],
                 "tasks_by_state": {
                     state.value: [
                         _task(t, openings.get(t.id)) for t in tasks if t.state == state
@@ -264,7 +258,7 @@ def build_api(
                         return
                     try:
                         event = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         # A keep-alive comment every 15 seconds. SSE
                         # proxies and load balancers close idle
                         # connections; a comment costs one byte
@@ -275,20 +269,22 @@ def build_api(
             finally:
                 await bus.unsubscribe(queue)
 
-        return _clean(StreamingResponse(
-            stream(),
-            media_type="text/event-stream",
-            headers={
-                # Disable proxy buffering so events reach the
-                # browser the moment the bus publishes them. A
-                # proxy that buffers holds them until the next
-                # flush and the screen lags for the flush
-                # interval.
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-                "Connection": "keep-alive",
-            },
-        ))
+        return _clean(
+            StreamingResponse(
+                stream(),
+                media_type="text/event-stream",
+                headers={
+                    # Disable proxy buffering so events reach the
+                    # browser the moment the bus publishes them. A
+                    # proxy that buffers holds them until the next
+                    # flush and the screen lags for the flush
+                    # interval.
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                    "Connection": "keep-alive",
+                },
+            )
+        )
 
     @api.get("/api/messages")
     async def messages(
@@ -368,10 +364,12 @@ def build_api(
         pass of a task's graph against every message the reporter has sent,
         and a responder answers the task rather than any one message.
         """
-        return _clean([
-            asdict(c) | {"created_at": c.created_at}
-            for c in await db.calls_for_task(task_id)
-        ])
+        return _clean(
+            [
+                asdict(c) | {"created_at": c.created_at}
+                for c in await db.calls_for_task(task_id)
+            ]
+        )
 
     @api.get("/api/tasks/{task_id}/calls")
     async def task_calls(task_id: int = Path(...)) -> dict:
@@ -396,9 +394,7 @@ def build_api(
                 "model_calls": [
                     asdict(c) | {"created_at": c.created_at} for c in calls
                 ],
-                "tool_calls": [
-                    asdict(t) | {"created_at": t.created_at} for t in tools
-                ],
+                "tool_calls": [asdict(t) | {"created_at": t.created_at} for t in tools],
                 "spent": sum(c.input_tokens + c.output_tokens for c in calls),
             }
         )
@@ -457,10 +453,12 @@ def build_api(
         an unbounded read here would grow with every correction a channel has
         ever had rather than with what it currently holds.
         """
-        return _clean([
-            _memory_row(m)
-            for m in await db.memories_for_channel(channel_id, limit=limit)
-        ])
+        return _clean(
+            [
+                _memory_row(m)
+                for m in await db.memories_for_channel(channel_id, limit=limit)
+            ]
+        )
 
     @api.get("/api/directories")
     async def directories(path: str = Query("")) -> dict:
@@ -494,12 +492,12 @@ def build_api(
             where.relative_to(root)
         except ValueError:
             raise HTTPException(
-                422, f"{path!r} is outside {root}, which is the only place "
-                "this looks"
+                422, f"{path!r} is outside {root}, which is the only place this looks"
             ) from None
         try:
             found = sorted(
-                entry.name for entry in where.iterdir()
+                entry.name
+                for entry in where.iterdir()
                 if entry.is_dir() and not entry.name.startswith(".")
             )
         except OSError:
@@ -533,10 +531,16 @@ def build_api(
         choice". The first six rows ever typed were entered into exactly that
         empty state.
         """
-        forms = [_kind_form(k) for k in mem_registry.specs() if ADMIN in mem_registry.writers_for(k)]
+        forms = [
+            _kind_form(k)
+            for k in mem_registry.specs()
+            if ADMIN in mem_registry.writers_for(k)
+        ]
         wanted = {
             field["names"]
-            for form in forms for field in form["fields"] if field["names"]
+            for form in forms
+            for field in form["fields"]
+            if field["names"]
         }
         keys = {kind: await _row_keys(db, channel_id, kind) for kind in wanted}
         for form in forms:
@@ -560,14 +564,21 @@ def build_api(
         """
         kind = body.get("kind")
         if kind not in mem_registry.kinds():
-            raise HTTPException(422, f"kind must be one of {', '.join(mem_registry.specs())}")
+            raise HTTPException(
+                422, f"kind must be one of {', '.join(mem_registry.specs())}"
+            )
         text = body.get("text") or ""
         if not isinstance(text, str):
             raise HTTPException(422, "text must be a string")
         with _refusals():
             written = await write.add(
-                db, _operator(channel_id), text, kind=kind, origin=ADMIN,
-                key=body.get("key"), data=body.get("data"),
+                db,
+                _operator(channel_id),
+                text,
+                kind=kind,
+                origin=ADMIN,
+                key=body.get("key"),
+                data=body.get("data"),
             )
         if written is None:
             raise HTTPException(
@@ -588,8 +599,12 @@ def build_api(
             raise HTTPException(422, "text must be a string")
         with _refusals():
             updated = await write.update(
-                db, _operator(channel_id), memory_id, text,
-                data=body.get("data"), origin=ADMIN,
+                db,
+                _operator(channel_id),
+                memory_id,
+                text,
+                data=body.get("data"),
+                origin=ADMIN,
             )
         if updated is None:
             raise HTTPException(404, f"no memory {memory_id!r} in {channel_id}")
@@ -620,13 +635,16 @@ def build_api(
         listed rather than deleted, so the operator can see what was
         proposed and turned down.
         """
-        return _clean([
-            asdict(c) | {
-                "proposed_at": c.proposed_at,
-                "resolved_at": c.resolved_at,
-            }
-            for c in await db.candidates_for_channel(channel_id, limit=limit)
-        ])
+        return _clean(
+            [
+                asdict(c)
+                | {
+                    "proposed_at": c.proposed_at,
+                    "resolved_at": c.resolved_at,
+                }
+                for c in await db.candidates_for_channel(channel_id, limit=limit)
+            ]
+        )
 
     @api.get("/api/conversations")
     async def conversations() -> list[dict]:
@@ -835,8 +853,10 @@ def _form_fields(shape: type, prefix: str = "") -> list[dict]:
     for f in dataclass_fields(shape):
         name, hint = f"{prefix}{f.name}", hints[f.name]
         args = [a for a in get_args(hint) if a is not type(None)]
-        optional = type(None) in get_args(hint) or f.default is not MISSING or (
-            f.default_factory is not MISSING
+        optional = (
+            type(None) in get_args(hint)
+            or f.default is not MISSING
+            or (f.default_factory is not MISSING)
         )
         if is_dataclass(hint):
             found += _form_fields(hint, f"{name}.")
@@ -857,19 +877,21 @@ def _form_fields(shape: type, prefix: str = "") -> list[dict]:
             entry = {"type": "text"}
         else:
             entry = {"type": "json"}
-        found.append({
-            "name": name,
-            "required": not optional,
-            "choices": [],
-            # Empty for every field that is not a foreign key, which is most
-            # of them. The kind's own name, so the route can fill the
-            # choices and the page can say what is missing.
-            "names": names,
-            # And empty for every field that is typed rather than chosen.
-            # `directory` sends the page to `/api/directories`.
-            "picks": str(f.metadata.get("picks", "")),
-            **entry,
-        })
+        found.append(
+            {
+                "name": name,
+                "required": not optional,
+                "choices": [],
+                # Empty for every field that is not a foreign key, which is most
+                # of them. The kind's own name, so the route can fill the
+                # choices and the page can say what is missing.
+                "names": names,
+                # And empty for every field that is typed rather than chosen.
+                # `directory` sends the page to `/api/directories`.
+                "picks": str(f.metadata.get("picks", "")),
+                **entry,
+            }
+        )
     return found
 
 
@@ -1100,6 +1122,7 @@ def _format_sse(event) -> bytes:
     guard against future event types that do carry one is in
     place."""
     import json as _json
+
     scrubbed = _clean(event.payload)
     payload = {
         "id": event.id,
@@ -1108,7 +1131,5 @@ def _format_sse(event) -> bytes:
         "payload": scrubbed,
     }
     return (
-        f"id: {event.id}\n"
-        f"event: {event.type}\n"
-        f"data: {_json.dumps(payload)}\n\n"
-    ).encode("utf-8")
+        f"id: {event.id}\nevent: {event.type}\ndata: {_json.dumps(payload)}\n\n"
+    ).encode()

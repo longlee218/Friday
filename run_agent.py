@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import AsyncExitStack
 from dataclasses import asdict
-import os
 from pathlib import Path
 
 # Pydantic AI prints a Logfire banner to stdout at first use unless this is set;
@@ -18,29 +18,30 @@ from alembic.config import Config
 from dotenv import load_dotenv
 
 from friday.kernel.audit import AuditLog
-from friday.kernel.memory.channel_context import ContextRebuilder
 from friday.kernel.config import ConfigError, declared_secrets, load_config
-from friday.store.db import Database
+from friday.kernel.domain.monitor import ModelCall
+from friday.kernel.harness.mcp import build as build_mcp
+from friday.kernel.harness.mcp import name_of
+from friday.kernel.harness.skills import SkillLibrary
 from friday.kernel.inbox import Inbox
+from friday.kernel.memory.channel_context import ContextRebuilder
 from friday.kernel.ops.api import bind, build_api, check_exposure
 from friday.kernel.ops.backup import Backup, databases
 from friday.kernel.ops.liveness import Heartbeat, Liveness
-from friday.kernel.harness.mcp import build as build_mcp, name_of
 from friday.kernel.ops.redact import (
     Redacting,
     install_excepthook,
     register_secret_values,
 )
-from friday.kernel.outbox import Outbox, record_decision
 from friday.kernel.ops.single_instance import single_instance_lock
-from friday.kernel.providers import CredentialRejected
-from friday.kernel.providers.discord.user import DiscordUserProvider
-from friday.kernel.providers.discord.bot import DiscordBot
-from friday.kernel.responder import Responder
-from friday.kernel.harness.skills import SkillLibrary
-from friday.kernel.domain.monitor import ModelCall
-from friday.kernel.triage.runner import TriageRunner
+from friday.kernel.outbox import Outbox, record_decision
 from friday.kernel.pool.pool import Pool
+from friday.kernel.providers import CredentialRejected
+from friday.kernel.providers.discord.bot import DiscordBot
+from friday.kernel.providers.discord.user import DiscordUserProvider
+from friday.kernel.responder import Responder
+from friday.kernel.triage.runner import TriageRunner
+from friday.store.db import Database
 
 log = logging.getLogger("friday")
 
@@ -62,9 +63,7 @@ async def serve_board(db, provider, config, sock, threshold) -> None:
     """
     import uvicorn
 
-    status = lambda: (  # noqa: E731
-        "connected" if provider.reconnected.is_set() else "connecting"
-    )
+    status = lambda: "connected" if provider.reconnected.is_set() else "connecting"
     check_exposure(config.board_host)
 
     app = build_api(
@@ -218,7 +217,9 @@ async def _run(stack: AsyncExitStack) -> None:
             by=by,
         )
         await db.resolve_candidates_for_message(
-            provider_message_id=provider_message_id, mark=str(mark), by=by,
+            provider_message_id=provider_message_id,
+            mark=str(mark),
+            by=by,
         )
 
     provider.on_verdict = marked
@@ -247,7 +248,9 @@ async def _run(stack: AsyncExitStack) -> None:
             # unattended. The graph says which source it wanted and skips.
             log.warning(
                 "mcp %s is not available and is being skipped — %s: %s",
-                name_of(server), type(refused).__name__, refused,
+                name_of(server),
+                type(refused).__name__,
+                refused,
             )
             continue
         servers.append(server)
@@ -283,7 +286,7 @@ async def _run(stack: AsyncExitStack) -> None:
         config,
         servers={name_of(s): s for s in servers},
         skills=skills,
-        # `api_issue`'s one model node is built here, the same way the
+        # `trace_problem`'s one model node is built here, the same way the
         # extractors and the responder are — so its calls are recorded like
         # everybody else's.
         record=record_call,
@@ -380,7 +383,7 @@ async def _run(stack: AsyncExitStack) -> None:
             config,
             db=db,
             record=record_call,
-            ),
+        ),
         # Both SQLite files backed up together, once a day, on the beat (§12.1,
         # ticket 09) — the application db and the DBOS system db beside it.
         backup=Backup(
@@ -427,7 +430,10 @@ async def _run(stack: AsyncExitStack) -> None:
             group.create_task(heartbeat.run_forever())
             group.create_task(
                 serve_board(
-                    db, provider, config, board_socket,
+                    db,
+                    provider,
+                    config,
+                    board_socket,
                     runner.confidence_threshold,
                 )
             )

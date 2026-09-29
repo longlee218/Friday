@@ -22,7 +22,8 @@ from friday.kernel.ops.api import build_api
 def board(db, root=None) -> TestClient:
     return TestClient(
         build_api(
-            db=db, provider_status=lambda: "connected",
+            db=db,
+            provider_status=lambda: "connected",
             repo_root=None if root is None else str(root),
         )
     )
@@ -141,6 +142,4 @@ async def test_the_form_says_which_field_is_picked_from_the_filesystem(db, tmp_p
     (repo_path,) = [f for f in project["fields"] if f["name"] == "repo_path"]
 
     assert repo_path["picks"] == "directory"
-    assert all(
-        f["picks"] == "" for f in project["fields"] if f["name"] != "repo_path"
-    )
+    assert all(f["picks"] == "" for f in project["fields"] if f["name"] != "repo_path")

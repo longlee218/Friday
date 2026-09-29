@@ -17,7 +17,6 @@ None of them ever depended on which identity was presented.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import stat
 
@@ -30,9 +29,7 @@ class FakeToken:
     """A token endpoint that answers from a script and counts the asking."""
 
     def __init__(self, *answers, status=200):
-        self.answers = list(answers) or [
-            {"access_token": "a1", "expires_in": 300}
-        ]
+        self.answers = list(answers) or [{"access_token": "a1", "expires_in": 300}]
         self.status = status
         self.posts: list[dict] = []
 
@@ -60,7 +57,10 @@ def tokens(tmp_path, endpoint, *, refresh="r1", **kwargs) -> SsoTokens:
         store.write(refresh)
     return SsoTokens(
         token_url="https://keycloak.invalid/realms/r/protocol/openid-connect/token",
-        client_id="friday", store=store, client=endpoint, **kwargs,
+        client_id="friday",
+        store=store,
+        client=endpoint,
+        **kwargs,
     )
 
 
@@ -133,8 +133,9 @@ async def test_a_rotated_refresh_token_is_kept(tmp_path):
     """Keycloak hands back a new one each exchange and the old stops working.
     A store that keeps the first works until the first refresh, then locks
     the operator out with no obvious cause."""
-    endpoint = FakeToken({"access_token": "a1", "expires_in": 300,
-                          "refresh_token": "r2"})
+    endpoint = FakeToken(
+        {"access_token": "a1", "expires_in": 300, "refresh_token": "r2"}
+    )
     auth = tokens(tmp_path, endpoint)
 
     await auth.token()
@@ -264,11 +265,11 @@ def test_an_empty_auth_block_survives_being_read_out_of_the_file(tmp_path):
 
     path = tmp_path / "config.yaml"
     path.write_text(
-        'mcp_servers:\n'
-        '  signed:\n'
+        "mcp_servers:\n"
+        "  signed:\n"
         '    url: "https://x/mcp"\n'
-        '    auth: {}\n'
-        '  plain:\n'
+        "    auth: {}\n"
+        "  plain:\n"
         '    url: "https://y/mcp"\n'
     )
 
@@ -279,18 +280,20 @@ def test_an_empty_auth_block_survives_being_read_out_of_the_file(tmp_path):
 
 
 def test_a_server_with_no_auth_key_is_not_signed_in_to(tmp_path):
-    from friday.kernel.harness.mcp import _auth
     from friday.kernel.config import MCPServerConfig
+    from friday.kernel.harness.mcp import _auth
 
     assert _auth(MCPServerConfig(name="plain", url="https://x/mcp")) is None
-    assert _auth(MCPServerConfig(name="signed", url="https://x/mcp", auth={})) is not None
+    assert (
+        _auth(MCPServerConfig(name="signed", url="https://x/mcp", auth={})) is not None
+    )
 
 
 def test_nothing_in_the_auth_block_is_required(tmp_path):
     """What is missing at boot is the sign-in, never the configuration to go
     and do it — the sign-in writes the endpoint and the client id itself."""
-    from friday.kernel.harness.mcp import _auth
     from friday.kernel.config import MCPServerConfig
+    from friday.kernel.harness.mcp import _auth
 
     built = _auth(MCPServerConfig(name="devops-generic", url="https://x/mcp", auth={}))
 
@@ -417,9 +420,12 @@ def test_the_verifier_and_its_challenge_carry_no_padding():
     verifier, challenge = pkce()
 
     assert "=" not in verifier and "=" not in challenge
-    assert challenge == base64.urlsafe_b64encode(
-        hashlib.sha256(verifier.encode()).digest()
-    ).rstrip(b"=").decode()
+    assert (
+        challenge
+        == base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+        .rstrip(b"=")
+        .decode()
+    )
 
 
 def test_two_sign_ins_do_not_share_a_verifier():

@@ -1,6 +1,6 @@
 """`ops.request_permission`'s parameters — the plugin's own, against the sdk.
 
-Moved out of the core models in build-the-spine ticket 02, the way `api_issue`'s
+Moved out of the core models in build-the-spine ticket 02, the way `trace_problem`'s
 and `doc_question`'s params moved before it: the kernel keeps no task type of
 its own (`skip` is not one). A plain frozen dataclass whose field metadata
 (`doc`, `ask`) the extractor and the ask-renderer read — stdlib only.
@@ -41,7 +41,6 @@ class AccessRequestParams:
     summary: str = field(
         default="",
         metadata={
-            "doc": "One line saying who wants what, in Vietnamese, in your "
-            "own words."
+            "doc": "One line saying who wants what, in Vietnamese, in your own words."
         },
     )

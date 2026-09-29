@@ -64,10 +64,10 @@ __all__ = [
     "LOCAL",
     "MAX_LINES",
     "READ_COMMANDS",
-    "TIMEOUT_SECONDS",
     "REFUSED_FLAGS",
     "SECRET_DIRS",
     "SECRET_FILES",
+    "TIMEOUT_SECONDS",
     "refusal",
     "shell_tools",
 ]
@@ -82,10 +82,22 @@ LOCAL = "local"
 
 #: The read-command allowlist: the same for every plugin; a plugin only
 #: chooses whether its contract grants `core.shell`.
-READ_COMMANDS = frozenset({
-    "cat", "df", "du", "find", "grep", "head", "journalctl", "kubectl", "ls",
-    "ps", "tail", "wc",
-})
+READ_COMMANDS = frozenset(
+    {
+        "cat",
+        "df",
+        "du",
+        "find",
+        "grep",
+        "head",
+        "journalctl",
+        "kubectl",
+        "ls",
+        "ps",
+        "tail",
+        "wc",
+    }
+)
 
 #: `kubectl` reads only through these verbs, written first (`kubectl get …`).
 KUBECTL_VERBS = frozenset({"get", "logs", "describe", "top"})
@@ -98,22 +110,61 @@ KUBECTL_VERBS = frozenset({"get", "logs", "describe", "top"})
 #: `flag=value`; a one-letter flag also matches `-sVALUE`, and for `grep` and
 #: `ps` (boolean clusters) anywhere in `-nR`.
 REFUSED_FLAGS = {
-    "find": frozenset({
-        "-delete", "-exec", "-execdir", "-ok", "-okdir",
-        "-fprint", "-fprint0", "-fprintf", "-fls",
-    }),
-    "journalctl": frozenset({
-        "--vacuum-size", "--vacuum-time", "--vacuum-files", "--rotate",
-        "--flush", "--sync", "--relinquish-var", "--smart-relinquish-var",
-        "--setup-keys", "--update-catalog", "--cursor-file",
-    }),
-    "kubectl": frozenset({
-        "--kubeconfig", "--server", "-s", "--token", "--cache-dir", "--as",
-        "--as-group", "--as-uid", "--user", "--cluster", "--context",
-        "--certificate-authority", "--client-certificate", "--client-key",
-        "--username", "--password", "--insecure-skip-tls-verify",
-        "--raw", "-f", "--filename", "-k", "--kustomize", "--template",
-    }),
+    "find": frozenset(
+        {
+            "-delete",
+            "-exec",
+            "-execdir",
+            "-ok",
+            "-okdir",
+            "-fprint",
+            "-fprint0",
+            "-fprintf",
+            "-fls",
+        }
+    ),
+    "journalctl": frozenset(
+        {
+            "--vacuum-size",
+            "--vacuum-time",
+            "--vacuum-files",
+            "--rotate",
+            "--flush",
+            "--sync",
+            "--relinquish-var",
+            "--smart-relinquish-var",
+            "--setup-keys",
+            "--update-catalog",
+            "--cursor-file",
+        }
+    ),
+    "kubectl": frozenset(
+        {
+            "--kubeconfig",
+            "--server",
+            "-s",
+            "--token",
+            "--cache-dir",
+            "--as",
+            "--as-group",
+            "--as-uid",
+            "--user",
+            "--cluster",
+            "--context",
+            "--certificate-authority",
+            "--client-certificate",
+            "--client-key",
+            "--username",
+            "--password",
+            "--insecure-skip-tls-verify",
+            "--raw",
+            "-f",
+            "--filename",
+            "-k",
+            "--kustomize",
+            "--template",
+        }
+    ),
     "grep": frozenset({"--include", "-R", "--dereference-recursive"}),
     "ps": frozenset({"-E"}),
 }
@@ -138,13 +189,26 @@ _VALUE_LETTERS = {"kubectl": "nlocLv", "grep": "efmABCdD"}
 _GREP_FLAG_LETTERS = "inrvwxclLhHoqsEFGIa"
 #: Letters whose value is required on both GNU and BSD grep.
 _GREP_VALUE_LETTERS = "ABm"
-_GREP_FLAGS = frozenset({
-    "--ignore-case", "--line-number", "--recursive", "--invert-match",
-    "--word-regexp", "--line-regexp", "--count", "--files-with-matches",
-    "--files-without-match", "--no-filename", "--with-filename",
-    "--only-matching", "--quiet", "--silent", "--extended-regexp",
-    "--fixed-strings",
-})
+_GREP_FLAGS = frozenset(
+    {
+        "--ignore-case",
+        "--line-number",
+        "--recursive",
+        "--invert-match",
+        "--word-regexp",
+        "--line-regexp",
+        "--count",
+        "--files-with-matches",
+        "--files-without-match",
+        "--no-filename",
+        "--with-filename",
+        "--only-matching",
+        "--quiet",
+        "--silent",
+        "--extended-regexp",
+        "--fixed-strings",
+    }
+)
 _GREP_VALUE_OPTIONS = frozenset({"--max-count", "--after-context", "--before-context"})
 
 #: `kubectl` flags whose next word is their value (`-n secrets` is a
@@ -152,18 +216,44 @@ _GREP_VALUE_OPTIONS = frozenset({"--max-count", "--after-context", "--before-con
 #: the next word even when it starts with `-`, so an unknown flag could take
 #: `-n` as its value: the skip holds only when every flag word is one of these
 #: or `_KUBECTL_BOOLEANS`.
-_KUBECTL_VALUE_FLAGS = frozenset({
-    "-n", "--namespace", "-l", "--selector", "-o", "--output", "-c",
-    "--container", "--field-selector", "-L", "--label-columns", "--sort-by",
-    "--since", "--since-time", "--tail",
-})
+_KUBECTL_VALUE_FLAGS = frozenset(
+    {
+        "-n",
+        "--namespace",
+        "-l",
+        "--selector",
+        "-o",
+        "--output",
+        "-c",
+        "--container",
+        "--field-selector",
+        "-L",
+        "--label-columns",
+        "--sort-by",
+        "--since",
+        "--since-time",
+        "--tail",
+    }
+)
 
 #: The boolean flags of get/logs/describe/top the skip understands.
-_KUBECTL_BOOLEANS = frozenset({
-    "-A", "--all-namespaces", "-w", "--watch", "--show-labels", "--no-headers",
-    "-f", "--follow", "-p", "--previous", "--timestamps", "--all-containers",
-    "--containers",
-})
+_KUBECTL_BOOLEANS = frozenset(
+    {
+        "-A",
+        "--all-namespaces",
+        "-w",
+        "--watch",
+        "--show-labels",
+        "--no-headers",
+        "-f",
+        "--follow",
+        "-p",
+        "--previous",
+        "--timestamps",
+        "--all-containers",
+        "--containers",
+    }
+)
 
 #: The commands that print a file's content; only their arguments are
 #: checked against the credential names (`ls` and `find` print names).
@@ -172,21 +262,50 @@ _CONTENT_READERS = frozenset({"cat", "grep", "head", "tail"})
 #: File names whose content is a credential, as globs on the last path part.
 #: Refused as an argument; excluded from every `grep`.
 SECRET_FILES = (
-    ".env", ".env.*", "*.env", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*",
-    "id_ecdsa*", "id_ed25519*", "id_dsa*", "ssh_host_*", ".netrc", ".pgpass",
-    ".git-credentials", ".npmrc", "*.tfstate", "*.tfstate.*", "environ",
-    "admin.conf", "super-admin.conf", "kubelet.conf", "controller-manager.conf",
-    "scheduler.conf", "token",
+    ".env",
+    ".env.*",
+    "*.env",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "id_rsa*",
+    "id_ecdsa*",
+    "id_ed25519*",
+    "id_dsa*",
+    "ssh_host_*",
+    ".netrc",
+    ".pgpass",
+    ".git-credentials",
+    ".npmrc",
+    "*.tfstate",
+    "*.tfstate.*",
+    "environ",
+    "admin.conf",
+    "super-admin.conf",
+    "kubelet.conf",
+    "controller-manager.conf",
+    "scheduler.conf",
+    "token",
 )
 
 #: A name matching `SECRET_FILES` with one of these endings is a template.
 _TEMPLATES = (".example", ".sample", ".template", ".dist")
 
 #: Directories that hold credentials; any path through one is refused.
-SECRET_DIRS = frozenset({
-    ".ssh", ".aws", ".kube", ".gnupg", ".docker", ".azure", "gcloud",
-    "secrets", "serviceaccount",
-})
+SECRET_DIRS = frozenset(
+    {
+        ".ssh",
+        ".aws",
+        ".kube",
+        ".gnupg",
+        ".docker",
+        ".azure",
+        "gcloud",
+        "secrets",
+        "serviceaccount",
+    }
+)
 
 #: Lines shown to the model; the rest is counted and left for `save_to`.
 MAX_LINES = 200
@@ -302,7 +421,7 @@ def _grep_pattern(argv: Sequence[str]) -> int | None:
             flags, value = arg[1:], ""
             for at, letter in enumerate(arg[1:]):
                 if letter in _GREP_VALUE_LETTERS:
-                    flags, value = arg[1:at + 1], arg[at + 2:]
+                    flags, value = arg[1 : at + 1], arg[at + 2 :]
                     consume = not value
                     break
             if any(letter not in _GREP_FLAG_LETTERS for letter in flags):
@@ -327,7 +446,10 @@ def _kubectl_values(argv: Sequence[str]) -> set[int]:
             continue
         if arg in _KUBECTL_VALUE_FLAGS:
             values.add(index + 1)
-        elif arg not in _KUBECTL_BOOLEANS and arg.partition("=")[0] not in _KUBECTL_VALUE_FLAGS:
+        elif (
+            arg not in _KUBECTL_BOOLEANS
+            and arg.partition("=")[0] not in _KUBECTL_VALUE_FLAGS
+        ):
             return set()
     return values
 
@@ -399,11 +521,14 @@ async def _run(host: str, script: str) -> tuple[int, str]:
     failure explains itself. Its own process group, so a timeout kills the
     whole pipeline, not only the `sh` or `ssh` in front of it."""
     argv = (
-        ["sh", "-c", script] if host == LOCAL
+        ["sh", "-c", script]
+        if host == LOCAL
         else ["ssh", "-o", "BatchMode=yes", "--", host, script]
     )
     process = await asyncio.create_subprocess_exec(
-        *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
         start_new_session=True,
     )
     try:
@@ -447,7 +572,11 @@ def shell_tools(run: RunContext, *, hosts: Sequence[str], audit: Any) -> list:
                 to instead of reading it here — for output too long to read.
         """
         if host not in declared:
-            return await refuse(host, command, f"host {host!r} is not declared; declared: {list(declared)}")
+            return await refuse(
+                host,
+                command,
+                f"host {host!r} is not declared; declared: {list(declared)}",
+            )
         if (why := refusal(command)) is not None:
             return await refuse(host, command, why)
         code, output = await _run(host, _script(command))
@@ -458,7 +587,9 @@ def shell_tools(run: RunContext, *, hosts: Sequence[str], audit: Any) -> list:
             saved = await workspace.save(run.task_id, save_to, output)
             return f"exit {code}, {len(lines)} lines; {saved}"
         shown = lines[:MAX_LINES]
-        text = run.evidence.show(shown) if run.evidence is not None else "\n".join(shown)
+        text = (
+            run.evidence.show(shown) if run.evidence is not None else "\n".join(shown)
+        )
         if len(lines) > MAX_LINES:
             text += f"\n({len(lines) - MAX_LINES} more lines not shown — narrow the command or use save_to)"
         return f"exit {code}\n{text}"

@@ -13,29 +13,29 @@ reads. Taking the mark back deletes the row, because "unmarked" and "never
 marked" mean the same thing — nobody is vouching for this one.
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = '8f31d4a90c25'
-down_revision: Union[str, Sequence[str], None] = '5c2e9a71b408'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "8f31d4a90c25"
+down_revision: str | Sequence[str] | None = "5c2e9a71b408"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     op.create_table(
-        'verdicts',
-        sa.Column('provider', sa.String(), nullable=False),
-        sa.Column('provider_message_id', sa.String(), nullable=False),
-        sa.Column('mark', sa.String(), nullable=False),
-        sa.Column('marked_by', sa.String(), nullable=False),
-        sa.Column('marked_at', sa.String(), nullable=False),
-        sa.PrimaryKeyConstraint('provider', 'provider_message_id'),
+        "verdicts",
+        sa.Column("provider", sa.String(), nullable=False),
+        sa.Column("provider_message_id", sa.String(), nullable=False),
+        sa.Column("mark", sa.String(), nullable=False),
+        sa.Column("marked_by", sa.String(), nullable=False),
+        sa.Column("marked_at", sa.String(), nullable=False),
+        sa.PrimaryKeyConstraint("provider", "provider_message_id"),
     )
 
 
 def downgrade() -> None:
-    op.drop_table('verdicts')
+    op.drop_table("verdicts")

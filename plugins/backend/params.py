@@ -11,14 +11,15 @@ what the type is, one line each, the same place its fields are defined.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from friday.sdk.validation import InSet, Matches, OneOf
 
-__all__ = ["ApiIssueParams"]
+__all__ = ["TraceProblemParams"]
 
 
 @dataclass(frozen=True, slots=True)
-class ApiIssueParams:
+class TraceProblemParams:
     """Something this team's systems did, or did not do, that somebody wants
     looked at: an integration failing, a request, log, curl or response with
     an error code to check, a symptom with no name yet ("I bought the plan
@@ -158,7 +159,7 @@ class ApiIssueParams:
     #: matching on the path alone returns every *other* caller's successful
     #: request to it — 18 dossier lines where the id gives 8 — so the id is
     #: what narrows it to this reporter.
-    _RULES = {
+    _RULES: ClassVar[dict] = {
         "environment": InSet(frozenset({"production", "dev"})),
         "correlation_id": Matches(
             r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",

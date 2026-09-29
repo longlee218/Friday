@@ -30,7 +30,7 @@ import re
 import subprocess
 import sys
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -44,31 +44,55 @@ SPEC_ELSEWHERE = {"discord-mention-triage": "docs/SPEC.md"}
 #: Rows `sync` owns. Every other kind is hand-written and kept verbatim.
 DERIVED = {"board", "ticket"}
 
-STATUSES = ("done", "part-done", "not-started", "blocked", "withdrawn", "proposed", "unknown")
+STATUSES = (
+    "done",
+    "part-done",
+    "not-started",
+    "blocked",
+    "withdrawn",
+    "proposed",
+    "unknown",
+)
 
 #: First match wins, so the order is the precedence: "done except X" must be
 #: caught as partial before "done" catches it as finished.
 _RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Anchored: "done. Two of the bullets below are superseded" is done.
-    ("withdrawn", re.compile(r"^\W*(superseded|retired|withdrawn|wontfix|won't fix)\b")),
+    (
+        "withdrawn",
+        re.compile(r"^\W*(superseded|retired|withdrawn|wontfix|won't fix)\b"),
+    ),
     ("not-started", re.compile(r"(?<!done; )\bnot started\b|\bready-for-agent\b")),
     # "no longer blocked" and "precondition met" are not blocked.
-    ("blocked", re.compile(
-        r"(?<!no longer )\bblocked\b|\bprecondition\b(?! met)|\bready-for-human\b"
-        r"|\bneeds-info\b|\bwaiting on\b|\bpaused\b"
-    )),
-    ("part-done", re.compile(r"\bpart(ly|ially)? done\b|\bhalf\b|\bexcept\b|\bowed\b|\bin progress\b|\bpartial")),
+    (
+        "blocked",
+        re.compile(
+            r"(?<!no longer )\bblocked\b|\bprecondition\b(?! met)|\bready-for-human\b"
+            r"|\bneeds-info\b|\bwaiting on\b|\bpaused\b"
+        ),
+    ),
+    (
+        "part-done",
+        re.compile(
+            r"\bpart(ly|ially)? done\b|\bhalf\b|\bexcept\b|\bowed\b|\bin progress\b|\bpartial"
+        ),
+    ),
     ("proposed", re.compile(r"\bproposed\b|\bneeds-triage\b")),
-    ("done", re.compile(r"\bdone\b|\banswered\b|\bcomplete[d]?\b|\blanded\b|\bbuilt\b")),
+    (
+        "done",
+        re.compile(r"\bdone\b|\banswered\b|\bcomplete[d]?\b|\blanded\b|\bbuilt\b"),
+    ),
 )
 
 #: The status runs to the first blank line: a wrapped status keeps its end
 #: ("its consumer is\npaused").
-_STATUS_LINE = re.compile(r"^\*\*Status:?\*\*:?[ \t]*((?:.+\n?)+)", re.M)
-_FENCE = re.compile(r"^```.*?^```", re.M | re.S)
-_H1 = re.compile(r"^#\s+(.+)$", re.M)
+_STATUS_LINE = re.compile(r"^\*\*Status:?\*\*:?[ \t]*((?:.+\n?)+)", re.MULTILINE)
+_FENCE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
+_H1 = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 _DATE = re.compile(r"\b(20\d\d-\d\d-\d\d)\b")
-_LABEL = re.compile(r"\b(needs-triage|needs-info|ready-for-agent|ready-for-human|wontfix)\b")
+_LABEL = re.compile(
+    r"\b(needs-triage|needs-info|ready-for-agent|ready-for-human|wontfix)\b"
+)
 
 
 def classify(status_line: str | None) -> str:
@@ -148,14 +172,17 @@ def scan(existing: dict[str, dict]) -> list[dict]:
             continue  # not a board: some other directory under .scratch
         old = existing.get(board_dir.name, {})
         updated = sorted(t["updated"] for t in tickets if t["updated"])
-        rows.append({
-            "kind": "board",
-            "board": board_dir.name,
-            "spec": str(spec.relative_to(ROOT)) if spec else None,
-            "status": board_status(tickets),
-            "dates": old.get("dates") or (f"{updated[0]} to {updated[-1]}" if updated else None),
-            "summary": old.get("summary") or first_paragraph(spec),
-        })
+        rows.append(
+            {
+                "kind": "board",
+                "board": board_dir.name,
+                "spec": str(spec.relative_to(ROOT)) if spec else None,
+                "status": board_status(tickets),
+                "dates": old.get("dates")
+                or (f"{updated[0]} to {updated[-1]}" if updated else None),
+                "summary": old.get("summary") or first_paragraph(spec),
+            }
+        )
         rows.extend(tickets)
     return rows
 
@@ -164,7 +191,11 @@ def load(path: Path | None = None) -> list[dict]:
     path = path or PROGRESS  # read at call time, not bound at import
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def merge(old: list[dict], derived: list[dict]) -> list[dict]:
@@ -194,7 +225,9 @@ def changes(old: list[dict], new: list[dict]) -> list[str]:
         out.append(f"- {k[0]} {k[1]} {k[2] or ''}".rstrip())
     for k in sorted(before.keys() & after.keys()):
         if before[k].get("status") != after[k].get("status"):
-            out.append(f"~ {k[1]} {k[2] or '(board)'}: {before[k].get('status')} → {after[k].get('status')}")
+            out.append(
+                f"~ {k[1]} {k[2] or '(board)'}: {before[k].get('status')} → {after[k].get('status')}"
+            )
     return out
 
 
@@ -204,7 +237,9 @@ class Refused(Exception):
 
 def sync(dry_run: bool = False, force: bool = False) -> list[dict]:
     old = load()
-    existing = {r["board"]: r for r in old if r.get("kind") == "board" and r.get("board")}
+    existing = {
+        r["board"]: r for r in old if r.get("kind") == "board" and r.get("board")
+    }
     new = merge(old, scan(existing))
     for line in changes(old, new) or ["no status changes"]:
         print(line)
@@ -226,7 +261,8 @@ def sync(dry_run: bool = False, force: bool = False) -> list[dict]:
     print("tickets:", ", ".join(f"{s} {tally[s]}" for s in STATUSES if tally[s]))
     if not dry_run:
         PROGRESS.write_text(
-            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in new), encoding="utf-8"
+            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in new),
+            encoding="utf-8",
         )
         print(f"wrote {PROGRESS.relative_to(ROOT)} ({len(new)} rows)")
     return new
@@ -239,7 +275,9 @@ _GIT_OK: bool | None = None
 
 def _mtime_iso(path: Path) -> str | None:
     try:
-        return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
+        return datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(
+            timespec="seconds"
+        )
     except OSError:
         return None
 
@@ -252,7 +290,11 @@ def _git_log_dates(rel_path: str) -> list[str]:
     try:
         r = subprocess.run(
             ["git", "log", "--format=%cI", "--", rel_path],
-            cwd=ROOT, capture_output=True, text=True, timeout=15,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         _GIT_OK = False
@@ -291,12 +333,13 @@ def enrich(rows: list[dict]) -> list[dict]:
 
 # ── the page ────────────────────────────────────────────────────────────────
 
+
 def render(rows: list[dict]) -> str:
     """One self-contained page: the rows embedded, no network, no build step."""
     # Every "<" escaped, not only "</": "<!--<script>" in a status line would
     # otherwise swallow the real </script> and blank the page.
     data = json.dumps(enrich(rows), ensure_ascii=False).replace("<", "\\u003c")
-    stamp = html.escape(date.today().isoformat())
+    stamp = html.escape(date.today().isoformat())  # noqa: DTZ011 - the reader's own date
     return _PAGE.replace("__DATA__", data).replace("__STAMP__", stamp)
 
 
@@ -634,9 +677,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd")
     p_sync = sub.add_parser("sync", help="rebuild board and ticket rows from .scratch")
-    p_sync.add_argument("--dry-run", action="store_true", help="print changes, write nothing")
-    p_sync.add_argument("--force", action="store_true", help="drop boards gone from .scratch, summaries included")
-    p_html = sub.add_parser("html", help="write data/progress.html from the current rows")
+    p_sync.add_argument(
+        "--dry-run", action="store_true", help="print changes, write nothing"
+    )
+    p_sync.add_argument(
+        "--force",
+        action="store_true",
+        help="drop boards gone from .scratch, summaries included",
+    )
+    p_html = sub.add_parser(
+        "html", help="write data/progress.html from the current rows"
+    )
     p_html.add_argument("--open", action="store_true", help="open it in the browser")
     args = parser.parse_args(argv)
 

@@ -5,6 +5,7 @@ Split out of `db.py` (ticket 16) so each repository mixin can reach them with on
 `from friday.store._common import *`, leaving the method bodies moved out of the
 god-class byte-for-byte unchanged. Internal to the store package.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -12,9 +13,9 @@ import logging
 import re
 import secrets
 from collections.abc import Mapping
-from typing import Any
 from dataclasses import asdict, replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
+from typing import Any
 
 from sqlalchemy import (
     Integer,
@@ -28,27 +29,16 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.pool import StaticPool
 
-from friday.kernel.harness.structured import fits
-from friday.store import schema
 from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.domain.states import OutboundState
-from friday.kernel.domain.messages import Artifact, InboundEvent, MentionType
-from friday.kernel.domain.outbound import (
-    AuditEntry,
-    POLICY,
-    Outbound,
-    payload_hash,
-    payload_hash_of,
-)
 from friday.kernel.domain.memory import (
     CandidateStatus,
     Memory,
@@ -57,9 +47,7 @@ from friday.kernel.domain.memory import (
     MemoryRefused,
     MemoryStatus,
 )
-from friday.kernel.domain.tasks import ExtractionMark, RunningTask, Task
-from friday.kernel.domain.state import FridayState
-from friday.sdk.memory import MemoryOrigin
+from friday.kernel.domain.messages import Artifact, InboundEvent, MentionType
 from friday.kernel.domain.monitor import (
     MessageFlow,
     ModelCall,
@@ -67,16 +55,34 @@ from friday.kernel.domain.monitor import (
     MonitorSnapshot,
     ToolCall,
 )
+from friday.kernel.domain.outbound import (
+    POLICY,
+    AuditEntry,
+    Outbound,
+    payload_hash,
+    payload_hash_of,
+)
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.states import (
+    OPEN,
+    IllegalTransition,
+    OutboundState,
+    TaskState,
+    may_move,
+)
+from friday.kernel.domain.tasks import ExtractionMark, RunningTask, Task
+from friday.kernel.harness.structured import fits
+
 # The memory-kind machinery moved out of `domain` into its registry (ticket 12):
 # the kind is a validated string now, and the store reaches up to the registry
 # for a kind's writers, data schema, natural key and reader routing.
 from friday.kernel.memory import registry as memory_kinds
-from friday.kernel.text_transform import redact
 from friday.kernel.ops.redact import scrub
-from friday.kernel.domain.states import OPEN, IllegalTransition, TaskState, may_move
+from friday.kernel.text_transform import redact
+from friday.sdk.memory import MemoryOrigin
+from friday.store import schema
 
 log = logging.getLogger(__name__)
-
 
 
 def estimated_tokens(text: str) -> int:
@@ -89,6 +95,7 @@ def estimated_tokens(text: str) -> int:
     one formula, not two that could drift.
     """
     return len(text) // 4
+
 
 _OLDEST_FIRST = (schema.Message.created_at, schema.Message.provider_message_id)
 #: Ties break on the id cast as a number — two messages can share a timestamp,
@@ -133,7 +140,7 @@ BUSY_TIMEOUT_MS = 3000
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 #: `[artifact <id>: <what it is>]`, as `_record_artifacts` writes it.
@@ -452,99 +459,99 @@ def _balanced(rows: list[tuple[str, str]], limit: int) -> list[tuple[str, str]]:
 
 
 __all__ = [
-    'Any',
-    'Mapping',
-    'Artifact',
-    'AsyncSession',
-    'BUSY_TIMEOUT_MS',
-    'CandidateStatus',
-    'ConversationId',
-    'ExtractionMark',
-    'FridayState',
-    'IllegalTransition',
-    'InboundEvent',
-    'Integer',
-    'IntegrityError',
-    'Memory',
-    'MemoryCandidate',
-    'MemoryKeyTaken',
-    'MemoryOrigin',
-    'MemoryRefused',
-    'MemoryStatus',
-    'MentionType',
-    'MessageFlow',
-    'ModelCall',
-    'MonitorEvent',
-    'MonitorSnapshot',
-    'OPEN',
-    'OUTBOUND_DELIVERY_UNKNOWN',
-    'OUTBOUND_DISPATCHING',
-    'OUTBOUND_FAILED',
-    'OUTBOUND_QUEUED',
-    'OUTBOUND_SENT',
-    'OUTBOUND_SENT_MANUALLY',
-    'Outbound',
-    'OutboundState',
-    'POLICY',
-    'RunningTask',
-    'StaticPool',
-    'Task',
-    'TaskState',
-    'ToolCall',
-    'AuditEntry',
-    '_ARTIFACT_REF',
-    '_ASK',
-    '_audit',
-    '_NEEDS_APPROVAL',
-    '_NEWEST_FIRST',
-    '_OLDEST_FIRST',
-    '_SQL_KEYWORDS',
-    '_artifact',
-    '_artifact_id',
-    '_balanced',
-    '_candidate',
-    '_checked_data',
-    '_describe_artifact',
-    '_event',
-    '_flush_keyed',
-    '_memory',
-    '_memory_id',
-    '_model_call',
-    '_now',
-    '_outbound',
-    '_runbook_matches',
-    '_task',
-    '_tool_call',
-    '_with_artifact_ids',
-    'aliased',
-    'asdict',
-    'async_sessionmaker',
-    'asyncio',
-    'cast',
-    'create_async_engine',
-    'datetime',
-    'delete',
-    'estimated_tokens',
-    'event',
-    'fits',
-    'func',
-    'insert',
-    'literal',
-    'log',
-    'logging',
-    'may_move',
-    'memory_kinds',
-    'or_',
-    'payload_hash',
-    'payload_hash_of',
-    're',
-    'redact',
-    'replace',
-    'schema',
-    'scrub',
-    'secrets',
-    'select',
-    'timedelta',
-    'timezone',
-    'update',
+    "BUSY_TIMEOUT_MS",
+    "OPEN",
+    "OUTBOUND_DELIVERY_UNKNOWN",
+    "OUTBOUND_DISPATCHING",
+    "OUTBOUND_FAILED",
+    "OUTBOUND_QUEUED",
+    "OUTBOUND_SENT",
+    "OUTBOUND_SENT_MANUALLY",
+    "POLICY",
+    "_ARTIFACT_REF",
+    "_ASK",
+    "_NEEDS_APPROVAL",
+    "_NEWEST_FIRST",
+    "_OLDEST_FIRST",
+    "_SQL_KEYWORDS",
+    "Any",
+    "Artifact",
+    "AsyncSession",
+    "AuditEntry",
+    "CandidateStatus",
+    "ConversationId",
+    "ExtractionMark",
+    "FridayState",
+    "IllegalTransition",
+    "InboundEvent",
+    "Integer",
+    "IntegrityError",
+    "Mapping",
+    "Memory",
+    "MemoryCandidate",
+    "MemoryKeyTaken",
+    "MemoryOrigin",
+    "MemoryRefused",
+    "MemoryStatus",
+    "MentionType",
+    "MessageFlow",
+    "ModelCall",
+    "MonitorEvent",
+    "MonitorSnapshot",
+    "Outbound",
+    "OutboundState",
+    "RunningTask",
+    "StaticPool",
+    "Task",
+    "TaskState",
+    "ToolCall",
+    "_artifact",
+    "_artifact_id",
+    "_audit",
+    "_balanced",
+    "_candidate",
+    "_checked_data",
+    "_describe_artifact",
+    "_event",
+    "_flush_keyed",
+    "_memory",
+    "_memory_id",
+    "_model_call",
+    "_now",
+    "_outbound",
+    "_runbook_matches",
+    "_task",
+    "_tool_call",
+    "_with_artifact_ids",
+    "aliased",
+    "asdict",
+    "async_sessionmaker",
+    "asyncio",
+    "cast",
+    "create_async_engine",
+    "datetime",
+    "delete",
+    "estimated_tokens",
+    "event",
+    "fits",
+    "func",
+    "insert",
+    "literal",
+    "log",
+    "logging",
+    "may_move",
+    "memory_kinds",
+    "or_",
+    "payload_hash",
+    "payload_hash_of",
+    "re",
+    "redact",
+    "replace",
+    "schema",
+    "scrub",
+    "secrets",
+    "select",
+    "timedelta",
+    "timezone",
+    "update",
 ]

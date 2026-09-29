@@ -35,7 +35,14 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from friday.kernel.spine.plan import AgentStep, AskStep, DraftStep, HandOverStep, Step, step_keys
+from friday.kernel.spine.plan import (
+    AgentStep,
+    AskStep,
+    DraftStep,
+    HandOverStep,
+    Step,
+    step_keys,
+)
 from friday.kernel.spine.plan_gate import Frozen
 from friday.sdk.actions import Ask, HandOver, Replan, Reply, Retriage
 from friday.sdk.agent import AgentSpec
@@ -93,8 +100,9 @@ async def run_plan(
         if not isinstance(end, Replan):
             return RunEnd(end, tuple(plans), replans_used)
         if replans_used >= frozen.plan.contract.limits.max_replans:
-            return RunEnd(HandOver(f"replans_exhausted: {end.found}"),
-                          tuple(plans), replans_used)
+            return RunEnd(
+                HandOver(f"replans_exhausted: {end.found}"), tuple(plans), replans_used
+            )
         replans_used += 1
         nxt = await steps.planner(frozen, results, end)
         if isinstance(nxt, HandOver):
@@ -131,8 +139,12 @@ async def _walk(
                 return results, HandOver(f"step_failed: {step.id}: {failed}")
             kind, body = _encode(value, step, agents)
             await db.put_step_result(
-                task_id=plan.task_id, step_key=keys[step.id], step_id=step.id,
-                plan_version=plan.plan_version, kind=kind, body=body,
+                task_id=plan.task_id,
+                step_key=keys[step.id],
+                step_id=step.id,
+                plan_version=plan.plan_version,
+                kind=kind,
+                body=body,
             )
             if isinstance(value, Replan):
                 results[step.id] = value
@@ -161,26 +173,43 @@ async def _run_step(step: Step, reads: Mapping[str, Any], steps: Steps) -> Any:
         except Exception as exc:  # noqa: BLE001 — every step failure is an attempt
             # `AgentRunFailed.reason` is scrubbed; any other text may not be.
             reason = getattr(exc, "reason", None) or type(exc).__name__
-            log.warning("step %s attempt %d/%d failed: %s",
-                        step.id, attempt, STEP_ATTEMPTS, reason)
+            log.warning(
+                "step %s attempt %d/%d failed: %s",
+                step.id,
+                attempt,
+                STEP_ATTEMPTS,
+                reason,
+            )
     raise _StepFailed(reason)
 
 
-_TYPES = {"ask": Ask, "hand_over": HandOver, "replan": Replan,
-          "retriage": Retriage, "reply": Reply}
+_TYPES = {
+    "ask": Ask,
+    "hand_over": HandOver,
+    "replan": Replan,
+    "retriage": Retriage,
+    "reply": Reply,
+}
 _KINDS = {t: kind for kind, t in _TYPES.items()}
 #: Not stored: `Ask.evidence` (ticket 14), `HandOver.interruption` (DAG only).
 _NOT_STORED = ("evidence", "interruption")
 
 
-def _encode(value: Any, step: Step, agents: Mapping[str, AgentSpec]) -> tuple[str, dict]:
+def _encode(
+    value: Any, step: Step, agents: Mapping[str, AgentSpec]
+) -> tuple[str, dict]:
     """`(kind, JSON body)`. An agent's own result goes through its declared
     `result` type; an `Ask` drops its `Evidence` (ticket 14)."""
     kind = _KINDS.get(type(value))
     if kind is None:
-        return "result", TypeAdapter(agents[step.agent].result).dump_python(value, mode="json")
-    return kind, {f.name: getattr(value, f.name)
-                  for f in fields(value) if f.name not in _NOT_STORED}
+        return "result", TypeAdapter(agents[step.agent].result).dump_python(
+            value, mode="json"
+        )
+    return kind, {
+        f.name: getattr(value, f.name)
+        for f in fields(value)
+        if f.name not in _NOT_STORED
+    }
 
 
 def _decode(kind: str, body: dict, step: Step, agents: Mapping[str, AgentSpec]) -> Any:

@@ -22,14 +22,14 @@ reverse-engineer them:
    in `model_calls` / `tool_calls` — the buffer is a cache for the
    hot path, and a restart asks the store if anything was missed.
 """
+
 from __future__ import annotations
 
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-
 
 #: How many events the bus keeps in memory for the `Last-Event-ID`
 #: replay path. 200 is the same number the audit uses for the feed
@@ -70,7 +70,7 @@ class EventBus:
         event = Event(
             id=self._next_id,
             type=type_,
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
             payload=payload,
         )
         # The replay buffer is a snapshot of the most recent

@@ -1,13 +1,18 @@
 """Ticket 06 — scoring a set of triage predictions against expected labels.
 
 Pure and synchronous: nothing here calls a model, so what is under test is
-the arithmetic, not the classifier. `evals/run_triage_eval.py` is the only
+the arithmetic, not the classifier. `friday.kernel.evals.triage` is the only
 real caller, and it supplies predictions from a live run.
 """
 
 from __future__ import annotations
 
-from evals.scoring import Prediction, accuracy, confusion_matrix, threshold_table
+from friday.kernel.evals.triage_scoring import (
+    Prediction,
+    accuracy,
+    confusion_matrix,
+    threshold_table,
+)
 
 
 def test_an_empty_run_has_zero_accuracy_not_a_crash():
@@ -16,10 +21,22 @@ def test_an_empty_run_has_zero_accuracy_not_a_crash():
 
 def test_accuracy_is_the_exact_match_rate():
     predictions = [
-        Prediction(expected="backend.trace_problem", predicted="backend.trace_problem", confidence=0.9),
+        Prediction(
+            expected="backend.trace_problem",
+            predicted="backend.trace_problem",
+            confidence=0.9,
+        ),
         Prediction(expected="skip", predicted="skip", confidence=0.8),
-        Prediction(expected="backend.answer_question", predicted="backend.trace_problem", confidence=0.6),
-        Prediction(expected="ops.request_permission", predicted="ops.request_permission", confidence=0.7),
+        Prediction(
+            expected="backend.answer_question",
+            predicted="backend.trace_problem",
+            confidence=0.6,
+        ),
+        Prediction(
+            expected="ops.request_permission",
+            predicted="ops.request_permission",
+            confidence=0.7,
+        ),
     ]
 
     assert accuracy(predictions) == 0.75
@@ -27,7 +44,11 @@ def test_accuracy_is_the_exact_match_rate():
 
 def test_confusion_matrix_counts_every_expected_predicted_pair():
     predictions = [
-        Prediction(expected="backend.trace_problem", predicted="backend.trace_problem", confidence=0.9),
+        Prediction(
+            expected="backend.trace_problem",
+            predicted="backend.trace_problem",
+            confidence=0.9,
+        ),
         Prediction(expected="backend.trace_problem", predicted="skip", confidence=0.4),
         Prediction(expected="skip", predicted="skip", confidence=0.95),
     ]
@@ -43,8 +64,16 @@ def test_confusion_matrix_gives_a_label_a_row_even_at_zero():
     """A label the classifier never once guessed must not silently vanish
     from the printed table — it is the confusion worth seeing most."""
     predictions = [
-        Prediction(expected="backend.trace_problem", predicted="backend.trace_problem", confidence=0.9),
-        Prediction(expected="ops.request_permission", predicted="backend.trace_problem", confidence=0.5),
+        Prediction(
+            expected="backend.trace_problem",
+            predicted="backend.trace_problem",
+            confidence=0.9,
+        ),
+        Prediction(
+            expected="ops.request_permission",
+            predicted="backend.trace_problem",
+            confidence=0.5,
+        ),
     ]
 
     matrix = confusion_matrix(predictions)
@@ -58,7 +87,9 @@ def test_a_label_only_ever_predicted_still_gets_a_column():
     it), but the classifier can still produce it. A matrix built only from
     the expected labels would raise on this row rather than show it."""
     predictions = [
-        Prediction(expected="backend.trace_problem", predicted="needs_human", confidence=0.0),
+        Prediction(
+            expected="backend.trace_problem", predicted="needs_human", confidence=0.0
+        ),
     ]
 
     matrix = confusion_matrix(predictions)
@@ -68,8 +99,16 @@ def test_a_label_only_ever_predicted_still_gets_a_column():
 
 def test_threshold_table_counts_what_confidence_below_it_would_escalate():
     predictions = [
-        Prediction(expected="backend.trace_problem", predicted="backend.trace_problem", confidence=0.9),
-        Prediction(expected="backend.trace_problem", predicted="backend.trace_problem", confidence=0.6),
+        Prediction(
+            expected="backend.trace_problem",
+            predicted="backend.trace_problem",
+            confidence=0.9,
+        ),
+        Prediction(
+            expected="backend.trace_problem",
+            predicted="backend.trace_problem",
+            confidence=0.6,
+        ),
         Prediction(expected="skip", predicted="skip", confidence=0.3),
     ]
 
@@ -86,7 +125,13 @@ def test_a_confidence_exactly_at_the_threshold_is_not_escalated():
     `state = PENDING if confidence >= threshold else NEEDS_HUMAN` — so the
     ceiling itself must count as decided, not escalated. `confidence < threshold`
     and `confidence <= threshold` agree everywhere except exactly here."""
-    predictions = [Prediction(expected="backend.trace_problem", predicted="backend.trace_problem", confidence=0.7)]
+    predictions = [
+        Prediction(
+            expected="backend.trace_problem",
+            predicted="backend.trace_problem",
+            confidence=0.7,
+        )
+    ]
 
     assert threshold_table(predictions, thresholds=(0.7,))[0.7] == 0
 
@@ -116,12 +161,18 @@ def test_a_decision_outside_the_closed_set_is_counted_as_its_own_outcome():
     beside it, so a change that starts making the model invent labels shows up
     as a number instead of as a slightly worse accuracy figure.
     """
-    from evals.scoring import out_of_set
+    from friday.kernel.evals.triage_scoring import out_of_set
 
     predictions = [
-        Prediction(expected="backend.trace_problem", predicted="needs_human", confidence=0.0,
-                   out_of_set=True),
-        Prediction(expected="backend.trace_problem", predicted="needs_human", confidence=0.0),
+        Prediction(
+            expected="backend.trace_problem",
+            predicted="needs_human",
+            confidence=0.0,
+            out_of_set=True,
+        ),
+        Prediction(
+            expected="backend.trace_problem", predicted="needs_human", confidence=0.0
+        ),
         Prediction(expected="backend.trace_problem", predicted="skip", confidence=0.8),
     ]
 
@@ -132,6 +183,8 @@ def test_a_row_nobody_invented_a_type_for_counts_zero():
     """The healthy case has to read as zero rather than as an absent number,
     because a report that only mentions this when it happens is a report whose
     silence means two things."""
-    from evals.scoring import out_of_set
+    from friday.kernel.evals.triage_scoring import out_of_set
 
-    assert out_of_set([Prediction(expected="skip", predicted="skip", confidence=0.9)]) == 0
+    assert (
+        out_of_set([Prediction(expected="skip", predicted="skip", confidence=0.9)]) == 0
+    )

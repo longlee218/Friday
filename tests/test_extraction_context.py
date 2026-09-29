@@ -12,8 +12,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from friday.kernel.domain.memory import Memory
-from plugins.backend.params import ApiIssueParams
 from friday.kernel.extraction.context import build_full_context
+from plugins.backend.params import TraceProblemParams
 from tests.test_extraction import _context
 from tests.test_outbox import _asked, _opened_by
 from tests.test_pool import make_task
@@ -29,16 +29,14 @@ async def test_the_extractor_itself_reads_what_it_already_asked(db):
     await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
 
     with_task = await build_full_context(
-        db, channel_id=None, task_id=task.id, known=ApiIssueParams()
+        db, channel_id=None, task_id=task.id, known=TraceProblemParams()
     )
     without_task = await build_full_context(
-        db, channel_id=None, task_id=None, known=ApiIssueParams()
+        db, channel_id=None, task_id=None, known=TraceProblemParams()
     )
 
     assert with_task.asked == ("em gửi anh curl với",)
-    assert without_task.asked == (), (
-        "a question leaked into a call about no task"
-    )
+    assert without_task.asked == (), "a question leaked into a call about no task"
 
 
 async def test_the_extractor_itself_reads_domain_kind_memories(db):
@@ -46,7 +44,6 @@ async def test_the_extractor_itself_reads_domain_kind_memories(db):
     (D14) reach the extractor through `db.domain_memories`, the same seam
     `test_the_extractor_itself_reads_what_it_already_asked` proved for
     outstanding questions."""
-    from friday.kernel.domain.memory import Memory
     from friday.kernel.domain.state import FridayState
 
     await db.memory_add(
@@ -56,10 +53,10 @@ async def test_the_extractor_itself_reads_domain_kind_memories(db):
     )
 
     with_room = await build_full_context(
-        db, channel_id="watched", task_id=None, known=ApiIssueParams()
+        db, channel_id="watched", task_id=None, known=TraceProblemParams()
     )
     without_channel = await build_full_context(
-        db, channel_id=None, task_id=None, known=ApiIssueParams()
+        db, channel_id=None, task_id=None, known=TraceProblemParams()
     )
 
     assert any(m.text == "test.apero is staging" for m in with_room.domain_memories)
@@ -78,7 +75,7 @@ async def test_voice_kind_memories_do_not_reach_the_extractor(db):
     await db.memory_add(scope, "they like short replies", kind="voice")
 
     context = await build_full_context(
-        db, channel_id="watched", task_id=None, known=ApiIssueParams()
+        db, channel_id="watched", task_id=None, known=TraceProblemParams()
     )
 
     texts = [m.text for m in context.domain_memories]
@@ -95,7 +92,7 @@ async def test_the_outstanding_questions_cost_no_model_call(db):
     await _asked(db, task, "em gửi anh curl với", sent_message_id="out-1")
 
     context = await build_full_context(
-        db, channel_id=None, task_id=task.id, known=ApiIssueParams()
+        db, channel_id=None, task_id=task.id, known=TraceProblemParams()
     )
 
     assert context.asked == ("em gửi anh curl với",)
@@ -109,8 +106,8 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
     internally, so a rendering change that silently drifts from that
     formula turns this test red rather than only a prompt-cache regression
     nobody notices."""
-    from dataclasses import fields as dataclass_fields
 
+    from friday.kernel.extraction.prompt import build_input
     from friday.kernel.harness.instruction_prompt import (
         assemble,
         memory,
@@ -119,27 +116,38 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
         user_input,
     )
     from friday.kernel.harness.structured import describe
-    from friday.kernel.extraction.prompt import build_input
 
-    known = ApiIssueParams(environment="production")
+    known = TraceProblemParams(environment="production")
     now = datetime.now(UTC)
     memories = [
         Memory(
-            id="m1", channel_id="watched", agent="extractor",
-            text="test.apero is staging", kind="fact",
-            created_at=now, updated_at=now,
+            id="m1",
+            channel_id="watched",
+            agent="extractor",
+            text="test.apero is staging",
+            kind="fact",
+            created_at=now,
+            updated_at=now,
         ),
         Memory(
-            id="m2", channel_id="*", agent="operator",
-            text="env: staging", kind="fact",
-            created_at=now, updated_at=now, origin="admin",
+            id="m2",
+            channel_id="*",
+            agent="operator",
+            text="env: staging",
+            kind="fact",
+            created_at=now,
+            updated_at=now,
+            origin="admin",
         ),
     ]
     asked = ("còn environment nào em?",)
     transcript = "API lỗi rồi"
 
     context = _context(
-        transcript, ApiIssueParams, asked=asked, memories=memories,
+        transcript,
+        TraceProblemParams,
+        asked=asked,
+        memories=memories,
         known=known,
     )
 
@@ -149,13 +157,14 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
     # two places. It *was* rendered twice: this rebuilt `- name: doc` by
     # hand, and when `build_input` moved to `describe` (which also names
     # types) the two drifted, which is how this test earned its keep.
-    schema = describe(ApiIssueParams, omit=known) or "(no fields)"
+    schema = describe(TraceProblemParams, omit=known) or "(no fields)"
     channel_body = room_facts(memories)
     by_hand = (
         f"Fields:\n{schema}\n\n"
         + assemble(
             memory(
-                conversation_body=outstanding_questions(asked), channel_body=channel_body
+                conversation_body=outstanding_questions(asked),
+                channel_body=channel_body,
             )
         )
         + f"What they said:\n{user_input(transcript)}"
@@ -178,7 +187,7 @@ async def test_the_debug_log_never_carries_content(db, caplog):
 
     with caplog.at_level(logging.DEBUG, logger="friday.kernel.extraction.context"):
         await build_full_context(
-            db, channel_id=None, task_id=task.id, known=ApiIssueParams()
+            db, channel_id=None, task_id=task.id, known=TraceProblemParams()
         )
 
     logged = "\n".join(r.getMessage() for r in caplog.records)
@@ -194,6 +203,7 @@ async def test_the_builder_never_writes_even_when_over_budget(db):
     A single message far larger than the budget, run through the builder
     directly, must leave the compaction count exactly where it started."""
     from conftest import make_event
+
     from tests.test_pool import _said
 
     task = await make_task(db)
@@ -204,7 +214,10 @@ async def test_the_builder_never_writes_even_when_over_budget(db):
     )
 
     context = await build_full_context(
-        db, channel_id=None, task_id=task.id, known=ApiIssueParams(),
+        db,
+        channel_id=None,
+        task_id=task.id,
+        known=TraceProblemParams(),
         budget_tokens=5,
     )
 

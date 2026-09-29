@@ -5,6 +5,7 @@ the SSE endpoint (`/api/events`). It is in-process and in-memory,
 so a unit test covers everything SSE needs from it without
 spinning up the FastAPI app.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -50,12 +51,12 @@ async def test_subscribe_returns_a_snapshot_of_the_replay_buffer() -> None:
     bus = EventBus()
     bus.publish("a", {})
     bus.publish("b", {})
-    queue, replay = await bus.subscribe()
+    _queue, replay = await bus.subscribe()
     assert [e.type for e in replay] == ["a", "b"]
     # The replay is a snapshot — events published after subscribe
     # are not in it.
     bus.publish("c", {})
-    queue2, replay2 = await bus.subscribe()
+    _queue2, replay2 = await bus.subscribe()
     assert [e.type for e in replay2] == ["a", "b", "c"]
 
 
@@ -113,6 +114,7 @@ async def test_slow_subscriber_does_not_block_others() -> None:
     # the bus at all — the bus would have also dropped the events
     # into the fast subscriber.
     from friday.kernel.ops.events import REPLAY_LIMIT
+
     filler = bus.publish("x", {})
     for _ in range(REPLAY_LIMIT):
         try:
@@ -132,7 +134,7 @@ async def test_slow_subscriber_does_not_block_others() -> None:
         try:
             ev = await asyncio.wait_for(fast.get(), 0.5)
             received.append(ev.payload.get("i"))
-        except asyncio.TimeoutError:
+        except TimeoutError:
             break
     assert received == [0, 1, 2], (
         f"fast subscriber missed events because slow one's queue was full: {received}"

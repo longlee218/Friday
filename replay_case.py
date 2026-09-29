@@ -1,4 +1,4 @@
-"""Run one past task through the `api_issue` graph again, and answer ticket
+"""Run one past task through the `trace_problem` graph again, and answer ticket
 00's four questions about it.
 
 Ticket 00 says "five runs through `run_agent.py` against a throwaway
@@ -17,7 +17,7 @@ collecting a case and not.
 
 **`Diagnose` is off unless asked for**, and that is the cheap loop. Question
 1 — did the dossier hold the line the operator calls decisive — is a
-question about `friday/kernel/dag/api_issue/distil.py`, a pure function. It can be
+question about `plugins/backend/graph/distil.py`, a pure function. It can be
 asked and re-asked for nothing. Only turn the model on once the dossier is
 right, or pay for reasoning over a dossier nobody has checked.
 
@@ -36,13 +36,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
+import shlex
 import sqlite3
 import sys
 import time
-import re
-import shlex
-
 from dataclasses import dataclass, field, fields
+from dataclasses import replace as _dc_replace
 from datetime import datetime
 from pathlib import Path
 from tempfile import mkdtemp
@@ -52,19 +52,17 @@ from typing import Any
 from dotenv import load_dotenv
 
 from friday.kernel.config import load_config
+from friday.kernel.dag import adapter
 from friday.kernel.dag.task_types import BootContext
-from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
-from friday.sdk.workflow import DAG, Deps as DAGDeps, NodeRun
+from friday.sdk.actions import Ask, HandOver, Reply
+from friday.sdk.workflow import DAG, NodeRun
+from friday.sdk.workflow import Deps as DAGDeps
+from friday.store.db import Database
 from plugins.backend.graph import DIAGNOSE, build_backend_dag
-from plugins.backend.params import ApiIssueParams
+from plugins.backend.params import TraceProblemParams
 from plugins.backend.toolsets import CODE, LOGS
 from plugins.backend.toolsets.logs import LokiSource, SshKubectlSource, log_tools
-from friday.store.db import Database
-from friday.kernel.dag import adapter
-
-
-from dataclasses import replace as _dc_replace
 
 
 class _WithoutDiagnose:
@@ -122,6 +120,7 @@ async def _run_on_adapter(
     def recorder(_scope: dict[str, Any]):
         async def rec(run: NodeRun) -> None:
             runs.append(run)
+
         return rec
 
     adapter.launch("friday-replay", str(system_db))
@@ -155,7 +154,9 @@ def copy_aside(live: Path, into: Path) -> Path:
     return copy
 
 
-def answers(runs: list[NodeRun], final: dict[str, Any], *, wall_s: float) -> dict[str, Any]:
+def answers(
+    runs: list[NodeRun], final: dict[str, Any], *, wall_s: float
+) -> dict[str, Any]:
     """Ticket 00's questions 3 and 4, off what the run recorded.
 
     Questions 1 and 2 are not here and cannot be: whether the dossier held
@@ -214,8 +215,11 @@ def _said(result: Any) -> str:
 
 
 def render(
-    task_id: int | str, found: dict[str, Any], report: Path | None,
-    *, held: bool | None = None,
+    task_id: int | str,
+    found: dict[str, Any],
+    report: Path | None,
+    *,
+    held: bool | None = None,
 ) -> str:
     lines = [
         f"=== task {task_id}: {found['wall_s']}s, "
@@ -279,7 +283,7 @@ def _parse_rfc3339(value: Any) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return datetime.fromisoformat(str(value))
     except ValueError:
         return None
 
@@ -309,7 +313,7 @@ def _superset_within(
         if needle and needle not in text:
             continue
         if found and (since or until):
-            at = datetime.fromisoformat(found.group("at").replace("Z", "+00:00"))
+            at = datetime.fromisoformat(found.group("at"))
             if since and at < since:
                 continue
             if until and at > until:
@@ -394,15 +398,26 @@ class CannedReads:
 
 #: Everything a captured case may say that is not a parameter of the issue
 #: itself. Named here so anything else is a mistake rather than a silence.
-CASE_KEYS = frozenset({
-    "id", "channel_id", "reported_at", "reads", "source",
-    # What the operator said was true, used by `evals/run_api_issue_eval.py`
-    # and by nothing at run time. `cause_mentions` is the tokens any correct
-    # answer must contain; `conclusive` is whether the evidence really did
-    # settle it, which is a judgement about their system and not about the
-    # model.
-    "decisive", "cause", "cause_mentions", "conclusive", "captured", "notes",
-})
+CASE_KEYS = frozenset(
+    {
+        "id",
+        "channel_id",
+        "reported_at",
+        "reads",
+        "source",
+        # What the operator said was true, used by the `backend.trace_problem` eval
+        # and by nothing at run time. `cause_mentions` is the tokens any correct
+        # answer must contain; `conclusive` is whether the evidence really did
+        # settle it, which is a judgement about their system and not about the
+        # model.
+        "decisive",
+        "cause",
+        "cause_mentions",
+        "conclusive",
+        "captured",
+        "notes",
+    }
+)
 
 
 def case_params(case: dict[str, Any]) -> dict[str, Any]:
@@ -420,7 +435,7 @@ def case_params(case: dict[str, Any]) -> dict[str, Any]:
     names declared on the class itself and would start quietly dropping
     inherited parameters the day one of these grows a base class.
     """
-    known = {f.name for f in fields(ApiIssueParams)}
+    known = {f.name for f in fields(TraceProblemParams)}
     unknown = sorted(set(case) - known - CASE_KEYS)
     if unknown:
         raise ValueError(
@@ -494,7 +509,9 @@ async def run_captured(case: dict, *, with_model: bool, into: Path):
         params = case_params(case)
         name, source = canned_source(case)
         dag = _replay_dag(
-            config, with_model=with_model, reports=reports,
+            config,
+            with_model=with_model,
+            reports=reports,
             toolsets=_canned_toolsets(name, source),
         )
         deps = DAGDeps(
@@ -509,7 +526,7 @@ async def run_captured(case: dict, *, with_model: bool, into: Path):
         final, runs, wall_s = await _run_on_adapter(
             dag,
             deps=deps,
-            seed={"prepare": ApiIssueParams(**params)},
+            seed={"prepare": TraceProblemParams(**params)},
             system_db=into / "replay-system.db",
             wfid=f"replay-{case['id']}",
         )
@@ -554,7 +571,10 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
             print(f"no task {task_id}", file=sys.stderr)
             return 1
         if task.type != "backend.trace_problem":
-            print(f"task {task_id} is {task.type}, not backend.trace_problem", file=sys.stderr)
+            print(
+                f"task {task_id} is {task.type}, not backend.trace_problem",
+                file=sys.stderr,
+            )
             return 1
 
         reports = into / "reports"
@@ -571,7 +591,7 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
         final, runs, wall_s = await _run_on_adapter(
             dag,
             deps=deps,
-            seed={"prepare": ApiIssueParams(**task.params)},
+            seed={"prepare": TraceProblemParams(**task.params)},
             system_db=into / "replay-system.db",
             wfid=f"replay-task-{task_id}",
         )
@@ -585,31 +605,38 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
 
 def main() -> int:
     load_dotenv()
-    # The api_issue graph reads memory (environment/route/service rows) through
+    # The trace_problem graph reads memory (environment/route/service rows) through
     # the store, which reads the kind registry (ticket 12); fill it before a run.
     from friday.kernel.memory.registry import register_all_memory_kinds
 
     register_all_memory_kinds()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "task_id", type=int, nargs="?",
+        "task_id",
+        type=int,
+        nargs="?",
         help="a task already in the store. Needs its back end reachable.",
     )
     parser.add_argument(
-        "--case", type=Path, default=None,
+        "--case",
+        type=Path,
+        default=None,
         help="a captured case: its parameters and the log its back end "
-             "returned, in one file. Replayable offline and for ever, which "
-             "a dev pod's log is not.",
+        "returned, in one file. Replayable offline and for ever, which "
+        "a dev pod's log is not.",
     )
     parser.add_argument(
-        "--diagnose", action="store_true",
+        "--diagnose",
+        action="store_true",
         help="run the model too. Off by default: question 1 is about the "
-             "distillation rule and costs nothing to ask.",
+        "distillation rule and costs nothing to ask.",
     )
     parser.add_argument(
-        "--into", type=Path, default=None,
+        "--into",
+        type=Path,
+        default=None,
         help="where the copy and the report go. A temporary directory by "
-             "default, so nothing here can touch the live database.",
+        "default, so nothing here can touch the live database.",
     )
     args = parser.parse_args()
     if (args.task_id is None) == (args.case is None):

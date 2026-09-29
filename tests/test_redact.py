@@ -93,6 +93,7 @@ def test_a_crash_does_not_print_the_token(tmp_path):
         # The script lives in a temp dir, and python puts *its* directory on
         # the path — not the working directory.
         env={**os.environ, "PYTHONPATH": str(ROOT)},
+        check=False,
     )
 
     assert SECRET not in done.stderr
@@ -119,6 +120,7 @@ def test_a_crash_in_a_thread_is_scrubbed_too(tmp_path):
         # The script lives in a temp dir, and python puts *its* directory on
         # the path — not the working directory.
         env={**os.environ, "PYTHONPATH": str(ROOT)},
+        check=False,
     )
 
     assert SECRET not in done.stderr

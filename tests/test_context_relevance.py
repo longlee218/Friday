@@ -10,6 +10,7 @@ arrived since is stable at the front and short at the back.
 from __future__ import annotations
 
 from conftest import make_event
+
 from friday.kernel.domain.conversation import ConversationId
 
 WATCHED = ConversationId("fake", "watched")
@@ -54,9 +55,7 @@ async def test_a_reply_to_the_operator_is_relevant(db):
         make_event(message_id="1", mention_type=None, is_own=True, text="which env?")
     )
     await db.record_message(
-        make_event(
-            message_id="2", mention_type=None, text="prod", reply_to="1"
-        )
+        make_event(message_id="2", mention_type=None, text="prod", reply_to="1")
     )
 
     relevant = await db.relevant_messages(WATCHED)
@@ -98,7 +97,9 @@ async def test_changing_the_definition_needs_no_history_that_was_never_stored(db
     assert [m.text for m in await db.relevant_messages(WATCHED)] == ["mentions me"]
 
 
-async def test_a_tasks_opening_context_does_not_change_as_the_conversation_continues(db):
+async def test_a_tasks_opening_context_does_not_change_as_the_conversation_continues(
+    db,
+):
     """No limit means nothing is ever evicted — the front of the prompt is
     stable by construction, not by tracking a boundary."""
     await db.record_message(make_event(message_id="1", text="opening question"))

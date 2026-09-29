@@ -36,14 +36,21 @@ async def test_a_memory_is_written_and_found_by_search(db):
 
 
 async def test_search_finds_nothing_in_an_empty_room(db):
-    assert await db.memory_search(ROOM, "anything", limit=8, kind=memory_kinds.VOICE) == []
+    assert (
+        await db.memory_search(ROOM, "anything", limit=8, kind=memory_kinds.VOICE) == []
+    )
 
 
 async def test_a_room_cannot_read_another_rooms_memory(db):
     await db.memory_add(OTHER_ROOM, "they deploy on fridays")
 
-    assert await db.memory_search(ROOM, "deploy", limit=8, kind=memory_kinds.VOICE) == []
-    assert await db.memory_search(OTHER_ROOM, "deploy", limit=8, kind=memory_kinds.VOICE) != []
+    assert (
+        await db.memory_search(ROOM, "deploy", limit=8, kind=memory_kinds.VOICE) == []
+    )
+    assert (
+        await db.memory_search(OTHER_ROOM, "deploy", limit=8, kind=memory_kinds.VOICE)
+        != []
+    )
 
 
 async def test_correcting_a_memory_replaces_its_text(db):
@@ -68,7 +75,9 @@ async def test_deleting_a_memory_removes_it_from_search(db):
 
     assert await db.memory_delete(ROOM, written.id) is True
 
-    assert await db.memory_search(ROOM, "staging", limit=8, kind=memory_kinds.VOICE) == []
+    assert (
+        await db.memory_search(ROOM, "staging", limit=8, kind=memory_kinds.VOICE) == []
+    )
 
 
 async def test_deleting_an_id_from_another_room_fails_the_same_as_missing(db):
@@ -109,8 +118,7 @@ async def test_a_neighbouring_id_does_not_resolve(db):
 
     guessed = format(int(first.id, 16) + 1, "012x")
     assert guessed != second.id, (
-        "sequential ids would make this the real second row — sparse ones "
-        "do not"
+        "sequential ids would make this the real second row — sparse ones do not"
     )
     assert await db.memory_update(ROOM, guessed, "anything") is None
 
@@ -131,7 +139,9 @@ async def test_a_full_channel_refuses_a_new_memory_rather_than_evicting_one(db):
 
     assert await db.memory_add(ROOM, "one more than the room can hold") is None
 
-    still_there = await db.memory_search(ROOM, "fact", limit=1000, kind=memory_kinds.VOICE)
+    still_there = await db.memory_search(
+        ROOM, "fact", limit=1000, kind=memory_kinds.VOICE
+    )
     assert len(still_there) == Database.MEMORY_PER_CHANNEL
     assert any(m.text == "fact number 0" for m in still_there), (
         "the oldest memory was not silently evicted to make room"
@@ -246,7 +256,9 @@ async def test_deleting_a_memory_frees_its_slot_at_the_cap(db):
         assert await db.memory_add(ROOM, f"fact number {n}") is not None
     assert await db.memory_add(ROOM, "one more than the room can hold") is None
 
-    first = (await db.memory_search(ROOM, "fact number 0", limit=1, kind=memory_kinds.VOICE))[0]
+    first = (
+        await db.memory_search(ROOM, "fact number 0", limit=1, kind=memory_kinds.VOICE)
+    )[0]
     await db.memory_delete(ROOM, first.id)
 
     assert await db.memory_add(ROOM, "now there is room again") is not None
@@ -259,8 +271,8 @@ async def test_the_store_enforces_the_same_text_length_the_tool_advertises(db):
     `MEMORY_PER_CHANNEL`'s own comment already makes for the count. A store
     that did not also cut would let a caller who skips the tool write
     anything, however long."""
-    from friday.store.db import Database
     from friday.kernel.toolsets.memory import TEXT_CHARS
+    from friday.store.db import Database
 
     assert Database.TEXT_CHARS == TEXT_CHARS, (
         "the tool's advertised limit and the store's enforced one must be "
@@ -270,7 +282,9 @@ async def test_the_store_enforces_the_same_text_length_the_tool_advertises(db):
     written = await db.memory_add(ROOM, "x" * (Database.TEXT_CHARS + 100))
     assert len(written.text) == Database.TEXT_CHARS
 
-    updated = await db.memory_update(ROOM, written.id, "y" * (Database.TEXT_CHARS + 100))
+    updated = await db.memory_update(
+        ROOM, written.id, "y" * (Database.TEXT_CHARS + 100)
+    )
     assert len(updated.text) == Database.TEXT_CHARS
 
 
@@ -317,7 +331,10 @@ def test_the_reader_of_a_memory_follows_from_its_kind():
         assert "extractor" in memory_kinds.readers_for(kind)
     assert memory_kinds.readers_for(memory_kinds.VOICE) == {"responder"}
     assert memory_kinds.domain_kinds() == {
-        memory_kinds.FACT, memory_kinds.CONSTRAINT, memory_kinds.FINDING, memory_kinds.DECISION,
+        memory_kinds.FACT,
+        memory_kinds.CONSTRAINT,
+        memory_kinds.FINDING,
+        memory_kinds.DECISION,
     }
 
 
@@ -326,7 +343,6 @@ def test_readers_for_refuses_a_kind_outside_the_closed_set():
     this domain is either voice or a constraint, and a kind that cannot be
     told apart from its neighbours is one a model will place at random."""
     import pytest
-
 
     with pytest.raises(ValueError):
         memory_kinds.readers_for("preference")
@@ -344,9 +360,7 @@ async def test_memory_add_defaults_to_voice_and_active(db):
 
 
 async def test_memory_add_takes_the_kind_it_is_given(db):
-    written = await db.memory_add(
-        ROOM, "test.apero is staging", kind=memory_kinds.FACT
-    )
+    written = await db.memory_add(ROOM, "test.apero is staging", kind=memory_kinds.FACT)
 
     assert written.kind == memory_kinds.FACT
 
@@ -358,7 +372,9 @@ async def test_domain_memories_reads_the_four_domain_kinds(db):
     await db.memory_add(ROOM, "test.apero is staging", kind=memory_kinds.FACT)
     await db.memory_add(ROOM, "never deploy on fridays", kind=memory_kinds.CONSTRAINT)
     await db.memory_add(
-        ROOM, "the timeout was the proxy, not the api", kind=memory_kinds.FINDING,
+        ROOM,
+        "the timeout was the proxy, not the api",
+        kind=memory_kinds.FINDING,
         data={"task_id": 7, "service": "api", "confidence": 0.7},
     )
     await db.memory_add(ROOM, "moved to the new queue", kind=memory_kinds.DECISION)
@@ -389,7 +405,9 @@ async def test_memory_search_only_returns_the_kind_it_is_asked_for(db):
     domain-kind row, however it got written, must not surface in that
     search."""
     await db.memory_add(ROOM, "test.apero is staging", kind=memory_kinds.FACT)
-    voice = await db.memory_add(ROOM, "they like short replies", kind=memory_kinds.VOICE)
+    voice = await db.memory_add(
+        ROOM, "they like short replies", kind=memory_kinds.VOICE
+    )
 
     found = await db.memory_search(ROOM, "", kind=memory_kinds.VOICE, limit=8)
 
@@ -431,12 +449,13 @@ async def test_a_superseded_memory_is_invisible_to_every_reader_that_serves_a_mo
 
     assert old.id not in {m.id for m in await db.domain_memories(ROOM.channel_id)}
     assert old.id not in {
-        m.id for m in await db.memory_search(ROOM, "", kind=memory_kinds.DECISION, limit=8)
+        m.id
+        for m in await db.memory_search(ROOM, "", kind=memory_kinds.DECISION, limit=8)
     }
 
 
 async def test_a_superseded_memory_cannot_be_superseded_again_through_its_own_id(db):
-    """"The current one" is the row a supersession points at — supersede
+    """ "The current one" is the row a supersession points at — supersede
     that one instead of trying to reach the row it already replaced."""
     old = await db.memory_add(ROOM, "the queue is rabbitmq", kind=memory_kinds.DECISION)
     new = await db.memory_supersede(ROOM, old.id, "the queue moved to kafka")
@@ -475,7 +494,9 @@ async def test_superseding_is_never_refused_for_the_channels_cap(db):
         ids.append(written.id)
     assert await db.memory_add(ROOM, "one more than the room can hold") is None
 
-    assert await db.memory_supersede(ROOM, ids[0], "fact number 0, corrected") is not None
+    assert (
+        await db.memory_supersede(ROOM, ids[0], "fact number 0, corrected") is not None
+    )
 
     # Still full: a supersession writes a new active row in the same call it
     # retires one, so the active count never dips — unlike `memory_delete`,
@@ -490,9 +511,13 @@ async def test_the_cap_counts_only_active_memories_not_every_superseded_generati
     room look full when it is not."""
     from friday.store.db import Database
 
-    current = await db.memory_add(ROOM, "the queue is rabbitmq", kind=memory_kinds.DECISION)
+    current = await db.memory_add(
+        ROOM, "the queue is rabbitmq", kind=memory_kinds.DECISION
+    )
     for n in range(Database.MEMORY_PER_CHANNEL):
-        current = await db.memory_supersede(ROOM, current.id, f"the queue is generation {n}")
+        current = await db.memory_supersede(
+            ROOM, current.id, f"the queue is generation {n}"
+        )
 
     assert await db.memory_add(ROOM, "well under the cap") is not None
 
@@ -535,7 +560,10 @@ async def test_a_structured_row_comes_back_as_its_own_type(db):
     await _project(db, "p")
     await _service(db, "be", "p")
     await db.memory_add(
-        ROOM, "ReelMe on dev", kind="backend.route", origin=MemoryOrigin.ADMIN,
+        ROOM,
+        "ReelMe on dev",
+        kind="backend.route",
+        origin=MemoryOrigin.ADMIN,
         data={"domain": "api.dev.aperogroup.ai", "env": "dev", "service": "be"},
     )
 
@@ -561,9 +589,15 @@ async def test_this_rooms_row_wins_over_the_one_written_for_every_room(db):
     await _service(db, "this-room", "p")
     for state, service in ((everywhere, "shared"), (ROOM, "this-room")):
         await db.memory_add(
-            state, "route", kind="backend.route", origin=MemoryOrigin.ADMIN,
-            data={"domain": "api.aperogroup.ai", "env": "production",
-                  "service": service},
+            state,
+            "route",
+            kind="backend.route",
+            origin=MemoryOrigin.ADMIN,
+            data={
+                "domain": "api.aperogroup.ai",
+                "env": "production",
+                "service": service,
+            },
         )
 
     found = await db.structured_memory(
@@ -587,10 +621,16 @@ async def _project(db, name: str, channel: str = "c1"):
     from friday.sdk.memory import MemoryOrigin
 
     return await db.memory_add(
-        FridayState(channel_id=channel, agent="operator"), f"repo {name}",
-        kind="backend.project", origin=MemoryOrigin.ADMIN,
-        data={"name": name, "repo_path": f"~/{name}",
-              "default_branch": "main", "stack": "NestJS"},
+        FridayState(channel_id=channel, agent="operator"),
+        f"repo {name}",
+        kind="backend.project",
+        origin=MemoryOrigin.ADMIN,
+        data={
+            "name": name,
+            "repo_path": f"~/{name}",
+            "default_branch": "main",
+            "stack": "NestJS",
+        },
     )
 
 
@@ -598,13 +638,15 @@ async def _service(db, name: str, project: str, channel: str = "c1"):
     from friday.sdk.memory import MemoryOrigin
 
     return await db.memory_add(
-        FridayState(channel_id=channel, agent="operator"), f"service {name}",
-        kind="backend.service", origin=MemoryOrigin.ADMIN,
+        FridayState(channel_id=channel, agent="operator"),
+        f"service {name}",
+        kind="backend.service",
+        origin=MemoryOrigin.ADMIN,
         data={
-            "name": name, "project": project,
+            "name": name,
+            "project": project,
             "prod": {"cluster": "c", "namespace": "n", "app": name},
-            "dev": {"kube_context": "d", "namespace": "dev",
-                    "pod_pattern": f"{name}-"},
+            "dev": {"kube_context": "d", "namespace": "dev", "pod_pattern": f"{name}-"},
         },
     )
 
@@ -649,8 +691,10 @@ async def test_renaming_a_row_another_row_names_is_refused(db):
 
     with pytest.raises(MemoryRefused, match="backend-reelme-v2"):
         await db.memory_update(
-            FridayState(channel_id="c1", agent="operator"), project.id,
-            text="repo", data={**project.data, "name": "renamed"},
+            FridayState(channel_id="c1", agent="operator"),
+            project.id,
+            text="repo",
+            data={**project.data, "name": "renamed"},
             origin="admin",
         )
 
@@ -659,8 +703,11 @@ async def test_renaming_a_row_nobody_names_is_fine(db):
     project = await _project(db, "lonely")
 
     changed = await db.memory_update(
-        FridayState(channel_id="c1", agent="operator"), project.id,
-        text="repo", data={**project.data, "name": "renamed"}, origin="admin",
+        FridayState(channel_id="c1", agent="operator"),
+        project.id,
+        text="repo",
+        data={**project.data, "name": "renamed"},
+        origin="admin",
     )
 
     assert changed.key == "renamed"
@@ -672,8 +719,10 @@ async def test_editing_a_row_without_moving_its_key_is_fine(db):
     await _service(db, "backend-reelme-v2", "reelme-v2")
 
     changed = await db.memory_update(
-        FridayState(channel_id="c1", agent="operator"), project.id,
-        text="repo", data={**project.data, "repo_path": "~/moved"},
+        FridayState(channel_id="c1", agent="operator"),
+        project.id,
+        text="repo",
+        data={**project.data, "repo_path": "~/moved"},
         origin="admin",
     )
 
@@ -692,7 +741,8 @@ async def test_deleting_a_row_another_row_names_is_refused(db):
 
     with pytest.raises(MemoryRefused, match="backend-reelme-v2"):
         await db.memory_delete(
-            FridayState(channel_id="c1", agent="operator"), project.id,
+            FridayState(channel_id="c1", agent="operator"),
+            project.id,
             origin="admin",
         )
 
@@ -701,12 +751,14 @@ async def test_a_deleted_row_no_longer_holds_its_dependants_hostage(db):
     project = await _project(db, "reelme-v2")
     service = await _service(db, "backend-reelme-v2", "reelme-v2")
     await db.memory_delete(
-        FridayState(channel_id="c1", agent="operator"), service.id,
+        FridayState(channel_id="c1", agent="operator"),
+        service.id,
         origin="admin",
     )
 
     assert await db.memory_delete(
-        FridayState(channel_id="c1", agent="operator"), project.id,
+        FridayState(channel_id="c1", agent="operator"),
+        project.id,
         origin="admin",
     )
 
@@ -723,8 +775,10 @@ async def test_superseding_cannot_move_a_key_another_row_names(db):
 
     with pytest.raises(MemoryRefused, match="backend-reelme-v2"):
         await db.memory_supersede(
-            FridayState(channel_id="c1", agent="operator"), project.id,
-            "a better description", origin="admin",
+            FridayState(channel_id="c1", agent="operator"),
+            project.id,
+            "a better description",
+            origin="admin",
             data={**project.data, "name": "renamed"},
         )
 
@@ -735,8 +789,10 @@ async def test_superseding_without_moving_the_key_is_still_allowed(db):
     await _service(db, "backend-reelme-v2", "reelme-v2")
 
     new = await db.memory_supersede(
-        FridayState(channel_id="c1", agent="operator"), project.id,
-        "a better description", origin="admin",
+        FridayState(channel_id="c1", agent="operator"),
+        project.id,
+        "a better description",
+        origin="admin",
         data={**project.data, "repo_path": "~/moved"},
     )
 
@@ -752,14 +808,14 @@ async def test_a_shared_row_cannot_be_removed_while_one_room_names_it(db):
 
     await _project(db, "shared", channel="*")
     await _service(db, "c1-service", "shared", channel="c1")
-    shared = [
-        m for m in await db.memories_for_channel("*")
-        if m.kind == "backend.project"
-    ][0]
+    shared = next(
+        m for m in await db.memories_for_channel("*") if m.kind == "backend.project"
+    )
 
     with pytest.raises(MemoryRefused, match="c1-service"):
         await db.memory_delete(
-            FridayState(channel_id="*", agent="operator"), shared.id,
+            FridayState(channel_id="*", agent="operator"),
+            shared.id,
             origin="admin",
         )
 

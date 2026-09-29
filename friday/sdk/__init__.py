@@ -13,15 +13,24 @@ is the bottom of our own code — it imports nothing of ours — `kernel` import
 
 from friday.sdk.action import Action, ActionContract, Limits, Recognition
 from friday.sdk.agent import AgentSpec, Budget
+from friday.sdk.eval import EvalCase, EvalSpec
+from friday.sdk.intake import ArtifactRef, Hints, IntakeContext, IntakeSeed
 from friday.sdk.memory import MemoryKindSpec, Origin
 from friday.sdk.model import Model
 from friday.sdk.outbox import Kind
 from friday.sdk.plugin import Plugin, PluginAPI, TaskTypeSpec
 from friday.sdk.redact import scrub
-from friday.sdk.intake import ArtifactRef, Hints, IntakeContext, IntakeSeed
 from friday.sdk.sources import CodeSource, Lines, LogSource, Reads
-from friday.sdk.toolset import RunContext, ToolContext, ToolSpec, ToolsetSpec, tool
-from friday.sdk.validation import InSet, Matches, NonEmpty, OneOf, Problem, asked_as, validate
+from friday.sdk.toolset import RunContext, ToolContext, ToolsetSpec, ToolSpec, tool
+from friday.sdk.validation import (
+    InSet,
+    Matches,
+    NonEmpty,
+    OneOf,
+    Problem,
+    asked_as,
+    validate,
+)
 
 __all__ = [
     "Action",
@@ -30,6 +39,8 @@ __all__ = [
     "ArtifactRef",
     "Budget",
     "CodeSource",
+    "EvalCase",
+    "EvalSpec",
     "Hints",
     "InSet",
     "IntakeContext",

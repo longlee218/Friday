@@ -35,17 +35,17 @@ not a memory kind; node-name columns (`node_runs.node`, `dag_state.paused_at_nod
 the core kinds `finding`/`person` and the shared agents `extractor`/`triage`/
 `responder` stay unprefixed.
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '7f31db1381ef'
-down_revision: Union[str, Sequence[str], None] = '8fe3db098f79'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "7f31db1381ef"
+down_revision: str | Sequence[str] | None = "8fe3db098f79"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 #: (table, column) -> the value renames to apply to it. One place, read by both
@@ -85,9 +85,7 @@ def _apply(mapping_selector) -> None:
         handle = sa.table(table, sa.column(column, sa.String))
         for old, new in mapping_selector(renames):
             op.execute(
-                handle.update()
-                .where(handle.c[column] == old)
-                .values({column: new})
+                handle.update().where(handle.c[column] == old).values({column: new})
             )
 
 

@@ -65,7 +65,7 @@ def _offenders(source: str) -> list[tuple[str, int, str]]:
             continue
 
         # An `if` at the component's own level, and where it closes.
-        if line.startswith(f"{_BODY}if (") or line.startswith(f"{_BODY}}} else"):
+        if line.startswith((f"{_BODY}if (", f"{_BODY}}} else")):
             in_if = True
         elif line == f"{_BODY}}}":
             in_if = False
@@ -108,7 +108,7 @@ function Path({ provider, id }: { provider: string; id: string }) {
   return <div />;
 }
 """
-    (component, _, line), = _offenders(shipped)
+    ((component, _, line),) = _offenders(shipped)
 
     assert component == "Path"
     assert "useEffect" in line

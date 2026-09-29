@@ -26,7 +26,16 @@ ROOT = Path(__file__).resolve().parent.parent
 #: plugin owns them (DESIGN-v2 §9.2). Everything else the memory registry holds
 #: is a pack kind a plugin ships, so its bare name is a literal the kernel must
 #: not carry.
-CORE_KINDS = {"fact", "constraint", "decision", "voice", "summary", "finding", "person", "skill"}
+CORE_KINDS = {
+    "fact",
+    "constraint",
+    "decision",
+    "voice",
+    "summary",
+    "finding",
+    "person",
+    "skill",
+}
 
 #: The in-core task types — none since build-the-spine ticket 02 moved the last
 #: one (`ops.request_permission`) out to `plugins/ops/`; `skip` is not a task
@@ -124,7 +133,9 @@ def test_kernel_imports_only_sdk():
         for mod in _friday_imports(rel, tree)
         if not _under(mod, "friday.sdk", "friday.kernel", *_KERNEL_INTERIM)
     }
-    assert offenders == set(), f"kernel imported something other than sdk (or the store): {sorted(offenders)}"
+    assert offenders == set(), (
+        f"kernel imported something other than sdk (or the store): {sorted(offenders)}"
+    )
 
 
 def test_a_plugin_imports_sdk_only():
@@ -167,4 +178,6 @@ def test_the_kernel_carries_no_task_type_or_pack_kind_literal():
         and isinstance(node.value, str)
         and node.value in forbidden
     }
-    assert offenders == set(), f"the kernel hardcoded a plugin's id: {sorted(offenders)}"
+    assert offenders == set(), (
+        f"the kernel hardcoded a plugin's id: {sorted(offenders)}"
+    )

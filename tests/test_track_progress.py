@@ -68,15 +68,38 @@ def test_sync_rebuilds_tickets_and_keeps_every_hand_written_row(tmp_path, monkey
     scratch = tmp_path / ".scratch"
     issues = scratch / "a-board" / "issues"
     issues.mkdir(parents=True)
-    (scratch / "a-board" / "spec.md").write_text("# Spec\n\nWhat the board is for.\n", encoding="utf-8")
-    (issues / "01-first.md").write_text("# First\n\n**Status:** done\n", encoding="utf-8")
-    (issues / "02-second.md").write_text("# Second\n\n**Status:** not started\n", encoding="utf-8")
+    (scratch / "a-board" / "spec.md").write_text(
+        "# Spec\n\nWhat the board is for.\n", encoding="utf-8"
+    )
+    (issues / "01-first.md").write_text(
+        "# First\n\n**Status:** done\n", encoding="utf-8"
+    )
+    (issues / "02-second.md").write_text(
+        "# Second\n\n**Status:** not started\n", encoding="utf-8"
+    )
     progress = scratch / "progress.jsonl"
     hand = [
-        {"kind": "board", "board": "a-board", "summary": "written by hand", "dates": "2026-09-01 to 2026-09-02"},
+        {
+            "kind": "board",
+            "board": "a-board",
+            "summary": "written by hand",
+            "dates": "2026-09-01 to 2026-09-02",
+        },
         {"kind": "ticket", "board": "a-board", "ticket": "01", "status": "not-started"},
-        {"kind": "measurement", "board": "a-board", "date": "2026-09-18", "what": "8 lines in 8.5 s", "source": "x"},
-        {"kind": "open", "board": "a-board", "date": "2026-09-22", "what": "a question", "source": "y"},
+        {
+            "kind": "measurement",
+            "board": "a-board",
+            "date": "2026-09-18",
+            "what": "8 lines in 8.5 s",
+            "source": "x",
+        },
+        {
+            "kind": "open",
+            "board": "a-board",
+            "date": "2026-09-22",
+            "what": "a question",
+            "source": "y",
+        },
     ]
     progress.write_text("".join(json.dumps(r) + "\n" for r in hand), encoding="utf-8")
     monkeypatch.setattr(tp, "ROOT", tmp_path)
@@ -97,14 +120,29 @@ def test_sync_rebuilds_tickets_and_keeps_every_hand_written_row(tmp_path, monkey
     assert [r for r in rows if r["kind"] in ("measurement", "open")] == hand[2:]
 
 
-@pytest.mark.parametrize("payload", ["</script><b>x", "<!--<script>", "<script>alert(1)</script>"])
+@pytest.mark.parametrize(
+    "payload", ["</script><b>x", "<!--<script>", "<script>alert(1)</script>"]
+)
 def test_the_page_carries_the_rows_and_cannot_be_closed_by_them(payload):
-    rows = [{"kind": "note", "board": "b", "date": "2026-09-22", "what": payload, "source": "s"}]
+    rows = [
+        {
+            "kind": "note",
+            "board": "b",
+            "date": "2026-09-22",
+            "what": payload,
+            "source": "s",
+        }
+    ]
 
     page = tp.render(rows)
     script = page.split("<script>", 1)[1]
 
-    assert "<" not in script.split("</script>", 1)[0].split("const rows = ", 1)[1].split(";", 1)[0]
+    assert (
+        "<"
+        not in script.split("</script>", 1)[0]
+        .split("const rows = ", 1)[1]
+        .split(";", 1)[0]
+    )
     assert page.count("</script>") == 1
 
 
@@ -137,22 +175,32 @@ def _board(tmp_path, monkeypatch, *, rows: list[dict]):
     return scratch, progress
 
 
-def test_a_board_with_a_spec_and_no_tickets_is_proposed_and_other_dirs_are_skipped(tmp_path, monkeypatch):
-    scratch, progress = _board(tmp_path, monkeypatch, rows=[])
+def test_a_board_with_a_spec_and_no_tickets_is_proposed_and_other_dirs_are_skipped(
+    tmp_path, monkeypatch
+):
+    scratch, _progress = _board(tmp_path, monkeypatch, rows=[])
     (scratch / "new-board").mkdir()
-    (scratch / "new-board" / "spec.md").write_text("# S\n\nWhat it will do.\n", encoding="utf-8")
+    (scratch / "new-board" / "spec.md").write_text(
+        "# S\n\nWhat it will do.\n", encoding="utf-8"
+    )
     (scratch / "notes").mkdir()
 
     rows = tp.sync()
 
     boards = [r for r in rows if r["kind"] == "board"]
-    assert [(b["board"], b["status"], b["summary"]) for b in boards] == [("new-board", "proposed", "What it will do.")]
+    assert [(b["board"], b["status"], b["summary"]) for b in boards] == [
+        ("new-board", "proposed", "What it will do.")
+    ]
 
 
 def test_dry_run_writes_nothing(tmp_path, monkeypatch):
-    scratch, progress = _board(tmp_path, monkeypatch, rows=[{"kind": "note", "board": "b", "what": "x"}])
+    scratch, progress = _board(
+        tmp_path, monkeypatch, rows=[{"kind": "note", "board": "b", "what": "x"}]
+    )
     (scratch / "b" / "issues").mkdir(parents=True)
-    (scratch / "b" / "issues" / "01-a.md").write_text("# A\n\n**Status:** done\n", encoding="utf-8")
+    (scratch / "b" / "issues" / "01-a.md").write_text(
+        "# A\n\n**Status:** done\n", encoding="utf-8"
+    )
     before = progress.read_text(encoding="utf-8")
 
     tp.sync(dry_run=True)
@@ -160,9 +208,11 @@ def test_dry_run_writes_nothing(tmp_path, monkeypatch):
     assert progress.read_text(encoding="utf-8") == before
 
 
-def test_a_board_gone_from_scratch_is_not_dropped_with_its_summary_unless_forced(tmp_path, monkeypatch):
+def test_a_board_gone_from_scratch_is_not_dropped_with_its_summary_unless_forced(
+    tmp_path, monkeypatch
+):
     old = [{"kind": "board", "board": "renamed-away", "summary": "written by hand"}]
-    scratch, progress = _board(tmp_path, monkeypatch, rows=old)
+    _scratch, progress = _board(tmp_path, monkeypatch, rows=old)
     before = progress.read_text(encoding="utf-8")
 
     with pytest.raises(tp.Refused):

@@ -14,29 +14,29 @@ Revises: 41e3adc9a278
 Create Date: 2026-09-10 09:49:10.590692
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '00696b6871f1'
-down_revision: Union[str, Sequence[str], None] = '41e3adc9a278'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "00696b6871f1"
+down_revision: str | Sequence[str] | None = "41e3adc9a278"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     """Upgrade schema."""
     op.create_table(
-        'compaction_state',
-        sa.Column('task_id', sa.Integer(), nullable=False),
-        sa.Column('ineffective_count', sa.Integer(), nullable=False),
-        sa.PrimaryKeyConstraint('task_id'),
+        "compaction_state",
+        sa.Column("task_id", sa.Integer(), nullable=False),
+        sa.Column("ineffective_count", sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint("task_id"),
     )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_table('compaction_state')
+    op.drop_table("compaction_state")

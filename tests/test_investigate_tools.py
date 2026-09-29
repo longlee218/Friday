@@ -13,7 +13,8 @@ clone says so rather than claiming to be what is deployed.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import ClassVar
 
 from friday.sdk.sources import Lines
 from friday.sdk.toolset import RunContext
@@ -22,7 +23,7 @@ from plugins.backend.toolsets.code import code_tools
 from plugins.backend.toolsets.evidence import MAX_READS, Evidence
 from plugins.backend.toolsets.logs import log_tools
 
-AT = datetime(2026, 9, 21, 10, 40, tzinfo=timezone.utc)
+AT = datetime(2026, 9, 21, 10, 40, tzinfo=UTC)
 
 
 class Log:
@@ -45,12 +46,19 @@ def built(source=None, *, repo_path="", error_code_doc=""):
     run = RunContext(
         task_id=1,
         domain=Placement(
-            env="dev", service="s", pod_pattern="p", project="r",
-            repo_path=repo_path, error_code_doc=error_code_doc,
-            projects=(Project(name="r", repo_path=repo_path,
-                              error_codes_doc=error_code_doc),),
+            env="dev",
+            service="s",
+            pod_pattern="p",
+            project="r",
+            repo_path=repo_path,
+            error_code_doc=error_code_doc,
+            projects=(
+                Project(name="r", repo_path=repo_path, error_codes_doc=error_code_doc),
+            ),
         ),
-        evidence=evidence, mcp={}, reported_at=AT,
+        evidence=evidence,
+        mcp={},
+        reported_at=AT,
     )
     tools = [
         *log_tools(run, {} if source is None else {"kubectl": source}),
@@ -140,7 +148,7 @@ def test_a_blank_line_keeps_its_place_and_takes_no_id():
 
 def test_a_run_that_has_looked_enough_is_told_to_answer():
     """A fixed pipeline's clock was the sum of a known list of nodes. A model
-    that can loop turns `api_issue.timeout_seconds` into a hope."""
+    that can loop turns `trace_problem.timeout_seconds` into a hope."""
     evidence = Evidence()
     evidence.reads = MAX_READS
 
@@ -191,7 +199,7 @@ def test_the_model_chooses_the_window():
 
     call(tools["read_log"], needle="abc", minutes_back=360)
 
-    since, until, _ = source.asked[0]
+    since, _until, _ = source.asked[0]
     assert AT - since == timedelta(minutes=360)
 
 
@@ -337,11 +345,13 @@ def test_the_error_codes_in_what_was_read_are_counted():
     """What `distil` actually contributes here, now that the narrowing does
     the cutting: the histogram. Without a test it could be removed from the
     tool with the suite green."""
-    source = Log([
-        '{"errorCode":"ERR19","correlationId":"abc"}',
-        '{"errorCode":"ERR19","correlationId":"abc"}',
-        '{"errorCode":"ERR306","correlationId":"abc"}',
-    ])
+    source = Log(
+        [
+            '{"errorCode":"ERR19","correlationId":"abc"}',
+            '{"errorCode":"ERR19","correlationId":"abc"}',
+            '{"errorCode":"ERR306","correlationId":"abc"}',
+        ]
+    )
     _, tools = built(source)
 
     said = call(tools["read_log"], needle="abc")
@@ -368,7 +378,8 @@ def test_asking_what_a_code_means_counts_too():
 def test_a_service_with_no_repository_recorded_says_so(tmp_path):
     _, tools = built()
 
-    assert "No repository is recorded" in call(tools["read_code"], repo="r", file="/app/a.ts", line=1
+    assert "No repository is recorded" in call(
+        tools["read_code"], repo="r", file="/app/a.ts", line=1
     )
 
 
@@ -389,24 +400,38 @@ def _state():
     """A run that has resolved a placement (via `Intake`) and read nothing."""
     from friday.sdk.workflow import DAGState
 
-    return DAGState.empty().with_result("intake", {
-        "status": "ok", "reason": "",
-        "intake": {
-            "request_text": "500 khi init đơn",
-            "reported_at": AT.isoformat(),
-            "hints": {"uuids": [], "artifacts": []},
-            "domain": {
-                "env": "dev", "service": "backend-reelme-v2", "cluster": "",
-                "namespace": "dev", "app": "",
-                "pod_pattern": "backend-reelme-v2", "clone_path": "",
-                "repo_path": "/nowhere", "error_code_doc": "",
-                "dbs": [], "candidates": [], "project": "", "projects": [],
-                "correlation_id": None, "curl_artifact_id": None,
-                "response_artifact_id": None,
+    return DAGState.empty().with_result(
+        "intake",
+        {
+            "status": "ok",
+            "reason": "",
+            "intake": {
+                "request_text": "500 khi init đơn",
+                "reported_at": AT.isoformat(),
+                "hints": {"uuids": [], "artifacts": []},
+                "domain": {
+                    "env": "dev",
+                    "service": "backend-reelme-v2",
+                    "cluster": "",
+                    "namespace": "dev",
+                    "app": "",
+                    "pod_pattern": "backend-reelme-v2",
+                    "clone_path": "",
+                    "repo_path": "/nowhere",
+                    "error_code_doc": "",
+                    "dbs": [],
+                    "candidates": [],
+                    "project": "",
+                    "projects": [],
+                    "correlation_id": None,
+                    "curl_artifact_id": None,
+                    "response_artifact_id": None,
+                },
+                "memory": [],
+                "skills": [],
             },
-            "memory": [], "skills": [],
         },
-    })
+    )
 
 
 def _backend_tools(source=None):
@@ -418,9 +443,12 @@ def _backend_tools(source=None):
     from friday.kernel.harness.run_agent import build_tools
     from plugins.backend.toolsets import CODE, LOGS
 
-    logs = replace(LOGS, factory=lambda run: log_tools(
-        run, {} if source is None else {"kubectl": source}
-    ))
+    logs = replace(
+        LOGS,
+        factory=lambda run: log_tools(
+            run, {} if source is None else {"kubectl": source}
+        ),
+    )
     return lambda run: build_tools((logs, CODE), run, {})
 
 
@@ -428,7 +456,7 @@ class Answering:
     """A harness that records the prompt and the tools it was built with."""
 
     last_error = None
-    seen: dict = {}
+    seen: ClassVar[dict] = {}
 
     def __init__(self, answer, tools):
         self.answer = answer
@@ -448,9 +476,10 @@ class Answering:
 async def test_the_model_is_given_the_reads_and_told_where_things_live(db):
     """`Gather` gathers metadata under v3.3 — where the service runs, which
     clone holds its code — and nothing is read in advance."""
-    from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
-    from friday.sdk.workflow import Deps
     from types import SimpleNamespace
+
+    from friday.sdk.workflow import Deps
+    from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
 
     answer = Diagnosis(cause="x", confidence="likely", conclusive=False, refs=[])
     node = diagnose_node(
@@ -458,13 +487,19 @@ async def test_the_model_is_given_the_reads_and_told_where_things_live(db):
         build_tools=_backend_tools(),
     )
 
-    await node.run(_state(), Deps(
-        task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
-        db=db,
-    ))
+    await node.run(
+        _state(),
+        Deps(
+            task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
+            db=db,
+        ),
+    )
 
     assert set(Answering.seen["tools"]) == {
-        "read_log", "read_code", "search_code", "what_code_means"
+        "read_log",
+        "read_code",
+        "search_code",
+        "what_code_means",
     }
     # Each field named, not one string that three of them happen to contain:
     # asserting the pod pattern alone stayed green with `service:` deleted.
@@ -480,22 +515,26 @@ async def test_an_answer_written_without_reading_anything_is_refused(db):
     from evidence, which is the whole reason the gates exist. Under the old
     pipeline the node checked there was a dossier; here nothing was fetched
     at all."""
-    from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
-    from friday.sdk.workflow import status_of
-    from friday.sdk.workflow import Deps
     from types import SimpleNamespace
 
-    answer = Diagnosis(cause="chắc là do cache", confidence="likely",
-                       conclusive=False, refs=[])
+    from friday.sdk.workflow import Deps, status_of
+    from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
+
+    answer = Diagnosis(
+        cause="chắc là do cache", confidence="likely", conclusive=False, refs=[]
+    )
     node = diagnose_node(
         make_harness=lambda *, tools: Answering(answer, tools),
         build_tools=_backend_tools(),
     )
 
-    result = await node.run(_state(), Deps(
-        task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
-        db=db,
-    ))
+    result = await node.run(
+        _state(),
+        Deps(
+            task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
+            db=db,
+        ),
+    )
 
     assert status_of(result) == "empty"
     assert "without reading a single line" in result["reason"]
@@ -534,12 +573,12 @@ async def test_what_a_tool_could_not_check_reaches_the_envelope(db):
     """The honest half is the tools' own, not the model's: what a read left
     out is a fact about the read, and a model asked to remember it
     reproduces it unreliably."""
-    from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
-    from friday.sdk.workflow import Deps
     from types import SimpleNamespace
 
-    answer = Diagnosis(cause="x", confidence="likely", conclusive=False,
-                       refs=["L1"])
+    from friday.sdk.workflow import Deps
+    from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
+
+    answer = Diagnosis(cause="x", confidence="likely", conclusive=False, refs=["L1"])
 
     class Reads(Answering):
         async def run_structured(self, prompt, **kw):
@@ -554,10 +593,13 @@ async def test_what_a_tool_could_not_check_reaches_the_envelope(db):
         build_tools=_backend_tools(source),
     )
 
-    result = await node.run(_state(), Deps(
-        task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
-        db=db,
-    ))
+    result = await node.run(
+        _state(),
+        Deps(
+            task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
+            db=db,
+        ),
+    )
 
     assert any("reach back" in line for line in result["not_checked"])
 

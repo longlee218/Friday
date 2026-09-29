@@ -14,17 +14,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from friday.kernel.inbox import MAX_MESSAGE_AGE_SECONDS, TURN_SECONDS
-from friday.store.db import Database
+from friday.kernel.domain.messages import InboundEvent
 from friday.kernel.domain.states import TaskState
 from friday.kernel.domain.tasks import SKIP, Task
-from friday.kernel.domain.messages import InboundEvent
+from friday.kernel.inbox import MAX_MESSAGE_AGE_SECONDS, TURN_SECONDS
 from friday.kernel.triage import TRIAGE, Decided, NeedsHuman, Triage, TriageOutcome
 from friday.kernel.triage.prefilter import Sensitive
+from friday.store.db import Database
 
-__all__ = ["PENDING", "NEEDS_HUMAN", "TriageRunner", "build_triage"]
+__all__ = ["NEEDS_HUMAN", "PENDING", "TriageRunner", "build_triage"]
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 #: something to learn to predict from a message's text.
 OUTDATED = "outdated"
 
-#: Escalate to a human below this. Changes only with a `run_triage_eval`
+#: Escalate to a human below this. Changes only with a `core.triage` eval
 #: threshold table beside it (board `domains-plug-in`, ticket 07).
 CONFIDENCE_THRESHOLD = 0.7
 #: How many hand-marked classifications the classifier is shown.
@@ -64,13 +64,11 @@ def _record(outcome: TriageOutcome) -> dict:
     return {"type": outcome.type, "confidence": outcome.confidence, "params": {}}
 
 
-async def build_triage(
-    config, *, db: Database, record=None
-) -> Triage:
+async def build_triage(config, *, db: Database, record=None) -> Triage:
     """The real classifier, assembled the one place this is done.
 
     Split out of `TriageRunner.build` for ticket 06's eval harness:
-    `evals/run_triage_eval.py` needs the same examples and the same
+    the `core.triage` eval needs the same examples and the same
     sensitive-word prefilter production uses, and a second copy of "which
     examples, which model" is exactly the kind of duplicate this codebase
     keeps finding and keeps regretting after it has already drifted (ticket
@@ -99,7 +97,8 @@ async def build_triage(
     if len(sensitive):
         log.info(
             "%d word(s) keep a message away from the model — it is held "
-            "for you instead", len(sensitive),
+            "for you instead",
+            len(sensitive),
         )
     else:
         log.warning(
@@ -129,7 +128,7 @@ class TriageRunner:
         db: Database,
         still_typing=None,
         record=None,
-    ) -> "TriageRunner":
+    ) -> TriageRunner:
         """Everything triage needs, read from configuration here.
 
         The composition root asks for a triage runner; it does not know that
@@ -206,7 +205,7 @@ class TriageRunner:
         for event in await self._db.untriaged_mentions(self._batch_size):
             try:
                 task = await self._triage_one(event)
-            except Exception:  # noqa: BLE001 - one bad row is not the batch
+            except Exception:
                 # Per message, because this runs inside the TaskGroup that
                 # also holds ingest, the outbox, the board and the heartbeat.
                 # An exception here took all of them down, and because it
@@ -247,9 +246,15 @@ class TriageRunner:
             await self._db.mark_triaged(
                 event,
                 None,
-                decision={"type": OUTDATED, "confidence": 0.0, "params": {"reason": stale}},
+                decision={
+                    "type": OUTDATED,
+                    "confidence": 0.0,
+                    "params": {"reason": stale},
+                },
             )
-            log.info("%s is %s — not sent to the model", event.provider_message_id, stale)
+            log.info(
+                "%s is %s — not sent to the model", event.provider_message_id, stale
+            )
             return None
         said = replace(event, text="\n".join(m.text for m in turn if m.text))
         outcome = await self._decide(said, turn=turn)
@@ -269,7 +274,7 @@ class TriageRunner:
         other direction.
         """
         newest = max(m.created_at for m in turn)
-        return (datetime.now(timezone.utc) - newest).total_seconds()
+        return (datetime.now(UTC) - newest).total_seconds()
 
     async def _too_old(
         self, event: InboundEvent, turn: list[InboundEvent]
@@ -296,8 +301,7 @@ class TriageRunner:
         if age <= cutoff:
             return None
         return (
-            f"written {age / 3600:.0f}h ago, older than the "
-            f"{cutoff / 3600:.0f}h cutoff"
+            f"written {age / 3600:.0f}h ago, older than the {cutoff / 3600:.0f}h cutoff"
         )
 
     def _still_open(self, turn: list[InboundEvent]) -> bool:
@@ -308,7 +312,7 @@ class TriageRunner:
         they are not in the list at all.
         """
         last = turn[-1]
-        quiet_for = (datetime.now(timezone.utc) - last.created_at).total_seconds()
+        quiet_for = (datetime.now(UTC) - last.created_at).total_seconds()
         if quiet_for < self._turn_seconds:
             return True
         return self._still_typing(last.conversation, last.author_id)
@@ -335,9 +339,7 @@ class TriageRunner:
         """
         return await self._triage.decide(event, turn=turn)
 
-    async def _apply(
-        self, event: InboundEvent, outcome: TriageOutcome
-    ) -> Task | None:
+    async def _apply(self, event: InboundEvent, outcome: TriageOutcome) -> Task | None:
         if isinstance(outcome, NeedsHuman):
             return await self._open(
                 event, "unknown", 0.0, {"reason": outcome.reason}, NEEDS_HUMAN

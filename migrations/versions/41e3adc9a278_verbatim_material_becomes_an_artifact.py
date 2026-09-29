@@ -14,57 +14,55 @@ Revises: 385fddf60289
 Create Date: 2026-09-09 16:26:04.983155
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '41e3adc9a278'
-down_revision: Union[str, Sequence[str], None] = '385fddf60289'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "41e3adc9a278"
+down_revision: str | Sequence[str] | None = "385fddf60289"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     """Upgrade schema."""
     op.create_table(
-        'artifacts',
-        sa.Column('id', sa.String(), nullable=False),
-        sa.Column('channel_id', sa.String(), nullable=False),
-        sa.Column('provider', sa.String(), nullable=False),
-        sa.Column('source_message_id', sa.String(), nullable=False),
-        sa.Column('content', sa.String(), nullable=False),
-        sa.Column('description', sa.String(), nullable=False),
-        sa.Column('created_at', sa.String(), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
+        "artifacts",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("channel_id", sa.String(), nullable=False),
+        sa.Column("provider", sa.String(), nullable=False),
+        sa.Column("source_message_id", sa.String(), nullable=False),
+        sa.Column("content", sa.String(), nullable=False),
+        sa.Column("description", sa.String(), nullable=False),
+        sa.Column("created_at", sa.String(), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
     )
-    with op.batch_alter_table('artifacts', schema=None) as batch_op:
+    with op.batch_alter_table("artifacts", schema=None) as batch_op:
         batch_op.create_index(
-            batch_op.f('ix_artifacts_channel_id'), ['channel_id'], unique=False
+            batch_op.f("ix_artifacts_channel_id"), ["channel_id"], unique=False
         )
         batch_op.create_index(
-            batch_op.f('ix_artifacts_source_message_id'),
-            ['source_message_id'],
+            batch_op.f("ix_artifacts_source_message_id"),
+            ["source_message_id"],
             unique=False,
         )
         batch_op.create_index(
-            batch_op.f('ix_artifacts_created_at'), ['created_at'], unique=False
+            batch_op.f("ix_artifacts_created_at"), ["created_at"], unique=False
         )
 
-    op.add_column(
-        'messages', sa.Column('redacted_text', sa.String(), nullable=True)
-    )
+    op.add_column("messages", sa.Column("redacted_text", sa.String(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_column('messages', 'redacted_text')
+    op.drop_column("messages", "redacted_text")
 
-    with op.batch_alter_table('artifacts', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_artifacts_created_at'))
-        batch_op.drop_index(batch_op.f('ix_artifacts_source_message_id'))
-        batch_op.drop_index(batch_op.f('ix_artifacts_channel_id'))
+    with op.batch_alter_table("artifacts", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_artifacts_created_at"))
+        batch_op.drop_index(batch_op.f("ix_artifacts_source_message_id"))
+        batch_op.drop_index(batch_op.f("ix_artifacts_channel_id"))
 
-    op.drop_table('artifacts')
+    op.drop_table("artifacts")

@@ -44,7 +44,7 @@ class Provider(Protocol):
     #: run at once instead of waiting out the timer.
     reconnected: asyncio.Event
 
-    def send(self, row: "Outbound") -> str | None:
+    def send(self, row: Outbound) -> str | None:
         """Post one outbound row, and return the message id it became.
 
         The id comes back so the outbox can recognise this message when the

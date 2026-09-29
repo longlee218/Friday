@@ -32,6 +32,11 @@ import asyncio
 import logging
 from typing import Any, cast, get_type_hints
 
+from fastmcp.client.transports import (
+    SSETransport,
+    StdioTransport,
+    StreamableHttpTransport,
+)
 from pydantic_ai import (
     Agent,
     ModelRetry,
@@ -50,17 +55,12 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.toolsets import AbstractToolset
-from fastmcp.client.transports import (
-    SSETransport,
-    StdioTransport,
-    StreamableHttpTransport,
-)
 
+from friday.kernel.config import AgentConfig
+from friday.kernel.domain.state import FridayState
 from friday.kernel.harness.model_client import ANSWER, _answer_params, _client
 from friday.kernel.harness.retry import _About, _Progress, _transient, _why
 from friday.kernel.harness.structured import Unfit, describe, find_json, fits
-from friday.kernel.config import AgentConfig
-from friday.kernel.domain.state import FridayState
 from friday.sdk.toolset import ToolSpec
 
 __all__ = [
@@ -485,9 +485,7 @@ class Harness:
             prompt,
             context=context,
             max_turns=self._config.max_turns,
-            about=_About.of(
-                context, message_id=message_id, task_id=task_id, node=node
-            ),
+            about=_About.of(context, message_id=message_id, task_id=task_id, node=node),
             history=history,
         )
 
@@ -603,7 +601,7 @@ class Harness:
         *,
         context: Any,
         max_turns: int,
-        about: "_About | None" = None,
+        about: _About | None = None,
         history: list[Any] | None = None,
     ) -> Any | None:
         """Run to completion or to the first thing that stops it, and turn a
@@ -628,7 +626,7 @@ class Harness:
         *,
         context: Any,
         max_turns: int,
-        about: "_About | None" = None,
+        about: _About | None = None,
         history: list[Any] | None = None,
     ) -> Any | None:
         # Deferred: `LogHooks` reaches names through this module, so importing it
@@ -715,7 +713,7 @@ class Harness:
                     ),
                     timeout=attempt_timeout,
                 )
-            except Exception as exc:  # noqa: BLE001 - decided by _transient
+            except Exception as exc:
                 progress.flush(hooks, calls)
                 last = exc
                 if not _transient(exc) or attempt == PROVIDER_ATTEMPTS:
@@ -733,7 +731,7 @@ class Harness:
                 return result
         raise last  # unreachable: the loop either returns or raises
 
-    async def _write_down(self, calls: list, about: "_About | None") -> None:
+    async def _write_down(self, calls: list, about: _About | None) -> None:
         """Hand each call to the sink. A sink that fails costs a row, not a run.
 
         **Cancellation is the exception, and deliberately so.** This awaits
@@ -747,7 +745,7 @@ class Harness:
         for call in calls:
             try:
                 await self._record(about.stamp(call) if about else call)
-            except Exception:  # noqa: BLE001 - recording must not cost the run
+            except Exception:
                 log.exception("could not record a call by %s", self._config.name)
 
 

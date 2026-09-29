@@ -10,11 +10,13 @@ from pydantic import BaseModel, Field
 from typing import Literal
 import json
 
+
 class SentimentAnalysis(BaseModel):
     sentiment: Literal["positive", "negative", "neutral"]
     confidence: float = Field(ge=0, le=1)
     key_phrases: list[str]
     reasoning: str
+
 
 async def analyze_sentiment(text: str) -> SentimentAnalysis:
     """Analyze sentiment with structured output."""
@@ -23,9 +25,10 @@ async def analyze_sentiment(text: str) -> SentimentAnalysis:
     message = client.messages.create(
         model="claude-sonnet-5",
         max_tokens=500,
-        messages=[{
-            "role": "user",
-            "content": f"""Analyze the sentiment of this text.
+        messages=[
+            {
+                "role": "user",
+                "content": f"""Analyze the sentiment of this text.
 
 Text: {text}
 
@@ -35,8 +38,9 @@ Respond with JSON matching this schema:
     "confidence": 0.0-1.0,
     "key_phrases": ["phrase1", "phrase2"],
     "reasoning": "brief explanation"
-}}"""
-        }]
+}}""",
+            }
+        ],
     )
 
     return SentimentAnalysis(**json.loads(message.content[0].text))
@@ -80,22 +84,31 @@ from langchain_chroma import Chroma
 # Create example selector with semantic similarity
 example_selector = SemanticSimilarityExampleSelector.from_examples(
     examples=[
-        {"input": "How do I reset my password?", "output": "Go to Settings > Security > Reset Password"},
-        {"input": "Where can I see my order history?", "output": "Navigate to Account > Orders"},
-        {"input": "How do I contact support?", "output": "Click Help > Contact Us or email support@example.com"},
+        {
+            "input": "How do I reset my password?",
+            "output": "Go to Settings > Security > Reset Password",
+        },
+        {
+            "input": "Where can I see my order history?",
+            "output": "Navigate to Account > Orders",
+        },
+        {
+            "input": "How do I contact support?",
+            "output": "Click Help > Contact Us or email support@example.com",
+        },
     ],
     embeddings=VoyageAIEmbeddings(model="voyage-3-large"),
     vectorstore_cls=Chroma,
-    k=2  # Select 2 most similar examples
+    k=2,  # Select 2 most similar examples
 )
+
 
 async def get_few_shot_prompt(query: str) -> str:
     """Build prompt with dynamically selected examples."""
     examples = await example_selector.aselect_examples({"input": query})
 
     examples_text = "\n".join(
-        f"User: {ex['input']}\nAssistant: {ex['output']}"
-        for ex in examples
+        f"User: {ex['input']}\nAssistant: {ex['output']}" for ex in examples
     )
 
     return f"""You are a helpful customer support assistant.
@@ -116,7 +129,6 @@ Start with simple prompts, add complexity only when needed:
 PROMPT_LEVELS = {
     # Level 1: Direct instruction
     "simple": "Summarize this article: {text}",
-
     # Level 2: Add constraints
     "constrained": """Summarize this article in 3 bullet points, focusing on:
 - Key findings
@@ -124,7 +136,6 @@ PROMPT_LEVELS = {
 - Practical implications
 
 Article: {text}""",
-
     # Level 3: Add reasoning
     "reasoning": """Read this article carefully.
 1. First, identify the main topic and thesis
@@ -134,7 +145,6 @@ Article: {text}""",
 Article: {text}
 
 Summary:""",
-
     # Level 4: Add examples
     "few_shot": """Read articles and provide concise summaries.
 
@@ -148,7 +158,7 @@ Summary:
 Now summarize this article:
 Article: {text}
 
-Summary:"""
+Summary:""",
 }
 ```
 
@@ -158,11 +168,13 @@ Summary:"""
 from pydantic import BaseModel, ValidationError
 import json
 
+
 class ResponseWithConfidence(BaseModel):
     answer: str
     confidence: float
     sources: list[str]
     alternative_interpretations: list[str] = []
+
 
 ERROR_RECOVERY_PROMPT = """
 Answer the question based on the context provided.
@@ -185,10 +197,9 @@ Respond in JSON:
 }}
 """
 
+
 async def answer_with_fallback(
-    context: str,
-    question: str,
-    llm
+    context: str, question: str, llm
 ) -> ResponseWithConfidence:
     """Answer with error recovery and fallback."""
     prompt = ERROR_RECOVERY_PROMPT.format(context=context, question=question)
@@ -204,7 +215,7 @@ async def answer_with_fallback(
             answer=simple_response.content,
             confidence=0.5,
             sources=["fallback extraction"],
-            alternative_interpretations=[]
+            alternative_interpretations=[],
         )
 ```
 
@@ -224,7 +235,6 @@ Communication style:
 - Be precise and technical when discussing methodology
 - Translate technical findings into business impact
 - Use clear visualizations when helpful""",
-
     "assistant": """You are a helpful AI assistant focused on accuracy and clarity.
 
 Core principles:
@@ -237,7 +247,6 @@ Constraints:
 - Do not provide medical, legal, or financial advice
 - Redirect harmful requests appropriately
 - Protect user privacy""",
-
     "code_reviewer": """You are a senior software engineer conducting code reviews.
 
 Review criteria:
@@ -251,7 +260,7 @@ Output format:
 1. Summary assessment (approve/request changes)
 2. Critical issues (must fix)
 3. Suggestions (nice to have)
-4. Positive feedback (what's done well)"""
+4. Positive feedback (what's done well)""",
 }
 ```
 
@@ -330,9 +339,9 @@ response = client.messages.create(
         {
             "type": "text",
             "text": LONG_SYSTEM_PROMPT,
-            "cache_control": {"type": "ephemeral"}
+            "cache_control": {"type": "ephemeral"},
         }
     ],
-    messages=[{"role": "user", "content": user_query}]
+    messages=[{"role": "user", "content": user_query}],
 )
 ```

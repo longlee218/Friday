@@ -11,6 +11,8 @@ wheels/
 
 # runtime
 data/
+# eval cases: real channel traffic, with tokens and customer data (like data/cases/)
+evals/datasets/
 *.db
 *.db-wal
 *.db-shm

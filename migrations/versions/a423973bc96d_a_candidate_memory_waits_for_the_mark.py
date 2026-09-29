@@ -19,52 +19,66 @@ Revises: 00696b6871f1
 Create Date: 2026-09-10 23:15:05.467389
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'a423973bc96d'
-down_revision: Union[str, Sequence[str], None] = '00696b6871f1'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "a423973bc96d"
+down_revision: str | Sequence[str] | None = "00696b6871f1"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     """Upgrade schema."""
     op.create_table(
-        'memory_candidates',
-        sa.Column('id', sa.String(), nullable=False),
-        sa.Column('channel_id', sa.String(), nullable=False),
-        sa.Column('agent', sa.String(), nullable=False),
-        sa.Column('text', sa.String(), nullable=False),
-        sa.Column('kind', sa.String(), nullable=False),
-        sa.Column('task_id', sa.Integer(), nullable=True),
-        sa.Column('source_message_id', sa.String(), nullable=True),
-        sa.Column('status', sa.String(), nullable=False),
-        sa.Column('proposed_at', sa.String(), nullable=False),
-        sa.Column('resolved_at', sa.String(), nullable=True),
-        sa.Column('resolved_by', sa.String(), nullable=True),
-        sa.Column('memory_id', sa.String(), nullable=True),
-        sa.PrimaryKeyConstraint('id'),
+        "memory_candidates",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("channel_id", sa.String(), nullable=False),
+        sa.Column("agent", sa.String(), nullable=False),
+        sa.Column("text", sa.String(), nullable=False),
+        sa.Column("kind", sa.String(), nullable=False),
+        sa.Column("task_id", sa.Integer(), nullable=True),
+        sa.Column("source_message_id", sa.String(), nullable=True),
+        sa.Column("status", sa.String(), nullable=False),
+        sa.Column("proposed_at", sa.String(), nullable=False),
+        sa.Column("resolved_at", sa.String(), nullable=True),
+        sa.Column("resolved_by", sa.String(), nullable=True),
+        sa.Column("memory_id", sa.String(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
     )
-    with op.batch_alter_table('memory_candidates', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_memory_candidates_channel_id'), ['channel_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_memory_candidates_proposed_at'), ['proposed_at'], unique=False)
-        batch_op.create_index(batch_op.f('ix_memory_candidates_source_message_id'), ['source_message_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_memory_candidates_status'), ['status'], unique=False)
-        batch_op.create_index(batch_op.f('ix_memory_candidates_task_id'), ['task_id'], unique=False)
+    with op.batch_alter_table("memory_candidates", schema=None) as batch_op:
+        batch_op.create_index(
+            batch_op.f("ix_memory_candidates_channel_id"), ["channel_id"], unique=False
+        )
+        batch_op.create_index(
+            batch_op.f("ix_memory_candidates_proposed_at"),
+            ["proposed_at"],
+            unique=False,
+        )
+        batch_op.create_index(
+            batch_op.f("ix_memory_candidates_source_message_id"),
+            ["source_message_id"],
+            unique=False,
+        )
+        batch_op.create_index(
+            batch_op.f("ix_memory_candidates_status"), ["status"], unique=False
+        )
+        batch_op.create_index(
+            batch_op.f("ix_memory_candidates_task_id"), ["task_id"], unique=False
+        )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    with op.batch_alter_table('memory_candidates', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_memory_candidates_task_id'))
-        batch_op.drop_index(batch_op.f('ix_memory_candidates_status'))
-        batch_op.drop_index(batch_op.f('ix_memory_candidates_source_message_id'))
-        batch_op.drop_index(batch_op.f('ix_memory_candidates_proposed_at'))
-        batch_op.drop_index(batch_op.f('ix_memory_candidates_channel_id'))
+    with op.batch_alter_table("memory_candidates", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_memory_candidates_task_id"))
+        batch_op.drop_index(batch_op.f("ix_memory_candidates_status"))
+        batch_op.drop_index(batch_op.f("ix_memory_candidates_source_message_id"))
+        batch_op.drop_index(batch_op.f("ix_memory_candidates_proposed_at"))
+        batch_op.drop_index(batch_op.f("ix_memory_candidates_channel_id"))
 
-    op.drop_table('memory_candidates')
+    op.drop_table("memory_candidates")

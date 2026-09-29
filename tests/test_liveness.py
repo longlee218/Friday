@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from types import SimpleNamespace
 
 from conftest import captured, make_event
+
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.ops.liveness import Heartbeat
 from friday.kernel.outbox import Kind
@@ -31,12 +33,18 @@ async def test_the_beat_reports_what_is_actually_stored(inbox, provider, db):
 async def test_a_message_nobody_could_deliver_is_shouted_about(db):
     """The only way anyone learns about it is by being told."""
     task = await db.create_task(
-        conversation=ConversationId("fake", "watched"), type="backend.trace_problem",
-        state="needs_human", confidence=0.9, params={},
+        conversation=ConversationId("fake", "watched"),
+        type="backend.trace_problem",
+        state="needs_human",
+        confidence=0.9,
+        params={},
     )
     row = await db.queue_outbound(
-        task_id=task.id, conversation=ConversationId("fake", "watched"),
-        kind=Kind.ASK_FOR_DETAILS, sender="discord_user", text="which environment?",
+        task_id=task.id,
+        conversation=ConversationId("fake", "watched"),
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
     await db.fail_outbound(row.id, "discord said no")
 
@@ -89,12 +97,12 @@ async def test_the_daily_summary_survives_a_restart(db):
     SQLite is the only state store. The outbox row is already the record of
     having said it, so the question is asked of the row.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from friday.kernel.ops.liveness import Liveness
     from friday.kernel.outbox import Kind
 
-    noon = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    noon = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 
     def fresh_process():
         return Liveness(db=db, gateway=SimpleNamespace(down_since=None))
@@ -112,12 +120,12 @@ async def test_a_new_day_is_summarised_again(db):
     with real time, so a hard-coded "yesterday" becomes "today" the moment the
     calendar catches up — this test failed for exactly that reason the day
     after it was written."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from friday.kernel.ops.liveness import Liveness
     from friday.kernel.outbox import Kind
 
-    today_noon = datetime.now(timezone.utc).replace(hour=12)
+    today_noon = datetime.now(UTC).replace(hour=12)
     liveness = Liveness(db=db, gateway=SimpleNamespace(down_since=None))
     await liveness._summary(today_noon)
     await liveness._summary(today_noon + timedelta(days=1))
@@ -133,8 +141,12 @@ async def test_the_beat_says_what_the_day_has_cost(db):
     or an operator has nothing to decide the ceiling *from*.
     """
     common = dict(model="m", system_prompt="s", prompt="p", output="o")
-    await db.record_model_call(agent="triage", input_tokens=1000, output_tokens=200, **common)
-    await db.record_model_call(agent="responder", input_tokens=300, output_tokens=100, **common)
+    await db.record_model_call(
+        agent="triage", input_tokens=1000, output_tokens=200, **common
+    )
+    await db.record_model_call(
+        agent="responder", input_tokens=300, output_tokens=100, **common
+    )
 
     line = await Heartbeat(db=db).summary()
 

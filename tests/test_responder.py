@@ -8,16 +8,18 @@ sentence every time, and that stops being true the moment a model writes it.
 
 from __future__ import annotations
 
-from friday.sdk.testing import FunctionModel
-from friday.sdk.testing import ScriptedModel, assistant_message
-
 from conftest import make_event
+
 from friday.kernel.config import AgentConfig
 from friday.kernel.responder import Draft, Responder
+from friday.sdk.testing import FunctionModel, ScriptedModel, assistant_message
 
 CONFIG = AgentConfig(
-    name="responder", api_key="k", base_url="https://example.invalid/v1",
-    model="test-model", settings={},
+    name="responder",
+    api_key="k",
+    base_url="https://example.invalid/v1",
+    model="test-model",
+    settings={},
 )
 
 TONE = [
@@ -155,9 +157,8 @@ async def test_a_responder_given_a_store_can_reach_its_own_memory():
     the kind of thing worth writing down. Driven end to end: a scripted model
     that calls `memory_search`, and the tool actually reaching the store
     scoped to the channel this draft is about."""
-    from friday.sdk.testing import function_call
-
     from friday.kernel.domain.state import FridayState
+    from friday.sdk.testing import function_call
 
     seen = {}
 
@@ -181,7 +182,9 @@ async def test_a_responder_given_a_store_can_reach_its_own_memory():
     )
 
     await responder.draft(
-        asking="ask", context=(), tone=TONE,
+        asking="ask",
+        context=(),
+        tone=TONE,
         state=FridayState(channel_id="c1", agent="responder").for_task(42),
     )
 
@@ -215,18 +218,23 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
 
     without_calls, without_sink = collecting()
     without = Responder(
-        config=CONFIG, model=ScriptedModel([[assistant_message("ok")]]),
+        config=CONFIG,
+        model=ScriptedModel([[assistant_message("ok")]]),
         record=without_sink,
     )
     await without.draft(asking="ask", context=(), tone=TONE)
 
     with_calls, with_sink = collecting()
     with_store = Responder(
-        config=CONFIG, model=ScriptedModel([[assistant_message("ok")]]),
-        db=Store(), record=with_sink,
+        config=CONFIG,
+        model=ScriptedModel([[assistant_message("ok")]]),
+        db=Store(),
+        record=with_sink,
     )
     await with_store.draft(
-        asking="ask", context=(), tone=TONE,
+        asking="ask",
+        context=(),
+        tone=TONE,
         state=FridayState(channel_id="c1", agent="responder"),
     )
 
@@ -342,9 +350,8 @@ async def test_a_memory_is_attributed_to_the_responder_whoever_handed_the_state_
     could be attributed to whoever ran before: the state travels a whole
     message's journey, and triage is at the front of it.
     """
-    from friday.sdk.testing import function_call
-
     from friday.kernel.domain.state import FridayState
+    from friday.sdk.testing import function_call
 
     seen = {}
 
@@ -358,15 +365,19 @@ async def test_a_memory_is_attributed_to_the_responder_whoever_handed_the_state_
 
     responder = Responder(
         config=CONFIG,
-        model=ScriptedModel([
-            [function_call("memory_search", {"query": "tone"}, call_id="1")],
-            [assistant_message("cho anh xin correlationId nhé")],
-        ]),
+        model=ScriptedModel(
+            [
+                [function_call("memory_search", {"query": "tone"}, call_id="1")],
+                [assistant_message("cho anh xin correlationId nhé")],
+            ]
+        ),
         db=Store(),
     )
 
     await responder.draft(
-        asking="ask", context=(), tone=TONE,
+        asking="ask",
+        context=(),
+        tone=TONE,
         state=FridayState(channel_id="c1", agent="triage").for_task(42),
     )
 

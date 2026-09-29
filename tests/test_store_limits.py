@@ -7,12 +7,13 @@ wrong — model calls — showed the oldest rows rather than the newest.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from conftest import captured, make_event
+
 from friday.kernel.domain.conversation import ConversationId
-from friday.kernel.outbox import Kind
 from friday.kernel.domain.states import TaskState
+from friday.kernel.outbox import Kind
 
 WATCHED = ConversationId("fake", "watched")
 
@@ -20,11 +21,17 @@ WATCHED = ConversationId("fake", "watched")
 async def test_model_calls_come_back_newest_first(db):
     """It sorted ascending and then limited, so past the limit it returned the
     oldest calls — the ones nobody asks about."""
-    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 8, 1, tzinfo=UTC)
     for n in range(5):
         await db.record_model_call(
-            message_id=str(n), agent="triage", model="m", system_prompt="s",
-            prompt="p", output="o", input_tokens=1, output_tokens=1,
+            message_id=str(n),
+            agent="triage",
+            model="m",
+            system_prompt="s",
+            prompt="p",
+            output="o",
+            input_tokens=1,
+            output_tokens=1,
             created_at=start + timedelta(hours=n),
         )
 
@@ -63,8 +70,11 @@ async def test_counts_do_not_require_loading_the_rows(inbox, provider, db):
     provider.emit(make_event(message_id="1"))
     await captured(inbox)
     await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
 
     counts = await db.counts()
@@ -79,12 +89,18 @@ async def test_a_provider_error_is_scrubbed_before_it_is_stored(db):
     """The one path by which a provider exception reaches the database, and
     `friday/redact.py` was written claiming to cover it."""
     task = await db.create_task(
-        conversation=WATCHED, type="backend.trace_problem", state=TaskState.PENDING,
-        confidence=0.9, params={},
+        conversation=WATCHED,
+        type="backend.trace_problem",
+        state=TaskState.PENDING,
+        confidence=0.9,
+        params={},
     )
     row = await db.queue_outbound(
-        task_id=task.id, conversation=WATCHED, kind=Kind.ASK_FOR_DETAILS,
-        sender="discord_user", text="which environment?",
+        task_id=task.id,
+        conversation=WATCHED,
+        kind=Kind.ASK_FOR_DETAILS,
+        sender="discord_user",
+        text="which environment?",
     )
 
     await db.fail_outbound(row.id, "401 for Bearer sk-abcdefghijklmnopqrstuvwxyz01")

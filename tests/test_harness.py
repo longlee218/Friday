@@ -14,6 +14,10 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+
+from friday.kernel.config import AgentConfig
+from friday.kernel.harness.harness import Harness, ToolContext, tool
+from friday.kernel.harness.mcp import name_of
 from friday.sdk.testing import (
     Agent,
     FunctionModel,
@@ -24,18 +28,22 @@ from friday.sdk.testing import (
     function_call,
 )
 
-from friday.kernel.harness.harness import Harness, ToolContext, tool
-from friday.kernel.harness.mcp import name_of
-from friday.kernel.config import AgentConfig
-
 CONFIG = AgentConfig(
-    name="an-agent", api_key="sk-secret", base_url="https://example.invalid/v1",
-    model="test-model", max_turns=1, settings={"temperature": 0},
+    name="an-agent",
+    api_key="sk-secret",
+    base_url="https://example.invalid/v1",
+    model="test-model",
+    max_turns=1,
+    settings={"temperature": 0},
 )
 #: A tool call and its answer: two requests.
 TWO_TURNS = AgentConfig(
-    name="an-agent", api_key="sk-secret", base_url="https://example.invalid/v1",
-    model="test-model", max_turns=2, settings={"temperature": 0},
+    name="an-agent",
+    api_key="sk-secret",
+    base_url="https://example.invalid/v1",
+    model="test-model",
+    max_turns=2,
+    settings={"temperature": 0},
 )
 
 
@@ -123,7 +131,8 @@ async def test_a_failure_is_no_result_rather_than_an_exception():
     """Every agent turns this into its own kind of work — a task for a human,
     or a fall back to a template. None of them should have to catch it."""
     result = await Harness(
-        config=CONFIG, instructions="do the thing",
+        config=CONFIG,
+        instructions="do the thing",
         model=_raising(RuntimeError("provider down")),
     ).run("go")
 
@@ -132,7 +141,8 @@ async def test_a_failure_is_no_result_rather_than_an_exception():
 
 async def test_the_reason_it_failed_is_kept():
     run = Harness(
-        config=CONFIG, instructions="do the thing",
+        config=CONFIG,
+        instructions="do the thing",
         model=_raising(RuntimeError("provider down")),
     )
     await run.run("go")
@@ -144,7 +154,8 @@ async def test_a_credential_never_appears_in_the_reason():
     """The reason is stored against a task, and a provider exception can quote
     an Authorization header."""
     run = Harness(
-        config=CONFIG, instructions="i",
+        config=CONFIG,
+        instructions="i",
         model=_raising(RuntimeError("401 for Bearer sk-abcdefghijklmnopqrstuvwx")),
     )
     await run.run("go")
@@ -216,8 +227,15 @@ async def test_this_is_the_only_module_that_imports_the_sdk():
 
     allowed = {"friday/kernel/harness/harness.py", "friday/sdk/testing/__init__.py"}
     hits = subprocess.run(
-        ["grep", "-rlE", r"^\s*(from|import)\s+(pydantic_ai|fastmcp|agents)\b", "friday/"],
-        capture_output=True, text=True,
+        [
+            "grep",
+            "-rlE",
+            r"^\s*(from|import)\s+(pydantic_ai|fastmcp|agents)\b",
+            "friday/",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.split()
 
     assert set(hits) <= allowed, f"unexpected importer: {set(hits) - allowed}"
@@ -290,6 +308,7 @@ async def test_a_sink_that_fails_costs_a_row_and_not_the_answer():
     """Recording runs after the expensive part is already done. A failed write
     loses a row; a raised write would lose an answer the provider has already
     been paid for — and would do it inside a `finally`."""
+
     async def sink(call) -> None:
         raise RuntimeError("the database is locked")
 
@@ -701,7 +720,10 @@ def test_an_agent_can_declare_both_a_shape_and_its_own_settings():
 
     built = Harness(
         config=AgentConfig(
-            name="both", api_key="k", base_url="http://x/v1", model="m",
+            name="both",
+            api_key="k",
+            base_url="http://x/v1",
+            model="m",
             settings={"tool_choice": "auto", "max_tokens": 64},
         ),
         instructions="i",
@@ -797,7 +819,10 @@ def test_an_agent_with_a_shape_may_not_have_its_mechanism_overridden():
         build(retries={"output": 5})
 
     # An agent that declares neither is untouched.
-    assert build(model_settings={"max_tokens": 64}).agent.model_settings["max_tokens"] == 64
+    assert (
+        build(model_settings={"max_tokens": 64}).agent.model_settings["max_tokens"]
+        == 64
+    )
 
 
 async def test_a_terminal_tool_finishes_the_run_beside_the_answer():
@@ -830,13 +855,17 @@ def test_a_terminal_tool_without_a_resolvable_return_is_refused():
     """A terminal tool whose return type cannot be read would be callable by the
     model but unrecognised by `run_structured` — the outcome would be silently
     lost as 'no answer'. Refuse it at build time, where the message names it."""
+
     def escalate(reason):  # no return annotation
         return _Escalated(reason)
 
     with pytest.raises(ValueError, match="return annotation"):
         Harness(
-            config=CONFIG, instructions="i", model=ScriptedModel([]),
-            answers=_ReplyShape, ends_with=[escalate],
+            config=CONFIG,
+            instructions="i",
+            model=ScriptedModel([]),
+            answers=_ReplyShape,
+            ends_with=[escalate],
         )
 
 
@@ -850,8 +879,11 @@ def test_a_terminal_tool_whose_name_collides_is_refused():
 
     with pytest.raises(ValueError, match="collides"):
         Harness(
-            config=CONFIG, instructions="i", model=ScriptedModel([]),
-            answers=_ReplyShape, ends_with=[clashing],
+            config=CONFIG,
+            instructions="i",
+            model=ScriptedModel([]),
+            answers=_ReplyShape,
+            ends_with=[clashing],
         )
 
 
@@ -861,8 +893,10 @@ def test_a_terminal_tool_without_an_answer_shape_is_refused():
     terminal tools ride on is not set up."""
     with pytest.raises(ValueError, match="answers"):
         Harness(
-            config=CONFIG, instructions="i",
-            model=ScriptedModel([]), ends_with=[_escalate],
+            config=CONFIG,
+            instructions="i",
+            model=ScriptedModel([]),
+            ends_with=[_escalate],
         )
 
 
@@ -910,6 +944,7 @@ async def test_why_a_run_failed_survives_a_second_run_starting():
     the caller the moment the run returns. A second run of the same harness
     clears them as it begins — so one that began while the first was still
     writing its record down wiped the first's reason."""
+
     async def slow_sink(call) -> None:
         await asyncio.sleep(0.05)
 

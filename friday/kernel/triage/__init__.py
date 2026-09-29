@@ -25,7 +25,7 @@ INSTRUCTIONS = build_instructions()
 
 #: Runs on every mention — the firehose — so the cheapest tool-capable tier.
 #: One turn: the forced answer is the whole run (its one correction is an
-#: attempt, not a turn). Changing the tier needs `run_triage_eval` first.
+#: attempt, not a turn). Changing the tier needs the `core.triage` eval first.
 #: 30s a request: the slowest measured was 16.9s (live `model_calls`,
 #: 2026-09-28).
 TRIAGE = AgentDeclaration(
