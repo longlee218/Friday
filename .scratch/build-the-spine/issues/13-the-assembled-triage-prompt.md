@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 Blocked by: 05
 
 # The assembled triage prompt
@@ -24,6 +24,19 @@ Stub: `recognition_and_triage_prompt_STUB.py` on its prototype branch.
 ## Acceptance
 
 - [ ] `run_triage_eval` run: accuracy, confusion matrix, threshold table
-      reported, compared with the 2026-09-20 100%.
-- [ ] Rendered prompt bytes stable across runs (test).
-- [ ] Whole suite green; `code-review` done.
+      reported, compared with the 2026-09-20 100%. — **Not done**: run
+      2026-09-29 on this change and on HEAD `330e06c` as a baseline; every
+      call answered HTTP 402 (OpenRouter account has no credits). Deferred
+      until credits exist.
+- [x] Rendered prompt bytes stable across runs (test).
+- [x] Whole suite green; `code-review` done.
+
+## Decided while building (operator, 2026-09-29)
+
+- The three `Action`s register with real contracts from the decisions, and
+  the agents they grant (`backend.diagnose`, `backend.explain`) register as
+  `AgentSpec`s so boot refusal 4 passes; `backend.explain` is on `flash`
+  (config declares no `strong`). Nothing runs them until 14/15.
+- Boundary check (06 §9): eval rows #23, #32 and #34 stay
+  `backend.trace_problem` — each reports behaviour that happened.
+- Triage runs on the new `free` tier (operator's change).

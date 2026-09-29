@@ -45,19 +45,16 @@ async def test_an_example_used_as_a_few_shot_is_not_in_the_frozen_set(db, tmp_pa
     seed_text, seed_type = SEED[0]
     out = tmp_path / "triage.jsonl"
 
-    await build_and_write(
-        db, _config(triage_examples=((seed_text, seed_type),)), out=out
-    )
+    await build_and_write(db, _config(), out=out, excluded=[(seed_text, seed_type)])
 
     texts = {row["text"] for row in _read_jsonl(out)}
     assert seed_text not in texts
 
 
-def _config(*, triage_examples=()) -> Config:
+def _config() -> Config:
     return Config(
         database_path=":memory:",
         ingest=IngestConfig(watched_channels=frozenset(), mention_types=frozenset()),
-        triage_examples=triage_examples,
     )
 
 
@@ -94,10 +91,23 @@ async def test_a_refresh_that_loses_a_decision_says_so_out_loud(db, tmp_path, ca
     every_seed_row = tuple((text, kind) for text, kind, *_ in SEED)
 
     with caplog.at_level(logging.WARNING, logger="evals.build_triage_set"):
-        await build_and_write(
-            db, _config(triage_examples=every_seed_row), out=out
-        )
+        await build_and_write(db, _config(), out=out, excluded=list(every_seed_row))
 
     warned = "\n".join(r.getMessage() for r in caplog.records)
     assert "not fit to score" in warned
     assert "skip" in warned
+
+
+async def test_a_declared_example_is_not_in_the_frozen_set(db, tmp_path):
+    """By default the excluded rows are the declared ones: each action's
+    `Recognition.examples` and the core's `skip` examples."""
+    from evals.build_triage_set import declared_examples
+
+    declared = declared_examples(_config())
+    text, label = declared[0]
+    await _confirmed(db, "m1", label, text)
+    out = tmp_path / "triage.jsonl"
+
+    await build_and_write(db, _config(), out=out)
+
+    assert text not in {row["text"] for row in _read_jsonl(out)}

@@ -13,6 +13,10 @@ database_path: ./data/friday.db
 # cache-read), 1M context, native tool + JSON-schema structured output. Triage,
 # the responder, the extractor and backend.diagnose all run on it.
 tiers:
+  free:
+    api_key: ${OPENROUTER_API_KEY}
+    provider: openrouter
+    model: "deepseek/deepseek-v4.1-flash"
   flash:
     api_key: ${OPENROUTER_API_KEY}
     provider: openrouter
@@ -113,19 +117,3 @@ sensitive_words:
   - secret key
   - private key
   - credential
-
-# ── Triage examples ─────────────────────────────────────────────────────────
-# Hand-written classifications, used from a fresh install. Also learned from
-# what you mark ✅/❌ in Discord (👍/👎 are not marks). Applied on next restart.
-# Nothing here may appear in evals/triage.jsonl.
-triage_examples:
-  - "a ơi bị lỗi api rồi": backend.trace_problem
-  - "a xem giúp e request này với ạ [image: postman.png]": backend.trace_problem
-  - "e mua gói sub lúc 15h mà 30 phút sau vẫn chưa được cộng coin a ạ": backend.trace_problem
-  - "nguyên nhân là do request thiếu selling_region nên catalog trả rỗng a nhé": backend.trace_problem
-  - "correlationId là cái gì a nhỉ, e ko biết": backend.answer_question
-  - "a ơi tài liệu mô tả webhook của Midas nằm ở repo nào v": backend.answer_question
-  - "cho em xin quyền vào repo BE-Midas với ạ": ops.request_permission
-  - "e không mở được Grafana của dev, a add quyền giúp e với": ops.request_permission
-  - "ok a, e hiểu rồi ạ": skip
-  - "chúc mừng a lên chức ạ": skip

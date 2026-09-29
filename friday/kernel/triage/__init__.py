@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
 
-from friday.kernel.triage.context import build_light_context
-from friday.kernel.triage.prompt import build_input, build_instructions
 from friday.kernel.config import AgentConfig
-from friday.sdk.agent import AgentDeclaration
-from friday.kernel.harness.harness import Harness
-from friday.kernel.domain.triage import Decided, NeedsHuman, TriageOutcome, make_decided
-from friday.kernel.domain.state import FridayState
 from friday.kernel.domain.messages import InboundEvent
+from friday.kernel.domain.state import FridayState
+from friday.kernel.domain.triage import Decided, NeedsHuman, TriageOutcome, make_decided
+from friday.kernel.harness.harness import Harness
+from friday.kernel.triage.context import build_light_context
 from friday.kernel.triage.prefilter import Sensitive
+from friday.kernel.triage.prompt import build_input, build_instructions
+from friday.sdk.action import Action
+from friday.sdk.agent import AgentDeclaration
 
 __all__ = ["Decided", "NeedsHuman", "Triage", "TriageOutcome"]
 
 log = logging.getLogger(__name__)
 
-#: The bare text, kept as an attribute because tests pin sentences in it.
-#: Assembly — examples and all — lives in `friday.kernel.triage.prompt`.
+#: The core's text with no action registered, kept as an attribute because
+#: tests pin sentences in it. Assembly — labels, examples and all — lives in
+#: `friday.kernel.triage.prompt`.
 INSTRUCTIONS = build_instructions()
 
 #: Runs on every mention — the firehose — so the cheapest tool-capable tier.
@@ -28,7 +29,11 @@ INSTRUCTIONS = build_instructions()
 #: 30s a request: the slowest measured was 16.9s (live `model_calls`,
 #: 2026-09-28).
 TRIAGE = AgentDeclaration(
-    name="triage", tier="flash", temperature=0.0, max_turns=1, tokens=50_000,
+    name="triage",
+    tier="free",
+    temperature=0.0,
+    max_turns=1,
+    tokens=50_000,
     request_timeout_seconds=30.0,
 )
 
@@ -37,7 +42,7 @@ class Triage:
     """Decides what a mention is. Performs no writes.
 
     **One answer, one closed set** (board `every-answer-has-a-shape`, D6). It
-    answers a `Decided` — a registered task type plus `skip`, and a confidence
+    answers a `Decided` — a registered action plus `skip`, and a confidence
     — through the tool `Harness` generates from the boot schema `make_decided`
     builds from the registry, and the arguments are validated there before
     anything acts on them (ticket 11).
@@ -56,10 +61,10 @@ class Triage:
         examples: Sequence[tuple[str, str]] = (),
         sensitive: Sensitive | None = None,
         record=None,
-        #: The `task_type -> Params` mapping the classifier's closed set is built
-        #: from (ticket 11). The registry fills this at boot; `None` falls back
-        #: to the current task-type catalog, so a bare test needs no registry.
-        decisions: Mapping[str, type] | None = None,
+        #: The registered actions: their `Recognition` is the prompt's labels
+        #: and their names the closed set. `build_triage` hands the boot's;
+        #: `None` loads the default plugins, so a bare test needs no registry.
+        actions: Iterable[Action] | None = None,
         #: Where the room's summary row is read from — anything with
         #: `room_summary(channel_id)`, which is the store in production. Held
         #: for the process, read per call: a store outlives every call, a
@@ -74,38 +79,29 @@ class Triage:
         #: guesses about what is sensitive in their workplace.
         self._sensitive = sensitive or Sensitive(())
         self._summaries = summaries
-        self._decisions = decisions
+        if actions is None:
+            from friday.kernel.plugin_host import registered_actions
+
+            actions = registered_actions()
+        actions = list(actions)
         # Examples are appended to the instructions rather than passed per
         # call: the instructions are the stable prefix, and a list that
         # changed per call would cost the cache hit on everything after it.
         # A mark made now therefore takes effect at the next start.
         self._run = Harness(
             config=config,
-            instructions=build_instructions(examples),
+            instructions=build_instructions(actions=actions, examples=examples),
             model=model,
             record=record,
-            # The shape this agent answers, built at boot from the registry's
-            # task types (ticket 11): `type` closed to those plus `skip`. The
+            # The shape this agent answers, built at boot from the registered
+            # actions: `type` closed to their names plus `skip`. The
             # harness generates the tool it arrives through, forces the call,
             # ends on an actual answer of this shape and validates it — so a type
             # outside the set is refused here, before anything acts on it,
             # exactly as the old static `Literal` did.
-            answers=self._answer_type,
+            answers=make_decided(a.name for a in actions),
             context_type=FridayState,
         )
-
-    @property
-    def _answer_type(self) -> type:
-        decisions = self._decisions
-        if decisions is None:
-            # The registry is the catalog: whatever task types are registered
-            # (the composition root fills it at boot; the autouse test fixture
-            # fills it for a bare `Triage`). An explicit `decisions` overrides,
-            # for a test that wants a specific set.
-            from friday.kernel.dag import registry
-
-            decisions = registry.decision_params()
-        return make_decided(decisions)
 
     async def decide(
         self,
@@ -148,8 +144,9 @@ class Triage:
             # The word is named; the message is not. It is the thing being
             # kept quiet.
             log.info(
-                "holding %s for you: it mentions %r, so it was not sent to the "
-                "model", event.provider_message_id, held,
+                "holding %s for you: it mentions %r, so it was not sent to the model",
+                event.provider_message_id,
+                held,
             )
             return NeedsHuman(f"mentions {held!r} — not sent to the model")
 

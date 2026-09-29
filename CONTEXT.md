@@ -159,14 +159,16 @@ is the premise each board tracks against.
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **In progress:** tickets 01, 02, 03, 05, 06, 07, 08, 09, 10 and 12 done
+  **In progress:** tickets 01, 02, 03, 05, 06, 07, 08, 09, 10, 12 and 13 done
   (2026-09-29; names are `backend.*`/`ops.*`, live db wiped; core Intake and
   the backend enricher live through the DAG's intake node; the backend's
   tools are its four toolsets, reading code at the running tag; the core's
   four toolsets `core.memory/skills/shell/workspace` are registered but no
-  spine agent is wired to them until 14); 04, 11 and 13 are takeable (`.scratch/build-the-spine/STATUS.md`). The triage eval
-  and `run_api_issue_eval` are deferred until the operator has an OpenRouter
-  key.
+  spine agent is wired to them until 14; triage's prompt is assembled from
+  the three registered actions' recognition); 04 and 11 are takeable
+  (`.scratch/build-the-spine/STATUS.md`). The triage eval and
+  `run_api_issue_eval` are deferred: an OpenRouter key exists since
+  2026-09-29, but the account has no credits (every call answers 402).
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
 
@@ -301,13 +303,19 @@ and the boot refuses a contract granting one of another type. No enricher
 ## Triage
 
 Deciding what a message is — **that, and nothing else**. Produces a decision
-(a type from one **closed set** — every task type plus `skip` — and a
-confidence) and writes nothing. Every message ends `Decided` or `NeedsHuman`;
+(a **label** from one **closed set** — every registered action plus `skip` —
+and a confidence) and writes nothing. Every message ends `Decided` or `NeedsHuman`;
 there is no silent discard. A `NeedsHuman` says which failure it was — a
 label outside the set is a prompt or model fault, no answer is a network
 fault — and the eval reports them apart. Triage extracts no parameters: a
 tool schema with `correlation_id` in it *is* extraction, whatever the prompt
 says.
+
+**Label** — what triage answers: an action's name, or `skip` (the core's, owned
+by no plugin). Its meaning is the action's recognition, rendered under
+`<labels>` in the **assembled triage prompt** — the core's reasoning + every
+action's recognition sorted by name, `skip` last + examples that add up
+(declared → `skip` → operator-confirmed). No label comes first.
 
 ## Extraction
 

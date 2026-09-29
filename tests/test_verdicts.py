@@ -264,17 +264,17 @@ async def test_nothing_happens_when_nobody_is_listening():
 # --- the examples the classifier is given -----------------------------------
 
 
-def test_no_examples_means_no_examples():
+def test_no_marks_means_only_the_declared_examples():
     """A fresh install has nothing marked, and stays that way until somebody
-    reacts. The instructions must not grow an empty heading."""
-    from friday.kernel.triage.prompt import build_instructions
+    reacts. What the classifier is shown then is the declared examples —
+    each action's and the core's `skip` ones — and nothing else: examples
+    add up (board `domains-plug-in`, ticket 02 §4), and the operator's marks
+    are the part that grows."""
+    from friday.kernel.triage.prompt import SKIP_EXAMPLES, build_instructions
 
-    # No examples means no examples section at all — not an empty tag for the
-    # model to read as "there were examples, and none of them". Hardcoding a
-    # built-in set in the prompt module was tried on 2026-09-20 and undone:
-    # examples are data the operator edits, and this assertion is what says
-    # so.
-    assert "<examples>" not in build_instructions(())
+    examples = build_instructions().split("<examples>")[1].split("</examples>")[0]
+    shown = [line for line in examples.splitlines() if line.startswith("- ")]
+    assert len(shown) == len(SKIP_EXAMPLES)
 
 
 def test_examples_are_rendered_with_what_they_turned_out_to_be():
@@ -284,7 +284,7 @@ def test_examples_are_rendered_with_what_they_turned_out_to_be():
     model."""
     from friday.kernel.triage.prompt import build_instructions
 
-    built = build_instructions([("checkout is 500ing", "backend.trace_problem")])
+    built = build_instructions(examples=[("checkout is 500ing", "backend.trace_problem")])
 
     assert "<examples>" in built
     assert "checkout is 500ing" in built

@@ -18,6 +18,8 @@ from typing import Any
 
 from friday.sdk import Plugin, TaskTypeSpec
 from plugins.backend import answer_question
+from plugins.backend.actions import ACTIONS
+from plugins.backend.agents import AGENTS
 from plugins.backend.graph import TASK_TYPE, build_backend_dag
 from plugins.backend.memory import DEPENDENCY_READERS, BACKEND_MEMORY_KINDS
 from plugins.backend.params import ApiIssueParams
@@ -29,15 +31,20 @@ __all__ = ["PLUGIN", "register"]
 
 def register(api: Any) -> None:
     """Contribute the backend pack kinds, their reader routing, the four
-    toolsets, and the `backend.trace_problem` and `backend.answer_question`
-    task types. The `graph` builder is deferred and closes over `api` (for
-    `api.caps`), so it runs only once the boot capabilities exist."""
+    toolsets, the two agents, the `backend.trace_problem` and
+    `backend.answer_question` actions, and their task types. The `graph`
+    builder is deferred and closes over `api` (for `api.caps`), so it runs
+    only once the boot capabilities exist."""
     for spec in BACKEND_MEMORY_KINDS:
         api.memory_kind(spec)
     for reader, kinds in DEPENDENCY_READERS.items():
         api.reader(reader, kinds)
     for toolset in TOOLSETS:
         api.toolset(toolset)
+    for agent in AGENTS:
+        api.agent(agent)
+    for action in ACTIONS:
+        api.action(action)
 
     api.task_type(
         TaskTypeSpec(

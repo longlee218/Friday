@@ -1,61 +1,43 @@
-"""Ticket 11 — the triage answer schema is built from the registry at boot.
+"""The triage answer schema is built from the registered action names at boot.
 
-`Decided` (the value type) is a plain `type: str` now; the *closed set* the model
-is held to is built at boot by `make_decided(params_by_type)` from the task-type
-registry, not from a static `Literal[PARAMS]` at import. These pin the factory:
-it renders the enum + per-label docs the classifier reads, it is memoised so the
-class has a stable identity, and `Decided` itself stays a static value type.
+`Decided` (the value type) is a plain `type: str`; the *closed set* the model is
+held to is built by `make_decided(names)` from the registered actions (board
+`domains-plug-in`, ticket 02 §2). These pin the factory: it closes the set, it
+carries no per-label text (label meaning lives in the prompt), and it is
+memoised so the class has a stable identity.
 """
 
 from __future__ import annotations
 
-from typing import Literal, get_args, get_type_hints
-
-import pytest
+from typing import get_args, get_type_hints
 
 from friday.kernel.domain.triage import Decided, make_decided
-from plugins.ops.params import AccessRequestParams
-from plugins.backend.answer_question import DocQuestionParams
-from plugins.backend.params import ApiIssueParams
 
-CATALOG = {
-    "backend.trace_problem": ApiIssueParams,
-    "ops.request_permission": AccessRequestParams,
-    "backend.answer_question": DocQuestionParams,
-}
+NAMES = ("backend.trace_problem", "ops.request_permission", "backend.answer_question")
 
 
 def test_decided_is_a_plain_value_type():
     """The value type carries a bare string — no static Literal, so it needs no
-    task-type catalog at import."""
+    catalog at import."""
     d = Decided(type="backend.trace_problem", confidence=0.9)
     assert d.type == "backend.trace_problem" and d.confidence == 0.9
     assert get_type_hints(Decided)["type"] is str
 
 
-def test_make_decided_closes_the_type_to_the_registry_plus_skip():
-    cls = make_decided(CATALOG)
-    allowed = set(get_args(get_type_hints(cls)["type"]))
-    assert allowed == {"backend.trace_problem", "ops.request_permission", "backend.answer_question", "skip"}
+def test_make_decided_closes_the_type_to_the_names_plus_skip():
+    cls = make_decided(NAMES)
+    allowed = get_args(get_type_hints(cls)["type"])
+    assert allowed == (*sorted(NAMES), "skip")
 
 
-def test_make_decided_carries_each_types_own_description():
-    cls = make_decided(CATALOG)
+def test_make_decided_describes_no_label():
+    cls = make_decided(NAMES)
     doc = next(f for f in cls.__dataclass_fields__.values() if f.name == "type").metadata["doc"]
-    # Each label's line comes from its Params class docstring.
-    for name in CATALOG:
-        assert f"    {name}:" in doc
-    assert "    skip:" in doc
+    assert "labels above" in doc
+    for name in NAMES:
+        assert name not in doc
 
 
 def test_make_decided_is_memoised_for_a_stable_identity():
     """Same set -> the same class object, so isinstance/== hold across callers."""
-    assert make_decided(CATALOG) is make_decided(dict(CATALOG))
-
-
-def test_make_decided_refuses_a_type_with_no_description():
-    class Undocumented:
-        pass
-
-    with pytest.raises(ValueError, match="no docstring"):
-        make_decided({"mystery": Undocumented})
+    assert make_decided(NAMES) is make_decided(list(reversed(NAMES)))

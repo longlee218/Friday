@@ -197,7 +197,7 @@ def test_a_vouched_example_cannot_carry_a_section_into_triage():
     system, where it would sit on every call until somebody unmarked it."""
     from friday.kernel.triage.prompt import build_instructions
 
-    built = build_instructions([(HOSTILE, "backend.trace_problem")])
+    built = build_instructions(examples=[(HOSTILE, "backend.trace_problem")])
 
     # Asserted on the escaped form, not on the tag name being absent: triage
     # has a real `<critical_reminder>` section of its own now, and a test that

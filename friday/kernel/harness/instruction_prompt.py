@@ -66,7 +66,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any, Sequence
 
 from friday.sdk.prompt import (
@@ -85,6 +85,7 @@ from friday.sdk.prompt import (
 )
 from friday.sdk.prompt import _QUOTE_CLOSE, _QUOTE_OPEN, _escape, _quoted
 from friday.kernel.harness.skills import Skill
+from friday.sdk.action import Action
 from friday.sdk.memory import MemoryOrigin
 from friday.kernel.domain.messages import InboundEvent
 from friday.kernel.domain.memory import Memory, RoomSummary
@@ -105,6 +106,7 @@ __all__ = [
     "critical_reminder",
     "few_shot",
     "job",
+    "labels",
     "memory",
     "memory_lines",
     "memory_tool_system",
@@ -578,6 +580,25 @@ def few_shot(examples: list[tuple[str, str]] | None, *, verdict: str) -> Section
     lines = [f"A message, and {verdict}:", ""]
     lines += [f"- {_escape(text)} -> {_escape(kind)}" for text, kind in examples]
     return Section("examples", "\n".join(lines))
+
+
+def labels(actions: Iterable[Action], *, last: tuple[str, str]) -> Section:
+    """Every action's recognition, then `last` — the core's own label and what
+    it means (board `domains-plug-in`, ticket 02).
+
+    Sorted by name: a stable byte order for the cache, not a priority. `last`
+    is last because it is the core's, not because it is tried last.
+    """
+    blocks = []
+    for action in sorted(actions, key=lambda a: a.name):
+        r = action.recognition
+        lines = [f"### {action.name}", r.means]
+        lines += [f"- when: {signal}" for signal in r.pick_when]
+        lines += [f"- not when: {signal} → {other}" for signal, other in r.not_when]
+        blocks.append("\n".join(lines))
+    name, means = last
+    blocks.append(f"### {name}\n{means}")
+    return Section("labels", "\n\n".join(blocks))
 
 
 # ---------------------------------------------------------------------------

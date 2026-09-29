@@ -18,7 +18,7 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 10 | The Harness runs an `AgentSpec` | ✅ done (main, 2026-09-29) | 05 |
 | 11 | The Planner and its plan-shape eval | ⬜ **takeable** | 06, 10 |
 | 12 | The WorkflowRunner and `step_results` | ✅ done (main, 2026-09-29) | 06, 10 |
-| 13 | The assembled triage prompt | ⬜ **takeable** | 05 |
+| 13 | The assembled triage prompt | ✅ done (main, 2026-09-29); triage eval deferred (OpenRouter 402, no credits) | 05 |
 | 14 | The spine pass; `trace_problem` moves onto it | ⬜ | 07, 08, 09, 11, 12, 13 |
 | 15 | `backend.answer_question` on the spine | ⬜ | 14 |
 | 16 | `ops.request_permission` on the spine; delete the DAG path | ⬜ | 14, 15 |

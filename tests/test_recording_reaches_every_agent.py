@@ -129,7 +129,6 @@ def _config():
 
     return SimpleNamespace(
         agent=lambda declaration: CONFIG,
-        triage_examples=[],
         sensitive_words=(),
         ingest=SimpleNamespace(watched_channels=frozenset({"c1"})),
         workflows=SimpleNamespace(use_responder=True),

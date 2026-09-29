@@ -6,6 +6,9 @@ who it is, the job, and the operator's vouched-for examples, appended to
 instructions rather than sent per call because examples that moved per call
 would cost the cache hit on everything after them.
 
+Over the 200-line target because most of it is prompt text a model reads
+(`JOB`, `THINKING`, `REMINDERS`), kept whole in one place.
+
 **No voice, deliberately.** Triage's whole output is a label and a number.
 There is no sentence a voice could improve, and every word would be paid for
 on the highest-volume calls in the system to change nothing — which is what
@@ -29,7 +32,7 @@ than against any one constant here.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from friday.kernel.harness.instruction_prompt import (
     assemble,
@@ -39,13 +42,16 @@ from friday.kernel.harness.instruction_prompt import (
     critical_reminder,
     few_shot,
     job,
+    labels,
     role,
     thinking_style,
     trust_boundary,
 )
+from friday.kernel.domain.tasks import SKIP
 from friday.kernel.triage.context import LightContext
+from friday.sdk.action import Action
 
-__all__ = ["build_input", "build_instructions"]
+__all__ = ["SKIP_EXAMPLES", "build_input", "build_instructions", "declared_examples"]
 
 
 #: The job. Whole sentences to a model, so no comments inside — anything that
@@ -60,8 +66,10 @@ Do not copy values out of the message, do not summarise it, do not answer it.
 Something else reads the message for what it contains — your job is the label
 and your confidence in it."""
 
-#: How to arrive at the label. Ordered because the order is the point: reading
-#: before deciding is what stops a keyword in the first line settling it.
+#: How to arrive at the label. The first two are ordered because reading
+#: before deciding is what stops a keyword in the first line settling it; the
+#: labels themselves have no order (board `domains-plug-in`, ticket 02): each
+#: action's `not_when` pairs decide between two, and the core names none.
 THINKING = [
     "Start from why this message is in front of you. Everything else in the "
     "channel was filtered out: what reaches you was addressed to this desk — "
@@ -71,27 +79,29 @@ THINKING = [
     "Read the whole turn before deciding. The useful part often comes second "
     "— a curl, a log, an attachment, a response body, an error code — and the "
     "opening line is only a greeting.",
-    "Then ask, in this order, and stop at the first that fits.",
-    "Does this one ask for nothing at all — thanks, a greeting, a joke, "
-    "salary, personal matters, or somebody simply telling us what they did? "
-    "Only then is it skip. Being short, vague or wordless is not a reason to "
-    "skip: somebody who tags this desk and says little still wants something.",
-    "Are they asking to be let in somewhere — a repository, an environment, a "
-    "dashboard, a channel, a key, a role? That is ops.request_permission, even when "
-    "they phrase it as a problem (\"I cannot open the staging repo\").",
-    "Are they asking where something is written down, or what a document or "
-    "spec says, without having run anything? That is backend.answer_question. If they "
-    "ran something and it did not do what they expected, it is not.",
-    "Everything else people bring this desk is backend.trace_problem: an integration "
-    "failing, a request or response to look at, an error code, a symptom with "
-    "no name yet, or a question about what an endpoint is for and how its "
-    "rules work.",
+    "It is skip only when it asks for nothing at all — thanks, a greeting, a "
+    "joke, salary, personal matters, or somebody simply telling us what they "
+    "did. Being short, vague or wordless is not a reason to skip: somebody "
+    "who tags this desk and says little still wants something.",
+    "Weigh every label below against the message; no label comes first. "
+    "Where a label says \"not when … → another label\", that pair decides "
+    "between the two.",
     "If two labels still fit, pick the one the person would recognise as "
     "their own problem, and lower your confidence to say so. Only answer with "
     "low confidence when you are genuinely unsure; a clear message deserves a "
     "high one.",
 ]
 
+#: What `skip` means. The core's own label: no plugin owns it, and it is the
+#: same on every install, so it renders last, after every action's.
+SKIP_MEANS = (
+    "Nobody is asking you for anything — social talk, thanks, salary, "
+    "personal matters, or people talking among themselves."
+)
+
+#: The core's own `skip` examples, shown after every action's declared ones.
+#: Nothing here may appear in `evals/triage.jsonl` (a suite test).
+SKIP_EXAMPLES = ("ok a, e hiểu rồi ạ", "chúc mừng a lên chức ạ")
 
 
 #: The two that must not be got wrong, at the end where a model looks again.
@@ -109,24 +119,47 @@ REMINDERS = [
 INSTRUCTIONS = JOB
 
 
-def build_instructions(examples: Sequence[tuple[str, str]] = ()) -> str:
-    """Who it is, the job, how to think, what it was shown, what not to get
-    wrong — in that order, because the order is how much each part moves.
+def declared_examples(actions: Iterable[Action]) -> list[tuple[str, str]]:
+    """What the classifier is shown before any mark: each action's declared
+    examples (sorted by action, as the labels are), then the core's `skip`
+    ones. `evals/build_triage_set.py` excludes exactly these from the set."""
+    out = [
+        (text, action.name)
+        for action in sorted(actions, key=lambda a: a.name)
+        for text in action.recognition.examples
+    ]
+    return out + [(text, SKIP) for text in SKIP_EXAMPLES]
 
-    The examples are the only part that changes between installs, and they
-    change at startup rather than per call, so they sit after everything
+
+def _examples(
+    actions: Iterable[Action], confirmed: Sequence[tuple[str, str]]
+) -> list[tuple[str, str]]:
+    """Examples add up: the declared ones, then the operator-confirmed rows.
+    The declared never drop out as confirmed rows accumulate, so a new action
+    is not outweighed and the prefix stays stable. A confirmed row whose text
+    is already shown is not shown twice."""
+    out = declared_examples(actions)
+    shown = {text.strip() for text, _ in out}
+    out += [(text, label) for text, label in confirmed if text.strip() not in shown]
+    return out
+
+
+def build_instructions(
+    *,
+    actions: Iterable[Action] = (),
+    examples: Sequence[tuple[str, str]] = (),
+) -> str:
+    """Who it is, the job, how to think, the labels, what it was shown, what
+    not to get wrong — in that order, because the order is how much each part
+    moves.
+
+    `actions` are the registered ones (their `Recognition` is the labels'
+    whole meaning — the answer schema carries none). `examples` are the
+    operator-confirmed rows; the declared and `skip` examples are added here.
+    Both change at startup rather than per call, so they sit after everything
     stable and before the reminder that closes.
-
-    **No `skill_system` here, and there has not been one to call since
-    ticket 03.** This function used to accept `skills_meta` and render
-    `skill_system(skills_meta)` beside a comment claiming "triage gets skills
-    like every other agent now" — but `Triage.__init__` stopped accepting a
-    skill library that same ticket, so `skills_meta` was always `None` at the
-    one call site, and the comment described a world ticket 03 had already
-    ended. `skill_system(None)` renders nothing either way, so this was dead
-    rather than wrong in its output — found while this module was open for
-    ticket 09's own work, not a bug ticket 09 introduces.
     """
+    actions = list(actions)
     return assemble(
         role(
             "Friday",
@@ -137,16 +170,12 @@ def build_instructions(examples: Sequence[tuple[str, str]] = ()) -> str:
         job(JOB),
         thinking_style(THINKING),
         clarification_system(None),
-        # Only classifications the operator marked *right*. An example
-        # nobody looked at teaches the classifier its own habits, and the
-        # drift has no floor because every generation is drawn from the last
-        # one's output.
-        # Data, not prose: the examples are loaded into this agent and
-        # rendered only when there are any. Hardcoding a set here was tried
-        # on 2026-09-20 and undone the same day — examples belong where the
-        # operator can change them without a release, and an install with
-        # none must read exactly as it did before they existed.
-        few_shot(list(examples), verdict="what it turned out to be"),
+        labels(actions, last=(SKIP, SKIP_MEANS)),
+        # Only classifications the operator marked *right* follow the
+        # declared ones. An example nobody looked at teaches the classifier
+        # its own habits, and the drift has no floor because every generation
+        # is drawn from the last one's output.
+        few_shot(_examples(actions, examples), verdict="what it turned out to be"),
         critical_reminder(REMINDERS),
     )
 

@@ -46,8 +46,9 @@ log = logging.getLogger(__name__)
 OUT = Path(__file__).parent / "triage.jsonl"
 
 #: Hand-written, covering the four classifiable types. Not the production
-#: few-shot examples — those are `config.yaml`'s `triage_examples`, read
-#: separately below and excluded from this set for exactly that reason:
+#: few-shot examples — those are each action's declared `Recognition.examples`
+#: and the core's `skip` ones, read separately below and excluded from this
+#: set for exactly that reason:
 #: scoring a classifier on the sentence it was already told the answer to
 #: is not a measurement of anything. Bilingual because real reports are —
 #: `CLAUDE.md` cites "token hết hạn rồi" as an ordinary bug report for the
@@ -164,8 +165,23 @@ SEED: list[tuple[str, str] | tuple[str, str, tuple]] = [
 ]
 
 
+def declared_examples(config: Config) -> list[tuple[str, str]]:
+    """Every example the classifier is shown before any mark — the prompt's
+    own list, for the actions `config` registers."""
+    from friday.kernel.plugin_host import registered_actions
+    from friday.kernel.triage import prompt
+
+    return prompt.declared_examples(registered_actions(config))
+
+
 async def build_and_write(
-    db: Database, config: Config, *, out: Path = OUT
+    db: Database,
+    config: Config,
+    *,
+    out: Path = OUT,
+    #: What must not be scored: the examples the model is shown. `None` reads
+    #: them from the registered actions; a test names its own.
+    excluded: list[tuple[str, str]] | None = None,
 ) -> list[Example]:
     """Read what a real deploy would show `run_triage_eval.py`'s frozen set,
     write it, and hand back the rows that landed.
@@ -177,7 +193,9 @@ async def build_and_write(
     """
     confirmed = await db.confirmed_classifications(limit=1000)
     frozen = build_frozen_set(
-        confirmed=confirmed, seed=SEED, excluded=list(config.triage_examples)
+        confirmed=confirmed,
+        seed=SEED,
+        excluded=declared_examples(config) if excluded is None else excluded,
     )
     write_jsonl(out, frozen)
 

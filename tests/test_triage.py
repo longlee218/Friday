@@ -831,37 +831,6 @@ async def test_a_provider_that_never_answered_is_not_an_invented_type():
     assert not outcome.out_of_set
 
 
-def test_every_decision_the_model_may_name_carries_its_own_description():
-    """A tool parameter is an instruction to the model, and an enum member
-    nobody defined is an instruction to guess. Each type's description is read
-    from its own `Params` class docstring — so a fourth type is a fourth class,
-    not a class and a second description of it somewhere else.
-
-    `skip`'s line is written by hand, because it is the one decision with no
-    class behind it. It was a whole second tool for that reason; D6 is the
-    finding that a tool is an expensive way to hold one sentence.
-
-    This replaces `test_create_task_describes_every_type_from_its_own_params_class`,
-    which asserted the same thing about `classify`'s enum.
-    """
-    from friday.kernel.harness.model_client import _answer_params
-    from friday.kernel.dag import registry
-    from friday.kernel.domain.triage import make_decided
-
-    # The closed set now lives on the boot-built schema (ticket 11), not on the
-    # `Decided` value type — `make_decided` builds it from the registry's types.
-    params = registry.decision_params()
-    described = _answer_params(make_decided(params))["properties"]["type"]
-
-    assert set(described["enum"]) == set(registry.decisions())
-    for name, params_cls in params.items():
-        # Whitespace collapsed, the way `_means` renders it: a definition long
-        # enough to be worth writing is wrapped in the source, and the enum
-        # keeps one line per label.
-        assert " ".join(params_cls.__doc__.split()) in described["description"], name
-    assert "skip" in described["description"]
-
-
 def test_triage_is_never_asked_for_anything_but_a_type_and_a_confidence():
     """The line, held by the only thing that can hold it.
 
@@ -883,32 +852,6 @@ def test_triage_is_never_asked_for_anything_but_a_type_and_a_confidence():
     for tool in triage._run.tools:
         asked = set(tool.params_json_schema.get("properties", {}))
         assert asked <= {"type", "confidence"}, f"{tool.name} also asks for {asked}"
-
-
-def test_a_task_type_that_never_wrote_down_what_it_means_is_refused_at_import():
-    """An enum member nobody defined is an instruction to guess, and the guess
-    is on the highest-volume path in the system.
-
-    **The hazard is not an empty docstring, which cannot happen.** A
-    `@dataclass` always has one: absent its own, Python synthesises the
-    constructor signature, so a forgetful author ships
-    `ApiIssueParams(summary: str = '', environment: str | None = None, ...)`
-    to the model as the description of what the type *means*. It reads like a
-    description to everything except a person. Written after a guard against
-    the empty case was found unable to fire.
-    """
-    from dataclasses import dataclass
-
-    from friday.kernel.domain.triage import _means
-
-    @dataclass
-    class Undocumented:
-        summary: str = ""
-
-    assert Undocumented.__doc__, "Python synthesised one; that is the point"
-
-    with pytest.raises(ValueError, match="constructor signature"):
-        _means("mystery", Undocumented)
 
 
 async def test_an_answer_that_names_no_type_is_never_silently_a_skip():

@@ -89,9 +89,9 @@ class VerdictsRepo:
 
         `decisions` is the closed set a right-marked row must name to count
         (the task types plus `skip`). It can arrive as an argument so the store
-        stays below the registry that holds it; `None` reads the registry here —
-        the path the production caller (`triage/runner.py`) takes, not only a
-        test — through a lazy import, so the store names no registry at module
+        stays below the registry that holds it — `triage/runner.py` passes the
+        registered actions plus `skip`; `None` reads the task-type registry here,
+        through a lazy import, so the store names no registry at module
         load and the layering holds.
         """
         if decisions is None:

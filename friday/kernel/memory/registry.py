@@ -258,8 +258,10 @@ def register_all_memory_kinds(config: Any = None) -> None:
 
     from friday.kernel.plugin_host import load_plugins
 
+    # Both plugins, as `Config` defaults: backend's recognition names ops's
+    # action in a `not_when`, and a load without ops is refused for it.
     class _DefaultConfig:
-        plugins = ("plugins.backend",)
+        plugins = ("plugins.backend", "plugins.ops")
         plugin_blocks: dict = {}
 
     loaded = load_plugins(config if config is not None else _DefaultConfig())

@@ -46,7 +46,7 @@ def test_each_agent_declares_its_tier_and_budget():
     from friday.kernel.triage import TRIAGE
     from plugins.backend.graph import DIAGNOSE
 
-    assert TRIAGE == AgentDeclaration("triage", "flash", 0.0, 1, 50_000, 30.0)
+    assert TRIAGE == AgentDeclaration("triage", "free", 0.0, 1, 50_000, 30.0)
     assert RESPONDER == AgentDeclaration("responder", "flash", 0.7, 13, 300_000, 60.0)
     assert EXTRACTOR == AgentDeclaration("extractor", "flash", 0.0, 3, 100_000, 30.0)
     assert DIAGNOSE == AgentDeclaration(
@@ -123,9 +123,9 @@ def test_no_time_budget_is_left_in_the_code():
 
 def test_the_shipped_config_holds_only_tiers_and_install_facts():
     """`config.yaml` = provider keys + named model tiers + install facts. The
-    three keys still read until ticket 16 deletes their readers — `workflows`'
-    `max_asks`/`use_responder`/`auto_ask_for_details`, `triage_examples` until
-    ticket 13's assembled prompt — are listed so the list is complete."""
+    keys still read until ticket 16 deletes their readers — `workflows`'
+    `max_asks`/`use_responder`/`auto_ask_for_details` — are listed so the
+    list is complete."""
     import yaml
 
     raw = yaml.safe_load((ROOT / "config.yaml").read_text())
@@ -133,7 +133,7 @@ def test_the_shipped_config_holds_only_tiers_and_install_facts():
     assert set(raw) <= {
         "database_path", "tiers", "backend", "operator_id", "board_host",
         "board_port", "board_origins", "repo_root", "backup_dir", "mcp_servers", "shell_hosts",
-        "workflows", "ingest", "context", "sensitive_words", "triage_examples",
+        "workflows", "ingest", "context", "sensitive_words",
     }
     assert set(raw["ingest"]) == {"mention_types", "watched_channels"}
     assert set(raw["context"]) == {"skills_directory"}

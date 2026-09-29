@@ -11,17 +11,20 @@ from __future__ import annotations
 from typing import Any
 
 from friday.sdk import Plugin, TaskTypeSpec
+from plugins.ops.actions.request_permission import ACTION
 from plugins.ops.params import AccessRequestParams
 
 __all__ = ["PLUGIN", "register"]
 
-TASK_TYPE = "ops.request_permission"
+TASK_TYPE = ACTION.name
 
 
 def register(api: Any) -> None:
-    """Contribute the `ops.request_permission` task type. No memory kinds and no
-    model node of its own; the `graph` builder is deferred and closes over `api`
-    so it runs only in the task-type lifecycle, where `api.caps` exists."""
+    """Contribute the `ops.request_permission` action and task type. No
+    memory kinds and no model node of its own; the `graph` builder is deferred
+    and closes over `api` so it runs only in the task-type lifecycle, where
+    `api.caps` exists."""
+    api.action(ACTION)
     api.task_type(
         TaskTypeSpec(
             name=TASK_TYPE,

@@ -31,8 +31,9 @@ is that, built for ticket 06 on `.scratch/nothing-runs-unmeasured/`.
 
   Pulls `db.confirmed_classifications()` (verdicts the operator marked ✅)
   and a small hand-written `SEED`, and drops anything that is also in
-  `config.yaml`'s `triage_examples` — an example already shown to the model
-  as a few-shot cannot also be something the model is scored against.
+  the declared examples (each action's `Recognition.examples` and the core's
+  `skip` ones) — an example already shown to the model as a few-shot cannot
+  also be something the model is scored against.
 
   **A real marked verdict overwrites the seed row that says the same thing.**
   The seed is the floor, not the set: it exists to give this tool something to

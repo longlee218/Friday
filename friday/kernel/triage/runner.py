@@ -77,13 +77,18 @@ async def build_triage(
     09's review caught `MemoryScope` behind a quoted forward reference and a
     bare `8` standing in for `RESULTS`). One function, two callers, instead.
     """
+    from friday.kernel.plugin_host import registered_actions
+
     settings = config.agent(TRIAGE)
+    actions = registered_actions(config)
 
     # Read once, at build time. Examples belong in the stable front of the
     # prompt, and a list that changed per call would cost the cache hit on
     # everything after it — a mark made now takes effect at the next start.
-    examples = list(config.triage_examples) + await db.confirmed_classifications(
-        limit=EXAMPLES
+    # A row naming a label no longer registered is dropped, not refused:
+    # history must not stop a boot.
+    examples = await db.confirmed_classifications(
+        limit=EXAMPLES, decisions=(*(a.name for a in actions), SKIP)
     )
     if examples:
         log.info("triage: %d example(s) the operator vouched for", len(examples))
@@ -105,6 +110,7 @@ async def build_triage(
 
     return Triage(
         config=settings,
+        actions=actions,
         examples=examples,
         sensitive=sensitive,
         record=record,

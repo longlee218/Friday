@@ -24,8 +24,9 @@ from friday.kernel.boot_refusals import refusals
 from friday.kernel.config import ConfigError
 from friday.kernel.registry import DuplicateRegistration, PluginRegistration, Registry
 from friday.kernel.toolsets import core_plugin
+from friday.sdk.action import Action
 
-__all__ = ["BootRefused", "Loaded", "configured_plugins", "load_plugins"]
+__all__ = ["BootRefused", "Loaded", "configured_plugins", "load_plugins", "registered_actions"]
 
 
 class BootRefused(ConfigError):
@@ -93,3 +94,16 @@ def load_plugins(config: Any) -> Loaded:
     if errors:
         raise BootRefused("the plugins cannot boot:\n  " + "\n  ".join(errors))
     return Loaded(registry, apis)
+
+
+def registered_actions(config: Any = None) -> list[Action]:
+    """The actions the configured plugins register — what triage's prompt and
+    closed set are built from. Loads only the plugin selection: the tier and
+    MCP-server checks need the whole config and are the boot's (`register_all`
+    runs them), not triage's; the recognition checks still refuse here."""
+
+    class _Selection:
+        plugins = getattr(config, "plugins", None)
+        plugin_blocks = getattr(config, "plugin_blocks", None)
+
+    return list(load_plugins(_Selection()).registry.actions().values())
