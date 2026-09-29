@@ -84,3 +84,13 @@ diagnose.py` and goes with the DAG path in ticket 16; not this ticket.
 - Built with two generic sdk builders, `facts` (escaped section) and `said`
   (quoted and escaped), rather than `case`/`action`/`plan` builders.
 
+## Extended to every agent (2026-09-30)
+
+At the operator's request the same standard now holds for all of them:
+the extractor's per-call input and the spine's `reply_brief` go through
+`facts`/`said`; `backend.explain` gets `explain_prompt.py` (assembled, with
+the trust boundary); the DAG-side `build_reads_input` is assembled too;
+`test_every_agents_instructions_state_the_trust_boundary` checks every
+registered `AgentSpec` plus the kernel's five. `tests/test_prompt_sections.py`
+lists the plugin prompt modules.
+

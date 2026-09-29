@@ -643,9 +643,7 @@ def test_the_field_schema_comes_before_the_room():
         _context("API lỗi", TraceProblemParams, memories=_rows("register: thân mật"))
     )
 
-    assert (
-        said.index("Fields:") < said.index("<memory>") < said.index("What they said:")
-    )
+    assert said.index("<fields>") < said.index("<memory>") < said.index("<transcript>")
 
 
 def test_what_the_operator_wrote_is_labelled_apart_from_what_a_model_did():
@@ -808,3 +806,12 @@ async def test_a_skill_fetch_and_a_correction_both_fit_in_one_extraction():
 
     assert params is not None and params.correlation_id == "3f7a1e22"
     assert len(model.calls) == 3
+
+
+def test_the_extractors_field_schema_is_escaped_once_not_twice():
+    from friday.kernel.extraction.prompt import build_input
+    from plugins.backend.params import TraceProblemParams
+
+    said = build_input(_context("API lỗi", TraceProblemParams))
+
+    assert "<fields>" in said and "&amp;" not in said

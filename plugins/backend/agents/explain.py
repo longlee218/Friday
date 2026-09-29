@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from friday.sdk import AgentSpec, Budget
+from plugins.backend.agents.explain_prompt import build_instructions
 
 __all__ = ["EXPLAIN", "Explanation"]
 
@@ -47,10 +48,7 @@ EXPLAIN = AgentSpec(
     name="backend.explain",
     description="Answers whether the code or docs running now do something, and "
     "how, citing the lines it read.",
-    instructions="You answer whether the code or docs running now do what the "
-    "reporter asked about, and how. Search and read before you answer; cite the "
-    'lines you read. "Not found" is not "not there": a conclusive no needs '
-    "the place that would have done it, read.",
+    instructions=build_instructions(),
     result=Explanation,
     tier="flash",
     toolsets=("backend.code", "backend.docs"),

@@ -15,9 +15,10 @@ from typing import Any
 from friday.kernel.harness.instruction_prompt import (
     assemble,
     base,
+    facts,
+    said,
     spine_facts,
     spine_task,
-    user_input,
 )
 from friday.sdk.intake import IntakeContext
 
@@ -58,5 +59,9 @@ def agent_input(
 def reply_brief(reply: str) -> str:
     """What a continued step is told: the reporter's reply to its question,
     quoted — the rest is already in its history."""
-    said = user_input(reply) or "(they said nothing new; continue with what you have)"
-    return f"The reporter replied to your question:\n{said}"
+    return assemble(
+        facts("continue", "The reporter replied to your question."),
+        said("reply", reply)
+        if reply.strip()
+        else facts("reply", "(they said nothing new; continue with what you have)"),
+    )

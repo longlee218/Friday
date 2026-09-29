@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 from friday.kernel.domain.memory import Memory
 from friday.kernel.extraction.context import build_full_context
+from friday.kernel.harness.instruction_prompt import facts, said
 from plugins.backend.params import TraceProblemParams
 from tests.test_extraction import _context
 from tests.test_outbox import _asked, _opened_by
@@ -113,7 +114,6 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
         memory,
         outstanding_questions,
         room_facts,
-        user_input,
     )
     from friday.kernel.harness.structured import describe
 
@@ -159,15 +159,13 @@ def test_the_prompt_is_byte_identical_gathered_or_assembled_by_hand():
     # types) the two drifted, which is how this test earned its keep.
     schema = describe(TraceProblemParams, omit=known) or "(no fields)"
     channel_body = room_facts(memories)
-    by_hand = (
-        f"Fields:\n{schema}\n\n"
-        + assemble(
-            memory(
-                conversation_body=outstanding_questions(asked),
-                channel_body=channel_body,
-            )
-        )
-        + f"What they said:\n{user_input(transcript)}"
+    by_hand = assemble(
+        facts("fields", schema),
+        memory(
+            conversation_body=outstanding_questions(asked),
+            channel_body=channel_body,
+        ),
+        said("transcript", transcript),
     )
 
     assert build_input(context) == by_hand

@@ -34,15 +34,16 @@ from friday.kernel.harness.instruction_prompt import (
     assemble,
     clarification_system,
     critical_reminder,
+    facts,
     job,
     memory,
     outstanding_questions,
     role,
     room_facts,
+    said,
     skill_system,
     thinking_style,
     trust_boundary,
-    user_input,
 )
 from friday.kernel.harness.structured import describe
 
@@ -54,8 +55,9 @@ __all__ = ["build_input", "build_instructions"]
 #: JSON promise stays.
 JOB = """You fill structured fields from what someone wrote.
 
-You are shown the field schema — the names and what each one is for — and
-everything the reporter has said about this, oldest first. The answer to a
+You are shown the field schema (`<fields>`) — the names and what each one is
+for — and everything the reporter has said about this (`<transcript>`), oldest
+first. The answer to a
 question they were asked is in there as an ordinary later message, so read all
 of it, not only the first line.
 
@@ -206,13 +208,11 @@ def build_input(context: FullContext) -> str:
     # the mark and still earns a fresh extraction.
     schema = describe(type(context.known), omit=context.known) or "(no fields)"
     channel_body = room_facts(list(context.domain_memories))
-    return (
-        f"Fields:\n{schema}\n\n"
-        + assemble(
-            memory(
-                conversation_body=outstanding_questions(context.asked),
-                channel_body=channel_body,
-            )
-        )
-        + f"What they said:\n{user_input(context.transcript or '')}"
+    return assemble(
+        facts("fields", schema),
+        memory(
+            conversation_body=outstanding_questions(context.asked),
+            channel_body=channel_body,
+        ),
+        said("transcript", context.transcript or ""),
     )

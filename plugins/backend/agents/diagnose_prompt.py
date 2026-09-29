@@ -21,8 +21,10 @@ from typing import Any
 from friday.sdk.prompt import (
     assemble,
     critical_reminder,
+    facts,
     job,
     role,
+    said,
     thinking_style,
     trust_boundary,
 )
@@ -162,22 +164,18 @@ def build_reads_input(
     if placement.stack:
         where.append(f"stack: {placement.stack}")
 
-    said = [
-        "## What was reported",
-        report or "(nothing beyond the parameters)",
-        "",
-        "## Where this service lives",
-        *where,
-    ]
-    if not_checked:
-        said += ["", "## Already known not to have been checked", *not_checked]
-    said += [
-        "",
-        "## Your job",
-        "Read what you need with the tools, then answer the shape. Nothing "
-        "has been read for you. If you genuinely cannot diagnose this and a "
-        "person must take it — the fix needs an action you may not take, or "
-        "the case is outside what these tools reach — call `hand_over` with "
-        "why, instead of guessing.",
-    ]
-    return "\n".join(said)
+    return assemble(
+        said("report", report)
+        if report.strip()
+        else facts("report", "(nothing beyond the parameters)"),
+        facts("where", where),
+        facts("not_checked", list(not_checked)),
+        facts(
+            "your_job",
+            "Read what you need with the tools, then answer the shape. Nothing "
+            "has been read for you. If you genuinely cannot diagnose this and a "
+            "person must take it — the fix needs an action you may not take, or "
+            "the case is outside what these tools reach — call `hand_over` with "
+            "why, instead of guessing.",
+        ),
+    )

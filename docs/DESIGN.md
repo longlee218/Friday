@@ -524,6 +524,17 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   describing a tool renders only if the agent has it; `trust_boundary` is
   claimed only by agents whose input wraps something. The responder reads
   `channel_derived` only, and its section order is load-bearing.
+- **Every agent's prompt is assembled, and states the boundary** (ticket 21's
+  standard, applied to all): triage, the extractor, the responder, the
+  summariser, the Planner and every registered `AgentSpec` (`backend.diagnose`,
+  `backend.explain`) build their instructions with `role` + `trust_boundary` +
+  `job` (+ `thinking_style`) + `critical_reminder`; what a person wrote, or an
+  agent wrote over it, reaches the model through `said` (quoted and escaped),
+  the rest through `facts` (escaped). `tests/test_prompt_sections.py` checks
+  every registered agent's instructions for `<trust_boundary>`, so a plugin's
+  new agent is held to it. The
+  DAG-side `build_reads_input` (`plugins/backend/agents/diagnose_prompt.py`)
+  and the extractor's `build_input` follow it too, until 16 deletes them.
 - **Anything stored and later read back into a prompt is stored plain**,
   escaped once at the seam. `channel_derived` takes the `summary` row and
   reads `RoomSummary`'s four fields by name, so the row's bookmark never
