@@ -103,14 +103,16 @@ def core_toolsets(
 
 def core_plugin(**deps: Any) -> Plugin:
     """The core as a registrant: the owner the `core.*` toolsets and the
-    core's own eval (`core.triage`) are recorded under, so the boot refusals
+    core's own evals (`core.triage`, `core.planner`) are recorded under, so the boot refusals
     treat them like any plugin's."""
 
     def register(api: Any) -> None:
+        from friday.kernel.evals.planner import PLANNER_EVAL
         from friday.kernel.evals.triage import TRIAGE_EVAL
 
         for spec in core_toolsets(**deps):
             api.toolset(spec)
         api.eval(TRIAGE_EVAL)
+        api.eval(PLANNER_EVAL)
 
     return Plugin(id="core", register=register)

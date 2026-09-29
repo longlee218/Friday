@@ -12,7 +12,9 @@ wheels/
 # runtime
 data/
 # eval cases: real channel traffic, with tokens and customer data (like data/cases/)
-evals/datasets/
+evals/datasets/*
+# …except the Planner's cases, which are synthetic
+!evals/datasets/planner/
 *.db
 *.db-wal
 *.db-shm

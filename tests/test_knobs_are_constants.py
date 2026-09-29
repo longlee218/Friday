@@ -56,6 +56,17 @@ def test_each_agent_declares_its_tier_and_budget():
     )
 
 
+def test_the_planner_knobs():
+    """The Planner's tier, budget and rewrites are core constants, the same
+    for every action (board `domains-plug-in`, tickets 11, 12, 17). Changing
+    one needs the `core.planner` eval first."""
+    from friday.kernel.spine.planner import PLAN_REWRITES, PLANNER, PLANNER_TOOLSETS
+
+    assert PLANNER == AgentDeclaration("planner", "strong", 0.0, 10, 200_000, 120.0)
+    assert PLAN_REWRITES == 2
+    assert PLANNER_TOOLSETS == ("core.memory", "core.skills")
+
+
 def test_rooms_are_not_summarised_until_a_tier_is_named():
     """As shipped: no summary tier, so no summaries (fog review, 2026-09-28)."""
     from friday.kernel.memory.channel_context import (

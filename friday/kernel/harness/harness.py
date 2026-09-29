@@ -173,9 +173,10 @@ class Harness:
     #: subclasses this and skips `__init__`; a built harness overrides it in
     #: `__init__` with the terminal tools' result types.
     _ends_with_types: tuple[type, ...] = ()
-    #: The last run's whole message history as plain JSON data when a
-    #: terminal tool ended it, else `None`; and whether it stopped on its
-    #: budget.
+    #: The last run's whole message history as plain JSON data when an
+    #: answer or a terminal tool ended it, else `None` — what a caller
+    #: continues the conversation from (an `Ask`, a refused plan); and
+    #: whether it stopped on its budget.
     #: Read after `run_structured` returns, like `last_error`.
     messages: list[Any] | None = None
     over_budget: bool = False
@@ -543,6 +544,11 @@ class Harness:
             # `_refused` fires per turned-down call; clearing it here makes the
             # flag mean "this run produced no answer that fits".
             self.unfit = None
+            # Kept so a caller can answer back in the same conversation (the
+            # Planner, told why its plan was refused).
+            self.messages = ModelMessagesTypeAdapter.dump_python(
+                said.all_messages(), mode="json"
+            )
             return said.output
 
         if (

@@ -16,7 +16,7 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 08 | Core toolsets: memory, skills, shell, workspace | ✅ done (main, 2026-09-29); workspace has no delete (library lacks one) | 05 |
 | 09 | Backend toolsets from `sources/` | ✅ done (main, 2026-09-29); the `backend.trace_problem` eval (was `run_api_issue_eval`) not run yet — the key has credits now, 1 captured case in `data/cases/` | 05, 07 |
 | 10 | The Harness runs an `AgentSpec` | ✅ done (main, 2026-09-29) | 05 |
-| 11 | The Planner and its plan-shape eval | ⬜ **takeable** | 06, 10 |
+| 11 | The Planner and its plan-shape eval | ✅ done (main, 2026-09-29); `core.planner` 6/8 on `strong` (glm-5.3-flash) | 06, 10 |
 | 12 | The WorkflowRunner and `step_results` | ✅ done (main, 2026-09-29) | 06, 10 |
 | 13 | The assembled triage prompt | ✅ done (main, 2026-09-29); `core.triage` measured 2026-09-29: deepseek 34/35, `trace_problem` subset qwen 21/23 | 05 |
 | 14 | The spine pass; `trace_problem` moves onto it | ⬜ | 07, 08, 09, 11, 12, 13 |

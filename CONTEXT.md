@@ -159,16 +159,19 @@ is the premise each board tracks against.
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **In progress:** tickets 01, 02, 03, 05, 06, 07, 08, 09, 10, 12 and 13 done
+  **In progress:** tickets 01, 02, 03, 05, 06, 07, 08, 09, 10, 11, 12 and 13 done
   (2026-09-29; names are `backend.*`/`ops.*`, live db wiped; core Intake and
   the backend enricher live through the DAG's intake node; the backend's
   tools are its four toolsets, reading code at the running tag; the core's
   four toolsets `core.memory/skills/shell/workspace` are registered but no
   spine agent is wired to them until 14; triage's prompt is assembled from
-  the three registered actions' recognition); 04 and 11 are takeable
+  the three registered actions' recognition; the Planner is built, not
+  wired until 14, on a new `strong` tier); 04 is takeable, and every
+  blocker of 14 is done
   (`.scratch/build-the-spine/STATUS.md`). Evals run on Pydantic Evals
   (`uv run run_eval.py <name>`); `core.triage` measured 2026-09-29 (deepseek
-  34/35; triage runs on qwen3-30b, 21/23 on `trace_problem`). The
+  34/35; triage runs on qwen3-30b, 21/23 on `trace_problem`); `core.planner`
+  6/8 on glm-5.3-flash (2026-09-29). The
   `backend.trace_problem` eval has not been run on the new key yet.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
@@ -353,7 +356,7 @@ A named set of **cases** and how each result is judged, run against the live
 provider by hand (`uv run run_eval.py <name>`), never by the suite. Declared
 as an **eval spec** (`EvalSpec`: cases, per-case checks, a report) and
 registered with `api.eval` under the owner's namespace (`core.triage`,
-`backend.trace_problem`); the core runs it on Pydantic Evals. A **case** is what
+`core.planner`, `backend.trace_problem`); the core runs it on Pydantic Evals. A **case** is what
 one run is given and what a right answer is — for triage, a markdown file
 under `evals/datasets/triage/<label>/`: one message, or a turn of messages
 (long ones kept in `_messages/`), whose folder is its expected label.
@@ -475,6 +478,25 @@ placement matches nothing old.
 (step types, agents, toolsets ⊆ contract ∩ the agent's ceiling) and
 `max_steps`, every error gathered — **refused, never clipped** — then frozen
 with its hash.
+
+**Planner** — the one core agent that writes every plan version
+(`friday/kernel/spine/planner.py`), for every action, one-step cases
+included. Given the intake context, the action's contract and `planning`,
+and each allowed agent's name, description, result shape, terminal tools and
+budget; reads only — the read tools of `core.memory` and `core.skills`. A plan GatePlan refuses
+goes back in the same conversation with its errors, `PLAN_REWRITES` (2)
+times, then **planner_failed** — a `HandOver` (`PlannerFailed`) carrying
+every version, its errors and what the Planner read; told apart from a
+`hand_over` step the Planner chose. Not an agent spec: it has no terminal
+tools and no contract grants its toolsets.
+
+**Replan** — a new plan version for the same action because an agent's step
+pointed the wrong way (the `replan(reason, found)` terminal tool → `Replan`).
+The Planner starts a fresh conversation with the current plan, the stored
+results of its finished steps and the reason; the new version `replaces` the
+old hash, identical steps keep their results by step key, and it gets its
+own rewrites. Counted against the contract's `max_replans`. Not a
+**re-triage**, which leaves the action.
 
 ## Graph
 

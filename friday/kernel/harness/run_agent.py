@@ -38,6 +38,7 @@ __all__ = [
     "replan",
     "retriage",
     "run_agent",
+    "terminal_tools",
 ]
 
 
@@ -88,6 +89,16 @@ def retriage(reason: str, found: str) -> Retriage:
         found: what you read that shows it, with line ids.
     """
     return Retriage(reason=reason, found=found)
+
+
+def terminal_tools(contract: ActionContract) -> list[Any]:
+    """The core's terminal tools an agent gets under `contract`:
+    `ask_reporter` only when the contract allows an `ask` step. The Planner
+    shows the same list to itself (`spine/planner_prompt.py`)."""
+    terminals: list[Any] = [hand_over, replan, retriage]
+    if "ask" in contract.allowed_step_types:
+        terminals.insert(0, ask_reporter)
+    return terminals
 
 
 def reads_for(toolset: ToolsetSpec, servers: Mapping[str, Any]) -> dict[str, Reads]:
@@ -158,9 +169,7 @@ async def run_agent(
         context,
         servers or {},
     )
-    terminals = [hand_over, replan, retriage]
-    if "ask" in contract.allowed_step_types:
-        terminals.insert(0, ask_reporter)
+    terminals = terminal_tools(contract)
 
     harness = Harness(
         config=AgentConfig(

@@ -3,6 +3,7 @@
     uv run run_eval.py                               # list the registered evals
     uv run run_eval.py core.triage                   # score triage
     uv run run_eval.py core.triage --add-confirmed   # add ✅-marked verdicts as cases
+    uv run run_eval.py core.planner                  # score the Planner's plan shapes
     uv run run_eval.py backend.trace_problem             # replay data/cases/ and score
     FRIDAY_DB=/path/to/db uv run run_eval.py core.triage
 
@@ -34,6 +35,17 @@ async def _triage_task(config):
     return build_task(await build_live_triage(config))
 
 
+async def _planner_task(config):
+    """The Planner's memory is a throwaway store, which checks each row's
+    kind against the registry — so the kinds are registered first, as
+    `run_agent.py` does at boot."""
+    from friday.kernel.evals.planner import build_task
+    from friday.kernel.memory.registry import register_all_memory_kinds
+
+    register_all_memory_kinds(config)
+    return build_task(config, load_plugins(config).registry)
+
+
 async def _trace_problem_task(config):
     """Temporary until build-the-spine ticket 14: a case is replayed through
     the DAG, which only the composition root can reach."""
@@ -61,7 +73,11 @@ async def _trace_problem_task(config):
 
 #: How each eval's cases are run. A registered eval with no entry here cannot
 #: be run yet, and says so.
-TASKS = {"core.triage": _triage_task, "backend.trace_problem": _trace_problem_task}
+TASKS = {
+    "core.triage": _triage_task,
+    "core.planner": _planner_task,
+    "backend.trace_problem": _trace_problem_task,
+}
 
 
 async def main(argv: list[str]) -> int:

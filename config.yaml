@@ -21,6 +21,12 @@ tiers:
     api_key: ${OPENROUTER_API_KEY}
     provider: openrouter
     model: "deepseek/deepseek-v4.1-flash"
+  # The Planner's tier (friday/kernel/spine/planner.py): a bad plan steers
+  # the whole run.
+  strong:
+    api_key: ${OPENROUTER_API_KEY}
+    provider: openrouter
+    model: "z-ai/glm-5.3-flash"
   ultra:
     api_key: ${OPENROUTER_API_KEY}
     provider: openrouter

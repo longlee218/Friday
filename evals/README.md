@@ -5,10 +5,10 @@ answers are right. An eval calls the configured provider, so it costs money
 and is read by a person; the suite checks only the wiring and the arithmetic.
 
 This folder holds **data only**, and the data is **not in git**:
-`evals/datasets/` is gitignored, like `data/cases/`, because cases are real
+`evals/datasets/*` is gitignored, like `data/cases/`, because cases are real
 channel traffic — pasted curls carry Bearer tokens, pasted tickets carry
-customer names, addresses and payment ids. Only this README is committed. The
-code lives where it runs:
+customer names, addresses and payment ids. Committed: this README and
+`datasets/planner/`, whose cases are synthetic. The code lives where it runs:
 
 | What | Where |
 | --- | --- |
@@ -16,6 +16,7 @@ code lives where it runs:
 | Running an eval on Pydantic Evals — the one module importing `pydantic_evals` | `friday/kernel/evals/run.py` |
 | The case format below (loader, writer) | `friday/kernel/evals/cases.py` |
 | `core.triage` — the classifier | `friday/kernel/evals/triage.py`, `triage_scoring.py`, `triage_set.py` |
+| `core.planner` — the plan shape | `friday/kernel/evals/planner.py` |
 | `backend.trace_problem` — the diagnosis | `plugins/backend/evals/trace_problem.py` |
 | The command, and the task each case runs through | `run_eval.py` |
 
@@ -23,6 +24,7 @@ code lives where it runs:
 uv run run_eval.py                               # list the registered evals
 uv run run_eval.py core.triage                   # score triage
 uv run run_eval.py core.triage --add-confirmed   # add ✅-marked verdicts as cases
+uv run run_eval.py core.planner                  # score the Planner's plan shapes
 uv run run_eval.py backend.trace_problem             # replay data/cases/ and score
 FRIDAY_DB=/path/to/db uv run run_eval.py core.triage
 ```
@@ -125,6 +127,65 @@ wrong. Measured once, against the original 16-row set on `MiniMax-M3`: ~15,000
 input tokens and ~1,100 output tokens for the whole run. The set has grown
 since, and a turn or a pasted ticket is much longer than a one-line message;
 the run does not record its own cost, so re-measure before relying on it.
+
+---
+
+## `core.planner` — did the Planner write the right kind of plan?
+
+Code-graded on synthetic cases (board `domains-plug-in` ticket 12 §11): each
+case is an intake context and the plan **shape** it should come to. Scoring a
+plan's quality — its `brief`, its `goal` — waits for real cases.
+
+### The set: `datasets/planner/` (committed)
+
+One folder per case. `case.md` is the case; `skills/<name>/SKILL.md` are the
+skills the Planner may read for it (optional).
+
+```markdown
+---
+action: backend.trace_problem
+memory: ["orders-api production logs are in Loki"]    # optional
+expect:
+  terminal: draft                     # draft | ask | hand_over
+  agents: [backend.diagnose]          # the agent steps, in order
+  toolsets:                           # optional: at least these, per agent
+    backend.diagnose: [backend.logs, backend.code]
+---
+the request, as the reporter wrote it
+```
+
+**The model is live; what it reads is fixed.** The case's `memory` is both
+what Intake retrieved and what `memory_search` finds (seeded into a
+throwaway store); its skills folder is the whole skill library. So a changed
+number is the prompt's or the model's, never the operator's memory.
+`tests/test_planner_eval.py` builds the smallest plan of each expected shape
+and requires GatePlan to pass it, and that every action and every terminal step
+type has a case. The expectations are a person's call — review them when an
+action's contract or agents change.
+
+### What a run prints
+
+How many cases got the whole shape right, the count per check (`terminal`,
+`agents`, `toolsets` — granted at least those expected; more is not wrong),
+how many ended `planner_failed`, and every wrong case with what it got.
+
+### First numbers (2026-09-29, `strong` = `z-ai/glm-5.3-flash`)
+
+Two runs, 6/8 each (terminal 6/8, agents 6/8, toolsets 7/8):
+
+- `trace-too-vague-to-start` ("a ơi bị lỗi api rồi") — planned `diagnose`
+  with every toolset instead of asking. Both runs.
+- `permission-for-what` ("a ơi e không vào được") — the second run spent all
+  3 tries' 10 turns on tool calls and never answered (`planner_failed`); the
+  first answered `hand_over` where the case expects `ask`.
+
+### When to run it
+
+A change to the Planner's prompt — `friday/kernel/spine/planner_prompt.py`
+— or its tier, budget or rewrites (`PLANNER`, `PLAN_REWRITES` in
+`planner.py`) is not done until this has run and its numbers are reported
+with the change. So is a change to what it is shown: an agent's or
+toolset's `description`, an action's `planning`.
 
 ---
 
