@@ -27,9 +27,11 @@ __all__ = [
     "base",
     "counterpart",
     "critical_reminder",
+    "facts",
     "job",
     "response_style",
     "role",
+    "said",
     "soul",
     "thinking_style",
     "trust_boundary",
@@ -253,6 +255,20 @@ def user_input(text: str) -> str:
     if not text or not text.strip():
         return ""
     return _quoted(_escape(text))
+
+
+def facts(name: str, body: Body) -> Section:
+    """A named section of what the system knows — a list becomes one bullet per
+    item, a string stays as written — escaped, so nothing in it can pass for
+    a tag. For a prompt with sections of its own that no other builder fits;
+    words a person wrote go through `said`."""
+    return Section(name, _body(body, lambda _: "-"))
+
+
+def said(name: str, text: str) -> Section:
+    """A named section holding words a person wrote — or an agent wrote after
+    reading them — quoted between the markers and escaped (`user_input`)."""
+    return Section(name, user_input(text))
 
 
 def _escape(text: str) -> str:

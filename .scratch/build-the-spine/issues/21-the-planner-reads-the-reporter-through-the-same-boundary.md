@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 20
 
 # The Planner reads the reporter through the same boundary
@@ -68,10 +68,19 @@ diagnose.py` and goes with the DAG path in ticket 16; not this ticket.
 
 ## Acceptance
 
-- [ ] The Planner's instructions carry `trust_boundary`; every reporter
+- [x] The Planner's instructions carry `trust_boundary`; every reporter
       word in its opening and replan messages is between the markers,
       escaped (test).
-- [ ] `_prompt_modules` includes the Planner; both assembler guards green.
+- [x] `_prompt_modules` includes the Planner; both assembler guards green.
 - [ ] `core.planner` reported with the change.
-- [ ] `docs/DESIGN.md` corrected.
-- [ ] Whole suite green; `code-review` done.
+- [x] `docs/DESIGN.md` corrected.
+- [x] Whole suite green; `code-review` done.
+
+## Left for the operator (2026-09-30)
+
+- **`core.planner` run** (paid): `uv run run_eval.py core.planner`; baseline
+  6/8 on `strong`. The Planner's whole prompt changed here and, one ticket
+  earlier, its brief wording (20): one run measures both.
+- Built with two generic sdk builders, `facts` (escaped section) and `said`
+  (quoted and escaped), rather than `case`/`action`/`plan` builders.
+

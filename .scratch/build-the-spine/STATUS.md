@@ -26,7 +26,7 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 18 | The board shows plans and re-triage | ⬜ | 17 |
 | 19 | Doc sweep | ⬜ | 18 |
 | 20 | The Planner hands over goals, not methods | 🧑 code in (main, 2026-09-30); waiting on the operator: the paid `core.planner` run (baseline 6/8) | 14 |
-| 21 | The Planner reads the reporter through the same boundary | ⬜ opened 2026-09-30: `planner_prompt.py` assembled from sdk sections, `trust_boundary` + `user_input`, listed in the assembler guard | 20 |
+| 21 | The Planner reads the reporter through the same boundary | 🧑 code in (main, 2026-09-30); waiting on the operator: one paid `core.planner` run for 20 and 21 (baseline 6/8) | 20 |
 
 Operator steps: the db wipe in 02 (asked first), the eval relabel
 confirmations in 13, one real end-to-end run in 14.

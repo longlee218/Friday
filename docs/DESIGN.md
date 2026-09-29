@@ -254,7 +254,13 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   refusal; every refusal message repeats the refused plan and its errors, so
   it reads the same when a failed run's messages were lost. A replan is a
   fresh conversation with its own rewrites. Tested in `tests/test_planner.py`;
-  its prompt is scored by `core.planner` (`evals/README.md`). **A `brief`
+  its prompt is scored by `core.planner` (`evals/README.md`) and, like every
+  agent's, **assembled from sections** (ticket 21): `role` + `trust_boundary` +
+  `job` + `critical_reminder` for the instructions; the request, and the
+  results, `reason` and `found` an agent wrote over the reporter's data, are
+  quoted between the markers (`said`), everything else is an escaped
+  `facts` section; `spine/planner_prompt.py` is in the assembler guard's
+  list. **A `brief`
   is a goal and its constraints, never a method** (ticket 20): what the step
   must establish and what the reporter gave; how to investigate is the
   agent's own instructions. **An empty `toolsets` on an `agent` step is the

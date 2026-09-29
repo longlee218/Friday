@@ -378,7 +378,7 @@ async def test_a_replan_is_a_fresh_conversation_with_its_own_rewrites():
     opening = model.calls[0]
     assert len(opening.input) == 1  # nothing carried from the first plan's run
     said = _texts(opening)
-    assert "The current plan (v1)" in said
+    assert "<current_plan>" in said and '"version": 1' in said
     assert "find correlationId 1234 in the logs first" in said
     assert '- s1: {"cause": "timeout"}' in said
     assert "the logs show a timeout upstream" in said and "L3: timeout" in said
