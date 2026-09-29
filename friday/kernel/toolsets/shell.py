@@ -119,9 +119,51 @@ REFUSED_FLAGS = {
 }
 
 #: Commands whose one-letter flags cluster (`grep -nR`, `ps -ef`,
-#: `kubectl -Af`). Matched letter by letter, so a value written into the
-#: cluster (`-ojsonpath=…`) can be refused: write it as `-o jsonpath=…`.
+#: `kubectl -Af`); a refused letter anywhere in the cluster refuses it.
 _CLUSTERED = frozenset({"grep", "kubectl", "ps"})
+
+#: The one-letter flags that take a value, for the commands whose clusters
+#: are read the way their parser reads them: letters left to right until one
+#: that takes a value, the rest being that value — so `-ojsonpath={.s}` is
+#: `-o` and not `-s`. **Only letters that take a value in every verb**: one
+#: listed wrongly would end the walk early and hide a refused letter after
+#: it. A letter missing here only refuses more.
+_VALUE_LETTERS = {"kubectl": "nlocLv", "grep": "efmABCdD"}
+
+#: The grep options `_grep_pattern` understands, and only these: any other
+#: option (an abbreviation, `--context`/`-C` whose value is optional on BSD,
+#: anything unlisted) means the pattern is not exempt. Consuming a word
+#: wrongly is **not** harmless — it moves the "pattern" onto the file after
+#: it — so the parse is trusted only when it is certain.
+_GREP_FLAG_LETTERS = "inrvwxclLhHoqsEFGIa"
+#: Letters whose value is required on both GNU and BSD grep.
+_GREP_VALUE_LETTERS = "ABm"
+_GREP_FLAGS = frozenset({
+    "--ignore-case", "--line-number", "--recursive", "--invert-match",
+    "--word-regexp", "--line-regexp", "--count", "--files-with-matches",
+    "--files-without-match", "--no-filename", "--with-filename",
+    "--only-matching", "--quiet", "--silent", "--extended-regexp",
+    "--fixed-strings",
+})
+_GREP_VALUE_OPTIONS = frozenset({"--max-count", "--after-context", "--before-context"})
+
+#: `kubectl` flags whose next word is their value (`-n secrets` is a
+#: namespace, not the resource). Exact tokens only. pflag hands a value flag
+#: the next word even when it starts with `-`, so an unknown flag could take
+#: `-n` as its value: the skip holds only when every flag word is one of these
+#: or `_KUBECTL_BOOLEANS`.
+_KUBECTL_VALUE_FLAGS = frozenset({
+    "-n", "--namespace", "-l", "--selector", "-o", "--output", "-c",
+    "--container", "--field-selector", "-L", "--label-columns", "--sort-by",
+    "--since", "--since-time", "--tail",
+})
+
+#: The boolean flags of get/logs/describe/top the skip understands.
+_KUBECTL_BOOLEANS = frozenset({
+    "-A", "--all-namespaces", "-w", "--watch", "--show-labels", "--no-headers",
+    "-f", "--follow", "-p", "--previous", "--timestamps", "--all-containers",
+    "--containers",
+})
 
 #: The commands that print a file's content; only their arguments are
 #: checked against the credential names (`ls` and `find` print names).
@@ -183,19 +225,20 @@ def _segment_refusal(argv: Sequence[str]) -> str | None:
         return f"{name!r} is not on the read-command allowlist"
     if name == "kubectl" and (len(argv) < 2 or argv[1] not in KUBECTL_VERBS):
         return f"kubectl reads only with {sorted(KUBECTL_VERBS)}, written first"
-    # Every argument of a content reader is checked, grep's pattern included:
-    # telling the pattern from a path means parsing grep's options (`-ie.`,
-    # `--regex=`, `-A 2`), and a wrong guess reads the file unchecked.
+    pattern = _grep_pattern(argv) if name == "grep" else None
+    values = _kubectl_values(argv) if name == "kubectl" else set()
     for index, arg in enumerate(argv[1:], start=1):
-        if name == "kubectl" and _names_secrets(arg):
+        if name == "kubectl" and index not in values and _names_secrets(arg):
             return "kubectl may not read the secret resource"
         if name == "kubectl" and ("-file=" in arg or arg.endswith("-file")):
             return "kubectl may not read a template file (`*-file` output)"
         if name == "ps" and index == 1 and _ps_environment(arg):
             return "ps may not print process environments"
-        if name in _CONTENT_READERS and _secret_path(arg):
+        if name in _CONTENT_READERS and index != pattern and _secret_path(arg):
             return f"{arg!r} names a credential file or directory"
         for flag in REFUSED_FLAGS.get(name, ()):
+            if name == "kubectl" and flag == "-f" and argv[1] == "logs":
+                continue  # `logs -f` is --follow; logs has no --filename
             if _matches(name, flag, arg):
                 return f"{name} {flag} is refused (it writes, changes credentials or reads around a guard)"
     return None
@@ -211,7 +254,82 @@ def _matches(name: str, flag: str, arg: str) -> bool:
     if len(flag) != 2:
         return False
     cluster = name in _CLUSTERED and arg.startswith("-") and not arg.startswith("--")
-    return arg.startswith(flag) or (cluster and flag[1] in arg[1:])
+    if not cluster:
+        return arg.startswith(flag)
+    return flag[1] in _cluster_letters(name, arg)
+
+
+def _cluster_letters(name: str, arg: str) -> str:
+    """The flag letters of a short cluster: left to right, up to and including
+    the first that takes a value. Every letter for a command not in
+    `_VALUE_LETTERS`."""
+    takes_value = _VALUE_LETTERS.get(name)
+    if takes_value is None:
+        return arg[1:]
+    for end, letter in enumerate(arg[1:], start=2):
+        if letter in takes_value:
+            return arg[1:end]
+    return arg[1:]
+
+
+def _grep_pattern(argv: Sequence[str]) -> int | None:
+    """The index of grep's pattern — a search term, not a path, so it is not
+    checked as one (`grep id_rsa auth.log`). The first word that is neither
+    an option nor an option's value, read as getopt does (options anywhere,
+    `--` ends them).
+
+    `None` — every word checked — unless every option is one this parse knows
+    exactly (`_GREP_FLAGS`, `_GREP_VALUE_OPTIONS`, and clusters of
+    `_GREP_FLAG_LETTERS` ending in at most one `_GREP_VALUE_LETTERS`). `-e`
+    and `-f` are not known on purpose: with them there is no pattern word."""
+    positionals: list[int] = []
+    consume = False
+    options_done = False
+    for index, arg in enumerate(argv[1:], start=1):
+        if consume:
+            consume = False
+        elif options_done or arg == "-" or not arg.startswith("-"):
+            positionals.append(index)
+        elif arg == "--":
+            options_done = True
+        elif arg.startswith("--"):
+            option, has_value, _ = arg.partition("=")
+            if option in _GREP_VALUE_OPTIONS:
+                consume = not has_value
+            elif option not in _GREP_FLAGS or has_value:
+                return None
+        else:
+            flags, value = arg[1:], ""
+            for at, letter in enumerate(arg[1:]):
+                if letter in _GREP_VALUE_LETTERS:
+                    flags, value = arg[1:at + 1], arg[at + 2:]
+                    consume = not value
+                    break
+            if any(letter not in _GREP_FLAG_LETTERS for letter in flags):
+                return None
+            if value and not value.isdigit():
+                return None
+    if consume:
+        return None
+    return positionals[0] if positionals else None
+
+
+def _kubectl_values(argv: Sequence[str]) -> set[int]:
+    """The indexes of words that are a flag's value (`-n secrets`), so the
+    resource check skips them. Exact flag tokens only, walked left to right:
+    a word already taken as a value is not a flag (pflag hands `-L -L
+    secrets` the second `-L` as the first one's value). Empty — every word
+    checked — when any flag word is unknown (`--profile-output -n secrets`
+    makes `-n` a value and `secrets` the resource)."""
+    values: set[int] = set()
+    for index, arg in enumerate(argv[2:], start=2):
+        if index in values or not arg.startswith("-"):
+            continue
+        if arg in _KUBECTL_VALUE_FLAGS:
+            values.add(index + 1)
+        elif arg not in _KUBECTL_BOOLEANS and arg.partition("=")[0] not in _KUBECTL_VALUE_FLAGS:
+            return set()
+    return values
 
 
 def _ps_environment(arg: str) -> bool:

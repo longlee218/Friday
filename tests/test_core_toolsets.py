@@ -193,11 +193,69 @@ def test_ordinary_debugging_still_passes(command):
     assert refusal(command) is None, refusal(command)
 
 
-def test_a_grep_pattern_is_checked_like_a_path():
-    """The price of not parsing grep's options: a pattern that looks like a
-    credential name is refused too."""
-    assert refusal("grep id_rsa /var/log/auth.log") is not None
-    assert refusal("grep -e x /srv/app/.env") is not None
+@pytest.mark.parametrize("command", [
+    "grep id_rsa /var/log/auth.log",
+    'grep "\\.pem" /etc/nginx/nginx.conf',
+    "grep -A 2 id_rsa /var/log/auth.log",
+    "grep -iA2 id_rsa /var/log/auth.log",
+    "grep -iA 2 id_rsa /var/log/auth.log",
+    "grep --max-count 5 id_rsa /var/log/auth.log",
+    "grep --files-with-matches id_rsa /var/log",
+    "grep -- .env /srv/app/README.md",
+    "kubectl get pods -n secrets",
+    "kubectl get pods --namespace secrets -o wide",
+    "kubectl get pods -A -n secrets --no-headers",
+    "kubectl get pods --namespace=secrets -n secrets",
+    "kubectl logs -f api-0",
+    "kubectl logs -fp api-0",
+    "kubectl get -ojsonpath={.status.phase} pods",
+    "kubectl get pods -lapp=frontend",
+])
+def test_the_four_false_refusals_are_allowed(command):
+    """grep's pattern is a search term; `-n secrets` a namespace; `logs -f`
+    is --follow; a value written into a kubectl cluster is that value."""
+    assert refusal(command) is None, refusal(command)
+
+
+@pytest.mark.parametrize("command", [
+    # the pattern comes from an option: every word is a file
+    "grep -e x /srv/app/.env",
+    "grep -ie. /root/.aws/credentials",
+    "grep -e. -i /root/.aws/credentials",
+    "grep --regex=. /root/.aws/credentials",
+    "grep --reg . /root/.aws/credentials",
+    "grep -if/tmp/p /root/.aws/credentials",
+    "grep --fil=/tmp/p /root/.aws/credentials",
+    # only the first word after the options is the pattern
+    "grep id_rsa /home/u/.ssh/id_rsa",
+    "grep -A 2 x /root/.env",
+    "grep -m 5 x /root/.env",
+    "grep x -r /home/u/.ssh",
+    # the namespace skip and the cluster walk do not open the resource
+    "kubectl get -n default secrets",
+    "kubectl get secrets -n default",
+    "kubectl get -An secrets",
+    "kubectl get -Af m.yaml",
+    "kubectl get -Rk dir",
+    "kubectl logs -fs https://elsewhere api-0",
+    "kubectl get pods -f m.yaml",
+    # the third review's: a misparse moved the pattern onto the file
+    "grep --binary root /home/u/.ssh/id_rsa",
+    "grep --context root /home/u/.ssh/id_rsa",
+    "grep -C root /home/u/.ssh/id_rsa",
+    "grep --line-num x /root/.env",
+    "grep -iy x /root/.env",
+    "grep --color=always x /root/.env",
+    "grep -A /root/.env x",
+    "kubectl get -L -L secrets -o yaml",
+    "kubectl get -l -n secrets",
+    "kubectl get --label-columns -n secrets",
+    "kubectl get --profile-output -n secrets",
+    "kubectl describe --tls-server-name -n secrets",
+    "kubectl get -An secrets",
+])
+def test_the_allowances_open_no_bypass(command):
+    assert refusal(command) is not None, command
 
 
 async def test_a_recursive_grep_skips_credential_files(db, tmp_path):

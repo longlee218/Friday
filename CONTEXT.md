@@ -377,7 +377,8 @@ for every plugin: `shlex`-parsed, `|` only between listed commands;
 operators, substitutions, write flags, `kubectl`'s credential/server flags,
 the `secret` resource (and `--raw`, `-f`, `-k`, `*-file` templates),
 process environments and credential paths (case-insensitive, for the
-commands that print content) refused; credential files excluded from every
+commands that print content; grep's pattern word exempt, found as getopt
+would) refused; credential files excluded from every
 `grep`, which may not `--include` or `-R`. A guardrail by name, not a
 boundary.
 Off the list is **refused, not queued** and written to `audit_log`; the

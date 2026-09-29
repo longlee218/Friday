@@ -66,17 +66,22 @@ Left open, on purpose:
   `--raw`/`-f`/`-k`/`--template` and `*-file` outputs, its short flags
   matched inside a cluster; `ps` refuses printing environments (`e` as its
   first argument, `-E`); `cat`/`grep`/`head`/`tail` refuse an argument naming
-  a credential file/dir (`SECRET_FILES`, `SECRET_DIRS`, case-insensitive —
-  grep's pattern included, since telling it from a path means parsing grep's
-  options); every `grep` runs with `--exclude`/`--exclude-dir` for them and
+  a credential file/dir (`SECRET_FILES`, `SECRET_DIRS`, case-insensitive;
+  grep's pattern word exempt, found getopt-style, and never when `-e`/`-f`
+  might supply it); every `grep` runs with `--exclude`/`--exclude-dir` for them and
   may not `--include` or `-R`, long options matched by unambiguous prefix.
   **Still a guardrail by name, not a boundary** (the operator accepted this
   over dropping the file readers): `grep -r` on a symlink named otherwise
   still follows it on the command line; a secret in a file named otherwise
-  (`config.yaml`, a pod's logs) is read. False refusals, accepted:
-  `kubectl get pods -n secrets`, `kubectl logs -f` (use `--follow`), a value
-  written into a kubectl cluster (`-ojsonpath=…`; write `-o jsonpath=…`), a
-  grep pattern that looks like a credential name (`grep id_rsa auth.log`).
+  (`config.yaml`, a pod's logs) is read.
+- The four false refusals (`grep id_rsa auth.log`, `kubectl get pods -n
+  secrets`, `kubectl logs -f`, `-ojsonpath=…`) are allowed by parsing options
+  the way grep/pflag do (operator's call, "allow all"). Two review rounds
+  showed a misread option moves the exemption onto the file or resource
+  after it (`grep --binary root ~/.ssh/id_rsa`, `kubectl get
+  --profile-output -n secrets`), so an exemption is granted **only when
+  every option word is one the parse knows exactly**; any other option
+  means every word is checked.
 - `/tmp/friday/<id>` is on a shared `/tmp` with predictable ids; a
   pre-planted symlink there would redirect writes. Low risk on the operator's
   one-user machine.
