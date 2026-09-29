@@ -3,8 +3,8 @@
 The seam the spec names highest: run graphs against a real DBOS on a file-based
 SQLite system database, and assert the durability behaviour that is the whole
 reason the engine exists — a completed step is not run twice, a crash resumes
-from the last incomplete step, an `Ask`/`HandOver` suspends and resumes on the
-answer. Individual node logic stays unit-testable with stub deps elsewhere;
+from the last incomplete step, an `Ask`/`HandOver` is a terminal result (no
+workflow waits on a person since build-the-spine ticket 14). Individual node logic stays unit-testable with stub deps elsewhere;
 this file proves the adapter.
 """
 
@@ -198,38 +198,28 @@ async def test_deps_are_rebuilt_inside_the_run_from_the_scope_key(dbos_sqlite):
     assert seen["task_id"] == "T-42"
 
 
-async def test_ask_suspends_then_the_answer_reruns_the_asking_node(dbos_sqlite):
-    """Pure model B: `Ask` suspends; the answer re-runs the SAME node with the
-    answer in `deps.answers` (v1's "answer re-runs the asking node"), not a
-    result-replacement. Only that node re-runs — upstream stays memoized."""
+async def test_an_ask_is_terminal_nothing_waits_on_a_person(dbos_sqlite):
+    """Ticket 14: an `Ask` ends the run like a `HandOver` — the pool reads it
+    off the state; the reporter's reply is a new pass, not a `recv`."""
 
     async def asker(state, deps):
         RAN.append("ask")
-        if deps.answers:  # re-run after the answer arrived
-            return envelope("ok", got=deps.answers[-1])
         return Ask("what is the ticket number?")
 
     dag = DAG(
         name="asking",
         nodes=(
             Node(name="ask", run=asker),
-            _node("use", lambda s, d: envelope("ok", got=s["ask"]["got"])),
+            _node("use", lambda s, d: envelope("ok")),
         ),
-        edges=(Edge("ask", "use"),),
+        edges=(Edge("ask", "use", when=lambda s: not isinstance(s.get("ask"), Ask)),),
     )
     adapter.register_graph(dag, _no_deps)
 
-    handle = await adapter.start("asking", {}, workflow_id="wf-ask")
-    await _until(lambda: RAN == ["ask"])  # suspended on recv for node "ask"
-    # The pool learns what it paused on by polling the run to its boundary.
-    assert (await adapter.pending("wf-ask"))["text"] == "what is the ticket number?"
-    await adapter.answer("wf-ask", "ask", "TICKET-7")
+    state = await adapter.run("asking", {}, workflow_id="wf-ask")
 
-    state = await handle.get_result()
-
-    assert RAN == ["ask", "ask", "use"]  # asked, re-ran with the answer, then on
-    assert state["ask"]["got"] == "TICKET-7"
-    assert state["use"]["got"] == "TICKET-7"
+    assert RAN == ["ask"]
+    assert state["ask"] == Ask("what is the ticket number?")
 
 
 async def test_handover_is_terminal_not_suspended(dbos_sqlite):
@@ -258,11 +248,11 @@ async def test_a_crash_resumes_from_the_last_incomplete_step(dbos_sqlite):
     step, on real DBOS + SQLite.
 
     A child process (`dbos_crash_child.py`) runs the `ask` step — appending once
-    to a marker file — then suspends on `recv` and `os._exit`s: a true kill
-    while waiting for the operator. This process then launches DBOS on the SAME
-    SQLite file, registers the same graph, and DBOS recovery re-enters the
-    PENDING workflow: `ask` is memoized (the marker stays at one `a`), the run
-    re-suspends on `recv`, and completes when the answer is sent."""
+    to a marker file — then `os._exit`s inside `after`, which waits for a go
+    file only this process writes: a true kill mid-run. This process then
+    launches DBOS on the SAME SQLite file, registers the same graph, and DBOS
+    recovery re-enters the PENDING workflow: `ask` is memoized (the marker
+    stays at one `a`) and `after` runs to the end."""
     import os
     import subprocess
     import sys
@@ -297,19 +287,17 @@ async def test_a_crash_resumes_from_the_last_incomplete_step(dbos_sqlite):
     )
     assert Path(marker).read_text().count("a") == 1  # ask ran once before the kill
 
+    Path(marker + ".go").write_text("go")
     _launch(dbos_sqlite)  # "restart" — same SQLite file, fresh process state
     build_and_register(marker)
 
-    # The answer is durable, so recovery picks it up whenever it re-enters;
-    # get_result blocks until the recovered workflow completes.
-    await adapter.answer("wf-crash", "ask", "resumed")
     handle = await DBOS.retrieve_workflow_async("wf-crash")
     state = await handle.get_result()
 
     assert (
         Path(marker).read_text().count("a") == 1
     )  # memoized: ask not re-run on resume
-    assert state["ask"]["answer"] == "resumed" and state["after"]["done"] is True
+    assert state["ask"]["asked"] is True and state["after"]["done"] is True
 
 
 async def test_a_send_interrupted_mid_call_is_delivery_unknown_after_restart(

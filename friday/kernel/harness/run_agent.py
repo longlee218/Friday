@@ -10,7 +10,8 @@ A run ends in exactly one of: the agent's declared `result`, or an outcome
 from a **terminal tool** — `ask_reporter` → `Ask`, `hand_over` → `HandOver`,
 `replan` → `Replan`, `retriage` → `Retriage`. A run the budget stopped is a
 `HandOver` `budget_spent` (trying again with the same budget only costs
-twice); any other run that ended without one raises `AgentRunFailed`, which
+twice); a result the agent's own `check` voids is a `HandOver` `ungrounded`
+(ticket 14); any other run that ended without one raises `AgentRunFailed`, which
 the runner treats as a failed step (operator, 2026-09-29).
 """
 
@@ -198,8 +199,13 @@ async def run_agent(
     )
     if isinstance(got, Ask):
         return Ask(got.text, history=harness.messages, evidence=context.evidence)
-    if got is not None:
+    if isinstance(got, (HandOver, Replan, Retriage)):
         return got
+    if got is not None:
+        # The grounding gate (ticket 14): an answer the agent's own check
+        # voids is handed over, never drafted from.
+        void = spec.check(got, context.evidence) if spec.check else None
+        return HandOver(f"ungrounded: {void}") if void else got
     if harness.over_budget:
         return HandOver(f"budget_spent: {harness.last_error}")
     raise AgentRunFailed(harness.last_error or "no result")

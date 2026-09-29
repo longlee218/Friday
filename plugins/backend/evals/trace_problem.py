@@ -12,10 +12,11 @@ captured:
     "cause_mentions": the tokens any correct answer must contain
     "conclusive":     whether the evidence really did settle it
 
-The task that runs a case (a replay through the DAG) is built by the
-composition root, `run_eval.py`, until build-the-spine ticket 14 lets the core
-run an action on a case. Its output is the diagnosis as the node answered it
-(`None` when none survived); `score` is the check, here.
+The task that runs a case — the spine's `backend.diagnose` step over the
+case's own words (`replay_case.run_captured`, build-the-spine ticket 14) — is
+built by the composition root, `run_eval.py`. Its output is the diagnosis as
+the agent answered it (`None` when it asked, handed over or was voided by its
+grounding check); `score` is the check, here.
 
 **Why this exists, plainly.** A change to the distillation rule, to how a
 read is narrowed, or to the answer's shape can make the model's causes

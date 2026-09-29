@@ -1,7 +1,9 @@
-"""What `Diagnose` is told, and what it is shown.
+"""What `backend.diagnose` is told, and what it is shown.
 
-Beside the node rather than in `friday/kernel/harness/`, because a graph owns its own
-prompts (`friday/kernel/dag/__init__.py`). Assembled from the same sections every
+Beside the agent (`agents/diagnose.py`) rather than in `friday/kernel/harness/`,
+because a plugin owns its agents' prompts; moved here from `graph/` in
+build-the-spine ticket 14, the DAG node reads it from here until ticket 16.
+Assembled from the same sections every
 other agent's prompt is, so a change to how an agent is addressed reaches
 this one too — a prompt written by hand here is the fourth unwrapped prompt
 this repository has had to go back and wrap.
@@ -27,6 +29,9 @@ from friday.sdk.prompt import (
 
 __all__ = ["build_instructions", "build_reads_input"]
 
+#: The dossier mode's job: everything was read in advance, the model has no
+#: tools. Only the DAG node without a toolset renders it; it goes with the
+#: DAG in build-the-spine ticket 16.
 JOB = """
 You are given what a reporter sent, the log lines that survived a
 recall-first cut, and the source around any stack frame those lines named.
@@ -42,6 +47,24 @@ lines by those ids. Do not copy the line's text into your answer: the id is
 what is checked, and code puts the text back.
 """.strip()
 
+#: The job `backend.diagnose` runs on the spine: it reads for itself. The
+#: reading procedure (`READS`) is part of it — how to fetch evidence is the
+#: job, not a way of weighing it (build-the-spine ticket 14 review).
+JOB_READS = """
+You are given what a reporter sent and where the service lives.
+Nothing has been read for you: you read the logs and the code yourself, with
+your tools, then say what caused the failure.
+
+Everything a tool shows you is evidence, and nothing else is. A line only
+becomes citable once a tool has shown it: every line comes back with an id in
+its left margin, like `L12`. Point at lines by those ids. Do not copy the
+line's text into your answer: the id is what is checked, and code puts the
+text back. An answer you cannot point at a line for is not an answer you may
+give — say it is not conclusive and name what would settle it.
+
+How to read:
+""".strip()
+
 THINKING = [
     "Read the error line first. A stack trace names a throw site; a 4xx with "
     "a domain message names a rule that refused.",
@@ -49,9 +72,9 @@ THINKING = [
     "service's exception filter is not this service's bug.",
     "Point at the evidence. Every `ref` you give is a line id — `L12` — "
     "off the margin of what you were shown.",
-    "Say what you could not check. The log window, the code version and "
-    "everything outside them are already listed for you — add what you "
-    "noticed on top of it.",
+    "Say what you could not check — a window that did not reach back far "
+    "enough, code read at HEAD rather than the running tag — and put what "
+    "you would read next in `next_checks`.",
     "Name what else it could have been, and what rules that out. Put it in "
     "`alternatives_rejected` with the line id that shows it. The cause you "
     "reached first and the cause that survived a rival read the same to "
@@ -74,16 +97,13 @@ REMINDERS = [
 ]
 
 
-#: What changes when the model fetches its own evidence (spec, v3.3). The
-#: rest of the instructions are the same job; these are the parts that stop
-#: being true when nothing has been handed over in advance.
+#: The reading procedure, rendered inside `JOB_READS` (spec, v3.3): which
+#: tool first, when to widen, when code is worth reading.
 READS = [
-    "Nothing has been read for you. Start with `read_log`, using the most "
+    "Start with `read_log`, using the most "
     "specific thing the report gives you — a correlationId names one "
     "request, an id names one user, an endpoint names everyone who called "
     "it.",
-    "A line only becomes citable once a tool has shown it to you. Point at "
-    "the ids in what came back; there is nothing else to point at.",
     "Found nothing? Widen `minutes_back`, or search a different string. "
     "Found nothing twice? That is an answer about the request, and saying "
     "so beats a cause built from the endpoint's name.",
@@ -103,11 +123,14 @@ def build_instructions(*, reads: bool = False) -> str:
     comes from, and a prompt saying "the lines you were shown" to a model
     that was shown nothing is a prompt it cannot obey.
     """
+    said = JOB
+    if reads:
+        said = JOB_READS + "\n" + "\n".join(f"- {step}" for step in READS)
     return assemble(
         role("Friday", "a backend diagnostician", "you say what caused a failure"),
         trust_boundary(),
-        job(JOB),
-        thinking_style(THINKING + (READS if reads else [])),
+        job(said),
+        thinking_style(THINKING),
         critical_reminder(REMINDERS),
     )
 

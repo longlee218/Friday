@@ -64,11 +64,12 @@ shell_hosts: [local, dev]
 
 # ── Workflows ───────────────────────────────────────────────────────────────
 workflows:
-  max_asks: 3                     # times to ask for the same detail before handover
+  max_asks: 3                     # different help-wanted messages per task (asks: MAX_ASKS_PER_TASK)
   concurrency: 2                  # tasks worked at once
-  use_responder: true             # phrase the ask in your voice, not the template
+  use_responder: true             # write the reply draft in your voice (needs approval);
+                                  # off, the spine's draft step fails and every trace_problem hands over
   # Send the missing-detail question with no approval step. Off since 2026-09-15
-  # (see docs/DESIGN.md D10 / responder/check.py). Turning it on is this one line.
+  # (see docs/DESIGN.md D10). Turning it on is this one line.
   auto_ask_for_details: false
 
 # ── Ingest ──────────────────────────────────────────────────────────────────

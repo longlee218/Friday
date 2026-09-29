@@ -304,7 +304,8 @@ def test_an_empty_library_gives_neither_the_tools_nor_the_sections(tmp_path):
     """
     from friday.kernel.config import AgentConfig
     from friday.kernel.responder import Responder
-    from friday.kernel.responder.prompt import build_input
+    from friday.kernel.responder.prompt import build_reply_input
+    from friday.sdk.intake import Hints, IntakeContext
 
     cfg = AgentConfig(
         name="responder",
@@ -316,7 +317,13 @@ def test_an_empty_library_gives_neither_the_tools_nor_the_sections(tmp_path):
     assert len(empty) == 0, "the fixture is the point of the test"
 
     responder = Responder(config=cfg, skills=empty)
-    text = build_input(asking="x")
+    text = build_reply_input(
+        action="x",
+        intake=IntakeContext(
+            request_text="x", reported_at="2026-09-30T09:00:00+07:00", hints=Hints()
+        ),
+        reads={},
+    )
 
     assert responder._run.tools == []
     # The four skill tools used to be described in three separate sections

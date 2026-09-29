@@ -8,7 +8,9 @@ agent, pinned by a test (board `domains-plug-in`, tickets 07 and 17).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 __all__ = ["AgentDeclaration", "AgentSpec", "Budget"]
 
@@ -52,6 +54,11 @@ class AgentSpec:
     agent's own `instructions`. `result` is the agent's terminal output type;
     the terminal tools (`ask_reporter`, `hand_over`, `replan`) are the core's
     and never listed here. `toolsets` is the agent's ceiling.
+
+    `check(result, evidence)` is the agent's grounding gate (build-the-spine
+    ticket 14): given its `result` and the run's `Evidence`, the reason the
+    answer is void, or `None` — `run_agent` turns a reason into a `HandOver`,
+    so an ungrounded answer never reaches a `draft`.
     """
 
     name: str
@@ -62,3 +69,4 @@ class AgentSpec:
     toolsets: tuple[str, ...]
     budget: Budget
     temperature: float
+    check: Callable[[Any, Any], str | None] | None = None

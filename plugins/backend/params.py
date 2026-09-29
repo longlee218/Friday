@@ -76,8 +76,8 @@ class TraceProblemParams:
             # reporter for "the correlationId" asks them to do a lookup they
             # do not know how to do, and the three `ask_for_details` messages
             # this system has ever sent all had to teach it inline — which is
-            # the responder adding content nobody approved
-            # (`tests/test_responder_check.py`).
+            # the responder adding content nobody approved (the rewording
+            # and its floor went in build-the-spine ticket 14).
             #
             # An artifact id, like `curl` and for ticket 18's reason: a
             # response body is long, and a model copying it out by hand gets

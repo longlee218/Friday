@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -27,7 +26,7 @@ from plugins.backend.graph.diagnose import (
     diagnose_node,
     unresolved_refs,
 )
-from plugins.backend.graph.report import render, report_node
+from plugins.backend.graph.report import report_node
 from plugins.backend.toolsets.code import CONTAINER_ROOTS, repo_file
 
 
@@ -61,9 +60,7 @@ class _StubCaps:
         return build_tools(toolsets, context, self.servers)
 
 
-def _dag(
-    *, diagnose_harness=None, reports_dir=None, budget_tokens=None, diagnose_agent=None
-):
+def _dag(*, diagnose_harness=None, budget_tokens=None, diagnose_agent=None):
     """The `backend.trace_problem` DAG, built through the plugin's own builder."""
     api = SimpleNamespace(
         caps=_StubCaps(
@@ -72,7 +69,7 @@ def _dag(
             diagnose_agent=diagnose_agent,
         ),
     )
-    return build_backend_dag(api, reports_dir=reports_dir or Path("./data/reports"))
+    return build_backend_dag(api)
 
 
 from friday.kernel.domain.conversation import ConversationId
@@ -430,9 +427,7 @@ async def test_no_diagnose_agent_skips_rather_than_failing(db):
 # --- report -----------------------------------------------------------------
 
 
-async def test_the_report_is_written_and_the_reporter_is_offered_the_cause(
-    db, tmp_path
-):
+async def test_the_reporter_is_offered_the_cause(db):
     state = _intake_state(
         env="dev", service="backend-reelme-v2", pod_pattern="p"
     ).with_result(
@@ -452,60 +447,13 @@ async def test_the_report_is_written_and_the_reporter_is_offered_the_cause(
         },
     )
 
-    result = await report_node(reports_dir=tmp_path).run(state, deps_for(db))
+    result = await report_node().run(state, deps_for(db))
 
-    (written,) = list(tmp_path.glob("*.md"))
-    # D10: "a report file at `data/reports/<task_id>.md`" — one per task, so
-    # a re-run after the reporter answers replaces it rather than leaving two
-    # reports that disagree.
-    assert written.name == "1.md"
     assert isinstance(result, Reply)
     assert "ERR19" in result.text
-    assert "ERR19" in written.read_text()
-    assert "read at HEAD" in written.read_text()
-
-
-def test_the_report_no_longer_renders_the_dossier_sections():
-    """`render` used to read `find_request_log`/`read_failing_code` for a log
-    source line, a counted error-code table and the raw lines each fed the
-    model — both nodes are gone (ticket 05), and a checkpoint written before
-    this change can still carry their keys. `render` must not resurrect them;
-    `not_checked` now comes off the diagnose node's own envelope alone."""
-    state = (
-        DAGState.empty()
-        .with_result(
-            "find_request_log",
-            {
-                "status": "ok",
-                "reason": "",
-                "dossier": "ERROR ERR19",
-                "source": "kubectl",
-                "kept": 1,
-                "total": 90,
-                "histogram": [["ERR19", 90]],
-            },
-        )
-        .with_result(
-            "read_failing_code",
-            {"status": "ok", "reason": "", "code": "throw new Error()"},
-        )
-        .with_result(
-            "diagnose",
-            {
-                "status": "empty",
-                "reason": "no diagnose agent is configured",
-                "not_checked": ["the log does not reach back to the report"],
-            },
-        )
-    )
-
-    text = render(state, task_id=6, at=datetime(2026, 9, 20, tzinfo=UTC))
-
-    assert "log source" not in text
-    assert "ERROR ERR19" not in text
-    assert "throw new Error" not in text
-    assert "the log does not reach back to the report" in text
-    assert "no diagnose agent is configured" in text
+    # No report file, no finding row (ticket 14): the board's plans and step
+    # results are the operator's record now.
+    assert await db.outbound() == []
 
 
 # --- the graph --------------------------------------------------------------
@@ -521,7 +469,8 @@ async def test_the_reporter_is_told_it_is_being_worked_on(db):
     from conftest import make_event
 
     from friday.kernel.outbox import DEFAULT_SENDER, Kind
-    from plugins.backend.graph.acknowledge import ack_text, acknowledge_node
+    from plugins.backend.actions.trace_problem.acknowledge import ack_text
+    from plugins.backend.graph.acknowledge import acknowledge_node
 
     await db.record_message(make_event(message_id="m1"))
     state = _intake_state(service="backend-reelme-v2")
@@ -598,7 +547,7 @@ def test_ack_text_names_the_service_or_stays_generic():
     """Names the service when Intake resolved one; otherwise stays generic —
     never 'log của external' (external is not a place a reporter knows, and the
     loop reads code/docs, not only logs). Operator's fog-item call, 2026-09-27."""
-    from plugins.backend.graph.acknowledge import ack_text
+    from plugins.backend.actions.trace_problem.acknowledge import ack_text
     from plugins.backend.placement import Placement
 
     named = ack_text(Placement(env="production", service="backend-reelme-v2"))
@@ -613,7 +562,7 @@ def test_the_reads_input_names_the_stack_when_known():
     """The stack (e.g. NestJS) is a hint the diagnose prompt gives the model so
     it reads a trace in that framework's idiom — restored on the unified
     Placement (2026-09-27). Absent when the placement carries no stack."""
-    from plugins.backend.graph.prompt import build_reads_input
+    from plugins.backend.agents.diagnose_prompt import build_reads_input
     from plugins.backend.placement import Placement
 
     with_stack = build_reads_input(
@@ -666,44 +615,19 @@ def _diagnosed() -> DAGState:
     )
 
 
-async def test_the_operator_is_told_where_the_whole_report_is(db, tmp_path):
-    """The approval card carries what the *reporter* would see. This is the
-    reading done before deciding whether they should see it."""
-    from friday.kernel.outbox import DEFAULT_APPROVER, Kind
-
-    state = _diagnosed()
-
-    await report_node(reports_dir=tmp_path, approver=DEFAULT_APPROVER).run(
-        state, deps_for(db)
-    )
-
-    (row,) = [r for r in await db.outbound() if r.kind == Kind.FINDING]
-    assert "1.md" in row.text
-    assert "ERR19" in row.text
-    # **Who reads it, not just what it says.** `sender` posts into the
-    # reporter's channel as the watched account; `approver` DMs the operator.
-    # Queued as `sender` — which this did until review caught it — the cause
-    # and an absolute path on the operator's machine would be published
-    # unapproved, ahead of the card asking whether to publish anything.
-    assert row.sender == DEFAULT_APPROVER
-
-
-async def test_with_nothing_concluded_the_reporter_is_offered_nothing(db, tmp_path):
+async def test_with_nothing_concluded_the_reporter_is_offered_nothing(db):
     """A brief with no cause costs the operator an approval and tells the
     reporter that what they asked about is still unanswered — which the
     silence already said."""
-    from friday.kernel.outbox import DEFAULT_APPROVER, Kind
-
     state = prepared().with_result(
         "diagnose", {"status": "skipped", "reason": "no diagnose agent"}
     )
 
-    result = await report_node(reports_dir=tmp_path, approver=DEFAULT_APPROVER).run(
-        state, deps_for(db)
-    )
+    result = await report_node().run(state, deps_for(db))
 
     assert isinstance(result, HandOver)
-    assert [r.kind for r in await db.outbound()] == [Kind.FINDING]
+    assert "no diagnose agent" in result.reason
+    assert await db.outbound() == []
 
 
 def test_the_brief_carries_the_cause_and_not_the_evidence():
@@ -800,17 +724,11 @@ def test_loki_is_read_only_when_its_server_is_open():
     assert set(prod) == {"kubectl", "loki"}
 
 
-async def test_a_complete_report_is_investigated_rather_than_handed_back(db, workflows):
-    """The behaviour task 6 met, and the reason this board exists.
-
-    Node 0 used to find nothing to ask about — a curl satisfies `_traceable`
-    — and the answer was "everything needed is here, and there is no
-    investigation past this point". `Intake` (ticket 06) makes no such call
-    at all: it never hands over, so every report reaches `Diagnose`. With no
-    `backend.diagnose` agent configured (every test that does not set one up),
-    that node skips and `Report` hands the case to the operator rather than
-    asserting a cause it has none for.
-    """
+async def test_the_pool_never_runs_the_trace_problem_dag_past_node_0(db, workflows):
+    """`backend.trace_problem` runs on the spine (ticket 14); its DAG is
+    unreachable from the pool until ticket 16 deletes it. Without a spine the
+    task goes to a person with that reason, never a stale "no investigation
+    past this point"."""
     from friday.kernel.pool.pool import Pool
 
     await write_environment_rows(db)
@@ -818,10 +736,8 @@ async def test_a_complete_report_is_investigated_rather_than_handed_back(db, wor
 
     await Pool(db=db, auto_ask=True).run_once()
 
-    pauses = await db.pauses_for([task_id])
-    (question,) = pauses.values()
-    assert "no investigation past this point" not in question
-    assert "no diagnose agent is configured" in question
+    (question,) = (await db.pauses_for([task_id])).values()
+    assert "runs on the spine" in question
 
 
 async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
@@ -862,12 +778,9 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
         ):
             return None if tools is None else Honest(tools)
 
-    reports_dir = tmp_path / "reports"
     source = FakeSource(answers=[["ERROR ERR19 POST /v1/pod/orders/init 500"]])
     api = SimpleNamespace(caps=HonestCaps())
-    dag = build_backend_dag(
-        api, toolsets=_reading_toolsets(source), reports_dir=reports_dir
-    )
+    dag = build_backend_dag(api, toolsets=_reading_toolsets(source))
     final, runs, _ = await _run_on_adapter(
         dag,
         deps=Deps(task=task, db=db),
@@ -879,8 +792,6 @@ async def test_the_whole_line_runs_from_a_curl_to_a_report(db, tmp_path):
     assert [r.node for r in runs] == ["intake", "acknowledge", "diagnose", "report"]
     assert isinstance(final["report"], Reply)
     assert "ERR19 ở orders.init" in final["report"].text
-    (written,) = list(reports_dir.glob("*.md"))
-    assert "ERR19 ở orders.init" in written.read_text()
 
 
 # --- replay_case.py, the tool that answers questions 3 and 4 -----------------
@@ -1179,56 +1090,34 @@ def test_a_kubectl_superset_serves_a_needle_with_spaces_and_a_quote():
     assert quoted.lines == ("WARN can't reach cache",)
 
 
-def test_a_node_that_ended_the_run_does_not_read_as_one_that_passed_it_on():
-    """`node_runs` records any `Action` as `ok`, because an `Action` carries
-    no envelope. So a `resolve` that handed over — ending the whole run —
-    printed exactly like a `resolve` that succeeded, and the first real use
-    of this tool was ten minutes of reading the wrong thing."""
-    from friday.sdk.workflow import NodeRun
-    from replay_case import answers
+def test_a_replay_that_handed_over_does_not_read_as_a_diagnosis():
+    """`replay_case.render` over the spine's diagnose step (ticket 14): a
+    hand-over is named as one, with its reason, never as a cause."""
+    from friday.sdk.evidence import Evidence
+    from plugins.backend.placement import Placement
+    from replay_case import Ran, render
 
-    run = NodeRun(
-        dag_name="backend.trace_problem",
-        node="resolve",
-        attempt=1,
-        status="ok",
-        reason="",
-        duration_ms=6,
-    )
-    final = DAGState.empty().with_result("resolve", HandOver("no service row"))
+    ran = Ran(Placement(env="dev"), HandOver("ungrounded: L9"), Evidence(), 1.0)
 
-    found = answers([run], final, wall_s=0.1)
+    said = render(6, ran)
 
-    assert found["nodes"][0]["status"] == "handed over"
-    assert found["nodes"][0]["reason"] == "no service row"
+    assert "handed over: ungrounded: L9" in said
+    assert ran.diagnosis is None
 
 
-def test_a_node_that_failed_is_named_as_a_seam_that_broke():
-    """Question 4. `empty` and `skipped` are nodes doing their job with
-    nothing to work on; `error` and `timed_out` are the seams."""
-    from friday.sdk.workflow import NodeRun
-    from replay_case import answers
+def test_a_replay_says_whether_the_decisive_line_was_read():
+    from friday.sdk.evidence import Evidence
+    from plugins.backend.placement import Placement
+    from replay_case import Ran, render
 
-    def run(node, status, reason=""):
-        return NodeRun(
-            dag_name="backend.trace_problem",
-            node=node,
-            attempt=1,
-            status=status,
-            reason=reason,
-            duration_ms=1,
-        )
+    evidence = Evidence()
+    evidence.show(["ERROR ERR19 POST /v1/pod/orders/init 400"])
+    found = Diagnosis(cause="ERR19", confidence="likely", conclusive=False, refs=["L1"])
+    ran = Ran(Placement(env="dev"), found, evidence, 1.0)
 
-    found = answers(
-        [
-            run("find_request_log", "error", "ssh: no route to host"),
-            run("read_failing_code", "empty", "no frame"),
-        ],
-        DAGState.empty(),
-        wall_s=0.1,
-    )
-
-    assert found["broke"] == ["find_request_log: ssh: no route to host"]
+    assert "decisive was read: True" in render(6, ran, decisive="ERR19")
+    assert "decisive was read: False" in render(6, ran, decisive="ERR20")
+    assert ran.diagnosis["cause"] == "ERR19"
 
 
 # --- Loki, against what the real server actually answers ---------------------
@@ -2155,7 +2044,7 @@ def test_the_model_is_told_both_to_fill_it_and_what_happens_if_it_does_not():
     alternative, and the warning that claiming `conclusive` without one is
     refused. Asserting only the field name passed with the warning deleted,
     because the instruction mentions it too."""
-    from plugins.backend.graph.prompt import build_instructions
+    from plugins.backend.agents.diagnose_prompt import build_instructions
 
     said = build_instructions()
 

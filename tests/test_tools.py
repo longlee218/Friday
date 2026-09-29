@@ -76,10 +76,10 @@ def _factories() -> dict[str, object]:
         search_skills_tool,
     )
     from friday.kernel.toolsets.workspace import workspace_tools
+    from friday.sdk.evidence import Evidence
     from friday.sdk.toolset import RunContext
     from plugins.backend.placement import Placement
     from plugins.backend.toolsets import TOOLSETS
-    from plugins.backend.toolsets.evidence import Evidence
 
     library = SkillLibrary(REPO / "skills")
     run = RunContext(

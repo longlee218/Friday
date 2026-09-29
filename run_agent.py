@@ -91,6 +91,11 @@ async def serve_board(db, provider, config, sock, threshold) -> None:
     await server.serve(sockets=[sock])
 
 
+#: The actions that run on the spine; the rest run their DAG's node 0 until
+#: build-the-spine ticket 16.
+SPINE_ACTIONS = ("backend.trace_problem",)
+
+
 async def run() -> None:
     async with AsyncExitStack() as stack:
         await _run(stack)
@@ -357,13 +362,13 @@ async def _run(stack: AsyncExitStack) -> None:
     )
     adapter.register_outbox(outbox.deliver_once)
 
-    # Durable workflows run on DBOS (ticket 06), on their own SQLite system
-    # database beside the application one. Launch after the graphs and the
-    # outbox delivery are registered, so recovery of any workflow left running
-    # by a previous process can rebuild its Deps and resume its delivery; shut
-    # it down on the way out. The adapter is the one module that names the vendor.
-    adapter.launch("friday", str(Path(config.database_path).with_suffix(".system.db")))
-    stack.callback(adapter.shutdown)
+    # The spine (build-the-spine ticket 14): one durable pass per task per
+    # reply, `task-<id>/pass-<n>`. Registered before launch for the reason the
+    # outbox is — launch recovers a pass a previous process left running. The
+    # responder writes its `draft` step. `SPINE_ACTIONS` grows in ticket 15;
+    # the DAG path takes the rest until ticket 16 deletes it.
+    from friday.kernel.spine.boot import build_spine
+    from friday.kernel.spine.workflow import run_pass
 
     responder = Responder.build(
         config,
@@ -371,7 +376,26 @@ async def _run(stack: AsyncExitStack) -> None:
         db=db,
         record=record_call,
     )
-    pool = Pool.build(config, db=db, responder=responder)
+    spine = build_spine(
+        config,
+        db=db,
+        actions=SPINE_ACTIONS,
+        skills=skills,
+        servers={name_of(s): s for s in servers},
+        responder=responder,
+        record=record_call,
+    )
+    adapter.register_pass(run_pass, spine.steps())
+
+    # Durable workflows run on DBOS (ticket 06), on their own SQLite system
+    # database beside the application one. Launch after the graphs, the pass
+    # and the outbox delivery are registered, so recovery of any workflow left
+    # running by a previous process can resume; shut it down on the way out.
+    # The adapter is the one module that names the vendor.
+    adapter.launch("friday", str(Path(config.database_path).with_suffix(".system.db")))
+    stack.callback(adapter.shutdown)
+
+    pool = Pool.build(config, db=db, spine=spine)
     liveness = Liveness(
         db=db,
         gateway=provider,

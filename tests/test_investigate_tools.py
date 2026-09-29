@@ -16,11 +16,11 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
+from friday.sdk.evidence import MAX_READS, Evidence
 from friday.sdk.sources import Lines
 from friday.sdk.toolset import RunContext
 from plugins.backend.placement import Placement, Project
 from plugins.backend.toolsets.code import code_tools
-from plugins.backend.toolsets.evidence import MAX_READS, Evidence
 from plugins.backend.toolsets.logs import log_tools
 
 AT = datetime(2026, 9, 21, 10, 40, tzinfo=UTC)
@@ -547,12 +547,17 @@ async def test_answering_passes_through_one_copy_of_the_gates(db):
     worth keeping legible on its own even with one caller."""
     import inspect
 
+    from plugins.backend.agents import diagnose as agent
     from plugins.backend.graph import diagnose as module
 
     source = inspect.getsource(module)
+    gates = inspect.getsource(agent)
 
-    assert source.count("without naming one") == 1, "the alternatives gate, once"
-    assert source.count("which names no line it was shown") == 1, "the refs gate, once"
+    # One copy since ticket 14: the agent's `void_reason`, which the DAG node
+    # and the spine's `check` both ask.
+    assert gates.count("without naming one") == 1, "the alternatives gate, once"
+    assert gates.count("which names no line it was shown") == 1, "the refs gate, once"
+    assert "without naming one" not in source, "no second copy in the node"
     assert source.count("_judged(") == 2, "defined once, called once"
 
 
@@ -560,13 +565,18 @@ def test_the_instructions_change_when_the_model_fetches_its_own_evidence():
     """A prompt saying "the lines you were shown" to a model that was shown
     nothing is a prompt it cannot obey. Asserted on the instructions, not on
     the run's input — deleting the reads half left every other test green."""
-    from plugins.backend.graph.prompt import build_instructions
+    from plugins.backend.agents.diagnose_prompt import build_instructions
 
     plain, reading = build_instructions(), build_instructions(reads=True)
 
     assert "Nothing has been read for you" in reading
     assert "Nothing has been read for you" not in plain
     assert "read_log" in reading and "read_log" not in plain
+    # One thing about tools (ticket 14 review): the reads job never says it
+    # has none, and how to read is the job, not a way of weighing.
+    assert "no tools" not in reading
+    thinking = reading.split("<thinking_style>")[1].split("</thinking_style>")[0]
+    assert "read_log" not in thinking
 
 
 async def test_what_a_tool_could_not_check_reaches_the_envelope(db):

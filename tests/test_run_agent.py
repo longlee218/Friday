@@ -20,6 +20,7 @@ from friday.kernel.harness.run_agent import AgentRunFailed, run_agent
 from friday.sdk.action import ActionContract, Limits
 from friday.sdk.actions import Ask, HandOver, Replan, Retriage
 from friday.sdk.agent import AgentSpec, Budget
+from friday.sdk.evidence import Evidence
 from friday.sdk.testing import (
     FunctionModel,
     ModelResponse,
@@ -28,7 +29,6 @@ from friday.sdk.testing import (
     function_call,
 )
 from friday.sdk.toolset import RunContext, ToolsetSpec, tool
-from plugins.backend.toolsets.evidence import Evidence
 
 
 @pytest.fixture(autouse=True)

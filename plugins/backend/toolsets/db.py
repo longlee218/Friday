@@ -51,9 +51,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from friday.sdk.evidence import Evidence
 from friday.sdk.toolset import RunContext, ToolsetSpec, tool
 from plugins.backend.placement import Placement
-from plugins.backend.toolsets.evidence import Evidence
 
 __all__ = ["DB", "DB_SERVER", "DbSource", "Rows", "db_tools", "redacted_name"]
 

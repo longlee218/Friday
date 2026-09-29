@@ -27,7 +27,7 @@ import json
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any, Literal
 
-from friday.sdk.action import ActionContract
+from friday.sdk.action import ActionContract, Limits
 from friday.sdk.actions import Ask, HandOver, Outcome, Reply
 
 __all__ = [
@@ -42,7 +42,9 @@ __all__ = [
     "Plan",
     "Reply",
     "Step",
+    "plan_from_json",
     "plan_hash",
+    "plan_json",
     "shape_errors",
     "step_keys",
 ]
@@ -129,6 +131,49 @@ def _sha256(value: Any) -> str:
         _plain(value), sort_keys=True, ensure_ascii=False, separators=(",", ":")
     )
     return hashlib.sha256(body.encode()).hexdigest()
+
+
+def plan_json(plan: Plan) -> dict:
+    """The plan as JSON data, for the `plans` table (ticket 14)."""
+    return _plain(plan)
+
+
+_STEP_OF = {
+    "agent": AgentStep,
+    "ask": AskStep,
+    "hand_over": HandOverStep,
+    "draft": DraftStep,
+}
+
+
+def plan_from_json(body: dict) -> Plan:
+    """`plan_json` undone: the same plan, the same hash."""
+    steps = []
+    for raw in body["steps"]:
+        fields_ = {k: v for k, v in raw.items() if k != "type"}
+        for name in _TUPLE_FIELDS:
+            if name in fields_:
+                fields_[name] = tuple(fields_[name])
+        steps.append(_STEP_OF[raw["type"]](**fields_))
+    c = body["contract"]
+    contract = ActionContract(
+        allowed_step_types=frozenset(c["allowed_step_types"]),
+        allowed_agents=frozenset(c["allowed_agents"]),
+        allowed_toolsets=frozenset(c["allowed_toolsets"]),
+        constraints=tuple(c["constraints"]),
+        approval_policy=c["approval_policy"],
+        acceptance_template=c["acceptance_template"],
+        limits=Limits(**c["limits"]),
+    )
+    return Plan(
+        task_id=body["task_id"],
+        action=body["action"],
+        plan_version=body["plan_version"],
+        replaces=body["replaces"],
+        contract=contract,
+        goal=body["goal"],
+        steps=tuple(steps),
+    )
 
 
 def plan_hash(plan: Plan) -> str:

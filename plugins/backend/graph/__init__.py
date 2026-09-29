@@ -21,7 +21,6 @@ in shape, only in where it reaches for things.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from friday.sdk.agent import AgentDeclaration
@@ -34,6 +33,7 @@ from friday.sdk.workflow import (
     Reply,
     status_of,
 )
+from plugins.backend.agents.diagnose_prompt import build_instructions
 from plugins.backend.graph.acknowledge import acknowledge_node
 from plugins.backend.graph.diagnose import (
     Diagnosis,
@@ -42,8 +42,7 @@ from plugins.backend.graph.diagnose import (
     hand_over,
 )
 from plugins.backend.graph.intake import intake_node
-from plugins.backend.graph.prompt import build_instructions
-from plugins.backend.graph.report import REPORTS_DIR, report_node
+from plugins.backend.graph.report import report_node
 
 __all__ = ["TASK_TYPE", "build_backend_dag"]
 
@@ -90,9 +89,7 @@ def _did_not_decide(node: str):
     return when
 
 
-def build_backend_dag(
-    api: Any, *, toolsets: Any = None, reports_dir: Path = REPORTS_DIR
-) -> DAG:
+def build_backend_dag(api: Any, *, toolsets: Any = None) -> DAG:
     """The whole graph, built from the composition root's boot capabilities
     (`api.caps`).
 
@@ -146,7 +143,7 @@ def build_backend_dag(
                 build_tools=lambda run: caps.build_tools(granted, run),
                 agent=None if diagnose_agent is None else "backend.diagnose",
             ),
-            report_node(reports_dir=Path(reports_dir), approver=caps.approver),
+            report_node(),
         ),
         edges=(
             Edge("intake", "acknowledge", when=_ran_ok("intake")),

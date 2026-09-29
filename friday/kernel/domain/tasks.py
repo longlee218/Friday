@@ -39,6 +39,10 @@ class Task:
     #: badge so a stuck task is distinguishable from a finished
     #: one at a glance.
     attempts: int = 0
+    #: The spine pass it is on, and why that pass started (build-the-spine
+    #: ticket 14; `schema.Task.pass_cause` lists the causes).
+    pass_no: int = 1
+    pass_cause: str = "first"
 
 
 # ---- task parameters -------------------------------------------------

@@ -24,11 +24,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from friday.sdk.evidence import Evidence
 from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS, Lines
 from friday.sdk.toolset import RunContext, ToolsetSpec, tool
 from plugins.backend.graph.distil import distil
 from plugins.backend.placement import Placement
-from plugins.backend.toolsets.evidence import Evidence
 
 __all__ = [
     "LOGS",

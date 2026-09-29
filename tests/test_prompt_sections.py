@@ -16,6 +16,17 @@ from conftest import make_event, summary_row
 from friday.kernel.harness import instruction_prompt as ip
 
 
+def _reply_input(action: str = "q", **kw) -> str:
+    """The responder's per-call input for a reply, with nothing found yet."""
+    from friday.kernel.responder.prompt import build_reply_input
+    from friday.sdk.intake import Hints, IntakeContext
+
+    intake = IntakeContext(
+        request_text="api lỗi", reported_at="2026-09-30T09:00:00+07:00", hints=Hints()
+    )
+    return build_reply_input(action=action, intake=intake, reads={}, **kw)
+
+
 def _events(texts: list[str]) -> list:
     """One event per line of text, all from the same person."""
     return [make_event(text=t) for t in texts]
@@ -245,6 +256,7 @@ def _prompt_modules():
         root / "extraction" / "prompt.py",
         root / "responder" / "prompt.py",
         root / "memory" / "channel_context.py",
+        root / "spine" / "brief.py",
     ]
 
 
@@ -544,7 +556,7 @@ def test_the_responder_is_told_the_two_things_it_has_got_wrong():
     said = build_instructions()
 
     assert "<critical_reminder>" in said
-    assert "params show as null" in said
+    assert "`intake` shows as null" in said
     assert "never say what happens next" in said
 
 
@@ -552,12 +564,10 @@ def test_the_responder_claims_the_markers_and_puts_them_in():
     """Both halves. The convention in the instructions, the markers round the
     conversation — and round the conversation only, since `<tone>` is the
     operator's own writing and `soul` tells the agent to follow it."""
-    from friday.kernel.responder.prompt import build_input, build_instructions
+    from friday.kernel.responder.prompt import build_instructions
 
     said = build_instructions()
-    given = build_input(
-        asking="q", context=_events(["api lỗi"]), tone=_events(["ok để anh xem"])
-    )
+    given = _reply_input(context=_events(["api lỗi"]), tone=_events(["ok để anh xem"]))
 
     assert "<trust_boundary>" in said
     assert "--- BEGIN USER INPUT ---" in given
@@ -668,7 +678,6 @@ def test_no_family_escapes_anything_twice():
     # Plain in the store, escaped once here — the split ticket 07 restored.
     from friday.kernel.harness.instruction_prompt import channel_derived
     from friday.kernel.memory.channel_context import _transcript
-    from friday.kernel.responder.prompt import build_input as responder_input
     from friday.kernel.triage.context import LightContext
     from friday.kernel.triage.prompt import build_input as triage_input
     from plugins.backend.params import TraceProblemParams
@@ -687,7 +696,7 @@ def test_no_family_escapes_anything_twice():
         "extraction_room": extraction_input(
             _context("ok", TraceProblemParams, memories=_rows(f"env: {HAS_MARKUP}"))
         ),
-        "responder": responder_input(asking="q", context=_events([HAS_MARKUP])),
+        "responder": _reply_input(context=_events([HAS_MARKUP])),
         "summariser": _transcript(_events([HAS_MARKUP])),
         "channel_derived": channel_derived(stored).render(),
     }
@@ -776,7 +785,7 @@ def test_the_catalogue_is_not_re_sent_on_every_call():
     from datetime import datetime
 
     from friday.kernel.harness.instruction_prompt import SkillMeta
-    from friday.kernel.responder.prompt import build_input, build_instructions
+    from friday.kernel.responder.prompt import build_instructions
 
     meta = [
         SkillMeta(
@@ -793,8 +802,8 @@ def test_the_catalogue_is_not_re_sent_on_every_call():
         stranger=True,
     )
 
-    a = build_input(asking="q1", context=[], **fixed)
-    b = build_input(asking="q2", context=[], **fixed)
+    a = _reply_input("q1", context=[], **fixed)
+    b = _reply_input("q2", context=[], **fixed)
 
     for section in ("<skill_system>", "<skill>"):
         assert section not in a, f"{section} is still re-sent on every call"

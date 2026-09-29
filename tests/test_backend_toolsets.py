@@ -17,10 +17,10 @@ from datetime import UTC, datetime
 import pytest
 
 from friday.kernel.harness.run_agent import build_tools, reads_for
+from friday.sdk.evidence import Evidence
 from friday.sdk.toolset import RunContext
 from plugins.backend.placement import Placement, Project
 from plugins.backend.toolsets import CODE, DB, DOCS, LOGS, TOOLSETS
-from plugins.backend.toolsets.evidence import Evidence
 
 AT = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 

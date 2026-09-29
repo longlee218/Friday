@@ -1,6 +1,9 @@
 """Acting on tasks. The only reply allowed out without review is the request
 for missing details: it is the same question every time, and being wrong about
-it costs someone one unnecessary question."""
+it costs someone one unnecessary question.
+
+These drive the actions still on the DAG path (node 0, then `deliver`) and
+the pool's own jobs; a pass on the spine is `tests/test_spine_pass.py`."""
 
 from __future__ import annotations
 
@@ -11,6 +14,7 @@ from conftest import ScriptedHarness, make_event
 from friday.kernel.domain.conversation import ConversationId
 from friday.kernel.domain.states import TaskState
 from friday.kernel.pool.pool import ASKED, Pool
+from friday.kernel.spine.workflow import _stranger
 
 
 async def make_task(db, **params):
@@ -81,22 +85,15 @@ async def test_a_task_is_acted_on_only_once(db):
     assert len([r for r in await db.outbound() if r.sender == "discord_user"]) == 1
 
 
-async def test_a_report_that_can_be_traced_waits_for_a_human(db, workflows):
-    """Tracing is not built. Handing over is honest; replying would not be.
-
-    `Intake` (ticket 6) never hands over at node 0 — it makes no model call
-    and no longer treats findability as a gate — so the run reaches
-    `Acknowledge` regardless. The unapproved "đang xử lý" it sends is not an
-    answer; the task still ends up with a human once `Diagnose` has nothing
-    to add.
-    """
+async def test_trace_problem_without_a_spine_waits_for_a_human(db, workflows):
+    """`backend.trace_problem` runs on the spine only (ticket 14): its DAG's
+    node 0 decides nothing, and nothing here runs past it. Honest, and
+    nothing is said to the reporter."""
     await make_task(db, curl="curl https://api.aperogroup.ai/v1/pay")
 
     await Pool(db=db, auto_ask=True).run_once()
 
-    assert [r.kind for r in await db.outbound() if r.sender == "discord_user"] == [
-        "acknowledged",
-    ]
+    assert [r for r in await db.outbound() if r.sender == "discord_user"] == []
     assert (await db.tasks())[0].state == "needs_human"
 
 
@@ -117,61 +114,23 @@ async def test_types_without_a_workflow_wait_for_a_human(db):
 
 async def test_a_task_stops_being_asked_after_a_few_tries(db):
     """Asking forever is how a helpful question becomes noise. After the bound
-    it becomes a human's problem, which is what a human is for."""
-    opened = await make_request_permission(db)
-    # Debounce off: this is about the bound on asking, not about bursts.
-    runner = Pool(db=db, auto_ask=True, max_asks=2)
+    (`MAX_ASKS_PER_TASK`) it becomes a human's problem, which is what a human
+    is for."""
+    from friday.kernel.spine.deliver import MAX_ASKS_PER_TASK
 
-    for _ in range(3):
+    opened = await make_request_permission(db)
+    runner = Pool(db=db, auto_ask=True)
+
+    for _ in range(MAX_ASKS_PER_TASK + 1):
         await db.move_task(opened.id, TaskState.PENDING)
         await runner.run_once()
 
     asks = [r for r in await db.outbound() if r.kind == "ask_for_details"]
-    assert len(asks) == 2
+    assert len(asks) == MAX_ASKS_PER_TASK
     assert (await db.tasks())[0].state == "needs_human"
 
 
-class StubResponder:
-    def __init__(self, text=None):
-        self._text = text
-        self.asked: list[str] = []
-        self.given_params: list = []
-        self.strangers: list[bool] = []
-        self.states: list = []
-
-    async def draft(
-        self, *, asking, params=None, state=None, stranger=False, context=(), tone=()
-    ):
-        self.strangers.append(stranger)
-        self.states.append(state)
-        from friday.kernel.responder import Draft
-
-        self.asked.append(asking)
-        self.given_params.append(params)
-        return Draft(self._text) if self._text else None
-
-
-async def test_the_responder_is_told_what_to_say(db):
-    await make_request_permission(db)
-    responder = StubResponder("ok")
-
-    await Pool(db=db, auto_ask=True, responder=responder).run_once()
-
-    assert "project" in responder.asked[0]
-
-
-async def test_the_template_still_goes_out_when_the_responder_cannot(db):
-    """Never a wrong reply in the operator's name; never silence either."""
-    await make_request_permission(db)
-
-    await Pool(db=db, auto_ask=True, responder=StubResponder(None)).run_once()
-
-    (queued,) = await db.outbound()
-    assert queued.kind == "ask_for_details"
-    assert await db.sendable_outbound() != []
-
-
-async def test_without_a_responder_nothing_changes(db):
+async def test_an_ask_is_one_row(db):
     await make_request_permission(db)
 
     await Pool(db=db, auto_ask=True).run_once()
@@ -192,27 +151,21 @@ async def test_a_task_waiting_on_the_reporter_still_is(db):
 
 async def test_asking_for_details_is_the_agents_own_decision(db):
     """Asking is low-risk whoever phrased it. The operator is interrupted for
-    answers and for trouble, not for questions."""
+    answers and for trouble, not for questions — and the question goes out
+    as written, redacted, with no responder rewording it (ticket 14 §11)."""
     await make_request_permission(db)
 
-    acted = await Pool(
-        db=db, auto_ask=True, responder=StubResponder("cho anh xin cái curl")
-    ).run_once()
+    acted = await Pool(db=db, auto_ask=True).run_once()
 
     (queued,) = await db.outbound()
     assert queued.kind == "ask_for_details"
-    assert queued.text == "cho anh xin cái curl"
+    assert "project" in queued.text
     assert await db.sendable_outbound() == [queued]
     assert acted[0].state == ASKED
 
 
 async def test_a_task_it_cannot_handle_is_brought_to_the_operator(db, workflows):
-    """Otherwise it sits in a column nobody is watching.
-
-    `Intake` (ticket 6) acknowledges and reports before giving up now, so
-    the operator's card is one of several rows rather than the only one —
-    the acknowledgement and the report's own finding card precede it.
-    """
+    """Otherwise it sits in a column nobody is watching."""
     await make_task(
         db, curl="curl https://api.aperogroup.ai/v1/pay"
     )  # findable, unactionable
@@ -227,13 +180,9 @@ async def test_a_task_it_cannot_handle_is_brought_to_the_operator(db, workflows)
 
 
 async def test_the_operator_is_told_once(db, workflows):
-    """A card per poll is a notification that trains you to ignore it.
-
-    The investigation's own rows — the acknowledgement, the report's finding
-    card — are queued once each on the pass that reaches them; only
+    """A card per poll is a notification that trains you to ignore it:
     `help_wanted`, `_raise_hands`'s own row, is what repeated polling risks
-    duplicating, and it does not.
-    """
+    duplicating, and it does not."""
     await make_task(db, curl="curl https://api.aperogroup.ai/v1/pay")
     runner = Pool(db=db, auto_ask=True)
 
@@ -241,11 +190,7 @@ async def test_the_operator_is_told_once(db, workflows):
     await runner.run_once()
     await runner.run_once()
 
-    assert [r.kind for r in await db.outbound()] == [
-        "acknowledged",
-        "finding",
-        "help_wanted",
-    ]
+    assert [r.kind for r in await db.outbound()] == ["help_wanted"]
 
 
 # The two debounce tests that lived here are gone with the debounce. A burst is
@@ -443,13 +388,13 @@ async def test_extraction_runs_when_a_message_is_linked(db):
         _EXTRACTORS.pop("ops.request_permission", None)
 
 
-async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db):
+async def test_an_extractors_question_reaches_the_reporter_as_written(db):
     """Ticket 05, end to end: the report already has a curl, so the
     structural floor (`_traceable`) finds nothing wrong — the only reason an
     `Ask` exists at all is the extractor naming a field in `ask_about` that
     code does not require. The sentence that reaches the reporter is the
-    Responder's, not the template `_question_from_clarify` builds for it to
-    write from.
+    one `_question_from_clarify` built — no responder rewrites an `Ask`
+    (ticket 14 §11).
 
     This mechanism — `prepare` node 0, an extractor's own `ask_about` beyond
     the structural floor — is generic, and `TraceProblemParams` is the one type
@@ -508,10 +453,6 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
     )
     _EXTRACTORS["backend.trace_problem"] = ext
 
-    # Ticket 12: a draft naming no work, so this stays a test of whose
-    # words reach the reporter rather than of `friday.kernel.responder.check`.
-    responder = StubResponder("em đang chạy trên môi trường nào thế?")
-
     try:
         event = InboundEvent(
             provider="fake",
@@ -533,41 +474,16 @@ async def test_ask_clarification_reaches_the_reporter_in_the_responders_words(db
                 .values(task_id=task.id)
             )
 
-        await Pool(db=db, auto_ask=True, responder=responder).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
 
         (row,) = await db.outbound()
-        assert row.text == "em đang chạy trên môi trường nào thế?", (
-            "the reporter must see the Responder's sentence, not the template"
-        )
-        (asking,) = responder.asked
-        assert "environment" in asking.lower(), (
-            "the Responder must be told which field to ask about"
+        assert row.kind == "ask_for_details"
+        assert "môi trường" in row.text.lower() or "environment" in row.text.lower(), (
+            "the question names the field the extractor asked about"
         )
     finally:
         _EXTRACTORS.pop("backend.trace_problem", None)
         EDGE_ROUTER.pop("backend.trace_problem", None)
-
-
-async def test_the_responder_is_told_what_this_task_actually_knows(db):
-    """Without it the model has only the conversation, and a conversation is a
-    whole channel — it may hold another report's correlationId.
-
-    Observed on the real provider: asked to request one, it read the channel,
-    found one belonging to a different task, and wrote "ok có correlationId
-    rồi, để anh trace thử". False, promising work nobody would do, and sent
-    under the operator's name with no approval step.
-    """
-    from plugins.ops.params import AccessRequestParams
-
-    responder = StubResponder("cho anh xin cái correlationId nhé")
-    await make_request_permission(db, project="payments repo")
-
-    await Pool(db=db, auto_ask=True, responder=responder).run_once()
-
-    (given,) = responder.given_params
-    assert isinstance(given, AccessRequestParams)
-    assert given.project == "payments repo"
-    assert given.permission == "", "it must be able to see what is absent"
 
 
 # --- a burst is one thought sent in three messages ---------------------------
@@ -896,10 +812,12 @@ async def test_a_handled_task_can_be_reopened_by_a_person(db):
 
 
 # --- ticket 41: a stranger changes the pronouns, and nothing else ------------
+#
+# Asked of the spine's `draft` binding since ticket 14 (the responder writes
+# replies there); the pool no longer drafts.
 
 
 async def test_someone_the_operator_never_wrote_to_is_a_stranger(db):
-    responder = StubResponder("dạ anh/chị gửi mình correlationId nhé")
     task = await make_request_permission(db)
     await db.record_message(make_event(message_id="m1", author_id="newcomer"))
     await db.mark_triaged(
@@ -908,15 +826,12 @@ async def test_someone_the_operator_never_wrote_to_is_a_stranger(db):
         decision={"type": "ops.request_permission"},
     )
 
-    await Pool(db=db, auto_ask=True, responder=responder).run_once()
-
-    assert responder.strangers == [True]
+    assert await _stranger(db, task) is True
 
 
 async def test_an_exchange_in_either_direction_makes_them_known(db):
     """A reply is the smallest thing that is an actual exchange. Being in the
     same channel is not — the operator has spoken in every watched channel."""
-    responder = StubResponder("cho anh xin correlationId nhé")
     task = await make_request_permission(db)
     await db.record_message(make_event(message_id="m1", author_id="dana"))
     await db.mark_triaged(
@@ -939,9 +854,7 @@ async def test_an_exchange_in_either_direction_makes_them_known(db):
         context_only=True,
     )
 
-    await Pool(db=db, auto_ask=True, responder=responder).run_once()
-
-    assert responder.strangers == [False]
+    assert await _stranger(db, task) is False
 
 
 async def test_being_written_down_for_the_room_makes_them_known(db):
@@ -958,7 +871,6 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
         origin=MemoryOrigin.ADMIN,
         data={"discord_id": "dana", "name": "Dana", "role": "qa", "team": "orders"},
     )
-    responder = StubResponder("ok")
     task = await make_request_permission(db)
     await db.record_message(make_event(message_id="m1", author_id="dana"))
     await db.mark_triaged(
@@ -967,14 +879,13 @@ async def test_being_written_down_for_the_room_makes_them_known(db):
         decision={"type": "ops.request_permission"},
     )
 
-    await Pool(db=db, auto_ask=True, responder=responder).run_once()
-
-    assert responder.strangers == [False]
+    assert await _stranger(db, task) is False
 
 
 async def test_the_stranger_line_reaches_the_prompt_and_only_then(tmp_path):
     from friday.kernel.config import AgentConfig
     from friday.kernel.responder import Responder
+    from friday.sdk.intake import Hints, IntakeContext
     from friday.sdk.testing import FunctionModel
 
     prompts: list[str] = []
@@ -994,8 +905,11 @@ async def test_the_stranger_line_reaches_the_prompt_and_only_then(tmp_path):
         config=AgentConfig(name="r", api_key="k", base_url="http://x/v1", model="m"),
         model=FunctionModel(capture, model_name="test-model"),
     )
-    await responder.draft(asking="q", stranger=True)
-    await responder.draft(asking="q", stranger=False)
+    intake = IntakeContext(
+        request_text="q", reported_at="2026-09-30T09:00:00+07:00", hints=Hints()
+    )
+    for stranger in (True, False):
+        await responder.reply(action="q", intake=intake, reads={}, stranger=stranger)
 
     assert "not written to this person" in prompts[0]
     assert "counterpart" not in prompts[1]
@@ -1129,9 +1043,6 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
     async def sink(call) -> None:
         recorded.append(call)
 
-    # Deliberately incomplete: a complete report ends the graph without ever
-    # asking, and the ask is what reaches the responder — the *other* agent
-    # that stamps a task id, and the one that writes text a person reads.
     filled = '{"summary": "checkout 500", "environment": "production", "curl": null}'
     ext = build_extractor(
         params_cls=TraceProblemParams,
@@ -1174,7 +1085,7 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
                 .values(task_id=task.id)
             )
 
-        await Pool(db=db, auto_ask=True, responder=_responder(sink)).run_once()
+        await Pool(db=db, auto_ask=True).run_once()
     finally:
         if kept is None:
             _EXTRACTORS.pop("backend.trace_problem", None)
@@ -1182,75 +1093,15 @@ async def test_the_calls_a_task_causes_are_stamped_with_that_task(db):
             _EXTRACTORS["backend.trace_problem"] = kept
         EDGE_ROUTER.pop("backend.trace_problem", None)
 
+    # The responder's leg is the spine's `draft` step now
+    # (`tests/test_spine_pass.py`); the pool no longer drafts.
     by_agent = {c.agent: c for c in recorded}
-    assert set(by_agent) == {"trace_problem_extractor", "responder"}, (
-        "both legs of the chain, because either can come apart on its own"
-    )
+    assert set(by_agent) == {"trace_problem_extractor"}
     assert by_agent["trace_problem_extractor"].task_id == task.id
     assert by_agent["trace_problem_extractor"].node == "prepare"
     assert by_agent["trace_problem_extractor"].message_id is None, (
         "an extractor reads a task, not one message"
     )
-    assert by_agent["responder"].task_id == task.id
-    assert by_agent["responder"].node is None, "a responder is not a graph node"
-
-
-def _responder(sink):
-    """A real `Responder` over a scripted model, so the whole path from
-    `Pool` to `Harness` is exercised rather than stubbed at the first joint."""
-    from friday.kernel.config import AgentConfig
-    from friday.kernel.responder import Responder
-    from friday.sdk.testing import ScriptedModel, assistant_message
-
-    return Responder(
-        config=AgentConfig(
-            name="responder",
-            api_key="k",
-            base_url="https://example.invalid/v1",
-            model="test-model",
-        ),
-        model=ScriptedModel([[assistant_message("cho anh xin correlationId nhé")]]),
-        record=sink,
-    )
-
-
-async def test_a_draft_that_would_promise_something_never_reaches_the_reporter(db):
-    """The only message this system sends without a person reading it first.
-
-    `config.yaml` justified that with a sentence — what is being asked never
-    changes, only the wording does — and nothing enforced it. The responder's
-    input carries other people's channel messages, so this was both the path
-    with no human in it and the path whose wording a model writes from
-    untrusted text under the operator's name.
-
-    Driven here rather than at the check, because what matters is not that a
-    predicate returns something: it is which bytes are in the row that goes
-    out.
-    """
-    await make_request_permission(db)
-    responder = StubResponder("ok có correlationId rồi, để anh trace thử")
-
-    await Pool(db=db, auto_ask=True, responder=responder).run_once()
-
-    (queued,) = await db.outbound()
-    assert "để anh trace" not in queued.text
-    assert queued.text == responder.asked[0], "the template, unchanged"
-    assert "project" in queued.text
-
-
-async def test_a_draft_that_only_reworded_the_question_does_reach_them(db):
-    """The wording is allowed to change — that is the whole reason the
-    responder is asked. A floor that only accepted the template would make the
-    step pointless."""
-    await make_request_permission(db)
-    responder = StubResponder(
-        "anh ơi cho em xin cái correlationId với, hoặc cái curl anh gọi nhé"
-    )
-
-    await Pool(db=db, auto_ask=True, responder=responder).run_once()
-
-    (queued,) = await db.outbound()
-    assert queued.text.startswith("anh ơi cho em xin")
 
 
 # --- ticket 46: the operator answering first is the case that is missed ------

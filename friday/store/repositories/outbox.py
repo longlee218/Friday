@@ -20,6 +20,32 @@ class OutboxRepo:
         approves: int | None = None,
     ) -> Outbound:
         """`approves` is for an approval card: the row it asks about."""
+        row = self._outbound_row(
+            task_id=task_id,
+            conversation=conversation,
+            kind=kind,
+            sender=sender,
+            text=text,
+            reply_to=reply_to,
+            approves=approves,
+        )
+        async with self._sessions.begin() as session:
+            session.add(row)
+        return _outbound(row)
+
+    @staticmethod
+    def _outbound_row(
+        *,
+        task_id: int | None,
+        conversation: ConversationId,
+        kind: str,
+        sender: str,
+        text: str,
+        reply_to: str | None = None,
+        approves: int | None = None,
+    ) -> schema.Outbound:
+        """A queued row, not yet added — `queue_outbound`'s, and the spine's
+        `deliver_pass`, which adds several in one transaction."""
         # A kind that needs no operator approval is approved by policy, here and
         # now: its payload is frozen at enqueue so the dispatch-time check has
         # something to hold it against, the same hash a reply gets at approval.
@@ -46,9 +72,7 @@ class OutboxRepo:
             if by_policy
             else None,
         )
-        async with self._sessions.begin() as session:
-            session.add(row)
-        return _outbound(row)
+        return row
 
     async def sendable_outbound(self, limit: int = 20) -> list[Outbound]:
         """Queued rows that are allowed out, oldest first.

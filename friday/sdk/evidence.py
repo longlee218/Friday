@@ -1,16 +1,18 @@
-"""What a run has read, numbered once: the grounding index every backend tool
+"""What a run has read, numbered once: the grounding index every read tool
 writes into (`RunContext.evidence`).
 
-Moved out of `plugins/backend/investigate.py` when `sources/` folded into
-`toolsets/` (build-the-spine ticket 09): the read tools now live beside the
-client each one reads through (`logs.py`, `code.py`, `docs.py`, `db.py`), and
-this is the one piece they share.
+In the sdk since build-the-spine ticket 14: the spine builds one per agent
+run and stores it with an `Ask` (a continuation point), so the core names it;
+backend's toolsets and core `shell` write into it. It was
+`plugins/backend/toolsets/evidence.py` (ticket 09) and, before that,
+`plugins/backend/investigate.py`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 __all__ = ["MAX_READS", "Evidence"]
 
@@ -80,4 +82,25 @@ class Evidence:
             f"You have made {MAX_READS} reads, which is the limit for one "
             f"investigation. Answer with what you have, and say in "
             f"`next_checks` what you would have looked at next."
+        )
+
+    def dump(self) -> dict[str, Any]:
+        """As JSON data, for a stored `Ask`: `load` gives back an `Evidence`
+        that numbers on from where this one stopped."""
+        return {
+            "index": dict(self.index),
+            "seen": dict(self._seen),
+            "not_checked": list(self.not_checked),
+            "reads": self.reads,
+            "tags": {repo: list(tag) for repo, tag in self.tags.items()},
+        }
+
+    @classmethod
+    def load(cls, data: Mapping[str, Any]) -> Evidence:
+        return cls(
+            index=dict(data["index"]),
+            _seen=dict(data["seen"]),
+            not_checked=list(data["not_checked"]),
+            reads=int(data["reads"]),
+            tags={repo: (tag[0], tag[1]) for repo, tag in data["tags"].items()},
         )

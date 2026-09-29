@@ -13,9 +13,10 @@ redaction and the `node_runs` record are Friday code in `_invoke`, not
 key**, with the live `Deps` rebuilt inside the run (DBOS cannot persist an open
 connection).
 
-`Ask`/`HandOver` **suspend the workflow in place** on `DBOS.recv_async` and
-resume when the pool `send`s the answer — the durable version of v1's pause,
-proven by spike to survive a kill mid-wait.
+A graph's `Ask`/`HandOver` is a terminal result: nothing waits on a person
+inside a workflow any more (build-the-spine ticket 14 — `DBOS.recv/send` and
+the 24h wait went with it). The spine pass (`friday/kernel/spine/workflow.py`)
+is a workflow here too: `task-<id>/pass-<n>`, each stage one durable step.
 """
 
 from __future__ import annotations
@@ -26,14 +27,13 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from dbos import DBOS, SetWorkflowID
 
 from friday.kernel.ops.redact import scrub
-from friday.sdk.actions import Ask
 from friday.sdk.workflow import (
     DAG,
     DAGState,
@@ -56,17 +56,6 @@ RecorderFactory = Callable[[ScopeKey], Recorder]
 #: A cycle in the edges would otherwise spin forever; the graph is meant to be
 #: acyclic, and this says so out loud.
 MAX_STEPS = 50
-
-#: The DBOS event key a suspended workflow publishes its pending `Ask` under,
-#: so the pool can poll a run to its next boundary from outside.
-PENDING_EVENT = "pending"
-
-#: How long a suspended `Ask`/`HandOver` waits for its answer before the wait
-#: itself times out. DBOS records the wait as a durable sleep, so it must be a
-#: concrete number — `recv` with no timeout is not supported. A day is longer
-#: than any reporter/operator turn; the cutover wires this to a per-run budget
-#: after which the wait resolves to a hand-over rather than blocking forever.
-WAIT_TIMEOUT_SECONDS = 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -92,9 +81,6 @@ class _Live:
     deps: Deps
     state: DAGState
     recorder: Recorder | None
-    #: Answers a suspended node has been given, keyed by node name, oldest
-    #: first. Refilled onto `deps.answers` before each run of that node.
-    answers: dict[str, list[Any]] = field(default_factory=dict)
 
 
 #: Live workflow context, keyed by the DBOS workflow id. Rebuilt when the
@@ -184,8 +170,6 @@ async def _run_node(dag_name: str, node_name: str) -> Any:
     assert wfid is not None  # always set inside a workflow
     graph = _GRAPHS[dag_name]
     live = _LIVE[wfid]
-    # A node that has asked and been answered re-runs with its answers in hand.
-    live.deps.answers[:] = live.answers.get(node_name, [])
     return await _invoke(
         dag_name, graph.dag.node(node_name), live.state, live.deps, live.recorder
     )
@@ -194,7 +178,7 @@ async def _run_node(dag_name: str, node_name: str) -> Any:
 @DBOS.workflow()
 async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
     """Walk the graph on DBOS. Rebuild `Deps` from the scope key, run each node
-    as a memoized step, suspend on `Ask`, and return the final results. Resume
+    as a memoized step, and return the final results. Resume
     after a crash re-enters here: the memoized steps replay without re-running,
     so the walk reaches the first incomplete node and continues from there.
 
@@ -232,34 +216,6 @@ async def _run_graph(dag_name: str, scope_key: ScopeKey) -> dict[str, Any]:
                 continue
 
             result = await _run_node(dag_name, current)
-
-            if isinstance(result, Ask):
-                # Model B, pure suspend: a node that cannot finish without the
-                # reporter suspends the workflow in place. The pool is told what
-                # it paused on, the wait is durable (survives a kill — proven by
-                # spike), and the answer re-runs the SAME node with the answer in
-                # `deps.answers` — the durable version of v1's "answer re-runs
-                # the asking node", but only that node re-runs, not the graph
-                # from the top.
-                #
-                # `HandOver` is not here on purpose: an `Ask` waits for the
-                # reporter and the same task resumes, but a `HandOver` escalates
-                # to the operator out of band — there is no answer that re-runs
-                # the node — so it flows on as a terminal result the pool reads
-                # off the state, exactly as v1's walk did.
-                # Publish what the run is waiting on, so the pool can poll it to
-                # its next boundary without blocking (get_event from outside).
-                await DBOS.set_event_async(
-                    PENDING_EVENT,
-                    {"waiting": True, "node": current, "text": result.text},
-                )
-                answer = await DBOS.recv_async(
-                    current, timeout_seconds=WAIT_TIMEOUT_SECONDS
-                )
-                await DBOS.set_event_async(PENDING_EVENT, {"waiting": False})
-                live.answers.setdefault(current, []).append(answer)
-                continue  # re-run `current`; do not advance, do not record the Ask
-
             live.state = live.state.with_result(current, result)
             current = graph.dag.next_after(current, live.state)
         return dict(live.state.results)
@@ -332,6 +288,53 @@ async def run_node(
     return await _invoke(dag_name, node, state, deps, record)
 
 
+# ── The spine pass as a durable workflow (build-the-spine ticket 14) ─────────
+#
+# `task-<id>/pass-<n>`: the body is plain code (`spine.workflow.run_pass`); each
+# stage it names runs as `_pass_step`, which DBOS memoizes, so a pass that
+# crashes resumes at the first stage with no recorded result. The steps hold
+# live handles (the store, the servers), so a step takes only serializable
+# arguments and finds its callable in this slot — the `_GRAPHS` shape again.
+_PASS: (
+    tuple[Callable[..., Awaitable[Any]], dict[str, Callable[..., Awaitable[Any]]]]
+    | None
+) = None
+
+
+def register_pass(
+    body: Callable[..., Awaitable[Any]], steps: dict[str, Callable[..., Awaitable[Any]]]
+) -> None:
+    """Wire the pass body and its named steps in (`Spine.steps()`), before
+    `launch`, so a pass a previous process left running resumes."""
+    global _PASS
+    _PASS = (body, steps)
+
+
+@DBOS.step()
+async def _pass_step(name: str, args: tuple) -> Any:
+    assert _PASS is not None, "register_pass was not called"
+    return await _PASS[1][name](*args)
+
+
+async def _step(name: str, *args: Any) -> Any:
+    return await _pass_step(name, args)
+
+
+@DBOS.workflow()
+async def _run_pass(task_id: int, pass_no: int) -> Any:
+    assert _PASS is not None, "register_pass was not called"
+    return await _PASS[0](task_id, pass_no, _step)
+
+
+async def run_pass(task_id: int, pass_no: int, workflow_id: str) -> Any:
+    """Start pass `pass_no` of a task — or join it, when a workflow of that id
+    is already running or done (a restart, a second pool pass) — and wait
+    for what it came to."""
+    with SetWorkflowID(workflow_id):
+        handle = await DBOS.start_workflow_async(_run_pass, task_id, pass_no)
+    return await handle.get_result()
+
+
 def launch(name: str, system_db: str) -> None:
     """Bring DBOS up on its own SQLite system database. The one place outside
     this module that used to import `dbos` — the composition root, the replay
@@ -386,11 +389,6 @@ async def run(
     """Start and await a graph to completion — the final state as a dict."""
     handle = await start(dag_name, scope_key, workflow_id=workflow_id)
     return await handle.get_result()
-
-
-async def answer(workflow_id: str, node: str, value: Any) -> None:
-    """Deliver the answer a suspended `Ask` is waiting on."""
-    await DBOS.send_async(workflow_id, value, topic=node)
 
 
 #: DBOS's status vocabulary, mapped to the four words the board shows (ticket
@@ -467,20 +465,6 @@ async def result(workflow_id: str) -> dict[str, Any]:
     """The finished run's results mapping (node name -> result, objects intact)."""
     handle: Any = await DBOS.retrieve_workflow_async(workflow_id)
     return await handle.get_result()
-
-
-async def pending(workflow_id: str) -> dict[str, Any] | None:
-    """What a suspended run is waiting on — `{"node", "text"}` — or `None` if it
-    is not currently suspended on an `Ask`."""
-    try:
-        event = await DBOS.get_event_async(
-            workflow_id, PENDING_EVENT, timeout_seconds=0
-        )
-    except Exception:  # noqa: BLE001
-        return None
-    if event and event.get("waiting"):
-        return {"node": event["node"], "text": event["text"]}
-    return None
 
 
 async def cancel(workflow_id: str) -> None:

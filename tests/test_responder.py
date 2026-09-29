@@ -12,6 +12,7 @@ from conftest import make_event
 
 from friday.kernel.config import AgentConfig
 from friday.kernel.responder import Draft, Responder
+from friday.sdk.intake import Hints, IntakeContext
 from friday.sdk.testing import FunctionModel, ScriptedModel, assistant_message
 
 CONFIG = AgentConfig(
@@ -26,6 +27,17 @@ TONE = [
     make_event(text="ok để anh xem", is_own=True),
     make_event(text="cho anh xin cái correlationId nhé", is_own=True),
 ]
+
+
+#: What `reply` needs besides the room: the action, the intake context and what
+#: the steps found. Spread into each call so a test names only what it varies.
+REPLY = dict(
+    action="trace_problem",
+    intake=IntakeContext(
+        request_text="api lỗi", reported_at="2026-09-30T09:00:00+07:00", hints=Hints()
+    ),
+    reads={},
+)
 
 
 def responder_with(*steps, record=None) -> Responder:
@@ -50,9 +62,7 @@ def collecting() -> tuple[list, object]:
 async def test_it_writes_a_reply():
     responder = responder_with([assistant_message("cho anh xin cái curl với")])
 
-    draft = await responder.draft(
-        asking="Could you send the correlationId?", context=(), tone=TONE
-    )
+    draft = await responder.reply(**REPLY, context=(), tone=TONE)
 
     assert isinstance(draft, Draft)
     assert draft.text == "cho anh xin cái curl với"
@@ -64,7 +74,7 @@ async def test_the_operators_own_messages_are_in_the_prompt():
     calls, sink = collecting()
     responder = responder_with([assistant_message("ok")], record=sink)
 
-    await responder.draft(asking="ask", context=(), tone=TONE)
+    await responder.reply(**REPLY, context=(), tone=TONE)
 
     (call,) = calls
     assert "cho anh xin cái correlationId nhé" in call.prompt
@@ -74,8 +84,8 @@ async def test_the_conversation_is_in_the_prompt():
     calls, sink = collecting()
     responder = responder_with([assistant_message("ok")], record=sink)
 
-    await responder.draft(
-        asking="ask",
+    await responder.reply(
+        **REPLY,
         context=[make_event(text="api trả 500", author_name="mobile dev")],
         tone=TONE,
     )
@@ -92,15 +102,15 @@ async def test_a_model_failure_produces_no_draft_rather_than_a_bad_one():
 
     draft = await Responder(
         config=CONFIG, model=FunctionModel(_down, model_name="test-model")
-    ).draft(asking="ask", context=(), tone=TONE)
+    ).reply(**REPLY, context=(), tone=TONE)
 
     assert draft is None
 
 
 async def test_an_empty_answer_produces_no_draft():
     """A model that returns nothing has not written a reply."""
-    draft = await responder_with([assistant_message("   ")]).draft(
-        asking="ask", context=(), tone=TONE
+    draft = await responder_with([assistant_message("   ")]).reply(
+        **REPLY, context=(), tone=TONE
     )
 
     assert draft is None
@@ -116,8 +126,8 @@ async def test_reasoning_never_reaches_the_reply():
         "cho anh xin cái correlationId nhé"
     )
 
-    draft = await responder_with([assistant_message(thinking)]).draft(
-        asking="ask", context=(), tone=TONE
+    draft = await responder_with([assistant_message(thinking)]).reply(
+        **REPLY, context=(), tone=TONE
     )
 
     assert draft.text == "cho anh xin cái correlationId nhé"
@@ -125,8 +135,8 @@ async def test_reasoning_never_reaches_the_reply():
 
 async def test_an_answer_that_is_only_reasoning_produces_no_draft():
     """Better the template than an empty message."""
-    draft = await responder_with([assistant_message("<think>hmm</think>")]).draft(
-        asking="ask", context=(), tone=TONE
+    draft = await responder_with([assistant_message("<think>hmm</think>")]).reply(
+        **REPLY, context=(), tone=TONE
     )
 
     assert draft is None
@@ -135,8 +145,8 @@ async def test_an_answer_that_is_only_reasoning_produces_no_draft():
 async def test_an_unclosed_reasoning_block_is_not_treated_as_a_reply():
     """A truncated response leaves the tag open. What follows is still working,
     not an answer."""
-    draft = await responder_with([assistant_message("<think>reasoning cut off")]).draft(
-        asking="ask", context=(), tone=TONE
+    draft = await responder_with([assistant_message("<think>reasoning cut off")]).reply(
+        **REPLY, context=(), tone=TONE
     )
 
     assert draft is None
@@ -181,8 +191,8 @@ async def test_a_responder_given_a_store_can_reach_its_own_memory():
         db=Store(),
     )
 
-    await responder.draft(
-        asking="ask",
+    await responder.reply(
+        **REPLY,
         context=(),
         tone=TONE,
         state=FridayState(channel_id="c1", agent="responder").for_task(42),
@@ -194,12 +204,12 @@ async def test_a_responder_given_a_store_can_reach_its_own_memory():
 async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
     """Same rule as skills: an agent told about a tool it does not have goes
     looking for a door that is not in the room — and the two halves of that
-    have to be checked on the *same* construction, not on `build_input` called
+    have to be checked on the *same* construction, not on `build_reply_input` called
     with a flag by hand, which cannot tell "the flag is right" from "the flag
     and the wiring happen to agree today".
 
-    The claim is checked on the real per-call prompt `draft()` sends — the
-    section lives in `build_input`'s output, not in the static
+    The claim is checked on the real per-call prompt `reply()` sends — the
+    section lives in `build_reply_input`'s output, not in the static
     `instructions` — captured through `record=`, the same sink `collecting()`
     already uses elsewhere in this file. The wiring is checked by reaching
     into `._run.tools`, the way
@@ -222,7 +232,7 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
         model=ScriptedModel([[assistant_message("ok")]]),
         record=without_sink,
     )
-    await without.draft(asking="ask", context=(), tone=TONE)
+    await without.reply(**REPLY, context=(), tone=TONE)
 
     with_calls, with_sink = collecting()
     with_store = Responder(
@@ -231,8 +241,8 @@ async def test_the_claim_and_the_tools_come_from_one_fact_not_two():
         db=Store(),
         record=with_sink,
     )
-    await with_store.draft(
-        asking="ask",
+    await with_store.reply(
+        **REPLY,
         context=(),
         tone=TONE,
         state=FridayState(channel_id="c1", agent="responder"),
@@ -294,7 +304,7 @@ def test_a_responder_declares_the_run_state_whether_or_not_it_has_memory(monkeyp
 
 
 def test_the_skill_catalogue_is_in_the_instructions_not_the_per_call_input():
-    """It was in `build_input`, so the operator reading a responder's
+    """It was in the per-call input, so the operator reading a responder's
     *instruction* prompt found no mention of skills at all — while the agent
     called `fetch_skill` anyway, off the tool schema alone.
 
@@ -308,7 +318,7 @@ def test_the_skill_catalogue_is_in_the_instructions_not_the_per_call_input():
     than sending them again on every classification.
     """
     from friday.kernel.harness.instruction_prompt import SkillMeta
-    from friday.kernel.responder.prompt import build_input, build_instructions
+    from friday.kernel.responder.prompt import build_instructions, build_reply_input
 
     meta = [
         SkillMeta(
@@ -321,7 +331,9 @@ def test_the_skill_catalogue_is_in_the_instructions_not_the_per_call_input():
     ]
 
     told = build_instructions(skills_meta=meta)
-    per_call = build_input(asking="which environment?")
+    per_call = build_reply_input(
+        action="trace_problem", intake=REPLY["intake"], reads={}
+    )
 
     assert "<name>trace-a-request</name>" in told, (
         "the catalogue is not in the instructions"
@@ -340,7 +352,7 @@ def test_a_responder_with_no_skills_says_nothing_about_them():
 
 
 async def test_a_memory_is_attributed_to_the_responder_whoever_handed_the_state_over():
-    """Provenance is "who wrote this, and while doing what", and `draft` is
+    """Provenance is "who wrote this, and while doing what", and `reply` is
     where the answer is known for certain.
 
     It used to be a guarantee by construction — the scope was built inside this
@@ -374,8 +386,8 @@ async def test_a_memory_is_attributed_to_the_responder_whoever_handed_the_state_
         db=Store(),
     )
 
-    await responder.draft(
-        asking="ask",
+    await responder.reply(
+        **REPLY,
         context=(),
         tone=TONE,
         state=FridayState(channel_id="c1", agent="triage").for_task(42),

@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 07, 08, 09, 11, 12, 13
 
 # The spine pass; `trace_problem` moves onto it
@@ -31,15 +31,45 @@ Carries `build-the-loop` ticket 04's acceptance.
   (`AgentSpec`, result `Diagnosis`). The report file and `reports_dir` go.
 - Responder reads the intake context (+ `Outcome`), same no-invention rule.
 - `trace_problem` tasks run only on the spine; its DAG is unreachable (deleted in 16).
+- `plugins/backend/agents/diagnose_prompt.py`, found in the 2026-09-30 review
+  of the working tree (the file moved here from `graph/` in this ticket):
+  - `JOB` still says "You have no tools on this path: you cannot read another
+    file, run another query" — the dossier mode's text — while `DIAGNOSE`
+    builds with `reads=True` and the `READS` steps say "Start with
+    `read_log`". Rewrite `JOB` for the mode the agent actually runs in; the
+    two-mode `reads` flag goes with the DAG node in 16 if nothing else needs it.
+  - `READS` is a reading procedure (which tool first, when to widen), not a
+    thinking style; appended to `THINKING` it renders as ten numbered steps.
+    Move it into the reads-mode `JOB` or its own section, and keep
+    `thinking_style` to how to weigh what was read.
+  - `agents/diagnose.py` defines `_rejected` twice (lines 105 and 125,
+    identical); keep one.
 
 ## Acceptance
 
-- [ ] Crash mid-pass resumes the same pass id; nothing sent twice.
-- [ ] Unchanged-placement reply resumes; `Lnn` stable; reads not repeated.
-- [ ] A reply flipping env/service re-plans and re-investigates.
-- [ ] `asks_exhausted`, hand-back reset, mid-pass message tested.
+- [x] Crash mid-pass resumes the same pass id; nothing sent twice.
+- [x] Unchanged-placement reply resumes; `Lnn` stable; reads not repeated.
+- [x] A reply flipping env/service re-plans and re-investigates.
+- [x] `asks_exhausted`, hand-back reset, mid-pass message tested.
 - [ ] `run_api_issue_eval` on the captured cases reported, no worse than before.
 - [ ] One real end-to-end run on the operator's machine, observed on the board.
-- [ ] `CONTEXT.md`: *spine*, *pass*, *hand-back*; `docs/DESIGN.md` § What
+- [ ] Diagnose's prompt says one thing about tools: `JOB` rewritten for
+      reads mode, `READS` out of `thinking_style`, one `_rejected`; the
+      rendered `build_instructions(reads=True)` read once by a person.
+- [x] `CONTEXT.md`: *spine*, *pass*, *hand-back*; `docs/DESIGN.md` § What
       exists describes the spine for `trace_problem`.
-- [ ] Whole suite green; `code-review` done.
+- [x] Whole suite green; `code-review` done.
+
+## Left for the operator (2026-09-30)
+
+Code, tests and docs are in. Three boxes wait on a person:
+
+- **Eval**: `uv run run_eval.py backend.trace_problem` now runs the spine's
+  `backend.diagnose` step on `data/cases/` (paid). No "before" number exists
+  (the DAG replay was never scored), so the first run is the baseline.
+- **End to end**: one real report through `uv run run_agent.py`, watched on
+  the board.
+- **Diagnose prompt**: `JOB` rewritten for reads mode, `READS` moved into it
+  and out of `thinking_style`, one `_rejected` — done; the rendered
+  `build_instructions(reads=True)` still has to be read by a person.
+

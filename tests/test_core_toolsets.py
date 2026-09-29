@@ -19,9 +19,9 @@ import pytest
 from friday.kernel.audit import AuditLog
 from friday.kernel.toolsets import NotWired, core_toolsets, workspace
 from friday.kernel.toolsets.shell import refusal, shell_tools
+from friday.sdk.evidence import Evidence
 from friday.sdk.redact import clear_secret_values, register_secret_values
 from friday.sdk.toolset import RunContext
-from plugins.backend.toolsets.evidence import Evidence
 
 REPO = Path(__file__).resolve().parents[1]
 

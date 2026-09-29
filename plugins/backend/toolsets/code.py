@@ -33,10 +33,10 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
+from friday.sdk.evidence import Evidence
 from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS
 from friday.sdk.toolset import RunContext, ToolsetSpec, tool
 from plugins.backend.placement import Placement
-from plugins.backend.toolsets.evidence import Evidence
 from plugins.backend.toolsets.release import (
     RELEASE_SERVER,
     ReleaseSource,

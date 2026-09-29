@@ -88,10 +88,10 @@ implementation detail.
 ## Running
 
 Friday ingests Discord mentions, classifies them, opens tasks, asks for
-missing details, investigates `trace_problem` (the six-node slice `Prepare →
-Resolve → FindRequestLog → ReadFailingCode → Diagnose → Report`, plus an
-unapproved acknowledgement), and sends approved replies as the watched
-account. It runs on the operator's own machine, on `main`, with a passing
+missing details, investigates `backend.trace_problem` on the spine (a durable
+pass: Intake → an unapproved acknowledgement → Planner + GatePlan → the
+`backend.diagnose` agent → a drafted reply; build-the-spine ticket 14), and
+sends approved replies as the watched account. It runs on the operator's own machine, on `main`, with a passing
 suite. Triage scored 100% on the eval set (then `evals/triage.jsonl`) on 2026-09-20.
 
 ## Technology
@@ -158,16 +158,19 @@ is the premise each board tracks against.
 - **`build-the-spine`** — builds the `domains-plug-in` map: a plugin is a
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
-  run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **In progress:** tickets 01, 02, 03, 05, 06, 07, 08, 09, 10, 11, 12 and 13 done
-  (2026-09-29; names are `backend.*`/`ops.*`, live db wiped; core Intake and
-  the backend enricher live through the DAG's intake node; the backend's
-  tools are its four toolsets, reading code at the running tag; the core's
-  four toolsets `core.memory/skills/shell/workspace` are registered but no
-  spine agent is wired to them until 14; triage's prompt is assembled from
-  the three registered actions' recognition; the Planner is built, not
-  wired until 14, on a new `strong` tier); 04 is takeable, and every
-  blocker of 14 is done
+  run → deliver). 21 tickets; rename first, DAG path deleted in ticket 16;
+  ticket 20 (opened 2026-09-30, after 14) keeps the Planner to goals — a brief
+  is not a method, an empty `toolsets` is the full grant, `replan` says when;
+  ticket 21 (after 20) puts the Planner's prompt through the one assembler
+  and the trust boundary, which it alone skips today.
+  **In progress:** tickets 01–03 and 05–13 done (2026-09-29; names are
+  `backend.*`/`ops.*`, live db wiped; the backend's tools are its four
+  toolsets, reading code at the running tag; triage's prompt is assembled
+  from the three registered actions' recognition; the Planner runs on a
+  `strong` tier). Ticket 14's code is in (2026-09-30): `backend.trace_problem`
+  runs only on the spine, the other two actions on their DAG's node 0 until
+  15–16; its paid eval run and one real end-to-end run wait on the operator.
+  04 is takeable
   (`.scratch/build-the-spine/STATUS.md`). Evals run on Pydantic Evals
   (`uv run run_eval.py <name>`); `core.triage` measured 2026-09-29 (deepseek
   34/35; triage runs on qwen3-30b, 21/23 on `trace_problem`); `core.planner`
@@ -344,11 +347,13 @@ change; a mark holds what node 0 was *given* and outlives that.
 
 ## Pool
 
-The loop that hosts tasks' graphs — deciding only *when*, and *whether what
-came back may be sent*, never *what* to do. Every pass: stand down for a task
-the operator answered, announce to the operator what nobody can act on, host
-graphs for pending tasks (bounded concurrency), and turn what came back into
-rows. Lives in `friday/kernel/pool/`, apart from the engine.
+The loop that claims pending tasks and starts their passes — deciding only
+*when*, never *what*. Every pool pass: stand down for a task the operator
+answered (and cancel its running pass), start or join each pending task's
+spine pass (bounded concurrency), and announce to the operator what nobody
+can act on. Routing is the pass's own `deliver`. An action not yet on the
+spine runs its DAG's node 0 here and goes through the same `deliver` (until
+build-the-spine ticket 16). Lives in `friday/kernel/pool/`.
 
 ## Eval
 
@@ -458,8 +463,8 @@ task, action, `plan_version` (1, +1 per replan), `replaces` (the hash of the
 version it replaced), the action contract copied in, a one-sentence goal, and
 a **straight list of steps** — no branch, no parallel; a change of direction
 is a replan. Its **plan hash** is sha256 of the canonical JSON of the whole
-plan, contract included. Built in build-the-spine ticket 06, not wired until
-14.
+plan, contract included. Built in build-the-spine ticket 06; every version,
+frozen or refused with its gate errors, is a row of `plans` since 14.
 
 **Step** — one entry of a plan, one of four core-owned types: `agent` (a named
 agent, the toolsets granted to it, a brief), `ask` / `hand_over` (the Planner
@@ -490,6 +495,13 @@ every version, its errors and what the Planner read; told apart from a
 `hand_over` step the Planner chose. Not an agent spec: it has no terminal
 tools and no contract grants its toolsets.
 
+**Plan version row** — one row of `plans` (`task_id`, `version`, `replaces`,
+`cause`, `placement`, `body`, `hash`, `gate_errors`, `pass_no`), written once:
+a crash that re-runs the Planner keeps the first. `cause` is what made the
+Planner write it — `first`, `replan` (an agent's `Replan`), `reply` (a reply
+moved the placement) or `hand_back`; `replan` and `reply` count toward
+`max_replans`, from the last `hand_back` on.
+
 **Replan** — a new plan version for the same action because an agent's step
 pointed the wrong way (the `replan(reason, found)` terminal tool → `Replan`).
 The Planner starts a fresh conversation with the current plan, the stored
@@ -497,6 +509,39 @@ results of its finished steps and the reason; the new version `replaces` the
 old hash, identical steps keep their results by step key, and it gets its
 own rewrites. Counted against the contract's `max_replans`. Not a
 **re-triage**, which leaves the action.
+
+## Spine
+
+The one path every task of a spine action runs (`friday/kernel/spine/`,
+build-the-spine ticket 14): Intake → acknowledge → plan → run → deliver. Only
+`backend.trace_problem` is on it until tickets 15–16.
+
+**Pass** — one short durable workflow of the spine, `task-<id>/pass-<n>`
+(`n` = `tasks.pass_no`, +1 in the same transaction as every move into
+`pending`; `tasks.pass_cause` says why: `first`, `reply`, `hand_back`,
+`reopen`). Each stage is one DBOS step, so a crash resumes the same pass and
+nothing done is done again. An `Ask` ends the pass — no workflow waits on a
+person — and the reply starts pass n+1: an unchanged placement continues the
+asking step from its continuation point, a changed one replans (cause
+`reply`). A reporter message newer than the pass's Intake when it ends in an
+`Ask`: the question is not sent, pass n+1 starts.
+
+**Acknowledgement** — the action's `acknowledge(intake)` hook, queued once
+per task after Intake, without approval (`backend.trace_problem`: "đang xem
+log của <service>…"). A later pass never sends a second one.
+
+**Deliver** — a pass's last step: outbox rows and the task's move in one
+transaction, refused for a pass the task has left, so a re-run queues
+nothing twice. `Ask` → the question as the agent wrote it, redacted
+(`MAX_ASKS_PER_TASK` (3) since the last hand-back, then `HandOver`
+`asks_exhausted`); `Reply` → the reply and its approval card; `HandOver` →
+`needs_human` with the reason.
+
+**Hand-back** — the operator moving a task from `needs_human` back to
+`pending`: a fresh run on the old ground. Replans and asks count from here,
+the Planner writes a new plan (cause `hand_back`, not counted) from the last
+one and its results, and a stored `HandOver` is never reused — its step runs
+again. Not a **reply**, which continues.
 
 ## Graph
 
@@ -604,7 +649,14 @@ the action contract has no `ask` step.
 message history (plain JSON) and its `Evidence`. Passed back to `run_agent`
 with the reporter's reply as the brief, the run continues from it — nothing
 already read is read again, `Lnn` ids keep their meaning. Not a mid-loop
-checkpoint: a crashed step re-runs from its start.
+checkpoint: a crashed step re-runs from its start. Continued only by a later
+pass; the pass that stored it reuses it.
+
+**Grounding check** — an agent spec's `check(result, evidence)`: the reason
+its answer is void (a ref naming no line read, a conclusive answer with no
+rival ruled out, nothing read at all), or `None`. `run_agent` turns a reason
+into `HandOver` `ungrounded: …`, so a void answer is never drafted from.
+`backend.diagnose`'s is `plugins/backend/agents/diagnose.py`.
 
 **Runner** — `run_plan` (`friday/kernel/spine/runner.py`, build-the-spine
 ticket 12) walks a frozen plan's steps in order. A step with a stored result
@@ -615,10 +667,12 @@ is skipped and its readers get that result; else the step runs (up to
 (`HandOver` `replans_exhausted`).
 
 **Step result** — what one step came to, stored in `step_results` at
-`(task_id, step_key)` by the runner alone and never rewritten. A stored step
-never runs again, so a reused `Replan` is data for its readers, not a new
-signal. A stored `Ask` keeps its message history; its `Evidence` is not
-stored yet (ticket 14).
+`(task_id, step_key, pass_no)` by the runner alone and never rewritten; the
+newest pass's row under a key is the one read. A stored step never runs
+again within its pass, so a reused `Replan` is data for its readers, not a
+new signal. From an earlier pass, a stored `Ask` is continued (the Planner's
+own `ask`, answered, is a replan) and a stored `HandOver` runs again. A
+stored `Ask` keeps its message history and its `Evidence`.
 
 ## Install fact and knob
 
@@ -754,9 +808,11 @@ being re-tried.
 
 ## Hand-over
 
-The `Action` for "cannot conclude". Its reason is the system's own finding,
+The `Outcome` for "cannot conclude". Its reason is the system's own finding,
 quoted to the operator; the task moves to `needs_human` and the pool
-announces it once. **Not** "handled by the operator", which is a person
+announces it once. Code-authored reasons start with a countable word:
+`planner_failed`, `step_failed`, `replans_exhausted`, `asks_exhausted`,
+`ungrounded`, `budget_spent`. **Not** "handled by the operator", which is a person
 having acted.
 
 ## Handled by the operator

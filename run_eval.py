@@ -47,11 +47,13 @@ async def _planner_task(config):
 
 
 async def _trace_problem_task(config):
-    """Temporary until build-the-spine ticket 14: a case is replayed through
-    the DAG, which only the composition root can reach."""
+    """A captured case through the spine's diagnose step (build-the-spine
+    ticket 14) — the path `replay_case.py --case … --diagnose` runs."""
+    from friday.kernel.memory.registry import register_all_memory_kinds
     from plugins.backend.evals.trace_problem import cases, unlabelled
     from replay_case import run_captured
 
+    register_all_memory_kinds(config)
     missing = unlabelled(cases())
     if missing:
         print(
@@ -62,11 +64,8 @@ async def _trace_problem_task(config):
     into = Path(mkdtemp(prefix="friday-eval-"))
 
     async def diagnose(case):
-        final, _runs, _wall, _reports = await run_captured(
-            case.inputs, with_model=True, into=into / case.name
-        )
-        thought = final.get("diagnose", {})
-        return thought.get("diagnosis") if isinstance(thought, dict) else None
+        ran = await run_captured(case.inputs, with_model=True, into=into / case.name)
+        return ran.diagnosis
 
     return diagnose
 

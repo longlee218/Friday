@@ -1,6 +1,7 @@
 """The Planner: one core agent that writes every action's plan (build-the-spine
 ticket 11; decision: board `domains-plug-in` ticket 12, as amended by 17).
-Plain code, not wired to the pass yet (ticket 14).
+Run by the spine pass's `plan` step and, on a `Replan`, by the runner
+(ticket 14).
 
 ```
 plan / replan → Planner answers → GatePlan
@@ -123,17 +124,27 @@ class Planning:
     record: Any = None
 
 
-async def plan(p: Planning) -> Frozen | PlannerFailed:
-    """Plan version 1 for the task."""
+async def plan(
+    p: Planning, *, version: int = 1, replaces: str | None = None
+) -> Frozen | PlannerFailed:
+    """A first plan for the task — version 1, or the next version on a
+    hand-back with no frozen plan to replan from (ticket 14)."""
     prompt = first_prompt(p.action, p.intake, p.agents, p.toolsets)
-    return await _write(p, prompt, version=1, replaces=None)
+    return await _write(p, prompt, version=version, replaces=replaces)
 
 
 async def replan(
-    p: Planning, current: Frozen, results: Mapping[str, Any], signal: Replan
+    p: Planning,
+    current: Frozen,
+    results: Mapping[str, Any],
+    signal: Replan,
+    *,
+    version: int | None = None,
 ) -> Frozen | PlannerFailed:
     """The next version after `current`, from `results` (by step id) and the
-    agent's `signal` — the runner's `Steps.planner`, once bound to `p`."""
+    agent's `signal` — the runner's `Steps.planner`, once bound to `p`.
+    `version` numbers it past a refused version stored after `current`
+    (ticket 14); `current`'s + 1 when not given."""
     prompt = replan_prompt(
         p.action,
         p.intake,
@@ -146,7 +157,7 @@ async def replan(
     return await _write(
         p,
         prompt,
-        version=current.plan.plan_version + 1,
+        version=version or current.plan.plan_version + 1,
         replaces=current.plan_hash,
     )
 

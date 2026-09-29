@@ -13,6 +13,7 @@ from friday.kernel.config import AgentConfig
 from friday.kernel.domain.state import FridayState
 from friday.kernel.memory.channel_context import ContextRebuilder
 from friday.kernel.ops.liveness import Heartbeat
+from friday.sdk.intake import Hints, IntakeContext
 from friday.sdk.testing import (
     FunctionModel,
     ModelResponse,
@@ -21,6 +22,17 @@ from friday.sdk.testing import (
     function_call,
 )
 from tests.conftest import make_event
+
+#: What `Responder.reply` needs besides the room; spread into each call.
+REPLY = dict(
+    action="trace_problem",
+    intake=IntakeContext(
+        request_text="cho anh xin correlationId",
+        reported_at="2026-09-30T09:00:00+07:00",
+        hints=Hints(),
+    ),
+    reads={},
+)
 
 SUMMARY_CONFIG = AgentConfig(
     name="summary",
@@ -352,8 +364,8 @@ async def test_the_responder_writes_differently_in_a_different_room(db):
         db=db,
     )
     for room in ("team", "client"):
-        await responder.draft(
-            asking="cho anh xin correlationId",
+        await responder.reply(
+            **REPLY,
             state=FridayState(channel_id=room, agent="responder"),
         )
 
@@ -372,8 +384,8 @@ async def test_a_room_with_no_rows_leaves_the_prompt_as_it_was(db):
         model=FieldsCapture(prompts),
         db=db,
     )
-    await responder.draft(
-        asking="cho anh xin correlationId",
+    await responder.reply(
+        **REPLY,
         state=FridayState(channel_id="unknown-room", agent="responder"),
     )
 

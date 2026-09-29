@@ -1,12 +1,12 @@
-"""Run one past task through the `trace_problem` graph again, and answer ticket
-00's four questions about it.
+"""Run one `backend.trace_problem` case through the spine's diagnose step
+again, and say what it read and what it concluded.
 
 Ticket 00 says "five runs through `run_agent.py` against a throwaway
 database". That is one run per reporter willing to send the message again,
-and it cannot be repeated after a prompt changes. This replays a task that
-is already in the store: same graph, same pool-facing nodes, same outbox
-rows, against a copy — so a case can be run now, run again after a change,
-and run a third time with the model on.
+and it cannot be repeated after a prompt changes. This replays a case against
+a copy of the store — so it can be run now, run again after a change, and
+scored by the `backend.trace_problem` eval (`run_eval.py`), which runs this
+same path.
 
 **Speed is the point, and it is not about convenience.** Measured
 2026-09-21: a dev pod's log history is its last restart, and two probes an
@@ -15,20 +15,16 @@ cannot be investigated at all on dev, so the window in which a case is worth
 running is short enough that a one-command run is the difference between
 collecting a case and not.
 
-**`Diagnose` is off unless asked for**, and that is the cheap loop. Question
-1 — did the dossier hold the line the operator calls decisive — is a
-question about `plugins/backend/graph/distil.py`, a pure function. It can be
-asked and re-asked for nothing. Only turn the model on once the dossier is
-right, or pay for reasoning over a dossier nobody has checked.
+**On the spine since build-the-spine ticket 14.** Core Intake builds the
+context from the case's own words; `backend.diagnose` runs through
+`run_agent` — its toolsets, its grounding check — with the brief the first
+plan gives it (board `domains-plug-in` ticket 15). The Planner and the draft
+are not run: this scores the diagnosis. Without `--diagnose` nothing calls a
+model, and the run shows where Intake placed the case.
 
-    uv run replay_case.py 6                 # no model, ~5s
-    uv run replay_case.py 6 --diagnose      # one model call
-    uv run replay_case.py 6 --into ./out    # where the report goes
+    uv run replay_case.py 6                 # Intake only, no model
+    uv run replay_case.py 6 --diagnose      # the diagnose step
     uv run replay_case.py --case data/cases/x.json --diagnose   # offline, for ever
-
-Node 0 does not run: its result is built from the parameters the task
-already holds. Node 0 is the extractor, it is a model call, and it has
-nothing to add to a task whose parameters were extracted once already.
 """
 
 from __future__ import annotations
@@ -41,52 +37,40 @@ import shlex
 import sqlite3
 import sys
 import time
-from dataclasses import dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields
 from dataclasses import replace as _dc_replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import mkdtemp
-from types import SimpleNamespace
 from typing import Any
 
 from dotenv import load_dotenv
 
 from friday.kernel.config import load_config
 from friday.kernel.dag import adapter
-from friday.kernel.dag.task_types import BootContext
-from friday.kernel.domain.conversation import ConversationId
-from friday.sdk.actions import Ask, HandOver, Reply
+from friday.kernel.harness.run_agent import run_agent
+from friday.kernel.spine.brief import agent_input
+from friday.kernel.spine.intake import from_turns
+from friday.sdk.actions import Ask, HandOver
+from friday.sdk.evidence import Evidence
+from friday.sdk.toolset import RunContext
 from friday.sdk.workflow import DAG, NodeRun
 from friday.sdk.workflow import Deps as DAGDeps
 from friday.store.db import Database
-from plugins.backend.graph import DIAGNOSE, build_backend_dag
+from plugins.backend.actions import TRACE_PROBLEM
+from plugins.backend.agents import DIAGNOSE
 from plugins.backend.params import TraceProblemParams
+from plugins.backend.placement import enrich
 from plugins.backend.toolsets import CODE, LOGS
 from plugins.backend.toolsets.logs import LokiSource, SshKubectlSource, log_tools
 
-
-class _WithoutDiagnose:
-    """The config, with the diagnose agent hidden: `agent(DIAGNOSE)` is `None`,
-    so the node skips the way it does with no model."""
-
-    def __init__(self, config) -> None:
-        self._config = config
-
-    def __getattr__(self, name: str):
-        return getattr(self._config, name)
-
-    def agent(self, declaration):
-        return None if declaration == DIAGNOSE else self._config.agent(declaration)
-
-
-def _replay_dag(config, *, with_model, reports, toolsets=None):
-    """The `backend.trace_problem` DAG, built through the plugin against a boot
-    context — the composition root's job, done here for one replayed case. The
-    diagnose model is dropped when `with_model` is false by hiding its agent.
-    `toolsets` replaces the plugin's own (a captured case's `backend.logs`)."""
-    whole = config if with_model else _WithoutDiagnose(config)
-    api = SimpleNamespace(caps=BootContext(config=whole, servers={}))
-    return build_backend_dag(api, toolsets=toolsets, reports_dir=reports)
+#: The brief the first plan gives `backend.diagnose` — a goal, not a method
+#: (build-the-spine ticket 20): fixed here so a score moves with the agent,
+#: not with the Planner.
+BRIEF = (
+    "Establish which field, rule or call rejected the reporter's request, "
+    "and whose fault it is."
+)
 
 
 def _canned_toolsets(name: str, source: Any) -> tuple:
@@ -154,111 +138,97 @@ def copy_aside(live: Path, into: Path) -> Path:
     return copy
 
 
-def answers(
-    runs: list[NodeRun], final: dict[str, Any], *, wall_s: float
-) -> dict[str, Any]:
-    """Ticket 00's questions 3 and 4, off what the run recorded.
+@dataclass(frozen=True, slots=True)
+class Ran:
+    """One diagnose step: where Intake placed the case, what the agent came
+    to (a `Diagnosis`, or the `Ask`/`HandOver` it ended with; `None` without
+    a model), what it was shown, and how long it took."""
 
-    Questions 1 and 2 are not here and cannot be: whether the dossier held
-    the decisive line, and whether the cause is right, are the operator's to
-    say. This is the half a run can answer about itself, so the half that is
-    left is small enough to be worth asking a person.
-    """
-    found = final.get("find_request_log", {})
-    read = final.get("read_failing_code", {})
-    thought = final.get("diagnose", {})
-    broke = [r for r in runs if r.status in {"error", "timed_out"}]
-    return {
-        "wall_s": round(wall_s, 1),
-        "nodes": [
-            {
-                "node": r.node,
-                # **Not `r.status` alone.** `node_runs` records any `Action`
-                # as `ok`, because an `Action` carries no envelope — so a
-                # node that ended the whole run with a hand-over reads
-                # exactly like one that succeeded and passed the work on.
-                # That cost ten minutes of reading the wrong thing the first
-                # time this tool was pointed at a broken row.
-                "status": _decided(final.get(r.node)) or r.status,
-                "ms": r.duration_ms,
-                "reason": _said(final.get(r.node)) or r.reason,
-            }
-            for r in runs
-        ],
-        "dossier_lines": found.get("kept", 0) if isinstance(found, dict) else 0,
-        "lines_offered": found.get("total", 0) if isinstance(found, dict) else 0,
-        "source": found.get("source", "—") if isinstance(found, dict) else "—",
-        "code_read": bool(read.get("code")) if isinstance(read, dict) else False,
-        "diagnosis": thought.get("diagnosis") if isinstance(thought, dict) else None,
-        "not_checked": list(thought.get("not_checked", []))
-        if isinstance(thought, dict)
-        else [],
-        # Question 4. A node that ended `error` or `timed_out` is a seam that
-        # broke; an `empty` or `skipped` one did its job and had nothing.
-        "broke": [f"{r.node}: {r.reason}" for r in broke],
-    }
+    placement: Any
+    outcome: Any
+    evidence: Evidence
+    wall_s: float
+
+    @property
+    def diagnosis(self) -> dict | None:
+        """The diagnosis as data, the eval's input — `None` when the step
+        asked, handed over, was voided by its check, or did not run."""
+        if self.outcome is None or isinstance(self.outcome, (Ask, HandOver)):
+            return None
+        return asdict(self.outcome)
 
 
-def _decided(result: Any) -> str:
-    """What a node that answered with an `Action` did, in a word."""
-    return {HandOver: "handed over", Ask: "asked", Reply: "replied"}.get(
-        type(result), ""
-    )
-
-
-def _said(result: Any) -> str:
-    if isinstance(result, HandOver):
-        return result.reason
-    if isinstance(result, (Ask, Reply)):
-        return result.text
-    return ""
-
-
-def render(
-    task_id: int | str,
-    found: dict[str, Any],
-    report: Path | None,
+async def diagnose(
+    db: Any,
     *,
-    held: bool | None = None,
-) -> str:
-    lines = [
-        f"=== task {task_id}: {found['wall_s']}s, "
-        f"{len(found['nodes'])} nodes, "
-        f"{'one model call' if found['diagnosis'] is not None else 'no model call'} ===",
-    ]
-    for node in found["nodes"]:
-        lines.append(
-            f"  {node['node']:<18} {node['status']:<8} {node['ms']:>6}ms  "
-            f"{node['reason'][:78]}"
+    task_id: int,
+    turns: tuple[str, ...],
+    channel_id: str,
+    reported_at: str,
+    toolsets: tuple,
+    config: Any,
+    with_model: bool,
+) -> Ran:
+    """Intake over `turns`, then — `with_model` — the diagnose step."""
+    started = time.monotonic()
+    context = await from_turns(
+        db,
+        turns=turns,
+        channel_id=channel_id,
+        reported_at=reported_at,
+        enricher=enrich,
+    )
+    evidence = Evidence()
+    outcome = None
+    if with_model:
+        outcome = await run_agent(
+            DIAGNOSE,
+            config.tiers[DIAGNOSE.tier],
+            TRACE_PROBLEM.contract,
+            toolsets,
+            RunContext(
+                task_id=task_id,
+                domain=context.domain,
+                evidence=evidence,
+                mcp={},
+                reported_at=datetime.fromisoformat(reported_at),
+            ),
+            agent_input(BRIEF, context, {}),
         )
-    lines += [
-        "",
-        f"3. dossier: {found['dossier_lines']} of {found['lines_offered']} "
-        f"lines from `{found['source']}`; code read: {found['code_read']}",
-        f"4. seams that broke: {', '.join(found['broke']) or 'none'}",
+    return Ran(context.domain, outcome, evidence, time.monotonic() - started)
+
+
+def render(name: int | str, ran: Ran, *, decisive: str | None = None) -> str:
+    placement = ran.placement
+    lines = [
+        f"=== {name}: {ran.wall_s:.1f}s, "
+        f"{'the diagnose step ran' if ran.outcome is not None else 'no model call'} ===",
+        f"  placed: env={placement.env} service={placement.service or '—'} "
+        f"repo={placement.repo_path or '—'}",
+        f"  read: {ran.evidence.reads} reads, {len(ran.evidence.index)} lines shown",
         "",
     ]
-    if found["diagnosis"]:
-        lines.append(f"2. cause: {found['diagnosis'].get('cause', '')}")
+    outcome = ran.outcome
+    if isinstance(outcome, HandOver):
+        lines.append(f"2. handed over: {outcome.reason}")
+    elif isinstance(outcome, Ask):
+        lines.append(f"2. asked the reporter: {outcome.text}")
+    elif ran.diagnosis is not None:
+        lines.append(f"2. cause: {ran.diagnosis.get('cause', '')}")
         lines.append(
-            f"   {found['diagnosis'].get('confidence')} · "
-            f"{'conclusive' if found['diagnosis'].get('conclusive') else 'not conclusive'}"
+            f"   {ran.diagnosis.get('confidence')} · "
+            f"{'conclusive' if ran.diagnosis.get('conclusive') else 'not conclusive'}"
+            f" · refs {', '.join(ran.diagnosis.get('refs') or ()) or 'none'}"
         )
     else:
         lines.append("2. no diagnosis this run")
-    for line in found["not_checked"]:
+    for line in ran.evidence.not_checked:
         lines.append(f"   not checked: {line}")
-    lines += [
-        "",
-        # A captured case wrote down the decisive line when it was captured,
-        # so question 1 is answered here rather than asked here. Only a case
-        # that did not say gets the question.
-        f"1. the line you called decisive is in the dossier: {held}"
-        if held is not None
-        else "1. did the dossier hold the line you call decisive? "
-        + ("read the report and say" if report else "no report was written"),
-        f"   {report}" if report else "",
-    ]
+    if decisive:
+        # A captured case wrote down the decisive line when it was captured:
+        # question 1 is whether the run was ever shown it.
+        shown = any(decisive in line for line in ran.evidence.index.values())
+        lines += ["", f"1. the line you called decisive was read: {shown}"]
     return "\n".join(lines)
 
 
@@ -494,74 +464,52 @@ class CannedKubectl(SshKubectlSource):
         return "\n".join(kept) + ("\n" if kept else "")
 
 
-async def run_captured(case: dict, *, with_model: bool, into: Path):
-    """One captured case through the graph, returning what the run produced.
+def case_turns(case: dict[str, Any]) -> tuple[str, ...]:
+    """What the reporter said, rebuilt from a captured case's parameters —
+    the turns core Intake reads."""
+    params = case_params(case)
+    said = [params.get("summary") or "", params.get("curl") or ""]
+    if params.get("correlation_id"):
+        said.append(f"correlationId {params['correlation_id']}")
+    if params.get("environment"):
+        said.append(f"environment {params['environment']}")
+    return tuple(t for t in said if t)
 
-    Split out of `replay_captured` so the eval runner and the command line
-    share one path. A second way to run a case is a second way for a score
-    to disagree with what the operator sees.
-    """
+
+async def run_captured(case: dict, *, with_model: bool, into: Path) -> Ran:
+    """One captured case through the diagnose step. The eval runner and the
+    command line share this one path: a second way to run a case is a second
+    way for a score to disagree with what the operator sees."""
     config = load_config()
     into.mkdir(parents=True, exist_ok=True)
     db = await Database.connect(str(copy_aside(Path(config.database_path), into)))
     try:
-        reports = into / "reports"
-        params = case_params(case)
         name, source = canned_source(case)
-        dag = _replay_dag(
-            config,
-            with_model=with_model,
-            reports=reports,
+        return await diagnose(
+            db,
+            task_id=int(case["id"]) if str(case["id"]).isdigit() else 0,
+            turns=case_turns(case),
+            channel_id=str(case["channel_id"]),
+            reported_at=case["reported_at"],
             toolsets=_canned_toolsets(name, source),
+            config=config,
+            with_model=with_model,
         )
-        deps = DAGDeps(
-            task=SimpleNamespace(
-                id=case["id"],
-                conversation=ConversationId("discord", str(case["channel_id"])),
-                params=params,
-                created_at=datetime.fromisoformat(case["reported_at"]),
-            ),
-            db=db,
-        )
-        final, runs, wall_s = await _run_on_adapter(
-            dag,
-            deps=deps,
-            seed={"prepare": TraceProblemParams(**params)},
-            system_db=into / "replay-system.db",
-            wfid=f"replay-{case['id']}",
-        )
-        return final, runs, wall_s, reports
     finally:
         await db.close()
 
 
 async def replay_captured(case_path: Path, *, with_model: bool, into: Path) -> int:
-    """One captured case, through the same graph the live one runs."""
     case = json.loads(case_path.read_text())
-    final, runs, wall_s, reports = await run_captured(
-        case, with_model=with_model, into=into
-    )
-    found = answers(runs, final, wall_s=wall_s)
-    written = next(iter(sorted(reports.glob(f"{case['id']}.md"))), None)
-    # The half a captured case can score by itself: the operator wrote down
-    # the line they call decisive when they captured it, so question 1 stops
-    # being a question put to a person every run.
-    decisive = case.get("decisive")
-    held = None
-    if decisive:
-        dossier = final.get("find_request_log", {})
-        held = decisive in (
-            dossier.get("dossier", "") if isinstance(dossier, dict) else ""
-        )
-    print(render(case["id"], found, written, held=held))
-    if decisive and not held:
-        print(f"   missing: {decisive[:120]}")
+    ran = await run_captured(case, with_model=with_model, into=into)
+    print(render(case["id"], ran, decisive=case.get("decisive")))
     if case.get("cause"):
         print(f"\n2. you said the cause is: {case['cause']}")
     return 0
 
 
 async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
+    """A task already in the store, its own turns, the live read tools."""
     config = load_config()
     into.mkdir(parents=True, exist_ok=True)
     db = await Database.connect(str(copy_aside(Path(config.database_path), into)))
@@ -570,34 +518,23 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
         if task is None:
             print(f"no task {task_id}", file=sys.stderr)
             return 1
-        if task.type != "backend.trace_problem":
+        if task.type != TRACE_PROBLEM.name:
             print(
-                f"task {task_id} is {task.type}, not backend.trace_problem",
+                f"task {task_id} is {task.type}, not {TRACE_PROBLEM.name}",
                 file=sys.stderr,
             )
             return 1
-
-        reports = into / "reports"
-        dag = _replay_dag(config, with_model=with_model, reports=reports)
-        deps = DAGDeps(
-            task=SimpleNamespace(
-                id=task.id,
-                conversation=task.conversation,
-                params=task.params,
-                created_at=task.created_at,
-            ),
-            db=db,
+        ran = await diagnose(
+            db,
+            task_id=task.id,
+            turns=tuple(await db.original_turns_for(task.id)),
+            channel_id=task.conversation.channel_id,
+            reported_at=(task.created_at or datetime.now(UTC)).isoformat(),
+            toolsets=(LOGS, CODE),
+            config=config,
+            with_model=with_model,
         )
-        final, runs, wall_s = await _run_on_adapter(
-            dag,
-            deps=deps,
-            seed={"prepare": TraceProblemParams(**task.params)},
-            system_db=into / "replay-system.db",
-            wfid=f"replay-task-{task_id}",
-        )
-        found = answers(runs, final, wall_s=wall_s)
-        written = next(iter(sorted(reports.glob(f"{task_id}.md"))), None)
-        print(render(task_id, found, written))
+        print(render(task_id, ran))
         return 0
     finally:
         await db.close()
@@ -628,14 +565,14 @@ def main() -> int:
     parser.add_argument(
         "--diagnose",
         action="store_true",
-        help="run the model too. Off by default: question 1 is about the "
-        "distillation rule and costs nothing to ask.",
+        help="run the diagnose step (a model call). Off by default: where "
+        "Intake placed the case costs nothing to ask.",
     )
     parser.add_argument(
         "--into",
         type=Path,
         default=None,
-        help="where the copy and the report go. A temporary directory by "
+        help="where the copy of the database goes. A temporary directory by "
         "default, so nothing here can touch the live database.",
     )
     args = parser.parse_args()

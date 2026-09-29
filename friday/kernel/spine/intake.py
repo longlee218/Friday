@@ -3,8 +3,8 @@ network — every field is a regex, a row, or the enricher's own DB read, so it
 re-runs every reply pass cheaply and its identity diff stays stable (board
 `domains-plug-in` ticket 04; build-the-spine ticket 07).
 
-Live through the backend DAG's intake node until ticket 14 puts it on the
-spine pass.
+The spine pass's first step since ticket 14; `from_turns` also seeds a
+captured case's replay (`replay_case.py`).
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 
 from friday.sdk.intake import ArtifactRef, Hints, IntakeContext, IntakeSeed
 
-__all__ = ["MEMORY_CAP", "SKILLS_CAP", "hints_of", "intake"]
+__all__ = ["MEMORY_CAP", "SKILLS_CAP", "from_turns", "hints_of", "intake"]
 
 _UUID = re.compile(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
 #: `[artifact <id>: <description>]`, as `friday/store/_common.py`'s
@@ -47,7 +47,24 @@ async def intake(
 ) -> IntakeContext:
     """The context every agent in the run receives. `enricher` is the task's
     domain's (`Plugin.enricher`); `None` for a domain with none."""
-    turns = tuple(await db.original_turns_for(task_id))
+    return await from_turns(
+        db,
+        turns=tuple(await db.original_turns_for(task_id)),
+        channel_id=channel_id,
+        reported_at=reported_at,
+        enricher=enricher,
+    )
+
+
+async def from_turns(
+    db: Any,
+    *,
+    turns: tuple[str, ...],
+    channel_id: str,
+    reported_at: str,
+    enricher: Enricher | None,
+) -> IntakeContext:
+    """`intake` over the reporter's `turns` as given rather than read."""
     request_text = "\n".join(turns)
     seed = IntakeSeed(
         channel_id, request_text, reported_at, hints_of(request_text), turns

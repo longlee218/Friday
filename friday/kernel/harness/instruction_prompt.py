@@ -118,6 +118,8 @@ __all__ = [
     "skill_metadata",
     "skill_system",
     "soul",
+    "spine_facts",
+    "spine_task",
     "task",
     "thinking_style",
     "tone_examples",
@@ -310,6 +312,55 @@ def task(task_type: str, params: Params | None, asking: str | None) -> Section:
         parts.append(f"params:\n{_render_params(params)}")
     if asking:
         parts.append(f"asking: {_escape(asking)}")
+    return Section("task", "\n".join(parts))
+
+
+def _json_block(value: Any) -> str:
+    """`value` as indented JSON, escaped for a section body — a dataclass,
+    at any depth, as its fields."""
+
+    def data(v: Any) -> Any:
+        if hasattr(v, "__dataclass_fields__") and not isinstance(v, type):
+            return asdict(v)
+        return str(v)
+
+    return _escape(json.dumps(value, ensure_ascii=False, indent=2, default=data))
+
+
+def spine_facts(
+    *,
+    request: str,
+    known: dict[str, Any],
+    memory: Sequence[str],
+    skills: Sequence[str],
+    found: dict[str, Any],
+) -> list[Section]:
+    """What a spine agent step is shown before its brief (build-the-spine
+    ticket 14): the request, quoted; what Intake found and what the earlier
+    steps it reads came to, as escaped JSON; what Friday remembers."""
+    lines = lambda items: "\n".join(f"- {_escape(i)}" for i in items)
+    return [
+        Section("request", user_input(request)),
+        Section("intake", _json_block(known)),
+        Section("memory", lines(memory)),
+        Section("skills", lines(skills)),
+        Section("found", _json_block(found) if found else ""),
+    ]
+
+
+def spine_task(
+    action: str, *, brief: str = "", known: Any = None, found: Any = None
+) -> Section:
+    """The `task` section of a spine step: the brief an agent step runs, or
+    — for the `draft` step — the action, the intake context and what was
+    found, every value escaped."""
+    parts = [f"task_type: {html.escape(action)}"] if action else []
+    if known is not None:
+        parts.append(f"intake:\n{_json_block(known)}")
+    if found is not None:
+        parts.append(f"found:\n{_json_block(found)}")
+    if brief:
+        parts.append(f"asking: {_escape(brief)}")
     return Section("task", "\n".join(parts))
 
 

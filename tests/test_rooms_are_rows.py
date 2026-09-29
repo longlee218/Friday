@@ -19,9 +19,21 @@ import json
 from friday.kernel.config import AgentConfig
 from friday.kernel.domain.memory import MemoryStatus
 from friday.kernel.domain.state import FridayState
+from friday.sdk.intake import Hints, IntakeContext
 from friday.sdk.memory import MemoryOrigin
 from friday.sdk.testing import ScriptedModel, assistant_message
 from tests.conftest import make_event
+
+#: What `Responder.reply` needs besides the room; spread into each call.
+REPLY = dict(
+    action="trace_problem",
+    intake=IntakeContext(
+        request_text="cho anh xin correlationId",
+        reported_at="2026-09-30T09:00:00+07:00",
+        hints=Hints(),
+    ),
+    reads={},
+)
 
 ADMIN = MemoryOrigin.ADMIN
 SUMMARY_CONFIG = AgentConfig(
@@ -268,8 +280,8 @@ async def test_the_responder_is_shown_the_summary_and_not_the_facts(db):
         model=FunctionModel(_capture, model_name="test-model"),
         db=db,
     )
-    await responder.draft(
-        asking="cho anh xin correlationId",
+    await responder.reply(
+        **REPLY,
         state=FridayState(channel_id="watched", agent="responder"),
     )
 

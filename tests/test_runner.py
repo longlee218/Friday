@@ -24,10 +24,11 @@ from friday.kernel.spine.plan import (
     Plan,
 )
 from friday.kernel.spine.plan_gate import Frozen, gate_plan
-from friday.kernel.spine.runner import STEP_ATTEMPTS, Steps, run_plan
+from friday.kernel.spine.runner import STEP_ATTEMPTS, Resume, Steps, run_plan
 from friday.sdk.action import ActionContract, Limits
 from friday.sdk.actions import Ask, HandOver, Replan, Reply, Retriage
 from friday.sdk.agent import AgentSpec, Budget
+from friday.sdk.evidence import Evidence
 
 ROOT = Path(__file__).resolve().parent.parent
 PLACEMENT = ("prod", "onboarding")
@@ -104,7 +105,7 @@ class Script:
         self.draft_calls: list[dict] = []
         self.planner_calls: list[tuple[Frozen, dict, Replan]] = []
 
-    async def agent(self, step, reads):
+    async def agent(self, step, reads, resume=None):
         self.agent_calls.append((step.brief, dict(reads)))
         answer = self.answers[step.brief]
         if isinstance(answer, list):
@@ -198,15 +199,104 @@ async def test_an_agent_outcome_is_stored_and_stops_the_plan(db, outcome):
     assert script.draft_calls == [] and len(script.agent_calls) == 1
 
 
-async def test_a_stored_ask_keeps_its_history_but_not_its_evidence(db):
-    """Where `Evidence` is stored is ticket 14's call (operator, 2026-09-29)."""
-    script = Script({"look": Ask("which id?", history=[{"a": 1}], evidence=object())})
+async def test_a_stored_ask_keeps_its_history_and_its_evidence(db):
+    """Ticket 14: the `Evidence` is stored with the `Ask`, so a continuation
+    numbers on from the same place."""
+    evidence = Evidence()
+    evidence.show(["ERROR email invalid"])
+    script = Script({"look": Ask("which id?", history=[{"a": 1}], evidence=evidence)})
     frozen = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)))
 
     await _run(db, frozen, script)
     end = await _run(db, frozen, script)
 
-    assert end.outcome == Ask("which id?", history=[{"a": 1}], evidence=None)
+    assert end.outcome.history == [{"a": 1}]
+    assert end.outcome.evidence.index == {"L1": "ERROR email invalid"}
+    assert end.outcome.evidence.show(["next"]) == "L2 | next"
+
+
+# ---- passes (ticket 14) -----------------------------------------------------
+
+
+class Replying(Script):
+    """A script whose reporter said `reply` since the question."""
+
+    def __init__(self, answers=None, plans=(), reply="the id is 42") -> None:
+        super().__init__(answers, plans)
+        self.reply = reply
+        self.resumes: list = []
+
+    async def agent(self, step, reads, resume=None):
+        self.resumes.append(resume)
+        return await super().agent(step, reads, resume)
+
+    async def replied(self, since):
+        return self.reply
+
+    def steps(self) -> Steps:
+        return Steps(
+            agent=self.agent,
+            draft=self.draft,
+            planner=self.planner,
+            replied=self.replied,
+        )
+
+
+async def test_a_later_pass_continues_the_agents_ask_with_the_reply(db):
+    asked = Ask("which id?", history=[{"a": 1}])
+    script = Replying({"look": [asked, Found("email rule", ["L3"])]})
+    frozen = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)))
+
+    await _run(db, frozen, script, pass_no=1)
+    end = await _run(db, frozen, script, pass_no=2)
+
+    assert script.resumes == [None, Resume(asked, "the id is 42")]
+    assert end.outcome == Reply("drafted from p1")
+
+
+async def test_the_same_pass_reuses_its_own_ask(db):
+    """A crash re-run of the pass that asked must not answer its own question."""
+    script = Replying({"look": Ask("which id?", history=[{"a": 1}])})
+    frozen = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)))
+
+    await _run(db, frozen, script, pass_no=1)
+    await _run(db, frozen, script, pass_no=1)
+
+    assert len(script.agent_calls) == 1
+
+
+async def test_the_planners_answered_question_is_a_replan(db):
+    nxt = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)), version=2)
+    script = Replying({"look": Found("x")}, plans=[nxt])
+    frozen = _frozen(AskStep(id="p1", question="which env?"))
+
+    await _run(db, frozen, script, pass_no=1)
+    end = await _run(db, frozen, script, pass_no=2)
+
+    ((_, _, signal),) = script.planner_calls
+    assert signal.found == "the id is 42"
+    assert end.replans_used == 1 and end.outcome == Reply("drafted from p1")
+
+
+async def test_a_hand_over_from_an_earlier_pass_is_run_again(db):
+    script = Replying({"look": [HandOver("stuck"), Found("x")]})
+    frozen = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)))
+
+    await _run(db, frozen, script, pass_no=1)
+    end = await _run(db, frozen, script, pass_no=2)
+
+    assert script.resumes == [None, None]
+    assert end.outcome == Reply("drafted from p1")
+
+
+async def test_a_result_from_an_earlier_pass_is_reused(db):
+    script = Replying({"look": Found("x")})
+    frozen = _frozen(_agent("p1", "look"), DraftStep(id="p2", reads=("p1",)))
+
+    await _run(db, frozen, script, pass_no=1)
+    await _run(db, frozen, script, pass_no=2)
+
+    assert len(script.agent_calls) == 1
 
 
 async def test_the_planners_ask_and_hand_over_steps_stop_the_plan(db):

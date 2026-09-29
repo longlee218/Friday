@@ -14,6 +14,7 @@ is the bottom of our own code — it imports nothing of ours — `kernel` import
 from friday.sdk.action import Action, ActionContract, Limits, Recognition
 from friday.sdk.agent import AgentSpec, Budget
 from friday.sdk.eval import EvalCase, EvalSpec
+from friday.sdk.evidence import Evidence
 from friday.sdk.intake import ArtifactRef, Hints, IntakeContext, IntakeSeed
 from friday.sdk.memory import MemoryKindSpec, Origin
 from friday.sdk.model import Model
@@ -41,6 +42,7 @@ __all__ = [
     "CodeSource",
     "EvalCase",
     "EvalSpec",
+    "Evidence",
     "Hints",
     "InSet",
     "IntakeContext",

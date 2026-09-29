@@ -405,9 +405,9 @@ def test_the_questions_this_system_can_ask_are_written_down():
     new question is a new thing a reporter is asked, and that is worth a line
     in a diff.
 
-    The split this feeds — which of these name something that must survive
-    translation — is asserted where the rule that needs it lives, in
-    `tests/test_responder_check.py`.
+    The split this fed — which of these name something that must survive
+    translation — was the responder check's, deleted with the ask rewording
+    in build-the-spine ticket 14.
     """
     assert _asks() == {
         ("TraceProblemParams", "environment"): "which environment you're on",

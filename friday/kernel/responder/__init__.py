@@ -19,17 +19,21 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from friday.kernel.config import AgentConfig
 from friday.kernel.domain.messages import InboundEvent
 from friday.kernel.domain.state import FridayState
-from friday.kernel.domain.tasks import Params
 from friday.kernel.harness.harness import Harness
-from friday.kernel.responder.prompt import build_input, build_instructions
+from friday.kernel.responder.prompt import (
+    build_instructions,
+    build_reply_input,
+)
 from friday.kernel.toolsets.memory import memory_tools
 from friday.sdk.agent import AgentDeclaration
+from friday.sdk.intake import IntakeContext
 
 __all__ = ["Draft", "Responder"]
 
@@ -136,14 +140,14 @@ class Responder:
         #: prompt described them only when the catalogue had lines, so a fresh
         #: install handed the agent three tools it was never told about. The
         #: two facts agree now because they are read off the same one, which
-        #: is what lets `build_input` keep deciding from the catalogue alone.
+        #: is what lets `build_reply_input` keep deciding from the catalogue alone.
         #: Only the memory tools are wired here now. The four skill tools
         #: moved into `Harness`, which hands them to any agent given a
         #: library — the operator's call, 2026-09-07: four lines every agent
         #: has to remember is four lines every agent can forget, and
         #: forgetting them looks like a model that did not think to reach.
         #:
-        #: Given only when there is a store to back them, and `build_input`'s
+        #: Given only when there is a store to back them, and `build_reply_input`'s
         #: `has_memory` reads this same fact rather than a second flag that
         #: could drift from it.
         self._has_memory = db is not None
@@ -175,93 +179,70 @@ class Responder:
             tools=tools,
             # **Unconditional, where it used to follow `_has_memory`.** The
             # state travels whether this agent has memory tools or not — see
-            # `draft`, which says why — so a context type that appeared only
+            # `reply`, which says why — so a context type that appeared only
             # with the tools was the last place the slot meant two things
             # depending on how the agent was built.
             context_type=FridayState,
             record=record,
         )
 
-    async def draft(
+    async def reply(
         self,
         *,
-        asking: str,
-        params: Params | None = None,
-        #: What this run is about: the room, the task, and the message that
-        #: opened it. **One object rather than the three parameters this
-        #: replaced** (board `every-answer-has-a-shape`, D8/D22) — `channel_id`
-        #: for the room lookup, `task_id` for the recording sink, and
-        #: `message_id` so a memory written during this draft carries the row
-        #: the Rooms screen joins its enrichment glyph on. Each layer naming
-        #: the subset it happened to need is how adding one more fact became
-        #: threading one more parameter.
-        #:
-        #: `None` for a caller with no room to be in, which is a test and not
-        #: a real task; a memory tool run without one reports "unavailable"
-        #: rather than crashing.
+        action: str,
+        intake: IntakeContext,
+        reads: Mapping[str, Any],
         state: FridayState | None = None,
         stranger: bool = False,
         context: Sequence[InboundEvent] = (),
         tone: Sequence[InboundEvent] = (),
     ) -> Draft | None:
-        """Write what `asking` says, in the operator's voice.
-
-        `params` is what this task actually knows, and it is not optional in
-        spirit. Without it the model has only the conversation to go on — and a
-        conversation is a whole channel, which may hold another task's
-        correlationId. Asked to request one, it read the channel, found one
-        that belonged to a different report, and wrote "ok có correlationId
-        rồi, để anh trace thử": false, promising work nobody would do, and sent
-        under the operator's name with no approval step.
-
-        None when it could not write — the caller falls back to the template.
-        Never a message in someone else's name that the model was unsure of,
-        and never silence either.
-        """
+        """The spine's `draft` step (build-the-spine ticket 14): the reply to
+        the reporter, from what the steps it reads came to and the intake
+        context — the no-invention rule over both (`prompt.REPLYING`).
+        `None` when it could not write; there is no template to fall back
+        on, so the step fails."""
         channel_id = state.channel_id if state is not None else None
         summary = (
             await self._db.room_summary(channel_id)
             if self._db is not None and channel_id is not None
             else None
         )
-        said = build_input(
-            asking=asking,
-            params=params,
+        said = build_reply_input(
+            action=action,
+            intake=intake,
+            reads=reads,
             summary=summary,
             stranger=stranger,
             has_memory=self._has_memory,
             tone=tone,
             context=context,
         )
-        # **The state travels whether or not this agent has memory tools**, and
-        # that took a review to get right: it was also gated on `_has_memory`,
-        # which reads sensible — no tools, nothing to scope — and quietly cost
-        # every memory-less responder its own correlation, since the recording
-        # sink reads the message and the task off this same context (D8). What
-        # the tools' absence changes is which tools exist, not what the run is
-        # about. `None` only when there is no state at all, which is a test
-        # and not a real task; a memory tool run without one reports
-        # "unavailable" rather than crashing.
+        return await self._write(said, state)
+
+    async def _write(self, said: str, state: FridayState | None) -> Draft | None:
+        # **The state travels whether or not this agent has memory tools**: the
+        # recording sink reads the message and the task off this same context
+        # (D8), so gating it on the tools cost every memory-less responder its
+        # own correlation. `None` only when there is no state at all, which is
+        # a test and not a real task.
         #
         # **`as_agent` rather than the state as handed in**, and it is a
-        # guarantee rather than a tidy-up: a memory's provenance is "who wrote
-        # this, and while doing what", and this method is where the answer is
-        # known for certain. Taking the caller's word for it means a memory
-        # written during a draft can be attributed to whoever ran before —
-        # the state travels a whole message's journey, and triage is at the
-        # front of it.
+        # guarantee: a memory's provenance is "who wrote this, and while doing
+        # what", and this is where the answer is known for certain — the state
+        # travels a whole message's journey, and triage is at the front of it.
         scope = state.as_agent("responder") if state is not None else None
         # No `task_id=` here: the state carries it, and `_About.of` reads it
         # off the context (D8). Naming it again was the state being unpacked
         # one line after being bundled.
         result = await self._run.run(said, context=scope)
         if result is None:
-            log.warning("falling back to the template")
+            log.warning("the responder wrote nothing")
             return None
 
         text = _without_reasoning(result.output or "")
         if not text:
-            log.warning("responder returned nothing, falling back to the template")
+            log.warning("the responder returned an empty draft")
             return None
         return Draft(text)
 

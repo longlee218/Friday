@@ -129,6 +129,14 @@ class Task(Base):
     confidence: Mapped[float]
     params: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(IsoDateTime)
+    #: The spine pass this task is on: the workflow id is
+    #: `task-<id>/pass-<pass_no>`. +1 in the same transaction as every move
+    #: into `pending` (build-the-spine ticket 14).
+    pass_no: Mapped[int] = mapped_column(default=1, server_default="1")
+    #: Why the current pass started: `first`, `reply` (from
+    #: `waiting_for_details`, or a reporter message mid-pass), `hand_back`
+    #: (from `needs_human`) or `reopen` (any other move into `pending`).
+    pass_cause: Mapped[str] = mapped_column(default="first", server_default="first")
 
 
 class Verdict(Base):
@@ -244,6 +252,13 @@ class StepResult(Base):
 
     task_id: Mapped[int] = mapped_column(primary_key=True)
     step_key: Mapped[str] = mapped_column(primary_key=True)
+    #: The pass that stored it (ticket 14). A key holds one row per pass at
+    #: most: a stored `Ask` is continued, and a stored `HandOver` re-run, by
+    #: a later pass, whose result lands beside it; the newest row is the one
+    #: the runner reads.
+    pass_no: Mapped[int] = mapped_column(
+        primary_key=True, default=1, server_default="1"
+    )
     #: The step's id and plan version when it ran — for the board, not a key.
     step_id: Mapped[str]
     plan_version: Mapped[int]
@@ -251,6 +266,39 @@ class StepResult(Base):
     kind: Mapped[str]
     #: The result as JSON data; an `Ask` without its `Evidence` (ticket 14).
     body: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(IsoDateTime)
+
+
+class PlanVersion(Base):
+    """One version of a task's plan, frozen or refused (build-the-spine
+    ticket 14; board `domains-plug-in` tickets 11 and 14 §6). Idempotent on
+    `(task_id, version)`: a crash that re-runs the Planner keeps the first
+    version stored. The board reads these; the pass reads the newest frozen
+    one back to continue or replan from.
+    """
+
+    __tablename__ = "plans"
+
+    task_id: Mapped[int] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(primary_key=True)
+    #: The hash of the version this one replaced; `None` for version 1.
+    replaces: Mapped[str | None]
+    #: `first | replan | reply | hand_back` — what made the Planner write it.
+    #: `replan` and `reply` count toward the contract's `max_replans`, from
+    #: the last `hand_back` on.
+    cause: Mapped[str]
+    #: The task's placement identity when it was planned, as JSON; a pass
+    #: whose Intake differs replans.
+    placement: Mapped[list] = mapped_column(JSON)
+    #: The plan as JSON — the frozen one, or the last one refused; `None`
+    #: when the Planner never answered.
+    body: Mapped[dict | None] = mapped_column(JSON)
+    #: `plan_hash` when GatePlan froze it; `None` when refused.
+    hash: Mapped[str | None]
+    #: A refused version's errors, one list per try, in order; `[]` for a
+    #: frozen one.
+    gate_errors: Mapped[list] = mapped_column(JSON, default=list)
+    pass_no: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(IsoDateTime)
 
 

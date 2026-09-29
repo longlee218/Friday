@@ -19,12 +19,14 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 11 | The Planner and its plan-shape eval | ✅ done (main, 2026-09-29); `core.planner` 6/8 on `strong` (glm-5.3-flash) | 06, 10 |
 | 12 | The WorkflowRunner and `step_results` | ✅ done (main, 2026-09-29) | 06, 10 |
 | 13 | The assembled triage prompt | ✅ done (main, 2026-09-29); `core.triage` measured 2026-09-29: deepseek 34/35, `trace_problem` subset qwen 21/23 | 05 |
-| 14 | The spine pass; `trace_problem` moves onto it | ⬜ | 07, 08, 09, 11, 12, 13 |
+| 14 | The spine pass; `trace_problem` moves onto it | 🧑 code in (main, 2026-09-30); waiting on the operator: the paid `backend.trace_problem` eval, one real end-to-end run, a read of the rendered diagnose prompt | 07, 08, 09, 11, 12, 13 |
 | 15 | `backend.answer_question` on the spine | ⬜ | 14 |
 | 16 | `ops.request_permission` on the spine; delete the DAG path | ⬜ | 14, 15 |
 | 17 | Re-triage | ⬜ | 16 |
 | 18 | The board shows plans and re-triage | ⬜ | 17 |
 | 19 | Doc sweep | ⬜ | 18 |
+| 20 | The Planner hands over goals, not methods | ⬜ opened 2026-09-30 (operator design review): brief = goal not method, empty `toolsets` = full grant, `replan` docstring says when | 14 |
+| 21 | The Planner reads the reporter through the same boundary | ⬜ opened 2026-09-30: `planner_prompt.py` assembled from sdk sections, `trust_boundary` + `user_input`, listed in the assembler guard | 20 |
 
 Operator steps: the db wipe in 02 (asked first), the eval relabel
 confirmations in 13, one real end-to-end run in 14.

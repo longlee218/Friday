@@ -296,13 +296,13 @@ def test_triage_assembles_nothing_inline():
 
 def test_responder_assembles_nothing_inline():
     """Same rule as triage's: the family's prompt module owns every assembled
-    byte, and the draft method calls one builder."""
+    byte, and the reply method calls one builder."""
     import inspect
 
     src = inspect.getsource(
-        __import__("friday.kernel.responder", fromlist=["Responder"]).Responder.draft
+        __import__("friday.kernel.responder", fromlist=["Responder"]).Responder.reply
     )
-    assert "build_input(" in src
+    assert "build_reply_input(" in src
     assert "ContextBundle" not in src
 
 
@@ -386,14 +386,20 @@ def test_two_responder_inputs_differing_late_share_a_byte_identical_prefix():
     byte for byte — which is the provider's prompt-cache hit. Reordering the
     sections because another order reads better is a silent cost on every
     call; this is the test that makes it loud."""
-    from friday.kernel.responder.prompt import build_input
+    from friday.kernel.responder.prompt import build_reply_input
+    from friday.sdk.intake import Hints, IntakeContext
 
+    intake = IntakeContext(
+        request_text="q", reported_at="2026-09-30T09:00:00+07:00", hints=Hints()
+    )
     fixed = dict(
+        intake=intake,
+        reads={},
         now=datetime(2026, 9, 2, 12, 0, tzinfo=UTC),
         stranger=True,
     )
-    a = build_input(asking="q1", context=_events(["a", "b"]), **fixed)
-    b = build_input(asking="q2", context=_events(["a", "b", "c", "d"]), **fixed)
+    a = build_reply_input(action="q1", context=_events(["a", "b"]), **fixed)
+    b = build_reply_input(action="q2", context=_events(["a", "b", "c", "d"]), **fixed)
 
     prefix_a = a.split("<conversation>")[0]
     prefix_b = b.split("<conversation>")[0]

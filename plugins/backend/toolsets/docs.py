@@ -14,10 +14,10 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from friday.sdk.evidence import Evidence
 from friday.sdk.toolset import RunContext, ToolsetSpec, tool
 from plugins.backend.placement import Placement, Project
 from plugins.backend.toolsets.code import at_ref, numbered, unknown_repo
-from plugins.backend.toolsets.evidence import Evidence
 from plugins.backend.toolsets.release import (
     RELEASE_SERVER,
     ReleaseSource,

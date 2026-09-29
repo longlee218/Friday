@@ -430,6 +430,8 @@ def _task(row: schema.Task) -> Task:
         # that did not ask for the activity rollup.
         last_activity_at=None,
         attempts=0,
+        pass_no=row.pass_no,
+        pass_cause=row.pass_cause,
     )
 
 

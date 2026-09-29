@@ -7,6 +7,12 @@ from __future__ import annotations
 
 from friday.store._common import *
 
+#: Why a pass starts, by the state the task moved into `pending` from.
+_PASS_CAUSE = {
+    TaskState.WAITING_FOR_DETAILS: "reply",
+    TaskState.NEEDS_HUMAN: "hand_back",
+}
+
 
 class TasksRepo:
     # ---- tasks ---------------------------------------------------------
@@ -67,10 +73,15 @@ class TasksRepo:
                 raise IllegalTransition(
                     f"task {task_id} cannot go {current} -> {state}"
                 )
+            values: dict[str, Any] = {"state": str(state)}
+            if state == TaskState.PENDING and current != TaskState.PENDING:
+                # A new spine pass, in the same transaction as the move
+                # (build-the-spine ticket 14): a reply or a hand-back is
+                # `task-<id>/pass-<n+1>`, never the pass that ended.
+                values["pass_no"] = schema.Task.pass_no + 1
+                values["pass_cause"] = _PASS_CAUSE.get(current, "reopen")
             await session.execute(
-                update(schema.Task)
-                .where(schema.Task.id == task_id)
-                .values(state=str(state))
+                update(schema.Task).where(schema.Task.id == task_id).values(**values)
             )
 
     async def extraction_mark(self, task_id: int) -> ExtractionMark | None:
@@ -168,6 +179,13 @@ class TasksRepo:
         `_raise_hands` carries it rather than the task's bare type (ticket 06 —
         the workflow itself suspends now, so this is the pool's note beside it,
         not a checkpoint). Scrubbed: a reason can be a node's exception text."""
+        async with self._sessions.begin() as session:
+            await session.execute(self._pause_statement(task_id, question))
+
+    @staticmethod
+    def _pause_statement(task_id: int, question: str):
+        """`set_pause`'s upsert, for a caller with its own transaction (the
+        spine's `deliver_pass`)."""
         statement = insert(schema.DagState).values(
             task_id=task_id,
             dag_name="",
@@ -176,17 +194,14 @@ class TasksRepo:
             paused_question=scrub(question),
             updated_at=_now(),
         )
-        async with self._sessions.begin() as session:
-            await session.execute(
-                statement.on_conflict_do_update(
-                    index_elements=[schema.DagState.task_id],
-                    set_={
-                        "paused_question": statement.excluded.paused_question,
-                        "paused_at_node": statement.excluded.paused_at_node,
-                        "updated_at": statement.excluded.updated_at,
-                    },
-                )
-            )
+        return statement.on_conflict_do_update(
+            index_elements=[schema.DagState.task_id],
+            set_={
+                "paused_question": statement.excluded.paused_question,
+                "paused_at_node": statement.excluded.paused_at_node,
+                "updated_at": statement.excluded.updated_at,
+            },
+        )
 
     async def pauses_for(self, task_ids: list[int]) -> dict[int, str]:
         """The reason each of these tasks was handed over, if one was stored.

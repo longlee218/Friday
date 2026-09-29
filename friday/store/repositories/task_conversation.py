@@ -333,8 +333,55 @@ class TaskConversationRepo:
         )
         return "\n".join(turns) or None
 
+    async def last_reporter_turn_at(self, task_id: int) -> datetime | None:
+        """When the reporter last said something about this task — what the
+        spine's `deliver` holds a pass's Intake against (ticket 14)."""
+        async with self._sessions() as session:
+            opening = await self._reporter_turns(session, task_id)
+            if opening is None:
+                return None
+            return await session.scalar(
+                select(func.max(schema.Message.created_at)).where(*opening[3])
+            )
+
+    @staticmethod
+    async def _reporter_turns(session, task_id: int):
+        """`(conversation, author, opened_at, where)` of the reporter's own
+        turns on this task — same conversation, same author as the opening
+        message, from it onwards, none of ours — or `None` with no opening."""
+        opening = (
+            await session.execute(
+                select(
+                    schema.Message.conversation_id,
+                    schema.Message.author_id,
+                    schema.Message.created_at,
+                )
+                .where(schema.Message.task_id == task_id)
+                .order_by(schema.Message.created_at)
+                .limit(1)
+            )
+        ).first()
+        if opening is None:
+            return None
+        conversation_id, author_id, opened_at = opening
+        ours = select(schema.Outbound.sent_message_id).where(
+            schema.Outbound.sent_message_id.is_not(None)
+        )
+        where = (
+            schema.Message.conversation_id == conversation_id,
+            schema.Message.author_id == author_id,
+            schema.Message.created_at >= opened_at,
+            schema.Message.provider_message_id.not_in(ours),
+        )
+        return conversation_id, author_id, opened_at, where
+
     async def original_turns_for(
-        self, task_id: int, limit: int = 20, *, budget_tokens: int | None = None
+        self,
+        task_id: int,
+        limit: int = 20,
+        *,
+        budget_tokens: int | None = None,
+        since: datetime | None = None,
     ) -> list[str]:
         """Everything the reporter has said about this task, oldest first, one
         entry per message — kept apart so a reader can ask which turn said
@@ -372,6 +419,10 @@ class TaskConversationRepo:
         the operator sets it — means no compaction at all (D7): exactly
         today's behaviour, bounded by `limit` alone.
 
+        `since` keeps only the turns after it — the reporter's reply to a
+        stored `Ask`, which the spine continues the asking step with
+        (build-the-spine ticket 14).
+
         **Every verbatim span carries its artifact id, above the span
         itself** (board `read-it-the-way-the-operator-does`, ticket 18):
 
@@ -396,33 +447,15 @@ class TaskConversationRepo:
         the text, which is a copy short enough to be right.
         """
         async with self._sessions() as session:
-            opening = (
-                await session.execute(
-                    select(
-                        schema.Message.conversation_id,
-                        schema.Message.author_id,
-                        schema.Message.created_at,
-                    )
-                    .where(schema.Message.task_id == task_id)
-                    .order_by(schema.Message.created_at)
-                    .limit(1)
-                )
-            ).first()
+            opening = await self._reporter_turns(session, task_id)
             if opening is None:
                 return []
-            conversation_id, author_id, opened_at = opening
-
-            ours = select(schema.Outbound.sent_message_id).where(
-                schema.Outbound.sent_message_id.is_not(None)
-            )
+            conversation_id, author_id, opened_at, theirs = opening
+            if since is not None:
+                theirs = (*theirs, schema.Message.created_at > since)
             said = await session.execute(
                 select(schema.Message.redacted_text, schema.Message.original_text)
-                .where(
-                    schema.Message.conversation_id == conversation_id,
-                    schema.Message.author_id == author_id,
-                    schema.Message.created_at >= opened_at,
-                    schema.Message.provider_message_id.not_in(ours),
-                )
+                .where(*theirs)
                 .order_by(schema.Message.created_at)
                 .limit(limit)
             )
