@@ -21,9 +21,15 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["ReleaseSource"]
+from plugins.backend.placement import Placement
+
+__all__ = ["RELEASE_SERVER", "ReleaseSource", "RunningVersion"]
 
 log = logging.getLogger(__name__)
+
+#: The MCP server `release_status` is on. A constant (build-the-spine ticket
+#: 09): the name an install gives the server is the name in `mcp_servers`.
+RELEASE_SERVER = "devops-generic"
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,3 +102,55 @@ def _text_of(result: Any) -> str:
             for part in content
         )
     return str(content)
+
+
+@dataclass
+class RunningVersion:
+    """Which tag each of the room's repositories runs at, asked once per run.
+
+    A client helper, not a tool: `read_code`, `search_code` and `read_docs`
+    read at this tag themselves (the operator's call, 2026-09-29), so "read
+    the version that runs" is code rather than an order the prompt asks for.
+
+    **Only the case's own repository has a known version.** The release is a
+    service's, and `Placement` names one service; another repo of the room has
+    no service in this case, so it is read at the checkout and says so.
+    `release_status`'s `project` argument is the **service name** — an
+    assumption from the image name (`backend-reelme-v2:0.4.4`), not measured;
+    if it is wrong every read falls back to the checkout and says why.
+    """
+
+    release: ReleaseSource | None
+    placement: Placement
+    #: Per run, shared by every toolset of the run (`Evidence.tags`).
+    known: dict[str, tuple[str, str]]
+
+    async def of(self, repo: str) -> tuple[str, str]:
+        """`(tag, "")`, or `("", why the version is not known)`."""
+        if repo not in self.known:
+            self.known[repo] = await self._ask(repo)
+        return self.known[repo]
+
+    async def _ask(self, repo: str) -> tuple[str, str]:
+        placement = self.placement
+        if not placement.service or repo != placement.project:
+            return "", f"no service of {repo} is named in this case"
+        if self.release is None:
+            return "", f"{RELEASE_SERVER} is not connected"
+        tag = await self.release.running_tag(placement.service, placement.env)
+        if not tag:
+            return "", (
+                f"release_status gave no tag for {placement.service} in "
+                f"{placement.env}"
+            )
+        return tag, ""
+
+    @classmethod
+    def for_run(cls, run: Any) -> RunningVersion:
+        """From a toolset's `RunContext`: its narrowed `release_status`."""
+        reads = run.mcp.get(RELEASE_SERVER)
+        return cls(
+            release=None if reads is None else ReleaseSource(server=reads),
+            placement=run.domain,
+            known=run.evidence.tags,
+        )

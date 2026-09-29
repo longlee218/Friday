@@ -1,4 +1,11 @@
-"""Reading a product's database, when a log line is not enough.
+"""`backend.db`: reading a product's database, when a log line is not enough.
+
+The client (`DbSource`) and its two tools, `describe_db` and `query_db`
+(build-the-spine ticket 09). Registered, granted to no action yet: no
+contract names `backend.db` today, and the room's databases
+(`Placement.dbs`) are not filled by the enricher. Over the 200-line soft
+target because the client and its tools are one file by decision
+(`domains-plug-in` ticket 09 §3).
 
 **The model decides which table answers the question.** That is the
 operator's call of 2026-09-21 and it reverses ticket 15's "no SQL at any
@@ -44,9 +51,16 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["DbSource", "Rows", "redacted_name"]
+from friday.sdk.toolset import RunContext, ToolsetSpec, tool
+from plugins.backend.placement import Placement
+from plugins.backend.toolsets.evidence import Evidence
+
+__all__ = ["DB", "DB_SERVER", "DbSource", "Rows", "db_tools", "redacted_name"]
 
 log = logging.getLogger(__name__)
+
+#: The MCP server the databases are read through.
+DB_SERVER = "db-generic"
 
 #: What the answer is trimmed to before anyone reads it. The far side has
 #: already done the work — see the module docstring — so this is the prompt's
@@ -232,3 +246,83 @@ def _json(result: Any) -> Any:
             log.warning("the db server's `result` is not JSON")
             return None
     return inner
+
+
+def _describe_db(evidence: Evidence, source: DbSource | None):
+    @tool
+    async def describe_db(db_id: str, table: str = "") -> str:
+        """The tables and columns of one of this room's databases, or of one
+        table. Look before you query: the best-named table is not always the
+        one that holds the column.
+
+        Args:
+            db_id: the database, as this room records it.
+            table: one table's name, or empty for every table.
+        """
+        if spent := evidence.spent():
+            return spent
+        if source is None:
+            return f"{DB_SERVER} is not connected, so no database can be read."
+        evidence.reads += 1
+        try:
+            found = await source.schema(db_id, table or None)
+        except PermissionError as refused:
+            return str(refused)
+        return json.dumps(found, ensure_ascii=False, indent=1) if found else "Nothing."
+
+    return describe_db
+
+
+def _query_db(evidence: Evidence, source: DbSource | None):
+    @tool
+    async def query_db(db_id: str, sql: str) -> str:
+        """Run one read (`SELECT` or `WITH`) on one of this room's databases.
+
+        At most 50 rows come back, and personal columns (emails, tokens,
+        addresses) come back as `[REDACTED]`. Every row is citable.
+
+        Args:
+            db_id: the database, as this room records it.
+            sql: one statement that reads.
+        """
+        if spent := evidence.spent():
+            return spent
+        if source is None:
+            return f"{DB_SERVER} is not connected, so no database can be read."
+        evidence.reads += 1
+        try:
+            rows = await source.query(db_id, sql)
+        except PermissionError as refused:
+            return str(refused)
+        if rows.truncated:
+            evidence.not_checked.append(
+                f"the query on {db_id} was capped at {source.max_rows} rows of {rows.count}"
+            )
+        if not rows.rows:
+            return f"No rows ({rows.count} counted)."
+        return evidence.show(
+            json.dumps(row, ensure_ascii=False, default=str) for row in rows.rows
+        )
+
+    return query_db
+
+
+def db_tools(run: RunContext) -> list:
+    """`backend.db`'s factory: the room's databases (`Placement.dbs`) only."""
+    reads = run.mcp.get(DB_SERVER)
+    source = None if reads is None else DbSource(
+        server=reads, allowed=frozenset(run.domain.dbs)
+    )
+    return [_describe_db(run.evidence, source), _query_db(run.evidence, source)]
+
+
+DB = ToolsetSpec(
+    name="backend.db",
+    description=(
+        "Read the room's own databases, one read statement at a time, "
+        "personal columns redacted: describe_db, query_db."
+    ),
+    factory=db_tools,
+    mcp={DB_SERVER: DbSource.TOOLS},
+    domain_type=Placement,
+)

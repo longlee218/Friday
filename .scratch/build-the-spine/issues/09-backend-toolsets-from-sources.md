@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done (acceptance box 4 half-open: eval waits on a model key)
 Blocked by: 05, 07
 
 # Backend toolsets from `sources/`
@@ -29,11 +29,37 @@ per data source holding tools + client: `logs.py` (`backend.logs`:
 
 ## Acceptance
 
-- [ ] `tests/test_sources_are_the_only_door.py` allow-list =
+- [x] `tests/test_sources_are_the_only_door.py` allow-list =
       `plugins/*/toolsets/` + `core.shell`; watched red.
-- [ ] A factory cannot reach `release_rollback` (test on narrowed `Reads`).
-- [ ] `read_code` reads at the running tag, not the working copy (test).
+- [x] A factory cannot reach `release_rollback` (test on narrowed `Reads`).
+- [x] `read_code` reads at the running tag, not the working copy (test).
 - [ ] Replay via `CannedReads` still passes; `run_api_issue_eval` numbers
-      reported unchanged.
-- [ ] `docs/DESIGN.md` "Three layers" corrected (sources folded).
-- [ ] Whole suite green; `code-review` done.
+      reported unchanged. — **Half done (2026-09-29).** Replay passes: the
+      CannedReads tests, `replay_case.py --case data/cases/prod-onboarding-400.json`
+      (no model) identical to HEAD, and the case's canned Loki answer read
+      through the new `read_log` holds the decisive line. The eval needs a
+      model and there is no OpenRouter key: not run.
+- [x] `docs/DESIGN.md` "Three layers" corrected (sources folded).
+- [x] Whole suite green; `code-review` done.
+
+## Built (2026-09-29)
+
+Operator's calls this session: (Q1) the room's projects ride on
+`Placement.projects` (outside `IDENTITY`), `RunContext` gains `reported_at`;
+(Q2) `read_code`/`search_code`/`read_docs` resolve the running tag themselves
+(`RunningVersion`, cached per run in `Evidence.tags`) and fall back to the
+checkout saying why; (Q3) `backend.db` (`describe_db`, `query_db`) registered,
+granted to no action.
+
+Left open, on purpose:
+- `release_status(project=)` is assumed to take the **service name** — not
+  measured. Wrong means every read falls back to the checkout, visibly.
+- Only the case's own repo has a running tag. `answer_question`'s "prod when
+  none" (map ticket 06 §6) needs a repo → service mapping → ticket 15.
+- `not_ours` was never read by any code; dropped rather than made a constant.
+- `Plugin.config` (sdk field + `plugin_host` branch) stays; no plugin sets it.
+  Its deletion (map ticket 03 amendment §2) is not in this ticket's wording.
+- `BootContext.build_tools` is the DAG's bridge to the core narrowing; goes
+  with `caps` (14/16). `toolsets/logs.py` imports `graph/distil.py`; it moves
+  when the graph is deleted (16). Duplicate `_rfc3339`/`_text_of` in
+  `logs.py` predate this ticket.

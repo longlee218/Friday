@@ -1,8 +1,12 @@
-"""Log lines, from the two places this system may read them (D4).
+"""`backend.logs`: log lines, from the two places this system may read them (D4).
 
 Production through the devops MCP's Loki tools; dev through `kubectl` on the
 dev host, reached by `ssh dev` — not a kubeconfig on this machine, which the
 spec assumed and ticket 16 measured to be wrong.
+
+**One file per data source, tools and client together** (board
+`domains-plug-in` ticket 09 §3): the two sources below and `read_log`, the one
+tool a model calls over them. Over the 200-line soft target for that reason.
 
 Both are reads, and the guard is the absence of a verb rather than a line in
 a prompt: there is nothing here that writes to a cluster. Neither knows what
@@ -17,15 +21,50 @@ import logging
 import re
 import shlex
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS, Lines
+from friday.sdk.toolset import RunContext, ToolsetSpec, tool
+from plugins.backend.graph.distil import distil
 from plugins.backend.placement import Placement
+from plugins.backend.toolsets.evidence import Evidence
 
-__all__ = ["LokiSource", "SshKubectlSource"]
+__all__ = [
+    "LOGS",
+    "LOKI_SERVER",
+    "LOKI_TOOL",
+    "LokiSource",
+    "SSH_HOST",
+    "SshKubectlSource",
+    "log_sources",
+    "log_tools",
+]
 
 log = logging.getLogger(__name__)
+
+#: The SSH alias `kubectl` runs behind for dev, from `~/.ssh/config`.
+#: Constants since build-the-spine ticket 09: they were `backend:` settings
+#: (`ssh_host`, `loki_server`, `loki_tool`), install facts nobody changed.
+SSH_HOST = "dev"
+#: The MCP server that carries Loki, and its range-query tool.
+LOKI_SERVER = "devops-generic"
+LOKI_TOOL = "loki_query_range"
+
+#: Lines one `read_log` may return, before `distil` cuts. The ceiling the
+#: spec puts on `FindRequestLog`, kept: the model chooses the window, code
+#: keeps the answer readable.
+LOG_LINES = 400
+
+#: How far *past* the report to read. The old node's, and for its reason: a
+#: log line is written before the person complains about it, but not always
+#: before their clock says so.
+MARGIN = timedelta(minutes=5)
+
+#: The widest window a model may ask for. Not distrust — it is how far back
+#: any of these back ends keeps anything (Loki is 30 days), and a number
+#: past it reads as a search that covered more than it did.
+MAX_MINUTES_BACK = 60 * 24 * 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +82,7 @@ class SshKubectlSource:
     """
 
     name: str = "kubectl"
-    host: str = "dev"
+    host: str = SSH_HOST
 
     async def lines(
         self,
@@ -395,3 +434,127 @@ def _text_of(result: Any) -> str:
             for part in content
         )
     return str(content)
+
+
+def log_sources(run: RunContext) -> dict[str, Any]:
+    """The two ways to read a log (D4): `kubectl` over SSH always, Loki when
+    its server is open this run — narrowed by the core to `LokiSource.TOOLS`."""
+    sources: dict[str, Any] = {"kubectl": SshKubectlSource(host=SSH_HOST)}
+    reads = run.mcp.get(LOKI_SERVER)
+    if reads is not None:
+        sources["loki"] = LokiSource(server=reads, tool=LOKI_TOOL)
+    return sources
+
+
+def log_tools(run: RunContext, sources: dict[str, Any]) -> list:
+    """`read_log` over `sources`. Split from the factory so a replay (a
+    captured case) or a test hands its own sources to the same tool."""
+    return [_read_log(run.evidence, run.domain, sources, run.reported_at)]
+
+
+def _read_log(
+    evidence: Evidence,
+    placement: Placement,
+    sources: dict[str, Any],
+    reported_at: datetime,
+):
+    wanted = "loki" if placement.env == "production" else "kubectl"
+    source = sources.get(wanted)
+
+    @tool
+    async def read_log(needle: str, minutes_back: int = 30) -> str:
+        """Search this service's log for lines carrying a string.
+
+        The search runs where the log is, so `needle` narrows the *read*
+        rather than filtering its result — a whole window is tens of
+        thousands of tokens and this returns a handful of lines. Give the
+        most specific thing you have: a correlationId names one request, an
+        id names one user, an endpoint path names everyone who called it.
+
+        Nothing is found and you think the window is wrong? Call again with
+        a larger `minutes_back`. Nothing is found twice? Say so; the log
+        reaching back and holding nothing is a fact about the request.
+
+        Args:
+            needle: a plain substring of the log line — an id, a path, an
+                error code. Not a regular expression.
+            minutes_back: how far before the report to search. The default
+                is thirty; six hours is 360. Thirty days is the most any of
+                these back ends keeps.
+        """
+        if spent := evidence.spent():
+            return spent
+        if source is None:
+            return (
+                f"No {wanted} log source is configured, so {placement.env} "
+                f"logs cannot be read at all."
+            )
+        evidence.reads += 1
+        # Not `wanted`: that names the back end in the enclosing scope, and
+        # assigning it here made it local for the whole function — so the
+        # "no source configured" branch above raised `UnboundLocalError`
+        # instead of saying which source it wanted. A test caught it.
+        window = min(MAX_MINUTES_BACK, max(1, int(minutes_back)))
+        since = reported_at - timedelta(minutes=window)
+        try:
+            found = await source.lines(
+                placement, since=since, until=reported_at + MARGIN,
+                limit=LOG_LINES, needle=needle,
+            )
+        except Exception as exc:  # noqa: BLE001 — a source that is down is an answer
+            log.warning("read_log(%r) failed: %s", needle, exc)
+            return f"The log could not be read: {type(exc).__name__}: {exc}"
+
+        # **Out of reach is not not-found**, and it is the difference between
+        # a request nobody can find and one nobody searched for.
+        if not found.lines and found.oldest is not None and found.oldest > since:
+            evidence.not_checked.append(
+                f"the log does not reach back to {since:%Y-%m-%dT%H:%M:%SZ}"
+            )
+            return (
+                f"Nothing, and the log does not reach back that far — its "
+                f"oldest line is {found.oldest:%Y-%m-%dT%H:%M:%SZ}. This "
+                f"request was not searched for; it is no longer there to "
+                f"search."
+            )
+        if not found.lines:
+            return f"No line in the last {minutes_back} minutes carries {needle!r}."
+
+        cut = distil(list(found.lines), matching=(needle,), max_lines=LOG_LINES)
+        if found.truncated:
+            evidence.not_checked.append(
+                f"the search for {needle!r} was capped at {LOG_LINES} lines"
+            )
+        if not cut.lines:
+            # A back end that ignores `needle` is allowed to (the protocol
+            # says so), and then nothing in the window is "ours" and nothing
+            # is loud. Returning the empty string tells a model nothing at
+            # all — the old node had this branch and it is not optional.
+            return (
+                f"{len(found.lines)} lines came back but none of them carries "
+                f"{needle!r}. The source may not support narrowing; try a "
+                f"different string."
+            )
+        said = [evidence.show(cut.lines)]
+        if cut.histogram:
+            said.append(
+                "\nError codes in what was read: "
+                + ", ".join(f"{code} ×{n}" for code, n in cut.histogram)
+            )
+        for line in cut.not_checked:
+            evidence.not_checked.append(line)
+        return "\n".join(said)
+
+    return read_log
+
+
+LOGS = ToolsetSpec(
+    name="backend.logs",
+    description=(
+        "Search the case's service log where it is kept — Loki for "
+        "production, kubectl for dev: read_log."
+    ),
+    factory=lambda run: log_tools(run, log_sources(run)),
+    mcp={LOKI_SERVER: LokiSource.TOOLS},
+    domain_type=Placement,
+)

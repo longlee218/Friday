@@ -1,9 +1,9 @@
 """When the reporter's message anchors a read.
 
 The fixed pre-fetch node this module built (`find_request_log_node`, the
-window-and-widen formula over `plugins/backend/sources/logs.py`) is gone
+window-and-widen formula over the log sources) is gone
 (ticket 05): the Diagnose loop reads the log itself, through
-`plugins.backend.investigate`. `_reported_at` survives because both that loop
+the `backend.logs` toolset. `_reported_at` survives because both that loop
 and `plugins.backend.graph.intake` still need the one fact it answers — when
 the reporter said something, which is what a window is measured back from.
 """

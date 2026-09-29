@@ -12,9 +12,9 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 04 | Board card and pool line from the opening message | ⬜ **takeable** | 02 |
 | 05 | SDK declarations and boot refusals | ✅ done (main, 2026-09-28); refusal 9 moved to 08 | 03 |
 | 06 | Plan, `step_key` and GatePlan | ✅ done (main, 2026-09-28); `sdk/actions.py` file move deferred to 16 | 05 |
-| 07 | Core Intake and the backend enricher | ✅ done (main, 2026-09-29); `read_code` reads the checkout until 09 | 05 |
+| 07 | Core Intake and the backend enricher | ✅ done (main, 2026-09-29) | 05 |
 | 08 | Core toolsets: memory, skills, shell, workspace | ⬜ **takeable** | 05 |
-| 09 | Backend toolsets from `sources/` | ⬜ **takeable** | 05, 07 |
+| 09 | Backend toolsets from `sources/` | ✅ done (main, 2026-09-29); `run_api_issue_eval` deferred until an OpenRouter key exists | 05, 07 |
 | 10 | The Harness runs an `AgentSpec` | ✅ done (main, 2026-09-29) | 05 |
 | 11 | The Planner and its plan-shape eval | ⬜ **takeable** | 06, 10 |
 | 12 | The WorkflowRunner and `step_results` | ✅ done (main, 2026-09-29) | 06, 10 |

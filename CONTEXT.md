@@ -159,11 +159,13 @@ is the premise each board tracks against.
   domain registering actions (intent + contract), agents and toolsets; every
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 19 tickets; rename first, DAG path deleted in ticket 16.
-  **In progress:** tickets 01, 02, 03, 05, 06, 07, 10 and 12 done
+  **In progress:** tickets 01, 02, 03, 05, 06, 07, 09, 10 and 12 done
   (2026-09-29; names are `backend.*`/`ops.*`, live db wiped; core Intake and
-  the backend enricher live through the DAG's intake node); 04, 08, 09, 11
+  the backend enricher live through the DAG's intake node; the backend's
+  tools are its four toolsets, reading code at the running tag); 04, 08, 11
   and 13 are takeable (`.scratch/build-the-spine/STATUS.md`). The triage eval
-  is deferred until the operator has an OpenRouter key.
+  and `run_api_issue_eval` are deferred until the operator has an OpenRouter
+  key.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
 
@@ -359,9 +361,27 @@ description, a factory that builds the tools per run, the MCP reads it may
 make (`{server: TOOLS}`) and the domain type it reads.
 
 **Run context** — what the core hands a toolset factory once per run
-(`RunContext`): task id, the domain value, the evidence read so far, and each
-declared MCP server narrowed to the toolset's reads. Not Pydantic AI's
-`RunContext`, which only `harness.py` names.
+(`RunContext`): task id, the domain value, the evidence read so far, when
+the reporter spoke (`reported_at`), and each declared MCP server narrowed to
+the toolset's reads — filled per toolset by the core (`reads_for`), so two
+toolsets in one run never share reads. Not Pydantic AI's `RunContext`, which
+only `harness.py` names.
+
+**Toolset file** — one file per data source under `plugins/<domain>/toolsets/`
+holding both the client that reaches out (a *source*) and the tools a model
+calls over it (`backend.logs`, `backend.code`, `backend.docs`, `backend.db`).
+The only plugin code that may start a process or call through a tool server.
+(Build-the-spine ticket 09; `plugins/backend/sources/` folded here.)
+
+**Running version** — the image tag a service is deployed at, which is its
+release tag. `RunningVersion` (`plugins/backend/toolsets/release.py`) asks
+`release_status` once per run per repo; the code and docs tools read at it
+with `git show`, or read the checkout and say why. Only the case's own repo
+(`Placement.project`) has one.
+
+**Repo** (a tool argument) — one of the room's `backend.project` rows by
+name (`Placement.projects`); every `backend.code`/`backend.docs` tool takes
+one and refuses any other.
 
 **Outcome** (`friday/sdk/actions.py`; named `Action` until build-the-spine
 ticket 06, the file moves to `friday/kernel/spine/plan.py` in 16):
@@ -472,8 +492,10 @@ replaced `diagnose_memories(service=, error_code=, path=)`.)
 
 ## Source, check, node
 
-Three layers. A **source** (`plugins/backend/sources/`) reads one kind of thing and
-decides nothing — the only package that reaches an outside read surface. A
+Three layers. A **source** reads one kind of thing and decides nothing; it
+lives in its data source's **toolset file** (`plugins/*/toolsets/`, since
+build-the-spine ticket 09), the only plugin code that reaches an outside read
+surface. A
 **check** is a formula over sources (being withdrawn by v3.3 in favour of
 distilling tools). A **node** is the frame a run is checkpointed, timed and
 retried in. Reuse lives in the first layer, not the third.

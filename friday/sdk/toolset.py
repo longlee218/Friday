@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 __all__ = ["RunContext", "ToolContext", "ToolSpec", "ToolsetSpec", "tool"]
@@ -60,13 +61,17 @@ class RunContext:
     `domain` is the domain's enricher output (e.g. `Placement`), `None` for a
     domain with no enricher. `evidence` is what the run has read — refs resolve
     against it. `mcp` maps each server the toolset declared to its `Reads`,
-    narrowed to exactly the tools the toolset listed.
+    narrowed to exactly the tools the toolset listed — the core fills it per
+    toolset, so two toolsets in one run never see each other's reads.
+    `reported_at` is when the reporter spoke (core Intake's seed), what a log
+    window is measured back from; core data, so not on the domain type.
     """
 
     task_id: int
     domain: Any
     evidence: Any
     mcp: Mapping[str, Any]
+    reported_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

@@ -68,9 +68,10 @@ def _factories() -> dict[str, object]:
     from friday.kernel.tools.describe_skill import describe_skill_tool
     from friday.kernel.tools.fetch_skill import fetch_skill_tool
     from friday.kernel.tools.memory import memory_tools
+    from friday.sdk.toolset import RunContext
     from plugins.backend.placement import Placement
-    from plugins.backend.config import DEFAULT_CONTAINER_ROOTS
-    from plugins.backend.investigate import Evidence, investigate_tools
+    from plugins.backend.toolsets import TOOLSETS
+    from plugins.backend.toolsets.evidence import Evidence
     from friday.kernel.tools.read_skill_file import read_skill_file_tool
     from friday.kernel.tools.search_skills import search_skills_tool
 
@@ -83,14 +84,15 @@ def _factories() -> dict[str, object]:
         *memory_tools(object()),
         # Built per run rather than once: every one of these needs the
         # placement `Intake` produced, so there is nothing to inject here
-        # but a stand-in for it.
-        *investigate_tools(
-            evidence=Evidence(),
-            placement=Placement(
-                env="dev", service="s", container_roots=DEFAULT_CONTAINER_ROOTS,
-            ),
-            log_sources={},
-            reported_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
+        # but a stand-in for it. Every backend toolset, by its own factory.
+        *(
+            built
+            for toolset in TOOLSETS
+            for built in toolset.factory(RunContext(
+                task_id=1, domain=Placement(env="dev", service="s"),
+                evidence=Evidence(), mcp={},
+                reported_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
+            ))
         ),
     ]
     # A plugin declares a tool as a neutral `ToolSpec` (`friday.sdk.toolset`); the
@@ -139,7 +141,11 @@ def test_the_tools_this_system_has_are_all_in_one_place():
         "memory_delete",
         "read_log",
         "read_code",
+        "search_code",
         "what_code_means",
+        "read_docs",
+        "describe_db",
+        "query_db",
     }
 
 

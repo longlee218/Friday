@@ -169,7 +169,7 @@ async def test_a_hung_tool_call_is_cut_by_the_per_call_timeout(monkeypatch):
 
 
 async def test_a_hung_ssh_read_is_cut_by_the_per_call_timeout(monkeypatch):
-    import plugins.backend.sources.logs as logs
+    import plugins.backend.toolsets.logs as logs
 
     monkeypatch.setattr(logs, "TOOL_CALL_TIMEOUT_SECONDS", 0.05)
 

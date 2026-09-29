@@ -9,6 +9,7 @@ point (board `domains-plug-in`, tickets 03, 13, 14, 16, 17).
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 import pytest
@@ -27,7 +28,7 @@ from friday.sdk.testing import (
     function_call,
 )
 from friday.sdk.toolset import RunContext, ToolsetSpec, tool
-from plugins.backend.investigate import Evidence
+from plugins.backend.toolsets.evidence import Evidence
 
 
 @pytest.fixture(autouse=True)
@@ -104,7 +105,8 @@ def _contract(toolsets=("demo.reads",), steps=("agent", "ask", "draft")):
 
 
 def _context() -> RunContext:
-    return RunContext(task_id=7, domain=None, evidence=Evidence(), mcp={})
+    return RunContext(task_id=7, domain=None, evidence=Evidence(), mcp={},
+                      reported_at=datetime(2026, 9, 29, tzinfo=timezone.utc))
 
 
 class Offered(FunctionModel):

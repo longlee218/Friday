@@ -90,7 +90,7 @@ def _imports(path: Path) -> set[str]:
 def test_intake_and_the_enricher_import_no_model_and_no_reader():
     root = Path(__file__).resolve().parent.parent
     banned = ("pydantic_ai", "friday.kernel.harness", "friday.kernel.providers",
-              "plugins.backend.sources", "httpx", "mcp")
+              "plugins.backend.toolsets", "httpx", "mcp")
     for module in ("friday/kernel/spine/intake.py", "plugins/backend/placement.py"):
         bad = [m for m in _imports(root / module) if m.startswith(banned)]
         assert bad == [], f"{module} imports {bad}"

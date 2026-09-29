@@ -7,7 +7,7 @@ deterministic node (ticket 03), so there is no extraction pass and no
 separate resolve step left to run. The two fixed pre-fetch nodes the diagram
 used to name here — `FindRequestLog`, `ReadFailingCode` — were already gone
 (ticket 05): `Diagnose` reads the log and the code itself, through
-`plugins.backend.investigate`'s tools, so there is nothing left to fetch in
+the `backend.logs` and `backend.code` toolsets, so there is nothing left to fetch in
 advance of it.
 
 **Built against the sdk, and the caps the composition root hands in.** A plugin
@@ -21,12 +21,10 @@ in shape, only in where it reaches for things.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any
 
 from friday.sdk.agent import AgentDeclaration
-from friday.sdk.sources import Reads
 from friday.sdk.workflow import (
     DAG,
     DAGState,
@@ -45,18 +43,9 @@ from plugins.backend.graph.diagnose import (
 )
 from plugins.backend.graph.intake import intake_node
 from plugins.backend.graph.prompt import build_instructions
-from plugins.backend.graph.report import report_node
-from plugins.backend.sources.logs import LokiSource, SshKubectlSource
-from plugins.backend.sources.release import ReleaseSource
+from plugins.backend.graph.report import REPORTS_DIR, report_node
 
-__all__ = [
-    "TASK_TYPE",
-    "build_backend_dag",
-    "build_log_sources",
-    "build_release_source",
-]
-
-log = logging.getLogger(__name__)
+__all__ = ["TASK_TYPE", "build_backend_dag"]
 
 TASK_TYPE = "backend.trace_problem"
 
@@ -97,14 +86,22 @@ def _did_not_decide(node: str):
     return when
 
 
-def build_backend_dag(api: Any) -> DAG:
-    """The whole graph, built from the plugin's config and the composition
-    root's boot capabilities (`api.caps`).
+def build_backend_dag(
+    api: Any, *, toolsets: Any = None, reports_dir: Path = REPORTS_DIR
+) -> DAG:
+    """The whole graph, built from the composition root's boot capabilities
+    (`api.caps`).
 
     Node 0 is `intake_node(caps.intake)` — core Intake, deterministic, no
     model: it reads the task's own text rather than a set of extracted
     parameters, so there is nothing here for `caps.prepare_node` to fill in
     first.
+
+    `Diagnose`'s tools come from the plugin's own toolsets (`backend.logs`,
+    `backend.code`), built per run by `caps.build_tools` — the core's door
+    that narrows each server to what the toolset declared (build-the-spine
+    ticket 09). `toolsets` replaces them: a replay hands in `backend.logs`
+    reading a captured case.
 
     The diagnose model is `caps.make_harness`. In production `whole.agent`
     always resolves `DIAGNOSE` (an undeclared tier refuses the boot); it is
@@ -112,10 +109,14 @@ def build_backend_dag(api: Any) -> DAG:
     tests. The node then skips, with a reason, and the graph still reaches
     `Report`.
     """
+    # Here, not at the top: `toolsets.logs` imports `graph.distil`, so a
+    # module-level import would be a cycle.
+    from plugins.backend.toolsets import CODE, LOGS
+
     caps = api.caps
-    cfg = api.config  # BackendConfig (the plugin's own block)
     whole = caps.config  # the full application Config, for the shared agent
     diagnose_agent = whole.agent(DIAGNOSE)
+    granted = (LOGS, CODE) if toolsets is None else tuple(toolsets)
 
     # A factory, because the tools carry this run's placement and numbering —
     # one harness built at boot would read the previous case's service.
@@ -135,12 +136,13 @@ def build_backend_dag(api: Any) -> DAG:
         name=TASK_TYPE,
         nodes=(
             intake_node(api.caps.intake),
-            acknowledge_node(),
+            acknowledge_node(sender=caps.sender),
             diagnose_node(
                 make_harness=make_diagnose_harness,
+                build_tools=lambda run: caps.build_tools(granted, run),
                 agent=None if diagnose_agent is None else "backend.diagnose",
             ),
-            report_node(reports_dir=Path(cfg.reports_dir)),
+            report_node(reports_dir=Path(reports_dir), approver=caps.approver),
         ),
         edges=(
             Edge("intake", "acknowledge", when=_ran_ok("intake")),
@@ -152,43 +154,3 @@ def build_backend_dag(api: Any) -> DAG:
             Edge("diagnose", "report", when=_did_not_decide("diagnose")),
         ),
     )
-
-
-def build_log_sources(cfg: Any, servers: dict[str, Any]) -> dict[str, Any]:
-    """The two ways to read a log, from configuration (D4).
-
-    A source that is not configured is simply absent, and the node says which
-    one it wanted. Neither is built speculatively: an `SshKubectlSource`
-    pointing at a host that does not resolve would turn every dev task into a
-    failed subprocess, which reads like a broken graph rather than an unset
-    option.
-    """
-    sources: dict[str, Any] = {}
-    if cfg.ssh_host:
-        sources["kubectl"] = SshKubectlSource(host=cfg.ssh_host)
-    server = servers.get(cfg.loki_server)
-    if server is not None:
-        # Narrowed here, not inside the source: the source declares what it
-        # calls, and this is where a server meets that declaration.
-        sources["loki"] = LokiSource(
-            server=Reads(server, LokiSource.TOOLS), tool=cfg.loki_tool
-        )
-    if not sources:
-        log.info(
-            "backend: no log source configured — set backend.ssh_host for dev, "
-            "or an mcp_servers entry named %r for production",
-            cfg.loki_server,
-        )
-    return sources
-
-
-def build_release_source(cfg: Any, servers: dict[str, Any]) -> Any:
-    """What the cluster says it is running, or `None`.
-
-    The same server the Loki tools come from — it carries both — and narrowed
-    the same way: `Reads` over what `ReleaseSource` declares.
-    """
-    server = servers.get(cfg.loki_server)
-    if server is None:
-        return None
-    return ReleaseSource(server=Reads(server, ReleaseSource.TOOLS))

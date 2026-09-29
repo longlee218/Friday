@@ -85,8 +85,10 @@ READS = [
     "Found nothing? Widen `minutes_back`, or search a different string. "
     "Found nothing twice? That is an answer about the request, and saying "
     "so beats a cause built from the endpoint's name.",
-    "A stack frame in what you read is worth `read_code`. A frame in "
-    "`node_modules` is somebody else's code and is not.",
+    "A stack frame in what you read is worth `read_code`, with `repo` the "
+    "project named under where the service lives. A frame in "
+    "`node_modules` is somebody else's code and is not. No frame? "
+    "`search_code` finds where a route or a symbol is written.",
 ]
 
 
@@ -127,6 +129,11 @@ def build_reads_input(
         where.append(f"pods matching: {placement.pod_pattern}")
     if placement.repo_path:
         where.append(f"repository: {placement.repo_path}")
+    if placement.project:
+        where.append(f"repo (for the code tools): {placement.project}")
+    others = [p.name for p in placement.projects if p.name != placement.project]
+    if others:
+        where.append(f"the room's other repos: {', '.join(others)}")
     if placement.stack:
         where.append(f"stack: {placement.stack}")
 

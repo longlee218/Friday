@@ -233,7 +233,7 @@ async def _run(stack: AsyncExitStack) -> None:
     # Connected here rather than by whoever uses them: a connection has a
     # lifetime, and something has to close it. The stack unwinds with the run.
     # Before the agents, because one of them is handed this list.
-    from plugins.backend.sources import DECLARED
+    from plugins.backend.toolsets import DECLARED
 
     servers = []
     for server in build_mcp(config.mcp_servers, allowed=DECLARED):
@@ -253,7 +253,7 @@ async def _run(stack: AsyncExitStack) -> None:
         servers.append(server)
         # The allow-list this server was built with, recorded when it changes
         # (§12). It is `DECLARED` — the one code-declared set of tools any reader
-        # in `friday/sources/` calls, applied to every server (`build(...,
+        # in `plugins/backend/toolsets/` calls, applied to every server (`build(...,
         # allowed=DECLARED)`) so a file cannot widen it. Recorded per server, so
         # a new server gets its own grant line and a change to `DECLARED`
         # re-records each. A no-wildcard grant, written down at boot.

@@ -17,6 +17,7 @@ inside a docstring is not.
 from __future__ import annotations
 
 import ast
+from fnmatch import fnmatch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,19 +26,23 @@ ROOT = Path(__file__).resolve().parent.parent
 #: guard has to read there too or it would pass by looking at the wrong tree.
 PACKAGES = (ROOT / "friday", ROOT / "plugins")
 
-#: Where the outside world may be reached, as repo-relative posix paths.
-#: `agent/mcp.py` *builds* MCP servers from configuration and hands them on; it
-#: never calls a tool, which is the line below.
-ALLOWED = {
-    "plugins/backend/sources/logs.py",
-    "plugins/backend/sources/code.py",
-    "plugins/backend/sources/db.py",
-    # `Reads` is the narrowing every other call goes through — the one place
+#: Where the outside world may be reached (build-the-spine ticket 09: the
+#: sources folded into each plugin's `toolsets/`, one file per data source
+#: holding the client and its tools). Globs over repo-relative posix paths.
+ALLOWED = (
+    "plugins/*/toolsets/*.py",
+    # `core.shell` (ticket 08): the one core toolset that runs a command.
+    "friday/kernel/toolsets/shell.py",
+    # `Reads` is the narrowing every MCP call goes through — the one place
     # allowed to hold a server and pass a call on, and the place that refuses
-    # a tool no reader declared. It is an sdk port now (ticket 14): the
-    # contract a plugin's sources implement, so it moved into `friday/sdk`.
+    # a tool no toolset declared. An sdk port since ticket 14.
     "friday/sdk/sources.py",
-}
+)
+
+
+def allowed(name: str) -> bool:
+    return any(fnmatch(name, pattern) for pattern in ALLOWED)
+
 
 #: Starting a process. The whole of how this system reaches `ssh`, `kubectl`
 #: and `git` today, and the thing a node must not do for itself.
@@ -86,7 +91,7 @@ def test_only_the_source_package_starts_a_process():
     A second module that spawns one is a second door."""
     offenders = {
         name for name, tree in modules()
-        if name not in ALLOWED
+        if not allowed(name)
         and _calls(tree) & {"create_subprocess_exec", "create_subprocess_shell", "Popen", "system", "check_output"}
     }
 
@@ -100,7 +105,7 @@ def test_only_the_source_package_reads_through_a_tool_server():
     is reading the outside world, whatever it calls itself."""
     offenders = {
         name for name, tree in modules()
-        if name not in ALLOWED and _calls(tree) & READS_THROUGH_MCP
+        if not allowed(name) and _calls(tree) & READS_THROUGH_MCP
     }
 
     assert offenders == set(), (
@@ -115,7 +120,7 @@ def test_a_source_may_not_reach_for_an_agent():
     the capability depend on the thing calling it."""
     reached = {}
     for name, tree in modules():
-        if "sources/" not in name:
+        if not fnmatch(name, "plugins/*/toolsets/*.py"):
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(

@@ -11,14 +11,14 @@ ticket 16.
 
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from typing import Any
 
 from friday.sdk.intake import ArtifactRef, Hints, IntakeContext
 from friday.sdk.workflow import DAGState, Node, envelope
-from plugins.backend.graph.deps import ApiIssueDeps
+from friday.sdk.workflow import Deps
 from plugins.backend.graph.logs import _reported_at
-from plugins.backend.placement import Placement, enrich
+from plugins.backend.placement import Placement, Project, enrich
 
 __all__ = ["intake_node", "intake_of"]
 
@@ -38,7 +38,7 @@ def intake_node(run_intake: Any) -> Node:
     """Build the node around core `intake` (`api.caps.intake`). No model:
     every field is a rule, a row, or a regex."""
 
-    async def _intake(state: DAGState, deps: ApiIssueDeps) -> Any:
+    async def _intake(state: DAGState, deps: Deps) -> Any:
         context = await run_intake(
             deps.db,
             task_id=deps.task.id,
@@ -49,14 +49,9 @@ def intake_node(run_intake: Any) -> Node:
             # reads it off the plugin.
             enricher=enrich,
         )
-        # `container_roots` is config the DB-only enricher cannot read; filled
-        # here until ticket 09 makes it a constant.
-        context = replace(
-            context, domain=replace(context.domain, container_roots=deps.container_roots)
-        )
         return envelope("ok", "", intake=_listed(asdict(context)))
 
-    return Node("intake", _intake)  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py
+    return Node("intake", _intake)
 
 
 def intake_of(result: Any) -> IntakeContext:
@@ -64,8 +59,12 @@ def intake_of(result: Any) -> IntakeContext:
     become tuples again, at every level that carries one."""
     data = result["intake"]
     domain = dict(data["domain"])
-    for field_name in ("dbs", "container_roots", "candidates"):
+    for field_name in ("dbs", "candidates"):
         domain[field_name] = tuple(domain[field_name])
+    domain["projects"] = tuple(
+        Project(**{**p, "docs_paths": tuple(p["docs_paths"])})
+        for p in domain.get("projects", ())
+    )
     hints = data["hints"]
     return IntakeContext(
         request_text=data["request_text"],

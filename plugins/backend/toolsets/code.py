@@ -1,23 +1,31 @@
-"""Reading the source that a stack frame names, and only reading it.
+"""`backend.code`: reading a repository of the room, and only reading it.
+
+**One file per data source, tools and client together** (board
+`domains-plug-in` ticket 09 §3): the git reads below and the three tools a
+model calls over them — `read_code`, `search_code`, `what_code_means`. Over
+the 200-line soft target for that reason: splitting the client from its tools
+is the split this layout was decided against.
 
 A frame names a file inside a container — `/app/src/orders.ts` — and the
-repository is a clone on the operator's own machine. These two functions map
-one to the other and read a window around the line. Nothing else: no
-checkout, no worktree, no fetch (finding H).
+repository is a clone on the operator's own machine. These functions map one
+to the other and read a window around the line. Nothing else: no checkout, no
+worktree, no fetch (finding H).
+
+**The version read is the one running** (ticket 04 §6): each tool asks
+`RunningVersion` for the service's tag and reads with `git show <tag>:<file>`.
+When the tag cannot be known, or the clone does not have it, the tool reads
+the checkout and says so in its answer and in `not_checked`.
 
 **A frame is reporter-influenced text.** It arrives from a log line, and a
 log line carries whatever an attacker got the service to print. So the path
 is resolved and checked against the repository root before anything is
 opened: `/app/../../../../etc/passwd` is a file this refuses to read, not a
 file it reads because the log said so.
-
-`CodeSource`'s other primitives — `grep`, `explore`, `doc` — are ticket 04's.
-They are not declared here as empty protocols: a shape with one
-implementation and no second caller is a guess about the second one.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import subprocess
@@ -26,10 +34,36 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS
+from friday.sdk.toolset import RunContext, ToolsetSpec, tool
+from plugins.backend.placement import Placement
+from plugins.backend.toolsets.evidence import Evidence
+from plugins.backend.toolsets.release import RELEASE_SERVER, ReleaseSource, RunningVersion
 
-__all__ = ["excerpt", "meanings", "original", "repo_file"]
+__all__ = [
+    "CODE",
+    "unknown_repo",
+    "CONTAINER_ROOTS",
+    "at_ref",
+    "code_tools",
+    "excerpt",
+    "grep",
+    "meanings",
+    "original",
+    "repo_file",
+]
 
 log = logging.getLogger(__name__)
+
+#: Where a service's source sits inside its image, stripped from a stack frame
+#: before it is joined to the clone. A constant since ticket 09: it was a
+#: `backend:` setting nobody set.
+CONTAINER_ROOTS = ("/usr/src/app", "/app", "/srv/app")
+
+#: The most matches one `search_code` returns; past it the search says so.
+MAX_HITS = 40
+
+#: A matched line longer than this is cut: a minified bundle is one line.
+HIT_CHARS = 300
 
 #: How much of a file to read around a frame — the spec's "±15 lines around
 #: the first frame", which with its header lands inside the `≤ 40 lines` that
@@ -39,7 +73,8 @@ AFTER = 15
 
 
 def repo_file(
-    frame: str, repo_path: str, *, container_roots: tuple[str, ...]
+    frame: str, repo_path: str, *, container_roots: tuple[str, ...],
+    exists: bool = True,
 ) -> Path | None:
     """The frame's file inside this clone, or `None` if it is not in it.
 
@@ -47,10 +82,10 @@ def repo_file(
     another image) and "trying to leave the clone". The caller cannot tell
     them apart and does not need to: neither is a file this node opens.
 
-    `container_roots` is the image's source-root policy, passed in as data
-    (box 4: `BackendConfig.container_roots`, carried on the run's `Deps`) rather
-    than read off a module constant here — the one thing on this path shaped by
-    the deployment, so the one thing an operator corrects without a release.
+    `container_roots` is the image's source-root policy (`CONTAINER_ROOTS`),
+    an argument so a test can name another layout. `exists=False` returns the
+    confined path even when the checkout has no such file — one the running
+    tag may still hold (`git show` reads it there).
     """
     root = Path(repo_path).expanduser()
     relative = frame
@@ -71,7 +106,7 @@ def repo_file(
         # Traversal, from a log line. The one thing this node must not do.
         log.warning("frame %r resolves outside %s — not read", frame, repo_path)
         return None
-    return candidate if candidate.is_file() else None
+    return candidate if candidate.is_file() or not exists else None
 
 
 def at_ref(repo_path: str, path: Path, ref: str) -> str | None:
@@ -288,3 +323,211 @@ def meanings(
             continue
         found[cells[0].upper()] = " — ".join(part for part in cells[1:3] if part)
     return found
+
+
+def grep(repo_path: str, query: str, ref: str = "") -> tuple[list[str], bool] | None:
+    """`file:line:text` for every line carrying `query`, at `ref` (the working
+    tree when empty), and whether there were more than `MAX_HITS`.
+
+    `git grep -F`, so `query` is a plain string, never a pattern; `-e` keeps
+    a query that starts with a dash a query. `None` for every way git could
+    not answer.
+    """
+    if ref.startswith("-"):
+        return None
+    root = Path(repo_path).expanduser().resolve()
+    args = ["git", "-C", str(root), "grep", "-n", "-I", "-F", "--no-color", "-e", query]
+    if ref:
+        args.append(ref)
+    args.append("--")
+    try:
+        done = subprocess.run(
+            args, capture_output=True, text=True,
+            timeout=TOOL_CALL_TIMEOUT_SECONDS, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("git grep %r: %s", query, exc)
+        return None
+    if done.returncode == 1:
+        return [], False
+    if done.returncode != 0:
+        return None
+    prefix = f"{ref}:" if ref else ""
+    found = [
+        line[len(prefix):] if prefix and line.startswith(prefix) else line
+        for line in done.stdout.splitlines()
+    ]
+    return [line[:HIT_CHARS] for line in found[:MAX_HITS]], len(found) > MAX_HITS
+
+
+def unknown_repo(repo: str, placement: Placement) -> str:
+    """The refusal every `repo`-taking tool gives a name that is not the room's."""
+    names = sorted(p.name for p in placement.projects)
+    return (
+        f"{repo!r} is not one of this room's projects: "
+        f"{names or 'none are recorded'}."
+    )
+
+
+def _read_code(evidence: Evidence, placement: Placement, running: RunningVersion):
+    @tool
+    async def read_code(repo: str, file: str, line: int) -> str:
+        """Read the code around a line, at the version that is running.
+
+        Give the file exactly as a stack frame named it, or as `search_code`
+        listed it. A compiled frame — `dist/src/x.js:80` — is mapped back to
+        the TypeScript before it is read, because line 80 of the built file
+        is not the line anybody wrote. The answer names the version it read.
+
+        Args:
+            repo: which of the room's projects, by name.
+            file: the path from the stack frame or the search.
+            line: the line number.
+        """
+        if spent := evidence.spent():
+            return spent
+        project = placement.repo(repo)
+        if project is None:
+            return unknown_repo(repo, placement)
+        if not project.repo_path:
+            return "No repository is recorded for this project, so no code can be read."
+        evidence.reads += 1
+        tag, why = await running.of(repo)
+        # With a tag, the checkout need not have the file: the tag may (a file
+        # renamed or deleted since the release).
+        found = repo_file(
+            file, project.repo_path, container_roots=CONTAINER_ROOTS, exists=not tag
+        )
+        if found is None:
+            return (
+                f"{file} is not in this clone — it is somebody else's code, "
+                f"or outside the repository."
+            )
+        shown, at, mapped_note = found, int(line), ""
+        mapped = original(found, int(line), project.repo_path) if found.is_file() else None
+        if mapped is not None:
+            shown, at = mapped
+            if tag:
+                # The map is the checkout's build, not the tag's: if the two
+                # differ, the line can be off. Said, not guessed around.
+                mapped_note = "; line mapped with the checkout's source map"
+        text = await asyncio.to_thread(at_ref, project.repo_path, shown, tag) if tag else None
+        if tag and text is None:
+            why = f"the clone has no {shown.name} at {tag} — fetch its tags"
+        if text is not None:
+            where = f"at {tag}, the version running in {placement.env}{mapped_note}"
+        else:
+            try:
+                text = shown.read_text(errors="replace")
+            except OSError:
+                return f"{file} is neither at the running version nor in the checkout ({why})."
+            where = f"the clone's current checkout — running version unresolved: {why}"
+            evidence.not_checked.append(
+                f"{repo}/{shown.name} was read at the checkout, not the running version ({why})"
+            )
+        return f"--- {shown.name}:{at} ({where})\n" + evidence.show(
+            numbered(text, at).splitlines()
+        )
+
+    return read_code
+
+
+def _search_code(evidence: Evidence, placement: Placement, running: RunningVersion):
+    @tool
+    async def search_code(repo: str, query: str) -> str:
+        """Find where a route, a symbol or a term is written in a repository.
+
+        A plain substring search (not a regular expression) at the version
+        that is running. Each match is `file:line: text`; follow one with
+        `read_code` to see the lines around it.
+
+        Args:
+            repo: which of the room's projects, by name.
+            query: the exact text to look for — a route path, a function name,
+                an error code.
+        """
+        if spent := evidence.spent():
+            return spent
+        project = placement.repo(repo)
+        if project is None:
+            return unknown_repo(repo, placement)
+        if not project.repo_path:
+            return "No repository is recorded for this project, so nothing can be searched."
+        if not query.strip():
+            return "Give a string to search for."
+        evidence.reads += 1
+        tag, why = await running.of(repo)
+        hits = await asyncio.to_thread(grep, project.repo_path, query, tag) if tag else None
+        where = f"at {tag}"
+        if hits is None:
+            if tag:
+                why = f"the clone does not have {tag} — fetch its tags"
+            hits = await asyncio.to_thread(grep, project.repo_path, query)
+            where = f"the clone's current checkout — running version unresolved: {why}"
+            evidence.not_checked.append(
+                f"the search for {query!r} in {repo} ran on the checkout, not the running version ({why})"
+            )
+        if hits is None:
+            return f"{repo} could not be searched."
+        found, more = hits
+        if not found:
+            return f"Nothing in {repo} ({where}) carries {query!r}."
+        if more:
+            evidence.not_checked.append(
+                f"the search for {query!r} in {repo} was capped at {MAX_HITS} matches"
+            )
+        said = f"--- {len(found)}{'+' if more else ''} matches in {repo} ({where})\n"
+        return said + evidence.show(found)
+
+    return search_code
+
+
+def _what_code_means(evidence: Evidence, placement: Placement):
+    @tool
+    def what_code_means(repo: str, code: str) -> str:
+        """What one of this project's error codes stands for.
+
+        Read out of the repository's own table, not guessed. Measured: every
+        one of 2,104 HTTP 500s in thirty days carried `ERR19`, the generic
+        code — so a number on its own says almost nothing, and what the
+        table calls it can say a great deal.
+
+        Args:
+            repo: which of the room's projects, by name.
+            code: the error code exactly as the log spelled it, e.g. `ERR19`.
+        """
+        if spent := evidence.spent():
+            return spent
+        project = placement.repo(repo)
+        if project is None:
+            return unknown_repo(repo, placement)
+        evidence.reads += 1
+        if not project.error_codes_doc:
+            return "This project records no error-code table."
+        found = meanings(project.error_codes_doc, [code], project.repo_path)
+        return found.get(code) or f"{code} is not in this project's table."
+
+    return what_code_means
+
+
+def code_tools(run: RunContext) -> list:
+    """`backend.code`'s factory: the three tools, over this run's placement,
+    numbering and running version."""
+    running = RunningVersion.for_run(run)
+    return [
+        _read_code(run.evidence, run.domain, running),
+        _search_code(run.evidence, run.domain, running),
+        _what_code_means(run.evidence, run.domain),
+    ]
+
+
+CODE = ToolsetSpec(
+    name="backend.code",
+    description=(
+        "Read, search and explain the room's repositories at the version "
+        "that is running: read_code, search_code, what_code_means."
+    ),
+    factory=code_tools,
+    mcp={RELEASE_SERVER: ReleaseSource.TOOLS},
+    domain_type=Placement,
+)

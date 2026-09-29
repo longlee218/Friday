@@ -18,57 +18,32 @@ from typing import Any
 
 from friday.sdk import Plugin, TaskTypeSpec
 from plugins.backend import answer_question
-from plugins.backend.config import BackendConfig
-from plugins.backend.graph import (
-    TASK_TYPE,
-    build_backend_dag,
-    build_log_sources,
-    build_release_source,
-)
-from plugins.backend.graph.deps import ApiIssueDeps
+from plugins.backend.graph import TASK_TYPE, build_backend_dag
 from plugins.backend.memory import DEPENDENCY_READERS, BACKEND_MEMORY_KINDS
 from plugins.backend.params import ApiIssueParams
 from plugins.backend.placement import enrich
+from plugins.backend.toolsets import TOOLSETS
 
 __all__ = ["PLUGIN", "register"]
 
 
-def _enrich_deps(base: Any, api: Any) -> Any:
-    """Enrich the kernel-built base `Deps` with `backend.trace_problem`'s own handles
-    — the typed per-run `Deps` (§5.2). The log/release sources are built from the
-    run's servers and the plugin's config; `sender`/`approver` are the two
-    identities a mid-run row is queued as, from the composition root's caps."""
-    return ApiIssueDeps(
-        task=base.task,
-        db=base.db,
-        servers=base.servers,
-        extra=base.extra,
-        answers=base.answers,
-        sender=api.caps.sender,
-        approver=api.caps.approver,
-        log_sources=build_log_sources(api.config, base.servers),
-        release_source=build_release_source(api.config, base.servers),
-        container_roots=api.config.container_roots,
-        not_ours=api.config.not_ours,
-    )
-
-
 def register(api: Any) -> None:
-    """Contribute the backend pack kinds, their reader routing, and the
-    `backend.trace_problem` and `backend.answer_question` task types. The `graph`/`deps` builders are deferred and
-    close over `api` (for `api.caps`), so they run only in the task-type
-    lifecycle where the boot capabilities exist."""
+    """Contribute the backend pack kinds, their reader routing, the four
+    toolsets, and the `backend.trace_problem` and `backend.answer_question`
+    task types. The `graph` builder is deferred and closes over `api` (for
+    `api.caps`), so it runs only once the boot capabilities exist."""
     for spec in BACKEND_MEMORY_KINDS:
         api.memory_kind(spec)
     for reader, kinds in DEPENDENCY_READERS.items():
         api.reader(reader, kinds)
+    for toolset in TOOLSETS:
+        api.toolset(toolset)
 
     api.task_type(
         TaskTypeSpec(
             name=TASK_TYPE,
             params=ApiIssueParams,
             graph=lambda _deps: build_backend_dag(api),
-            deps=lambda base: _enrich_deps(base, api),
             needs=frozenset({"source:loki", "backend.service"}),
         )
     )
@@ -84,4 +59,4 @@ def register(api: Any) -> None:
     )
 
 
-PLUGIN = Plugin(id="backend", register=register, enricher=enrich, config=BackendConfig)
+PLUGIN = Plugin(id="backend", register=register, enricher=enrich)

@@ -24,10 +24,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from plugins.backend.graph.deps import ApiIssueDeps
 from plugins.backend.graph.intake import intake_of
 from plugins.backend.placement import Placement
-from friday.sdk.workflow import DAGState, Node, envelope
+from friday.sdk.workflow import DAGState, Deps, Node, envelope
 from friday.sdk.outbox import Kind
 
 __all__ = ["ack_text", "acknowledge_node"]
@@ -63,17 +62,16 @@ def ack_text(placement: Placement) -> str:
     return "Đang xử lý — mình đang xem lại vụ này, sẽ báo lại khi có kết quả."
 
 
-def acknowledge_node() -> Node:
+def acknowledge_node(*, sender: str = "") -> Node:
     """Build node 2a.
 
     Queues rather than sends: the outbox is the only module that delivers,
     and a node that posted to a chat platform itself would be a second place
     that can, with its own retry and its own idea of what has already gone
-    out.
+    out. `sender` is the identity the row is queued as (`caps.sender`).
     """
 
-    async def _acknowledge(state: DAGState, deps: ApiIssueDeps) -> Any:
-        sender: str = deps.sender
+    async def _acknowledge(state: DAGState, deps: Deps) -> Any:
         if not sender:
             # Nothing here is worth failing an investigation over, and a run
             # that says why it stayed quiet is better than one that is quiet
@@ -103,7 +101,4 @@ def acknowledge_node() -> Node:
         log.info("task %s: acknowledged", deps.task.id)
         return envelope("ok", "", said=text)
 
-    # The adapter hands every api_issue node an `ApiIssueDeps`; `Node.run` is
-    # typed `[Deps]` (not generic over the subtype), so the narrower parameter is
-    # a known, safe variance gap.
-    return Node("acknowledge", _acknowledge)  # type: ignore[arg-type]
+    return Node("acknowledge", _acknowledge)

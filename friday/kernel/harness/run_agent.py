@@ -16,7 +16,7 @@ the runner treats as a failed step (operator, 2026-09-29).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from typing import Any
@@ -26,12 +26,15 @@ from friday.kernel.harness.harness import Harness
 from friday.sdk.action import ActionContract
 from friday.sdk.actions import Ask, HandOver, Replan, Retriage
 from friday.sdk.agent import AgentSpec
+from friday.sdk.sources import Reads
 from friday.sdk.toolset import RunContext, ToolsetSpec
 
 __all__ = [
     "AgentRunFailed",
     "ask_reporter",
+    "build_tools",
     "hand_over",
+    "reads_for",
     "replan",
     "retriage",
     "run_agent",
@@ -87,6 +90,36 @@ def retriage(reason: str, found: str) -> Retriage:
     return Retriage(reason=reason, found=found)
 
 
+def reads_for(toolset: ToolsetSpec, servers: Mapping[str, Any]) -> dict[str, Reads]:
+    """The servers `toolset` declared, each narrowed to the tools it listed.
+
+    **The core alone holds a raw server** (board `domains-plug-in` ticket 03
+    §2): a factory is handed only this, so `backend.code`, which declares
+    `release_status`, cannot call `release_rollback` on the same server, and
+    `backend.logs` never sees `backend.db`'s reads. A declared server that is
+    not open this run is absent; the factory says which one it wanted.
+    """
+    return {
+        name: Reads(servers[name], frozenset(tools))
+        for name, tools in toolset.mcp.items()
+        if name in servers
+    }
+
+
+def build_tools(
+    toolsets: Sequence[ToolsetSpec],
+    context: RunContext,
+    servers: Mapping[str, Any],
+) -> list[Any]:
+    """Every tool of `toolsets`, each factory given `context` with its own
+    narrowed `mcp` (`reads_for`)."""
+    return [
+        built
+        for toolset in toolsets
+        for built in toolset.factory(replace(context, mcp=reads_for(toolset, servers)))
+    ]
+
+
 async def run_agent(
     spec: AgentSpec,
     tier: TierConfig,
@@ -98,13 +131,15 @@ async def run_agent(
     *,
     model: Any = None,
     record: Any = None,
+    servers: Mapping[str, Any] | None = None,
 ) -> Any:
     """Run `spec` once and return its `result`, or an `Ask` / `HandOver` /
     `Replan` / `Retriage`.
 
     `toolsets` are the registered specs to choose from; the run gets those
     named by both `contract.allowed_toolsets` and `spec.toolsets`, each built
-    by its factory from `context`. `ask_reporter` is offered only when the
+    by its factory from `context` with `mcp` narrowed to that toolset from the
+    raw `servers` (whatever `context.mcp` held is replaced). `ask_reporter` is offered only when the
     contract allows an `ask` step.
 
     `history` is a stored `Ask` to continue from: its messages and `Evidence`
@@ -118,12 +153,11 @@ async def run_agent(
         context = replace(context, evidence=deepcopy(history.evidence))
 
     granted = contract.allowed_toolsets & set(spec.toolsets)
-    tools = [
-        built
-        for toolset in toolsets
-        if toolset.name in granted
-        for built in toolset.factory(context)
-    ]
+    tools = build_tools(
+        [toolset for toolset in toolsets if toolset.name in granted],
+        context,
+        servers or {},
+    )
     terminals = [hand_over, replan, retriage]
     if "ask" in contract.allowed_step_types:
         terminals.insert(0, ask_reporter)

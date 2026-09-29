@@ -1,7 +1,7 @@
 """Node 4: say what caused it, and say what was not checked.
 
 **The reads loop is the only diagnose mode** (ticket 05): the model fetches
-its own evidence through `plugins.backend.investigate`'s tools rather than
+its own evidence through the `backend.logs` and `backend.code` toolsets rather than
 being handed a fixed dossier. The two fixed pre-fetch nodes that used to
 build one — `FindRequestLog`, `ReadFailingCode` — are gone; `_reading` below
 is what is left.
@@ -26,9 +26,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from plugins.backend.graph.deps import ApiIssueDeps
 from friday.sdk.toolset import tool
-from friday.sdk.workflow import Ask, DAGState, HandOver, Node, envelope
+from friday.sdk.workflow import Ask, DAGState, Deps, HandOver, Node, envelope
 
 __all__ = [
     "Diagnosis",
@@ -281,7 +280,9 @@ def _judged(answer: Any, index: dict, not_checked: tuple, deps: Any) -> Any:
     )
 
 
-async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> Any:
+async def _reading(
+    state: DAGState, deps: Deps, make_harness: Any, build_tools: Any
+) -> Any:
     """v3.3: the model fetches its own evidence.
 
     The same answer shape and the same gates — what changes is where the
@@ -290,20 +291,20 @@ async def _reading(state: DAGState, deps: ApiIssueDeps, make_harness: Any) -> An
     checked against what this run was actually shown rather than against a
     dossier built in advance.
     """
+    from friday.sdk.toolset import RunContext
     from plugins.backend.graph.intake import intake_of
     from plugins.backend.graph.logs import _reported_at
     from plugins.backend.graph.prompt import build_reads_input
-    from plugins.backend.investigate import Evidence, investigate_tools
+    from plugins.backend.toolsets.evidence import Evidence
 
     ctx = intake_of(state["intake"])
     placement = ctx.domain
     evidence = Evidence()
-    tools = investigate_tools(
-        evidence=evidence,
-        placement=placement,
-        log_sources=deps.log_sources,
+    # `mcp` is filled by the core per toolset (`caps.build_tools`).
+    tools = [] if build_tools is None else build_tools(RunContext(
+        task_id=deps.task.id, domain=placement, evidence=evidence, mcp={},
         reported_at=_reported_at(deps.task),
-    )
+    ))
     harness = make_harness(tools=tools)
     if harness is None:
         return envelope(
@@ -357,6 +358,10 @@ def diagnose_node(
     #: read the previous case's service. `None` when no `diagnose` agent is
     #: configured — a fresh install, and every test that does not set one up.
     make_harness: Any = None,
+    #: This run's tools from a `RunContext` — the graph builder's
+    #: `caps.build_tools` over `backend.logs` and `backend.code`. `None`
+    #: builds none (a test that reads nothing).
+    build_tools: Any = None,
 ) -> Node:
     """Build node 4.
 
@@ -366,14 +371,14 @@ def diagnose_node(
     reads it.
     """
 
-    async def _diagnose(state: DAGState, deps: ApiIssueDeps) -> Any:
+    async def _diagnose(state: DAGState, deps: Deps) -> Any:
         if make_harness is None:
             return envelope(
                 "skipped",
                 "no diagnose agent is configured, so nothing was diagnosed",
             )
-        return await _reading(state, deps, make_harness)
+        return await _reading(state, deps, make_harness, build_tools)
 
     return Node(
-        "diagnose", _diagnose, agent=agent  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py
+        "diagnose", _diagnose, agent=agent
     )

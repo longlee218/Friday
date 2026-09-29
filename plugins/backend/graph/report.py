@@ -21,14 +21,18 @@ from typing import Any
 
 from plugins.backend.graph.diagnose import diagnosis_of
 from plugins.backend.graph.intake import intake_of
-from plugins.backend.graph.deps import ApiIssueDeps
-from friday.sdk.workflow import DAGState, HandOver, Node, Reply
+from friday.sdk.workflow import DAGState, Deps, HandOver, Node, Reply
 from friday.sdk.outbox import Kind
 from friday.sdk.redact import scrub
 
 __all__ = ["render", "report_node"]
 
 log = logging.getLogger(__name__)
+
+#: Where a run's report is written, beside the database: state this process
+#: produced, not source. A constant since build-the-spine ticket 09 (it was a
+#: `backend:` setting); the file itself goes in ticket 14.
+REPORTS_DIR = Path("./data/reports")
 
 
 def render(state: DAGState, *, task_id: int, at: datetime) -> str:
@@ -118,7 +122,7 @@ def brief(diagnosis: Any) -> str:
     return said
 
 
-def report_node(*, reports_dir: Path) -> Node:
+def report_node(*, reports_dir: Path, approver: str = "") -> Node:
     """Build node 5: the report file, and the two rows that follow it.
 
     Hands over only when nothing was concluded. With a cause it returns a
@@ -126,13 +130,13 @@ def report_node(*, reports_dir: Path) -> Node:
     approval card — the risk this queue guards is in *answering*, and this
     is the one output that answers.
 
-    `reports_dir` is required rather than defaulted, because there was a
-    default here *and* one on `BackendConfig.reports_dir`, spelled
-    differently — two answers to one question, which is how a report goes
-    missing from the directory somebody is watching.
+    `reports_dir` is required rather than defaulted: the one answer is
+    `REPORTS_DIR`, passed by the graph builder (a replay passes its own).
+    `approver` is the identity the operator's finding row is queued as
+    (`caps.approver`); empty queues none.
     """
 
-    async def _report(state: DAGState, deps: ApiIssueDeps) -> Any:
+    async def _report(state: DAGState, deps: Deps) -> Any:
         at = datetime.now(timezone.utc)
         directory = reports_dir
         text = render(state, task_id=deps.task.id, at=at)
@@ -180,7 +184,6 @@ def report_node(*, reports_dir: Path) -> Node:
         # anything has been approved. Sending it as `sender` — which this did
         # until review caught it — would publish both, unapproved, ahead of
         # the card that asks whether to publish anything at all.
-        approver = deps.approver
         if approver:
             await deps.db.queue_outbound(
                 task_id=deps.task.id,
@@ -199,4 +202,4 @@ def report_node(*, reports_dir: Path) -> Node:
 
         return Reply(brief(diagnosis))
 
-    return Node("report", _report)  # type: ignore[arg-type]  # ApiIssueDeps subtype; see acknowledge.py
+    return Node("report", _report)

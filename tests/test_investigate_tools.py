@@ -16,9 +16,11 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from friday.sdk.sources import Lines
-from plugins.backend.placement import Placement
-from plugins.backend.config import DEFAULT_CONTAINER_ROOTS
-from plugins.backend.investigate import MAX_READS, Evidence, investigate_tools
+from friday.sdk.toolset import RunContext
+from plugins.backend.placement import Placement, Project
+from plugins.backend.toolsets.code import code_tools
+from plugins.backend.toolsets.evidence import MAX_READS, Evidence
+from plugins.backend.toolsets.logs import log_tools
 
 AT = datetime(2026, 9, 21, 10, 40, tzinfo=timezone.utc)
 
@@ -40,16 +42,20 @@ class Log:
 
 def built(source=None, *, repo_path="", error_code_doc=""):
     evidence = Evidence()
-    tools = investigate_tools(
-        evidence=evidence,
-        placement=Placement(
-            env="dev", service="s", pod_pattern="p",
+    run = RunContext(
+        task_id=1,
+        domain=Placement(
+            env="dev", service="s", pod_pattern="p", project="r",
             repo_path=repo_path, error_code_doc=error_code_doc,
-            container_roots=DEFAULT_CONTAINER_ROOTS,
+            projects=(Project(name="r", repo_path=repo_path,
+                              error_codes_doc=error_code_doc),),
         ),
-        log_sources={} if source is None else {"kubectl": source},
-        reported_at=AT,
+        evidence=evidence, mcp={}, reported_at=AT,
     )
+    tools = [
+        *log_tools(run, {} if source is None else {"kubectl": source}),
+        *code_tools(run),
+    ]
     # Plugin tools are neutral `ToolSpec`s; the harness binds each to the
     # vendor's `Tool`. Bind here so the test sees what the model sees (ticket 14).
     from friday.kernel.harness.harness import _bind_tool_spec
@@ -252,7 +258,7 @@ def test_code_is_read_from_the_checkout_and_says_so(tmp_path):
     (tmp_path / "orders.ts").write_text("edited since\nb\nc\nd\n")
     _, tools = built(repo_path=str(tmp_path))
 
-    said = call(tools["read_code"], file="/app/orders.ts", line=1)
+    said = call(tools["read_code"], repo="r", file="/app/orders.ts", line=1)
 
     assert "edited since" in said
     assert "the clone's current checkout" in said
@@ -261,7 +267,7 @@ def test_code_is_read_from_the_checkout_and_says_so(tmp_path):
 def test_code_outside_the_clone_is_named_rather_than_opened():
     _, tools = built(repo_path="/nowhere")
 
-    said = call(tools["read_code"], file="/app/node_modules/x/y.js", line=3)
+    said = call(tools["read_code"], repo="r", file="/app/node_modules/x/y.js", line=3)
 
     assert "not in this clone" in said
 
@@ -270,7 +276,7 @@ def test_the_lines_of_code_are_citable_like_any_other(tmp_path):
     (tmp_path / "a.ts").write_text("one\ntwo\nthree\n")
     evidence, tools = built(repo_path=str(tmp_path))
 
-    call(tools["read_code"], file="/app/a.ts", line=2)
+    call(tools["read_code"], repo="r", file="/app/a.ts", line=2)
 
     assert any("two" in line for line in evidence.index.values())
 
@@ -282,7 +288,7 @@ def test_a_project_with_no_table_says_so_rather_than_guessing():
     _, tools = built()
 
     assert "records no error-code table" in call(
-        tools["what_code_means"], code="ERR19"
+        tools["what_code_means"], repo="r", code="ERR19"
     )
 
 
@@ -303,7 +309,7 @@ def test_the_window_reaches_past_the_report():
 def test_a_window_wider_than_anything_is_kept_is_brought_back_to_it():
     """Not distrust: thirty days is what Loki keeps, and a search that says
     it covered a year covered a month."""
-    from plugins.backend.investigate import MAX_MINUTES_BACK
+    from plugins.backend.toolsets.logs import MAX_MINUTES_BACK
 
     source = Log(["ERROR abc"])
     _, tools = built(source)
@@ -349,21 +355,20 @@ def test_reading_code_counts_against_the_ceiling_too():
     evidence, tools = built(source, repo_path="/nowhere")
     evidence.reads = MAX_READS
 
-    assert "limit" in call(tools["read_code"], file="/app/a.ts", line=1)
+    assert "limit" in call(tools["read_code"], repo="r", file="/app/a.ts", line=1)
 
 
 def test_asking_what_a_code_means_counts_too():
     evidence, tools = built()
     evidence.reads = MAX_READS
 
-    assert "limit" in call(tools["what_code_means"], code="ERR19")
+    assert "limit" in call(tools["what_code_means"], repo="r", code="ERR19")
 
 
 def test_a_service_with_no_repository_recorded_says_so(tmp_path):
     _, tools = built()
 
-    assert "No repository is recorded" in call(
-        tools["read_code"], file="/app/a.ts", line=1
+    assert "No repository is recorded" in call(tools["read_code"], repo="r", file="/app/a.ts", line=1
     )
 
 
@@ -373,7 +378,7 @@ def test_a_code_the_table_does_not_carry_says_so(tmp_path):
     _, tools = built(repo_path=str(tmp_path), error_code_doc=doc.name)
 
     assert "not in this project's table" in call(
-        tools["what_code_means"], code="ERR999"
+        tools["what_code_means"], repo="r", code="ERR999"
     )
 
 
@@ -395,13 +400,28 @@ def _state():
                 "namespace": "dev", "app": "",
                 "pod_pattern": "backend-reelme-v2", "clone_path": "",
                 "repo_path": "/nowhere", "error_code_doc": "",
-                "container_roots": [], "dbs": [], "candidates": [],
+                "dbs": [], "candidates": [], "project": "", "projects": [],
                 "correlation_id": None, "curl_artifact_id": None,
                 "response_artifact_id": None,
             },
             "memory": [], "skills": [],
         },
     })
+
+
+def _backend_tools(source=None):
+    """`build_tools` over the real `backend.logs` (reading `source`) and
+    `backend.code`, through the core's narrowing — what `caps.build_tools`
+    does in the DAG."""
+    from dataclasses import replace
+
+    from friday.kernel.harness.run_agent import build_tools
+    from plugins.backend.toolsets import CODE, LOGS
+
+    logs = replace(LOGS, factory=lambda run: log_tools(
+        run, {} if source is None else {"kubectl": source}
+    ))
+    return lambda run: build_tools((logs, CODE), run, {})
 
 
 class Answering:
@@ -429,18 +449,23 @@ async def test_the_model_is_given_the_reads_and_told_where_things_live(db):
     """`Gather` gathers metadata under v3.3 — where the service runs, which
     clone holds its code — and nothing is read in advance."""
     from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
-    from plugins.backend.graph.deps import ApiIssueDeps
+    from friday.sdk.workflow import Deps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="x", confidence="likely", conclusive=False, refs=[])
-    node = diagnose_node(make_harness=lambda *, tools: Answering(answer, tools))
+    node = diagnose_node(
+        make_harness=lambda *, tools: Answering(answer, tools),
+        build_tools=_backend_tools(),
+    )
 
-    await node.run(_state(), ApiIssueDeps(
+    await node.run(_state(), Deps(
         task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
-        db=db, sender="", approver="",
+        db=db,
     ))
 
-    assert set(Answering.seen["tools"]) == {"read_log", "read_code", "what_code_means"}
+    assert set(Answering.seen["tools"]) == {
+        "read_log", "read_code", "search_code", "what_code_means"
+    }
     # Each field named, not one string that three of them happen to contain:
     # asserting the pod pattern alone stayed green with `service:` deleted.
     said = Answering.seen["prompt"]
@@ -457,16 +482,19 @@ async def test_an_answer_written_without_reading_anything_is_refused(db):
     at all."""
     from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
     from friday.sdk.workflow import status_of
-    from plugins.backend.graph.deps import ApiIssueDeps
+    from friday.sdk.workflow import Deps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="chắc là do cache", confidence="likely",
                        conclusive=False, refs=[])
-    node = diagnose_node(make_harness=lambda *, tools: Answering(answer, tools))
+    node = diagnose_node(
+        make_harness=lambda *, tools: Answering(answer, tools),
+        build_tools=_backend_tools(),
+    )
 
-    result = await node.run(_state(), ApiIssueDeps(
+    result = await node.run(_state(), Deps(
         task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
-        db=db, sender="", approver="",
+        db=db,
     ))
 
     assert status_of(result) == "empty"
@@ -507,7 +535,7 @@ async def test_what_a_tool_could_not_check_reaches_the_envelope(db):
     out is a fact about the read, and a model asked to remember it
     reproduces it unreliably."""
     from plugins.backend.graph.diagnose import Diagnosis, diagnose_node
-    from plugins.backend.graph.deps import ApiIssueDeps
+    from friday.sdk.workflow import Deps
     from types import SimpleNamespace
 
     answer = Diagnosis(cause="x", confidence="likely", conclusive=False,
@@ -521,11 +549,14 @@ async def test_what_a_tool_could_not_check_reaches_the_envelope(db):
             return await super().run_structured(prompt, **kw)
 
     source = Log([], oldest=AT + timedelta(hours=16))
-    node = diagnose_node(make_harness=lambda *, tools: Reads(answer, tools))
+    node = diagnose_node(
+        make_harness=lambda *, tools: Reads(answer, tools),
+        build_tools=_backend_tools(source),
+    )
 
-    result = await node.run(_state(), ApiIssueDeps(
+    result = await node.run(_state(), Deps(
         task=SimpleNamespace(id=1, conversation=None, params={}, created_at=AT),
-        db=db, sender="", approver="", log_sources={"kubectl": source},
+        db=db,
     ))
 
     assert any("reach back" in line for line in result["not_checked"])

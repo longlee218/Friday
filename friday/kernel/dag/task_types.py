@@ -58,6 +58,15 @@ class BootContext:
 
         return await intake(*args, **kwargs)
 
+    def build_tools(self, toolsets: Any, context: Any) -> list[Any]:
+        """The tools of `toolsets` for one run, each factory handed `context`
+        with `Reads` narrowed to that toolset from this boot's servers — the
+        same door `run_agent` uses (build-the-spine ticket 09), exposed so the
+        backend DAG builds its tools from its toolsets until ticket 14."""
+        from friday.kernel.harness.run_agent import build_tools
+
+        return build_tools(toolsets, context, self.servers)
+
     def simple_dag(self, name: str, params: type) -> Any:
         """The one-node graph a type with no investigation past node 0 uses —
         prepare, then ask for what is missing or hand over (D1). Exposed here so

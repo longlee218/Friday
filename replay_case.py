@@ -53,15 +53,13 @@ from dotenv import load_dotenv
 
 from friday.kernel.config import load_config
 from friday.kernel.dag.task_types import BootContext
-from friday.kernel.outbox import DEFAULT_APPROVER, DEFAULT_SENDER
 from friday.sdk.actions import Ask, HandOver, Reply
 from friday.kernel.domain.conversation import ConversationId
 from friday.sdk.workflow import DAG, Deps as DAGDeps, NodeRun
-from plugins.backend.config import load_backend_config
-from plugins.backend.graph import DIAGNOSE, build_backend_dag, build_log_sources
-from plugins.backend.graph.deps import ApiIssueDeps
+from plugins.backend.graph import DIAGNOSE, build_backend_dag
 from plugins.backend.params import ApiIssueParams
-from plugins.backend.sources.logs import LokiSource, SshKubectlSource
+from plugins.backend.toolsets import CODE, LOGS
+from plugins.backend.toolsets.logs import LokiSource, SshKubectlSource, log_tools
 from friday.store.db import Database
 from friday.kernel.dag import adapter
 
@@ -83,17 +81,23 @@ class _WithoutDiagnose:
         return None if declaration == DIAGNOSE else self._config.agent(declaration)
 
 
-def _replay_dag(config, *, with_model, reports):
+def _replay_dag(config, *, with_model, reports, toolsets=None):
     """The `backend.trace_problem` DAG, built through the plugin against a boot
     context — the composition root's job, done here for one replayed case. The
-    diagnose model is dropped when `with_model` is false by hiding its agent."""
-    backend_cfg = _dc_replace(
-        load_backend_config((config.plugin_blocks or {}).get("backend")),
-        reports_dir=str(reports),
-    )
+    diagnose model is dropped when `with_model` is false by hiding its agent.
+    `toolsets` replaces the plugin's own (a captured case's `backend.logs`)."""
     whole = config if with_model else _WithoutDiagnose(config)
-    api = SimpleNamespace(caps=BootContext(config=whole, servers={}), config=backend_cfg)
-    return build_backend_dag(api), backend_cfg
+    api = SimpleNamespace(caps=BootContext(config=whole, servers={}))
+    return build_backend_dag(api, toolsets=toolsets, reports_dir=reports)
+
+
+def _canned_toolsets(name: str, source: Any) -> tuple:
+    """`backend.logs` reading the captured case, beside the real `backend.code`
+    — the same tool, with only its source replaced."""
+    return (
+        _dc_replace(LOGS, factory=lambda run: log_tools(run, {name: source})),
+        CODE,
+    )
 
 
 async def _run_on_adapter(
@@ -487,10 +491,13 @@ async def run_captured(case: dict, *, with_model: bool, into: Path):
     db = await Database.connect(str(copy_aside(Path(config.database_path), into)))
     try:
         reports = into / "reports"
-        dag, _backend_cfg = _replay_dag(config, with_model=with_model, reports=reports)
         params = case_params(case)
         name, source = canned_source(case)
-        deps = ApiIssueDeps(
+        dag = _replay_dag(
+            config, with_model=with_model, reports=reports,
+            toolsets=_canned_toolsets(name, source),
+        )
+        deps = DAGDeps(
             task=SimpleNamespace(
                 id=case["id"],
                 conversation=ConversationId("discord", str(case["channel_id"])),
@@ -498,9 +505,6 @@ async def run_captured(case: dict, *, with_model: bool, into: Path):
                 created_at=datetime.fromisoformat(case["reported_at"]),
             ),
             db=db,
-            sender=DEFAULT_SENDER,
-            approver=DEFAULT_APPROVER,
-            log_sources={name: source},
         )
         final, runs, wall_s = await _run_on_adapter(
             dag,
@@ -554,8 +558,8 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
             return 1
 
         reports = into / "reports"
-        dag, backend_cfg = _replay_dag(config, with_model=with_model, reports=reports)
-        deps = ApiIssueDeps(
+        dag = _replay_dag(config, with_model=with_model, reports=reports)
+        deps = DAGDeps(
             task=SimpleNamespace(
                 id=task.id,
                 conversation=task.conversation,
@@ -563,9 +567,6 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
                 created_at=task.created_at,
             ),
             db=db,
-            sender=DEFAULT_SENDER,
-            approver=DEFAULT_APPROVER,
-            log_sources=build_log_sources(backend_cfg, {}),
         )
         final, runs, wall_s = await _run_on_adapter(
             dag,

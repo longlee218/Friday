@@ -18,15 +18,6 @@ tiers:
     provider: openrouter
     model: "deepseek/deepseek-v4.1-flash"
 
-# ── The api_issue investigation ────────────────────────────────────────────
-# What it reaches outside this process with; each is optional (a node with no
-# source skips and says which one it wanted).
-backend:
-  ssh_host: "dev"                 # where kubectl runs for dev logs; empty = off
-  loki_server: "devops-generic"   # which mcp_servers block carries Loki
-  loki_tool: "loki_query_range"   # its range-query tool
-  reports_dir: "./data/reports"   # where a run's report is written
-
 # ── Operator & board ─────────────────────────────────────────────────────────
 operator_id: 482447107983147039   # who approves replies, by DM from the bot
 
