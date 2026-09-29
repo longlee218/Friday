@@ -158,18 +158,30 @@ def counterpart(text: str) -> Section:
     return Section("counterpart", _escape(text))
 
 
-def response_style(rules: list[str] | None) -> Section:
+#: A section body: a list of items the builder formats, or one block of text
+#: kept as written — so a prompt can be read in the source the way the model
+#: reads it.
+Body = str | list[str] | None
+
+
+def _body(value: Body, marker) -> str:
+    """A list becomes one line per item, `marker(i)` in front; a string is
+    kept as written. Escaped either way — the section's boundary is here."""
+    if isinstance(value, str):
+        return _escape(value.strip())
+    return "\n".join(f"{marker(i)} {_escape(item)}" for i, item in enumerate(value or (), 1))
+
+
+def response_style(rules: Body) -> Section:
     """How to write the answer — length, register, what to leave out.
 
-    A list rather than prose: an agent asked to hold six sentences of style
-    guidance in mind follows the first and the last. Six bullets it follows.
+    A list is bulleted: an agent asked to hold six sentences of style guidance
+    in mind follows the first and the last. Six bullets it follows.
     """
-    if not rules:
-        return Section("response_style")
-    return Section("response_style", "\n".join(f"- {_escape(r)}" for r in rules))
+    return Section("response_style", _body(rules, lambda _: "-"))
 
 
-def thinking_style(steps: list[str] | None) -> Section:
+def thinking_style(steps: Body) -> Section:
     """How to think before answering, as ordered steps.
 
     **This does not make a model reason.** It describes the shape of an
@@ -180,13 +192,10 @@ def thinking_style(steps: list[str] | None) -> Section:
     so a section here is the half that always works — asking for the steps in
     the output rather than paying for a mode the endpoint may reject.
     """
-    if not steps:
-        return Section("thinking_style")
-    body = "\n".join(f"{i}. {_escape(s)}" for i, s in enumerate(steps, 1))
-    return Section("thinking_style", body)
+    return Section("thinking_style", _body(steps, lambda i: f"{i}."))
 
 
-def critical_reminder(rules: list[str] | None) -> Section:
+def critical_reminder(rules: Body) -> Section:
     """The two or three things that must not be got wrong, last in the prompt.
 
     Last on purpose, and short on purpose. A model attends to the front and
@@ -194,9 +203,7 @@ def critical_reminder(rules: list[str] | None) -> Section:
     a list of none — if everything is critical, the section has stopped
     saying anything.
     """
-    if not rules:
-        return Section("critical_reminder")
-    return Section("critical_reminder", "\n".join(f"- {_escape(r)}" for r in rules))
+    return Section("critical_reminder", _body(rules, lambda _: "-"))
 
 
 #: Said once in the system prompt; `user_input` puts the markers around the

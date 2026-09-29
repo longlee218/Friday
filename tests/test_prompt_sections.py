@@ -8,6 +8,7 @@ and nothing a stranger typed can close the section it was quoted into.
 
 from __future__ import annotations
 
+import pytest
 from conftest import make_event, summary_row
 
 from friday.kernel.harness import instruction_prompt as ip
@@ -1221,3 +1222,28 @@ def test_channel_derived_renders_a_structured_summarys_list_fields():
     rendered = ip.channel_derived(ctx).render()  # must not raise
 
     assert "never paste a token into the channel" in rendered
+
+
+# --- a section's body: a list is formatted, a string is kept (2026-09-29) ----
+
+
+@pytest.mark.parametrize(
+    ("build", "listed"),
+    [
+        ("thinking_style", "1. read it\n2. decide"),
+        ("critical_reminder", "- read it\n- decide"),
+        ("response_style", "- read it\n- decide"),
+    ],
+)
+def test_a_list_is_numbered_or_bulleted_and_a_string_is_kept_as_written(build, listed):
+    """A prompt written as one block of prose reads like a prompt in the
+    source; a list of fragments does not. Both are accepted — a list is
+    formatted as before, a string is kept as written (still escaped)."""
+    from friday.sdk import prompt
+
+    make = getattr(prompt, build)
+    written = "Read it first.\n\nThen decide — <not a tag>."
+
+    assert make(["read it", "decide"]).body == listed
+    assert make(written).body == "Read it first.\n\nThen decide — &lt;not a tag&gt;."
+    assert make("   ").render() == "" and make(None).render() == "" and make([]).render() == ""
