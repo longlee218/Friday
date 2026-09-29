@@ -166,9 +166,10 @@ is the premise each board tracks against.
   four toolsets `core.memory/skills/shell/workspace` are registered but no
   spine agent is wired to them until 14; triage's prompt is assembled from
   the three registered actions' recognition); 04 and 11 are takeable
-  (`.scratch/build-the-spine/STATUS.md`). The triage eval and
-  the `backend.trace_problem` eval are deferred: an OpenRouter key exists since
-  2026-09-29, but the account has no credits (every call answers 402).
+  (`.scratch/build-the-spine/STATUS.md`). Evals run on Pydantic Evals
+  (`uv run run_eval.py <name>`); `core.triage` measured 2026-09-29 (deepseek
+  34/35; triage runs on qwen3-30b, 21/23 on `trace_problem`). The
+  `backend.trace_problem` eval has not been run on the new key yet.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
 

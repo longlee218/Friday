@@ -23,11 +23,17 @@ Stub: `recognition_and_triage_prompt_STUB.py` on its prototype branch.
 
 ## Acceptance
 
-- [ ] `run_triage_eval` run: accuracy, confusion matrix, threshold table
-      reported, compared with the 2026-09-20 100%. — **Not done**: run
-      2026-09-29 on this change and on HEAD `330e06c` as a baseline; every
-      call answered HTTP 402 (OpenRouter account has no credits). Deferred
-      until credits exist.
+- [x] `run_triage_eval` run: accuracy, confusion matrix, threshold table
+      reported, compared with the 2026-09-20 100%. — **Done 2026-09-29**, as
+      `uv run run_eval.py core.triage` (the eval moved onto Pydantic Evals the
+      same day), on the assembled prompt as refined afterwards (senior-backend
+      thinking, 06 §9 amended): deepseek-v4.1-flash **34/35 (97.1%)**, 0 out of
+      set, 2/35 below 0.7; the one miss (020) is held by the sensitive-word
+      prefilter and never reaches the model. `backend.trace_problem` subset
+      (23): deepseek 22/23, qwen3-30b 21/23, gpt-5-mini 21/23 — after the
+      harness answer-tool schema fix (`cf93f34`); before it, qwen and
+      gpt-5-mini answered `{}`. Below 2026-09-20's 100%, on a different and
+      larger set (35 real-traffic cases, long turns and attachments).
 - [x] Rendered prompt bytes stable across runs (test).
 - [x] Whole suite green; `code-review` done.
 

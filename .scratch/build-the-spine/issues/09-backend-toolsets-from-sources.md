@@ -38,7 +38,8 @@ per data source holding tools + client: `logs.py` (`backend.logs`:
       CannedReads tests, `replay_case.py --case data/cases/prod-onboarding-400.json`
       (no model) identical to HEAD, and the case's canned Loki answer read
       through the new `read_log` holds the decisive line. The eval needs a
-      model and there is no OpenRouter key: not run.
+      model: not run. (2026-09-29: the key has credits now; the eval is
+      `uv run run_eval.py backend.trace_problem`, once was `run_api_issue_eval`.)
 - [x] `docs/DESIGN.md` "Three layers" corrected (sources folded).
 - [x] Whole suite green; `code-review` done.
 
