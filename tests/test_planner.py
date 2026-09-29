@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import pytest
 
 from friday.kernel.config import AgentConfig
-from friday.kernel.spine.plan import AgentStep, DraftStep
+from friday.kernel.spine.plan import AgentStep, DraftStep, step_keys
 from friday.kernel.spine.plan_gate import Frozen
 from friday.kernel.spine.planner import (
     PLAN_REWRITES,
@@ -195,12 +195,43 @@ async def test_a_plan_that_passes_is_frozen_as_version_one():
         AgentStep(
             "s1",
             "backend.diagnose",
-            ("backend.logs", "backend.code"),
+            ("backend.code", "backend.logs"),
             "find correlationId 1234 in the logs first",
         ),
         DraftStep("s2", ("s1",)),
     )
     assert len(model.calls) == 1
+
+
+async def test_an_agent_step_with_no_toolsets_freezes_with_the_full_grant():
+    """`contract ∩ ceiling`, filled before the plan is hashed — so the key and
+    the stored plan carry the real grant, and equal the spelled-out plan's."""
+    bare = {
+        **GOOD,
+        "steps": [{**GOOD["steps"][0], "toolsets": []}, GOOD["steps"][1]],
+    }
+
+    got = await plan(_planning(ScriptedModel([_answer(bare)])))
+    spelled = await plan(_planning(ScriptedModel([_answer(GOOD)])))
+
+    assert isinstance(got, Frozen) and isinstance(spelled, Frozen)
+    assert got.plan.steps[0].toolsets == ("backend.code", "backend.logs")
+    assert step_keys(got.plan, ("x",)) == step_keys(spelled.plan, ("x",))
+
+
+async def test_a_toolset_outside_the_ceiling_is_still_refused_never_clipped():
+    over = {
+        **GOOD,
+        "steps": [
+            {**GOOD["steps"][0], "toolsets": ["backend.logs", "backend.db"]},
+            GOOD["steps"][1],
+        ],
+    }
+
+    got = await plan(_planning(ScriptedModel([_answer(over)] * 3)))
+
+    assert isinstance(got, PlannerFailed)
+    assert any("backend.db" in e for e in got.errors[0])
 
 
 async def test_a_refusal_goes_back_in_the_same_conversation_and_the_rewrite_passes():
@@ -351,3 +382,15 @@ async def test_a_replan_is_a_fresh_conversation_with_its_own_rewrites():
     assert "find correlationId 1234 in the logs first" in said
     assert '- s1: {"cause": "timeout"}' in said
     assert "the logs show a timeout upstream" in said and "L3: timeout" in said
+
+
+def test_the_instructions_ask_for_a_goal_and_not_a_method():
+    """Ticket 20: `brief` is what to establish and what the reporter gave; the
+    agent's own instructions say how. Empty `toolsets` is the full grant."""
+    from friday.kernel.spine.planner_prompt import INSTRUCTIONS
+
+    said = " ".join(INSTRUCTIONS.split())
+
+    assert "never a method" in said
+    assert "where to look first" not in said
+    assert "Leave `toolsets` empty for the full grant" in said

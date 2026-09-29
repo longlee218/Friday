@@ -198,7 +198,7 @@ async def _write(
                 replaces=replaces,
                 contract=p.action.contract,
                 goal=answer.goal,
-                steps=to_steps(answer),
+                steps=to_steps(answer, p.action.contract, p.agents),
             )
             verdict = gate_plan(written, p.agents)
             if isinstance(verdict, Frozen):

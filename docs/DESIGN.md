@@ -254,7 +254,14 @@ bullet, the first sentence is the rule; the rest is mechanism and why.
   refusal; every refusal message repeats the refused plan and its errors, so
   it reads the same when a failed run's messages were lost. A replan is a
   fresh conversation with its own rewrites. Tested in `tests/test_planner.py`;
-  its prompt is scored by `core.planner` (`evals/README.md`).
+  its prompt is scored by `core.planner` (`evals/README.md`). **A `brief`
+  is a goal and its constraints, never a method** (ticket 20): what the step
+  must establish and what the reporter gave; how to investigate is the
+  agent's own instructions. **An empty `toolsets` on an `agent` step is the
+  full grant**, `contract ∩ the agent's ceiling`, filled by `to_steps` and
+  sorted before the plan is hashed; a grant outside the ceiling is still
+  refused. The `replan` tool's docstring says when to replan (a toolset or
+  agent it was not granted, or a wrong premise) and when to keep reading.
 - **`friday/kernel/harness/harness.py` is the only module that may import the agent
   SDK** (`pydantic_ai`, `fastmcp`), the one exception being
   `friday/sdk/testing/` (the test-double seam). `tests/test_harness.py`

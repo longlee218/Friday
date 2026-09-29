@@ -72,3 +72,14 @@ Carried: to **12** — how the Planner uses the gate's errors to rewrite. To
 ## Amended 2026-09-28 by ticket 17
 
 The time check goes (no `total_time`): the limits step checks `max_steps` only. See [The budget in three groups](17-the-budget-in-three-groups.md).
+
+## Amended 2026-09-30 by build-the-spine ticket 20
+
+§2 (toolsets): an `agent` step's empty `toolsets` means the full grant,
+`contract.allowed_toolsets ∩ the agent's ceiling`, filled by code
+(`to_steps`) before the plan is hashed, so `step_key` and the stored plan see
+the real grant; grants are sorted. The Planner lists toolsets only when the
+action's `planning` or a constraint gives a reason to narrow. The refusal of
+a grant *outside* the ceiling stands (refused, never clipped); an
+unregistered agent gets no fill and is refused as before. See
+[The Planner hands over goals, not methods](../../build-the-spine/issues/20-the-planner-hands-over-goals-not-methods.md).

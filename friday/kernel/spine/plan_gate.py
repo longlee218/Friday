@@ -20,9 +20,22 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from friday.kernel.spine.plan import AgentStep, Plan, plan_hash, shape_errors
+from friday.sdk.action import ActionContract
 from friday.sdk.agent import AgentSpec
 
-__all__ = ["Frozen", "Refused", "gate_plan"]
+__all__ = [
+    "Frozen",
+    "Refused",
+    "full_grant",
+    "gate_plan",
+]
+
+
+def full_grant(contract: ActionContract, spec: AgentSpec) -> frozenset[str]:
+    """The most an agent step may be granted: the contract's toolsets that
+    are also inside the agent's own ceiling. The Planner's empty `toolsets`
+    means all of it; GatePlan refuses anything beyond it."""
+    return contract.allowed_toolsets & frozenset(spec.toolsets)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +84,7 @@ def _contract_errors(plan: Plan, agents: Mapping[str, AgentSpec]) -> list[str]:
         if spec is None:
             errors.append(f"{step.id}: agent {step.agent} is not registered")
             continue
-        ceiling = contract.allowed_toolsets & frozenset(spec.toolsets)
+        ceiling = full_grant(contract, spec)
         errors += [
             f"{step.id}: toolset {t} is outside what {step.agent} may be "
             f"granted ({_names(ceiling)})"

@@ -91,3 +91,11 @@ reply-driven replan counts toward `max_replans`.
 ## Amended 2026-09-28 by ticket 17
 
 Point 9 goes: no time check before a step and no `out_of_time` hand-over. `STEP_ATTEMPTS = 2` stays. See [The budget in three groups](17-the-budget-in-three-groups.md).
+
+## Amended 2026-09-30 by build-the-spine ticket 20
+
+§1, wording only: the `replan` tool's docstring now states the rule — replan
+when the task needs a toolset or an agent the step was not granted, or the
+brief's premise is wrong; keep reading when more reading with the granted
+tools would settle it. `Replan(reason, found)` is unchanged. See
+[The Planner hands over goals, not methods](../../build-the-spine/issues/20-the-planner-hands-over-goals-not-methods.md).

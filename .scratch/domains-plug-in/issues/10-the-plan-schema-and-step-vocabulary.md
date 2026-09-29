@@ -72,9 +72,9 @@ Plan
    it re-run.
 
 Worked plan (`backend.trace_problem`, prod-onboarding-400):
-`p1 agent backend.diagnose [backend.logs, backend.code] "find the 400 for the
-correlationId; read the validator at the running tag; say which field or rule
-rejects it"` → `p2 draft reads p1`.
+`p1 agent backend.diagnose [backend.logs, backend.code] "establish which field
+or rule rejected the request with the correlationId the reporter gave"` →
+`p2 draft reads p1`. (Rewritten as a goal by ticket 20 — see below.)
 
 Carried: to **13** — ticket 13's question says `(plan_version, phase_id)`;
 this answer replaces that with `(task_id, step_key)`; how an agent signals
@@ -85,3 +85,12 @@ the last agent step (it must, to see the reply) is 14's call. To **11** —
 the contract checks (agent / toolsets / step types within the contract) and
 a cap on the number of steps. To **15** — acknowledge as a step or a spine
 concern is not a step type here, so this leans "spine concern".
+
+## Amended 2026-09-30 by build-the-spine ticket 20
+
+§5: a `brief` is a goal and its constraints — what the step must establish and
+what the reporter gave (ids, endpoints, times) — never a method. "What to look
+at first" leaves the brief: the Planner guesses before it has read anything,
+and the agent's own instructions already say how to investigate. The worked
+plan above is the goal form. See
+[The Planner hands over goals, not methods](../../build-the-spine/issues/20-the-planner-hands-over-goals-not-methods.md).

@@ -466,6 +466,11 @@ is a replan. Its **plan hash** is sha256 of the canonical JSON of the whole
 plan, contract included. Built in build-the-spine ticket 06; every version,
 frozen or refused with its gate errors, is a row of `plans` since 14.
 
+**Brief** — an `agent` step's instruction from the Planner: what the step must
+establish and what the reporter gave, never how to investigate (that is the
+agent's own instructions). An empty `toolsets` beside it is the full grant,
+`contract ∩ ceiling`. (Build-the-spine ticket 20.)
+
 **Step** — one entry of a plan, one of four core-owned types: `agent` (a named
 agent, the toolsets granted to it, a brief), `ask` / `hand_over` (the Planner
 deciding that up front), `draft` (the core responder writes the `Reply`).

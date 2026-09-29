@@ -25,7 +25,7 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 17 | Re-triage | ⬜ | 16 |
 | 18 | The board shows plans and re-triage | ⬜ | 17 |
 | 19 | Doc sweep | ⬜ | 18 |
-| 20 | The Planner hands over goals, not methods | ⬜ opened 2026-09-30 (operator design review): brief = goal not method, empty `toolsets` = full grant, `replan` docstring says when | 14 |
+| 20 | The Planner hands over goals, not methods | 🧑 code in (main, 2026-09-30); waiting on the operator: the paid `core.planner` run (baseline 6/8) | 14 |
 | 21 | The Planner reads the reporter through the same boundary | ⬜ opened 2026-09-30: `planner_prompt.py` assembled from sdk sections, `trust_boundary` + `user_input`, listed in the assembler guard | 20 |
 
 Operator steps: the db wipe in 02 (asked first), the eval relabel

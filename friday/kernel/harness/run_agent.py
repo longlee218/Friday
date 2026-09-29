@@ -72,7 +72,10 @@ def hand_over(reason: str) -> HandOver:
 
 
 def replan(reason: str, found: str) -> Replan:
-    """Your brief points the wrong way for this task: ask for a new plan.
+    """Ask for a new plan. Use it when the task needs a toolset or an agent
+    you were not granted, or the brief's premise is wrong. Do not use it for
+    a dead end you can get past by reading more with the tools you have —
+    keep reading.
 
     Args:
         reason: why this step's direction is wrong.

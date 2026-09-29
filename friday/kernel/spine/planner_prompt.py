@@ -6,6 +6,8 @@ knows about planning reaches the Planner as its action's `planning`, the
 operator's memory and skills, and the descriptions its agents and toolsets
 declare. The answer is a `PlanAnswer` — goal and steps only; the task, the
 version, `replaces` and the contract are the core's to fill in (`planner.py`).
+Over 200 lines: the instructions, the answer types and the prompt sections are
+one unit; ticket 21 rebuilds the sections on the sdk builders.
 """
 
 from __future__ import annotations
@@ -26,7 +28,8 @@ from friday.kernel.spine.plan import (
     Plan,
     Step,
 )
-from friday.sdk.action import Action
+from friday.kernel.spine.plan_gate import full_grant
+from friday.sdk.action import Action, ActionContract
 from friday.sdk.actions import Replan
 from friday.sdk.agent import AgentSpec
 from friday.sdk.intake import IntakeContext
@@ -49,9 +52,12 @@ reporter's system yourself — the agents do that. You may read what Friday \
 already knows (memory, skills) first; then answer once, with the plan.
 
 Step types:
-- agent: run one of the allowed agents. `agent` names it; `toolsets` grants \
-it toolsets, only from those listed for that agent; `brief` says what to \
-establish and where to look first.
+- agent: run one of the allowed agents. `agent` names it; `brief` says what \
+the step must establish and what the reporter gave (ids, endpoints, times) — \
+a goal and its constraints, never a method: the agent decides how to \
+investigate. Leave `toolsets` empty for the full grant (every toolset listed \
+for that agent); list some only when the action's plan notes or a constraint \
+gives a reason to narrow, and only from those listed for that agent.
 - ask: ask the reporter one question up front, only when the request is too \
 vague to start and no agent could find the missing piece by reading. \
 `question` is sent as written.
@@ -76,9 +82,10 @@ refused, fix every error it names and give the whole plan again."""
 class PlannedStep:
     """One step of the plan. `id` is short and unique ("s1"). `type` is
     agent | ask | hand_over | draft. Fill only the fields its type uses:
-    agent → `agent`, `toolsets`, `brief`; ask → `question`; hand_over →
-    `reason`; draft → nothing more. `reads` lists the ids of earlier steps
-    whose result this step is handed."""
+    agent → `agent`, `brief` (what to establish and what the reporter gave,
+    not how), `toolsets` (empty: the full grant); ask → `question`;
+    hand_over → `reason`; draft → nothing more. `reads` lists the ids of
+    earlier steps whose result this step is handed."""
 
     id: str
     type: Literal["agent", "ask", "hand_over", "draft"]
@@ -100,15 +107,26 @@ class PlanAnswer:
     )
 
 
-def to_steps(answer: PlanAnswer) -> tuple[Step, ...]:
+def to_steps(
+    answer: PlanAnswer, contract: ActionContract, agents: Mapping[str, AgentSpec]
+) -> tuple[Step, ...]:
     """The answer's steps as the spine's own step types. A field the type
     does not use is dropped; one it needs and lacks stays empty for GatePlan
+    to refuse. An agent step with no `toolsets` gets the full grant
+    (`full_grant`), filled here, before the plan is hashed, so the step key
+    sees the real grant. Toolsets are sorted: a grant is a set, and its order
+    must not change the key. An unregistered agent stays empty for GatePlan
     to refuse."""
     steps: list[Step] = []
     for s in answer.steps:
         reads = tuple(s.reads)
         if s.type == "agent":
-            steps.append(AgentStep(s.id, s.agent, tuple(s.toolsets), s.brief, reads))
+            spec = agents.get(s.agent)
+            named = set(s.toolsets)
+            if not named and spec is not None:
+                named = full_grant(contract, spec)
+            granted = tuple(sorted(named))
+            steps.append(AgentStep(s.id, s.agent, granted, s.brief, reads))
         elif s.type == "ask":
             steps.append(AskStep(s.id, s.question, reads))
         elif s.type == "hand_over":
@@ -210,7 +228,7 @@ def _action(
         spec = agents.get(name)
         if spec is None:
             continue
-        granted = sorted(contract.allowed_toolsets & set(spec.toolsets))
+        granted = sorted(full_grant(contract, spec))
         lines = [
             f"### {spec.name}",
             spec.description,

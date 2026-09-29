@@ -384,3 +384,15 @@ async def test_a_failure_that_is_not_the_budget_raises():
 
     with pytest.raises(AgentRunFailed):
         await _run(FunctionModel(reply, model_name="test-model"))
+
+
+def test_the_replan_tool_says_when_to_replan_and_when_to_keep_reading():
+    """The rule is the tool's docstring (build-the-spine ticket 20): the model
+    sees it as the tool's description, and nothing else tells it."""
+    from friday.kernel.harness.run_agent import replan
+
+    said = " ".join(replan.__doc__.split())
+
+    assert "toolset or an agent you were not granted" in said
+    assert "brief's premise is wrong" in said
+    assert "keep reading" in said
