@@ -11,6 +11,7 @@ so no tool file has to duplicate them or import a sibling.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 
@@ -121,18 +122,66 @@ def refuse_ref_flag(ref: str | None) -> None:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class Resolved:
+    """One of the room's repositories, already looked up — never `None`.
+    `resolve_repo` raises `ModelRetry` for every way that could fail, so a
+    tool body holding one never repeats the lookup its `args_validator`
+    already did, or the `Repo | None` check that repeating it would need."""
+
+    repo: Repo
+    root: Path
+
+
+def resolve_repo(domain: RepoRoom, repo: str, *, verb: str) -> Resolved:
+    """`repo`, looked up and confirmed to have a clone, or a raised
+    `ModelRetry` naming why not. Shared by `grep`/`glob` (which need nothing
+    more) and by `resolve_path` below (which does)."""
+    found = repo_of(domain, repo)
+    if found is None:
+        raise ModelRetry(unknown_repo(domain, repo))
+    if not found.repo_path:
+        raise ModelRetry(
+            f"No repository is recorded for {repo!r}, so nothing can be {verb}."
+        )
+    return Resolved(repo=found, root=Path(found.repo_path).expanduser().resolve())
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedPath(Resolved):
+    """A `Resolved` repo plus a `path`, confined to its clone and cleared of
+    being a secret — never `None`, for the same reason `Resolved` is not."""
+
+    frame: Path
+
+
+def resolve_path(domain: RepoRoom, repo: str, path: str) -> ResolvedPath:
+    """`read`'s own resolution: `repo` (via `resolve_repo`), then `path`
+    confined to its clone and refused if it names a credential."""
+    found = resolve_repo(domain, repo, verb="read")
+    confined = repo_file(
+        path,
+        found.repo.repo_path,
+        container_roots=found.repo.container_roots,
+        exists=False,
+    )
+    if confined is None:
+        raise ModelRetry(
+            f"{path!r} is not in {repo}'s clone — it is somebody else's code, "
+            f"or outside the repository."
+        )
+    if is_secret(confined, found.repo.repo_path):
+        raise ModelRetry(
+            f"{path!r} names a credential file or directory and may not be read."
+        )
+    return ResolvedPath(repo=found.repo, root=found.root, frame=confined)
+
+
 def validate_room(domain: RepoRoom, *, verb: str):
     """The unknown-repo / no-clone refusal shared by `grep` and `glob`."""
 
     def check_args(ctx, **kwargs) -> None:
-        repo = kwargs["repo"]
         refuse_ref_flag(kwargs.get("ref"))
-        found = repo_of(domain, repo)
-        if found is None:
-            raise ModelRetry(unknown_repo(domain, repo))
-        if not found.repo_path:
-            raise ModelRetry(
-                f"No repository is recorded for {repo!r}, so nothing can be {verb}."
-            )
+        resolve_repo(domain, kwargs["repo"], verb=verb)
 
     return check_args

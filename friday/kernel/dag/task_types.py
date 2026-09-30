@@ -98,11 +98,11 @@ class BootContext:
         agent: Any,
         instructions: str,
         answers: type | None = None,
-        tools: list | None = None,
+        tools: list[Any] | None = None,
         #: Terminal output tools this agent may finish through besides its
         #: `answers` shape — the diagnose loop's `hand_over(reason)`. Passed
         #: straight to the `Harness`; see its `ends_with`.
-        ends_with: list | None = None,
+        ends_with: list[Any] | None = None,
     ) -> Any:
         """A model harness built from a resolved agent, or `None` when a caller
         hid the agent (replay without a model, tests). Built here, where `record` lives, so a plugin's model

@@ -134,7 +134,9 @@ def _readers(registry: Registry) -> list[str]:
     that registers at least one `AgentSpec`: until then its readers name DAG
     agents that have no spec (temporary, ticket 16 deletes the DAG path)."""
     with_specs = {
-        registry.owner_of(n).id for n in registry.agents() if registry.owner_of(n)
+        owner.id
+        for n in registry.agents()
+        if (owner := registry.owner_of(n)) is not None
     }
     agents = registry.agents()
     return [

@@ -21,14 +21,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import subprocess
-from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field
 
 from friday.kernel.harness.harness import ModelRetry
 from friday.kernel.toolsets.repos.git import ref_resolves
-from friday.kernel.toolsets.repos.paths import REF_LINE, repo_of, validate_room
+from friday.kernel.toolsets.repos.paths import REF_LINE, resolve_repo, validate_room
 from friday.kernel.toolsets.shell import SECRET_DIRS, SECRET_FILES
 from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS, RepoRoom
 from friday.sdk.toolset import tool
@@ -143,8 +142,8 @@ def _build_grep(domain: RepoRoom, evidence, name_the_room):
         body runs at all. A `ref` git cannot resolve is refused here.
         """
         evidence.reads += 1
-        found = repo_of(domain, repo)
-        root = Path(found.repo_path).expanduser().resolve()
+        resolved = resolve_repo(domain, repo, verb="searched")
+        repo_path, root = resolved.repo.repo_path, resolved.root
 
         prefix = ["git", "-C", str(root), "grep", "--extended-regexp", "-n"]
         if case_insensitive:
@@ -168,7 +167,7 @@ def _build_grep(domain: RepoRoom, evidence, name_the_room):
         suffix.extend(f":(exclude,glob){name}" for name in SECRET_FILES)
         suffix.extend(f":(exclude,glob)**/{name}/**" for name in sorted(SECRET_DIRS))
 
-        async def run_at(git_ref: str) -> subprocess.CompletedProcess | None:
+        async def run_at(git_ref: str) -> subprocess.CompletedProcess[str] | None:
             args = [*prefix, *([git_ref] if git_ref else []), *suffix]
             try:
                 return await asyncio.to_thread(
@@ -184,7 +183,7 @@ def _build_grep(domain: RepoRoom, evidence, name_the_room):
                 return None
 
         if ref:
-            if not await asyncio.to_thread(ref_resolves, found.repo_path, ref):
+            if not await asyncio.to_thread(ref_resolves, repo_path, ref):
                 raise ModelRetry(
                     f"{ref!r} could not be resolved in {repo}'s clone — check the "
                     f"spelling, or fetch it."

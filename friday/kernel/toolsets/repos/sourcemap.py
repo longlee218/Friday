@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 __all__ = ["original"]
 
@@ -76,8 +77,8 @@ def original(compiled: Path, line: int, root: Path | str) -> tuple[Path, int] | 
 
 
 def _walk(
-    loaded: dict,
-    sources: list,
+    loaded: dict[str, Any],
+    sources: list[Any],
     mappings: str,
     compiled: Path,
     line: int,

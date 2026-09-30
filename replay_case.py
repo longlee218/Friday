@@ -74,7 +74,7 @@ BRIEF = (
 )
 
 
-def _canned_toolsets(name: str, source: Any) -> tuple:
+def _canned_toolsets(name: str, source: Any) -> tuple[Any, ...]:
     """`backend.logs` reading the captured case, beside the real
     `core.repos` — the same tool, with only the log source replaced."""
     return (
@@ -151,7 +151,7 @@ class Ran:
     wall_s: float
 
     @property
-    def diagnosis(self) -> dict | None:
+    def diagnosis(self) -> dict[str, Any] | None:
         """The diagnosis as data, the eval's input — `None` when the step
         asked, handed over, was voided by its check, or did not run."""
         if self.outcome is None or isinstance(self.outcome, (Ask, HandOver)):
@@ -166,7 +166,7 @@ async def diagnose(
     turns: tuple[str, ...],
     channel_id: str,
     reported_at: str,
-    toolsets: tuple,
+    toolsets: tuple[Any, ...],
     config: Any,
     with_model: bool,
 ) -> Ran:
@@ -477,7 +477,7 @@ def case_turns(case: dict[str, Any]) -> tuple[str, ...]:
     return tuple(t for t in said if t)
 
 
-async def run_captured(case: dict, *, with_model: bool, into: Path) -> Ran:
+async def run_captured(case: dict[str, Any], *, with_model: bool, into: Path) -> Ran:
     """One captured case through the diagnose step. The eval runner and the
     command line share this one path: a second way to run a case is a second
     way for a score to disagree with what the operator sees."""

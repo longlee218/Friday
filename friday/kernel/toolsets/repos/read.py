@@ -18,8 +18,7 @@ rather than being split across files for a line count.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import Field
 
@@ -27,12 +26,9 @@ from friday.kernel.harness.harness import ModelRetry
 from friday.kernel.toolsets.repos.git import at_ref, blob_kind, ref_resolves
 from friday.kernel.toolsets.repos.paths import (
     REF_LINE,
-    is_secret,
     numbered,
     refuse_ref_flag,
-    repo_file,
-    repo_of,
-    unknown_repo,
+    resolve_path,
 )
 from friday.kernel.toolsets.repos.sourcemap import original
 from friday.sdk.sources import RepoRoom
@@ -63,32 +59,18 @@ def _read_description() -> str:
 
 def _validate_read(domain: RepoRoom):
     def check_args(ctx, **kwargs) -> None:
-        repo, path = kwargs["repo"], kwargs["path"]
         refuse_ref_flag(kwargs.get("ref"))
-        found = repo_of(domain, repo)
-        if found is None:
-            raise ModelRetry(unknown_repo(domain, repo))
-        if not found.repo_path:
-            raise ModelRetry(
-                f"No repository is recorded for {repo!r}, so nothing can be read."
-            )
-        confined = repo_file(
-            path, found.repo_path, container_roots=found.container_roots, exists=False
-        )
-        if confined is None:
-            raise ModelRetry(
-                f"{path!r} is not in {repo}'s clone — it is somebody else's code, "
-                f"or outside the repository."
-            )
-        if is_secret(confined, found.repo_path):
-            raise ModelRetry(
-                f"{path!r} names a credential file or directory and may not be read."
-            )
+        resolve_path(domain, kwargs["repo"], kwargs["path"])
 
     return check_args
 
 
-def _build_read(domain: RepoRoom, evidence, seen_ranges: dict, name_the_room):
+def _build_read(
+    domain: RepoRoom,
+    evidence,
+    seen_ranges: dict[tuple[Any, ...], tuple[str, str]],
+    name_the_room,
+):
     """`read`, bound to this run's domain, evidence and unchanged-range cache
     (`seen_ranges`, one run's worth, owned by `friday.kernel.toolsets.repos`
     and shared across calls within the run)."""
@@ -130,15 +112,12 @@ def _build_read(domain: RepoRoom, evidence, seen_ranges: dict, name_the_room):
         here, since checking it is a git call.
         """
         evidence.reads += 1
-        found = repo_of(domain, repo)
-        frame = repo_file(
-            path, found.repo_path, container_roots=found.container_roots, exists=False
-        )
+        resolved = resolve_path(domain, repo, path)
+        repo_path, frame, root = resolved.repo.repo_path, resolved.frame, resolved.root
 
-        root = Path(found.repo_path).expanduser().resolve()
         shown, at, translated = frame, max(1, int(offset)), False
         if frame.is_file():
-            mapped = await asyncio.to_thread(original, frame, at, found.repo_path)
+            mapped = await asyncio.to_thread(original, frame, at, repo_path)
             if mapped is not None:
                 shown, at, translated = *mapped, True
 
@@ -146,16 +125,16 @@ def _build_read(domain: RepoRoom, evidence, seen_ranges: dict, name_the_room):
 
         text: str | None = None
         if ref:
-            if not await asyncio.to_thread(ref_resolves, found.repo_path, ref):
+            if not await asyncio.to_thread(ref_resolves, repo_path, ref):
                 raise ModelRetry(
                     f"{ref!r} could not be resolved in {repo}'s clone — check the "
                     f"spelling, or fetch it."
                 )
-            kind = await asyncio.to_thread(blob_kind, found.repo_path, relative, ref)
+            kind = await asyncio.to_thread(blob_kind, repo_path, relative, ref)
             if kind == "tree":
                 raise ModelRetry(f"{path!r} is a directory; use grep or glob instead.")
             if kind == "blob":
-                text = await asyncio.to_thread(at_ref, found.repo_path, shown, ref)
+                text = await asyncio.to_thread(at_ref, repo_path, shown, ref)
 
         served_from_ref = text is not None
         if served_from_ref:

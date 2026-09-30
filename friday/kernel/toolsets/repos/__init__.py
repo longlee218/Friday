@@ -44,6 +44,7 @@ resolve is refused in the body, since checking it is a git call.
 from __future__ import annotations
 
 from dataclasses import replace as _replace
+from typing import Any
 
 from friday.kernel.toolsets.repos.glob import _build_glob
 from friday.kernel.toolsets.repos.grep import _build_grep
@@ -69,7 +70,7 @@ def _name_the_room(domain: RepoRoom):
     return prepare
 
 
-def repos_tools(run: RunContext) -> list:
+def repos_tools(run: RunContext) -> list[Any]:
     """`core.repos`'s factory: `read`, `grep`, `glob` over this run's domain
     (a `RepoRoom`), each taking its own `ref` from the model."""
     domain: RepoRoom = run.domain
@@ -77,7 +78,7 @@ def repos_tools(run: RunContext) -> list:
     #: Unchanged-range dedup, one run's worth: the same file/ref/window read
     #: twice gets a stub instead of its text again. `read`'s own state,
     #: built here since it must survive across calls within one run.
-    seen_ranges: dict[tuple, tuple[str, str]] = {}
+    seen_ranges: dict[tuple[Any, ...], tuple[str, str]] = {}
     name_the_room = _name_the_room(domain)
 
     return [

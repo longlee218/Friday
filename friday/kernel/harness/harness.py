@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, cast, get_type_hints
+from collections.abc import Callable
+from typing import Any, cast, get_type_hints, overload
 
 from fastmcp.client.transports import (
     SSETransport,
@@ -102,7 +103,15 @@ PROVIDER_BACKOFF_SECONDS = 10.0
 OUTPUT_CORRECTIONS = 1
 
 
-def tool(func=None, **options):
+@overload
+def tool(func: Callable[..., Any]) -> Tool[Any]: ...
+@overload
+def tool(
+    func: None = None, **options: Any
+) -> Callable[[Callable[..., Any]], Tool[Any]]: ...
+def tool(
+    func: Callable[..., Any] | None = None, **options: Any
+) -> Tool[Any] | Callable[[Callable[..., Any]], Tool[Any]]:
     """A Pydantic AI `Tool`, built from a plain function.
 
     A thin wrapper so tool modules name `tool` rather than the vendor — a tool
@@ -127,7 +136,7 @@ def tool(func=None, **options):
     those to a `Tool` here, the one place that names the SDK.
     """
 
-    def make(fn):
+    def make(fn: Callable[..., Any]) -> Tool[Any]:
         return Tool(fn, **options)
 
     return make(func) if func is not None else make

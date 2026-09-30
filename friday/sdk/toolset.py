@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, overload
 
 __all__ = ["RunContext", "ToolContext", "ToolSpec", "ToolsetSpec", "tool"]
 
@@ -37,7 +37,15 @@ class ToolSpec:
     options: dict[str, Any] = field(default_factory=dict)
 
 
-def tool(func=None, **options):
+@overload
+def tool(func: Callable[..., Any]) -> ToolSpec: ...
+@overload
+def tool(
+    func: None = None, **options: Any
+) -> Callable[[Callable[..., Any]], ToolSpec]: ...
+def tool(
+    func: Callable[..., Any] | None = None, **options: Any
+) -> ToolSpec | Callable[[Callable[..., Any]], ToolSpec]:
     """Declare a tool from a plain function, as a `ToolSpec`.
 
     A thin marker so tool modules name `tool` rather than the vendor. The
@@ -46,9 +54,13 @@ def tool(func=None, **options):
     from the model's schema; a google-style `Args:` docstring becomes each
     parameter's description. Anything passed as a keyword rides along in
     `options` to the vendor's `Tool`.
+
+    Two call shapes, hence the `@overload`s above: bare (`tool(fn)`) returns
+    the `ToolSpec` directly; with options (`@tool(description=...)`) returns
+    a decorator. Type-only — same body either way.
     """
 
-    def make(fn):
+    def make(fn: Callable[..., Any]) -> ToolSpec:
         return ToolSpec(fn, options)
 
     return make(func) if func is not None else make

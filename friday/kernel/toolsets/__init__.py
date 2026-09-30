@@ -70,7 +70,11 @@ def core_toolsets(
         names = MEMORY_READS if toolset == "core.memory" else MEMORY_WRITES
         built = memory_tools(_needs(db, "a store", toolset))
         # A `Tool` carries its name; a bare function is named by `__name__`.
-        return [t for t in built if (getattr(t, "name", None) or t.__name__) in names]
+        return [
+            t
+            for t in built
+            if (getattr(t, "name", None) or getattr(t, "__name__", None)) in names
+        ]
 
     def skill(run: RunContext) -> list:
         from friday.kernel.toolsets.skills import skill_toolset
