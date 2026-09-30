@@ -1,5 +1,5 @@
 Status: ready-for-agent
-Blocked by: 20
+Blocked by:
 
 # The grant is code, not the Planner; memory writes are their own toolset
 
