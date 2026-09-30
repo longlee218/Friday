@@ -57,7 +57,15 @@ from friday.kernel.harness.harness import ToolContext, tool
 from friday.kernel.harness.instruction_prompt import memory_lines
 from friday.kernel.memory import write
 
-__all__ = ["RESULTS", "TEXT_CHARS", "FridayState", "NotWired", "memory_tools"]
+__all__ = [
+    "MEMORY_READS",
+    "MEMORY_WRITES",
+    "RESULTS",
+    "TEXT_CHARS",
+    "FridayState",
+    "NotWired",
+    "memory_tools",
+]
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +73,15 @@ log = logging.getLogger(__name__)
 #: A memory is a sentence, not a document. Longer than this is a summary that
 #: belongs in the channel's context file.
 TEXT_CHARS = 500
+
+#: The two toolsets these five are granted as (build-the-spine ticket 22): the
+#: toolset is the unit of a grant, so an agent that reads what nobody vouches
+#: for can hold the reads without the writes. `core.memory` reads and proposes
+#: — a proposal waits for the operator before anything reads it back;
+#: `core.memory_write` writes what is read back as fact, and can rewrite or
+#: remove any row in the room. The responder builds all five itself.
+MEMORY_READS = ("memory_search", "memory_propose")
+MEMORY_WRITES = ("memory_add", "memory_update", "memory_delete")
 
 #: What one search returns. Enough to choose from, few enough that the agent
 #: still has to have written something worth finding.
@@ -91,8 +108,10 @@ def memory_tools(db):
 
     A factory for the same reason `search_skills_tool` is one: what an agent
     can reach is composition, not something the agent declares. Returns them
-    in a list to be handed to `Harness(tools=...)`; an agent gets all five or
-    none, because four of them are unusable without the fifth (`search`).
+    in a list to be handed to `Harness(tools=...)`. The responder gets all
+    five; a spine agent gets them as two toolsets (`MEMORY_READS`,
+    `MEMORY_WRITES`), and `core.memory_write` needs `core.memory` beside it,
+    since `memory_update`/`memory_delete` take ids only `memory_search` gives.
 
     The split is by lifetime. `db` lives as long as the process, so it is
     closed over; the state lives as long as one run, so it is

@@ -33,8 +33,9 @@ __all__ = [
 
 def full_grant(contract: ActionContract, spec: AgentSpec) -> frozenset[str]:
     """The most an agent step may be granted: the contract's toolsets that
-    are also inside the agent's own ceiling. The Planner's empty `toolsets`
-    means all of it; GatePlan refuses anything beyond it."""
+    are also inside the agent's own ceiling. Every agent step of a
+    Planner-written plan gets all of it (`to_steps`; the Planner writes no
+    grant, ticket 22); GatePlan refuses anything beyond it."""
     return contract.allowed_toolsets & frozenset(spec.toolsets)
 
 

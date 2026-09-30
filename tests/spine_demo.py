@@ -176,7 +176,6 @@ PLAN = {
             "id": "p1",
             "type": "agent",
             "agent": "demo.diagnose",
-            "toolsets": ["demo.reads"],
             "brief": "find the 400 in the log",
         },
         {"id": "p2", "type": "draft", "reads": ["p1"]},

@@ -83,3 +83,13 @@ action's `planning` or a constraint gives a reason to narrow. The refusal of
 a grant *outside* the ceiling stands (refused, never clipped); an
 unregistered agent gets no fill and is refused as before. See
 [The Planner hands over goals, not methods](../../build-the-spine/issues/20-the-planner-hands-over-goals-not-methods.md).
+
+## Amended 2026-09-30 by build-the-spine ticket 22
+
+§2 (toolsets): the Planner writes no grant. Its answer has no `toolsets`;
+every `agent` step of a Planner-written plan carries the full grant,
+`contract.allowed_toolsets ∩ the agent's ceiling`, filled by `to_steps`
+before hashing. "The Planner lists toolsets only when … a reason to narrow"
+(ticket 20) is withdrawn. GatePlan's toolset check stays, for a plan built
+any other way; on a Planner-written plan it has nothing left to refuse. See
+[The grant is code, not the Planner](../../build-the-spine/issues/22-the-grant-is-code-not-the-planner-and-memory-writes-apart.md).

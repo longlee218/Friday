@@ -148,8 +148,6 @@ memory: ["orders-api production logs are in Loki"]    # optional
 expect:
   terminal: draft                     # draft | ask | hand_over
   agents: [backend.diagnose]          # the agent steps, in order
-  toolsets:                           # optional: at least these, per agent
-    backend.diagnose: [backend.logs, backend.code]
 ---
 the request, as the reporter wrote it
 ```
@@ -166,8 +164,11 @@ action's contract or agents change.
 ### What a run prints
 
 How many cases got the whole shape right, the count per check (`terminal`,
-`agents`, `toolsets` — granted at least those expected; more is not wrong),
-how many ended `planner_failed`, and every wrong case with what it got.
+`agents`), how many ended `planner_failed`, and every wrong case with what it
+got. The grant is not graded since build-the-spine ticket 22: the Planner
+writes no `toolsets`, every agent step gets `contract ∩ ceiling`, so the
+`toolsets` check and `expect.toolsets` left. The numbers below from before
+that date include a `toolsets` count.
 
 ### First numbers (2026-09-29, `strong` = `z-ai/glm-5.3-flash`)
 
@@ -194,6 +195,17 @@ the run takes over ten minutes.
   run says otherwise.
 - With `toolsets` empty the diagnose step is granted all four of its toolsets
   (`backend.logs`, `backend.code`, `core.memory`, `core.skills`).
+
+### After ticket 22 (2026-09-30, same `strong` model)
+
+The Planner writes no grant, so only `terminal` and `agents` are graded. Two
+runs: 7/8 and 8/8 (`planner_failed` 0/8 in both); no case worse than the 6/8
+of tickets 20 and 21.
+
+- `trace-too-vague-to-start` — drafted `diagnose` instead of asking in the
+  first run, asked in the second: the one case that still moves.
+- `question-about-the-docs` passed both runs. In the first run one Planner
+  try hit its request limit (11), and the rewrite passed.
 
 ### When to run it
 

@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 Blocked by:
 
 # The grant is code, not the Planner; memory writes are their own toolset
@@ -98,13 +98,29 @@ The Planner is already read-only (`PLANNER_READS`) for the same reason.
 
 ## Acceptance
 
-- [ ] The Planner's answer shape has no `toolsets`; every frozen agent step
+- [x] The Planner's answer shape has no `toolsets`; every frozen agent step
       carries `full_grant` (test).
-- [ ] `backend.diagnose`, run through `run_agent`, is offered
+- [x] `backend.diagnose`, run through `run_agent`, is offered
       `memory_search` and `memory_propose` and not `memory_add`,
       `memory_update`, `memory_delete` (test).
-- [ ] The responder's memory behaviour unchanged (its existing tests green).
-- [ ] `core.planner` run and reported: no case worse than the run of
+- [x] The responder's memory behaviour unchanged (its existing tests green).
+- [x] `core.planner` run and reported: no case worse than the run of
       2026-09-30 (6/8) — run twice, since one run moved a case each way.
-- [ ] Decisions and docs amended.
-- [ ] Whole suite green; `code-review` done.
+- [x] Decisions and docs amended.
+- [x] Whole suite green; `code-review` done.
+
+## Comments
+
+2026-09-30, implementation:
+- The responder builds its memory tools outside the toolsets:
+  `friday/kernel/responder/__init__.py` calls `memory_tools(db)`, which still
+  returns all five, and its `memory_tool_system` / `MEMORY_TOOLS` describe all
+  five. This ticket left it unchanged, as asked. `core.memory` and
+  `core.memory_write` pick their tools from the same factory by name
+  (`MEMORY_READS`, `MEMORY_WRITES`).
+- Nothing enforces that `core.memory_write` must be granted beside
+  `core.memory`, though its update and delete tools need ids that only
+  `memory_search` gives. No agent holds it yet.
+- A Planner answer that still sends `toolsets` is accepted, and the key is
+  ignored: the step gets the full grant.
+- `core.planner` (two runs): 7/8 and 8/8. See `evals/README.md`.

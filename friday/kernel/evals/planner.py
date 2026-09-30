@@ -2,9 +2,9 @@
 ticket 11; board `domains-plug-in` ticket 12 §11).
 
 Code-graded: each case is an intake context and the plan *shape* it should
-come to — the terminal step (`draft | ask | hand_over`), the agents in order,
-and the toolsets each agent must be granted (at least those). `brief` and `goal` are not
-graded; scoring the plan's quality waits for real cases. The model is live
+come to — the terminal step (`draft | ask | hand_over`) and the agents in
+order. The grant is not graded: the Planner writes none (ticket 22), every
+agent step gets `full_grant`. `brief` and `goal` are not graded; scoring the plan's quality waits for real cases. The model is live
 (a run costs money); what the Planner reads is fixed per case — its memory is
 seeded into a throwaway store and its skills are the case's own folder — so a
 changed number is the prompt's or the model's, not the operator's memory.
@@ -18,7 +18,6 @@ changed number is the prompt's or the model's, not the operator's memory.
     expect:
       terminal: draft
       agents: [backend.diagnose]
-      toolsets: {backend.diagnose: [backend.logs, backend.code]}
     ---
     the request, as the reporter wrote it
 
@@ -28,7 +27,7 @@ Synthetic, so committed — unlike the triage set, which is real traffic.
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,7 +50,6 @@ _FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.DOTALL)
 class Expected:
     terminal: str
     agents: tuple[str, ...] = ()
-    toolsets: Mapping[str, frozenset[str]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +67,6 @@ class Shape:
 
     terminal: str | None
     agents: tuple[str, ...] = ()
-    toolsets: tuple[tuple[str, frozenset[str]], ...] = ()
     failed: str | None = None
 
 
@@ -92,7 +89,6 @@ def _case(path: Path) -> EvalCase:
         or not match.group(2).strip()
     ):
         raise ValueError(f"{name}: needs `action`, `expect.terminal` and a request")
-    toolsets = expect.get("toolsets")
     return EvalCase(
         name=name,
         inputs=PlannerCase(
@@ -104,9 +100,6 @@ def _case(path: Path) -> EvalCase:
         expected=Expected(
             terminal=expect["terminal"],
             agents=tuple(expect.get("agents") or ()),
-            toolsets=None
-            if toolsets is None
-            else {a: frozenset(t) for a, t in toolsets.items()},
         ),
     )
 
@@ -115,11 +108,9 @@ def shape_of(got: Any) -> Shape:
     """A `Frozen` plan's shape, or a `PlannerFailed`'s reason."""
     if not isinstance(got, Frozen):
         return Shape(terminal=None, failed=got.reason)
-    agent_steps = [s for s in got.plan.steps if isinstance(s, AgentStep)]
     return Shape(
         terminal=got.plan.steps[-1].type,
-        agents=tuple(s.agent for s in agent_steps),
-        toolsets=tuple((s.agent, frozenset(s.toolsets)) for s in agent_steps),
+        agents=tuple(s.agent for s in got.plan.steps if isinstance(s, AgentStep)),
     )
 
 
@@ -182,22 +173,7 @@ def _agents(case: EvalCase, shape: Shape) -> bool:
     return shape.failed is None and shape.agents == case.expected.agents
 
 
-def _toolsets(case: EvalCase, shape: Shape) -> bool:
-    """Each agent step granted at least the toolsets the case expects for
-    its agent — more is not graded wrong (whether `core.memory` rides along
-    is not a shape question); an agent the case does not expect fails. A
-    case that names no toolsets grades only the other two."""
-    want = case.expected.toolsets
-    if shape.failed is not None:
-        return False
-    if want is None:
-        return True
-    return all(
-        agent in want and want[agent] <= granted for agent, granted in shape.toolsets
-    )
-
-
-CHECKS = {"terminal": _terminal, "agents": _agents, "toolsets": _toolsets}
+CHECKS = {"terminal": _terminal, "agents": _agents}
 
 
 def report(results: Sequence[tuple[EvalCase, Shape]]) -> str:
@@ -211,7 +187,7 @@ def report(results: Sequence[tuple[EvalCase, Shape]]) -> str:
     wrong = [(c, s) for (c, s), ok in zip(results, passed) if not ok]
     lines += ["", f"wrong: {len(wrong)}/{n}"]
     for c, s in wrong:
-        got = s.failed or f"{s.terminal} via {list(s.agents)} {_granted(s)}"
+        got = s.failed or f"{s.terminal} via {list(s.agents)}"
         e = c.expected
         lines.append(
             f"  {c.name}: got {got}; expected {e.terminal} via {list(e.agents)}"
@@ -219,14 +195,10 @@ def report(results: Sequence[tuple[EvalCase, Shape]]) -> str:
     return "\n".join(lines)
 
 
-def _granted(shape: Shape) -> str:
-    return ", ".join(f"{a}={sorted(t)}" for a, t in shape.toolsets)
-
-
 PLANNER_EVAL = EvalSpec(
     name="core.planner",
     description="The Planner's plan shape for each synthetic case in "
-    "evals/datasets/planner/: terminal step, agents, toolsets.",
+    "evals/datasets/planner/: terminal step and agents.",
     cases=load_cases,
     checks=CHECKS,
     report=report,

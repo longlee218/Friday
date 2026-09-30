@@ -65,8 +65,8 @@ ACTION = Action(
         limits=Limits(max_replans=2, max_steps=4),
     ),
     acknowledge=acknowledge,
-    planning="Usually two steps: one backend.diagnose step granted backend.logs "
-    "and backend.code, then a draft that reads it. The brief says what the step "
+    planning="Usually two steps: one backend.diagnose step, then a draft that "
+    "reads it. The brief says what the step "
     "must establish — which field, rule or call rejected the request — and what "
     "the reporter gave (ids, endpoints, times); how to read is the agent's own. "
     "When Intake left the service unresolved, name its candidates in the brief. "

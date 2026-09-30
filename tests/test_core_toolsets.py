@@ -422,8 +422,63 @@ async def test_a_path_inside_the_workspace_is_read_and_written(root):
 
 def test_the_core_toolsets_are_named_and_described():
     specs = {spec.name: spec for spec in core_toolsets()}
-    assert set(specs) == {"core.memory", "core.skills", "core.shell", "core.workspace"}
+    assert set(specs) == {
+        "core.memory",
+        "core.memory_write",
+        "core.skills",
+        "core.shell",
+        "core.workspace",
+    }
     assert all(spec.description.strip() for spec in specs.values())
+
+
+def _tool_names(built) -> set[str]:
+    return {getattr(t, "name", None) or t.__name__ for t in built}
+
+
+def test_core_memory_reads_and_proposes_and_core_memory_write_writes():
+    """Ticket 22: the toolset is the unit of a grant, so the writes are their
+    own toolset — an agent can hold the reads without them."""
+    specs = {spec.name: spec for spec in core_toolsets(db=object())}
+    assert _tool_names(specs["core.memory"].factory(_run())) == {
+        "memory_search",
+        "memory_propose",
+    }
+    assert _tool_names(specs["core.memory_write"].factory(_run())) == {
+        "memory_add",
+        "memory_update",
+        "memory_delete",
+    }
+
+
+async def test_backend_diagnose_is_offered_memory_reads_and_no_memory_writes():
+    """Ticket 22: diagnose reads data nobody vouches for, and memory outlives
+    the task — so it may search and propose, never add, update or delete."""
+    from friday.kernel.config import TierConfig
+    from friday.kernel.harness.run_agent import run_agent
+    from friday.sdk.testing import FunctionModel, ModelResponse, function_call
+    from plugins.backend.actions.trace_problem import ACTION
+    from plugins.backend.agents.diagnose import DIAGNOSE
+
+    offered: list[str] = []
+
+    def reply(messages, info):
+        offered.extend(t.name for t in info.function_tools)
+        return ModelResponse(parts=[function_call("hand_over", {"reason": "x"})])
+
+    await run_agent(
+        DIAGNOSE,
+        TierConfig(name="flash", api_key="k", base_url="https://x.invalid", model="m"),
+        ACTION.contract,
+        [s for s in core_toolsets(db=object()) if s.name.startswith("core.memory")],
+        _run(),
+        "look",
+        None,
+        model=FunctionModel(reply, model_name="m"),
+    )
+
+    assert {"memory_search", "memory_propose"} <= set(offered)
+    assert not {"memory_add", "memory_update", "memory_delete"} & set(offered)
 
 
 def test_a_core_toolset_built_without_its_dependency_says_which():

@@ -94,3 +94,11 @@ at first" leaves the brief: the Planner guesses before it has read anything,
 and the agent's own instructions already say how to investigate. The worked
 plan above is the goal form. See
 [The Planner hands over goals, not methods](../../build-the-spine/issues/20-the-planner-hands-over-goals-not-methods.md).
+
+## Amended 2026-09-30 by build-the-spine ticket 22
+
+The `agent` step keeps `toolsets`, but the Planner no longer writes it: code
+fills it with the full grant, `contract ∩ the agent's ceiling`. The Planner
+decides which agent runs, never what that agent holds; a step that needs a
+tool its agent does not hold is answered with another agent or step. See
+[The grant is code, not the Planner](../../build-the-spine/issues/22-the-grant-is-code-not-the-planner-and-memory-writes-apart.md).

@@ -5,7 +5,8 @@ Build-the-spine ticket 08 (board `domains-plug-in` ticket 03, amendment
 
 | Module | Toolset | Tools |
 | --- | --- | --- |
-| `memory.py` | `core.memory` | `memory_search`, `memory_add`, `memory_propose`, `memory_update`, `memory_delete` |
+| `memory.py` | `core.memory` | `memory_search`, `memory_propose` |
+| `memory.py` | `core.memory_write` | `memory_add`, `memory_update`, `memory_delete` |
 | `skills.py` | `core.skills` | `fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file` |
 | `shell.py` | `core.shell` | `run_command` (read-command allowlist, local or SSH) |
 | `workspace.py` | `core.workspace` | the pydantic-ai-harness file tools over `/tmp/friday/<task_id>/` |
@@ -47,13 +48,22 @@ def _needs(value: Any, what: str, toolset: str) -> Any:
 def core_toolsets(
     *, db: Any = None, skills: Any = None, hosts: Sequence[str] = ()
 ) -> tuple[ToolsetSpec, ...]:
-    """The four core toolsets, their factories bound to `db` (the store),
+    """The five core toolsets, their factories bound to `db` (the store),
     `skills` (a `SkillLibrary`) and `hosts` (`config.shell_hosts`)."""
 
     def memory(run: RunContext) -> list:
-        from friday.kernel.toolsets.memory import memory_tools
+        return _memory("core.memory")
 
-        return memory_tools(_needs(db, "a store", "core.memory"))
+    def memory_write(run: RunContext) -> list:
+        return _memory("core.memory_write")
+
+    def _memory(toolset: str) -> list:
+        from friday.kernel.toolsets.memory import MEMORY_READS, MEMORY_WRITES, memory_tools
+
+        names = MEMORY_READS if toolset == "core.memory" else MEMORY_WRITES
+        built = memory_tools(_needs(db, "a store", toolset))
+        # A `Tool` carries its name; a bare function is named by `__name__`.
+        return [t for t in built if (getattr(t, "name", None) or t.__name__) in names]
 
     def skill(run: RunContext) -> list:
         from friday.kernel.toolsets.skills import skill_toolset
@@ -76,9 +86,15 @@ def core_toolsets(
     return (
         ToolsetSpec(
             "core.memory",
-            "What this channel already knows: search, add, propose, correct "
-            "and delete short memories scoped to the room.",
+            "What this channel already knows: search short memories scoped to "
+            "the room, and propose one for the operator to review.",
             memory,
+        ),
+        ToolsetSpec(
+            "core.memory_write",
+            "Write this channel's memory directly: add a memory read back as "
+            "fact, correct or delete one — no operator review.",
+            memory_write,
         ),
         ToolsetSpec(
             "core.skills",

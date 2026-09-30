@@ -52,8 +52,9 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class AgentStep:
-    """Run `agent` with `toolsets` (⊆ contract ∩ the agent's ceiling; the full
-    grant unless the Planner narrowed it). `brief` is a goal — what to
+    """Run `agent` with `toolsets` (⊆ contract ∩ the agent's ceiling; on a
+    Planner-written plan always the full grant, filled by code — the Planner
+    writes no grant, ticket 22). `brief` is a goal — what to
     establish and what the reporter gave — never a method: the agent's own
     instructions say how. Its result is the agent's declared result type, or
     an `Ask`/`HandOver` that stops the plan."""

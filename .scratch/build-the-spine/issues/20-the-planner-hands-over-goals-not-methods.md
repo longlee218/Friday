@@ -172,3 +172,9 @@ Recorded so the review is not lost; none has a case to build against today.
   action; open it when a real narrowing reason exists.
 - The suite and both reviews are done; the last box waits on the eval run.
 
+## Amended 2026-09-30 by ticket 22
+
+"The Planner lists toolsets only when … a reason to narrow" is withdrawn:
+`PlannedStep` has no `toolsets`, and every agent step gets the full grant.
+The narrowing case above is therefore not needed. See
+[ticket 22](22-the-grant-is-code-not-the-planner-and-memory-writes-apart.md).

@@ -10,7 +10,8 @@ Over 200 lines: the instructions, the answer types and the prompt sections are
 one unit. Every prompt here is assembled from sections like every other agent's
 (ticket 21): the request and what an agent wrote over the reporter's data are
 quoted (`said`), the rest is escaped (`facts`), and the instructions state the
-trust boundary.
+trust boundary. The Planner writes no grant (ticket 22): an agent step's
+toolsets are always `full_grant`, the contract's ceiling ∩ the agent's own.
 """
 
 from __future__ import annotations
@@ -68,9 +69,8 @@ Step types:
 - agent: run one of the allowed agents. `agent` names it; `brief` says what \
 the step must establish and what the reporter gave (ids, endpoints, times) — \
 a goal and its constraints, never a method: the agent decides how to \
-investigate. Leave `toolsets` empty for the full grant (every toolset listed \
-for that agent); list some only when the action's plan notes or a constraint \
-gives a reason to narrow, and only from those listed for that agent.
+investigate, with every tool listed for it. A step that needs a tool its \
+agent does not hold needs another agent.
 - ask: ask the reporter one question up front, only when the request is too \
 vague to start and no agent could find the missing piece by reading. \
 `question` is sent as written.
@@ -84,8 +84,8 @@ error:
 of these;
 - step ids are unique; `reads` names earlier steps only; a draft reads at \
 least one step;
-- only the step types, agents and toolsets the action allows, and no more \
-steps than its limit.
+- only the step types and agents the action allows, and no more steps than \
+its limit.
 
 Prefer the fewest steps that settle the request."""
 
@@ -114,14 +114,13 @@ class PlannedStep:
     """One step of the plan. `id` is short and unique ("s1"). `type` is
     agent | ask | hand_over | draft. Fill only the fields its type uses:
     agent → `agent`, `brief` (what to establish and what the reporter gave,
-    not how), `toolsets` (empty: the full grant); ask → `question`;
-    hand_over → `reason`; draft → nothing more. `reads` lists the ids of
-    earlier steps whose result this step is handed."""
+    not how); ask → `question`; hand_over → `reason`; draft → nothing more.
+    `reads` lists the ids of earlier steps whose result this step is handed.
+    No `toolsets`: the grant is the agent's, filled by `to_steps`."""
 
     id: str
     type: Literal["agent", "ask", "hand_over", "draft"]
     agent: str = ""
-    toolsets: list[str] = field(default_factory=list)
     brief: str = ""
     question: str = ""
     reason: str = ""
@@ -143,20 +142,16 @@ def to_steps(
 ) -> tuple[Step, ...]:
     """The answer's steps as the spine's own step types. A field the type
     does not use is dropped; one it needs and lacks stays empty for GatePlan
-    to refuse. An agent step with no `toolsets` gets the full grant
-    (`full_grant`), filled here, before the plan is hashed, so the step key
-    sees the real grant. Toolsets are sorted: a grant is a set, and its order
-    must not change the key. An unregistered agent stays empty for GatePlan
-    to refuse."""
+    to refuse. Every agent step gets the full grant (`full_grant`), filled
+    here, before the plan is hashed, so the step key sees the real grant.
+    Toolsets are sorted: a grant is a set, and its order must not change the
+    key. An unregistered agent gets no grant, for GatePlan to refuse."""
     steps: list[Step] = []
     for s in answer.steps:
         reads = tuple(s.reads)
         if s.type == "agent":
             spec = agents.get(s.agent)
-            named = set(s.toolsets)
-            if not named and spec is not None:
-                named = full_grant(contract, spec)
-            granted = tuple(sorted(named))
+            granted = tuple(sorted(full_grant(contract, spec) if spec else ()))
             steps.append(AgentStep(s.id, s.agent, granted, s.brief, reads))
         elif s.type == "ask":
             steps.append(AskStep(s.id, s.question, reads))
@@ -265,7 +260,7 @@ def _action(
             spec.description,
             f"- returns: {spec.result.__name__}, or ends early with: {terminals}",
             f"- budget: {spec.budget.max_turns} turns, {spec.budget.tokens} tokens",
-            "- toolsets it may be granted:" + ("" if granted else " none"),
+            "- toolsets it holds:" + ("" if granted else " none"),
         ]
         lines += [
             f"  - {t}: {toolsets[t].description}" if t in toolsets else f"  - {t}"

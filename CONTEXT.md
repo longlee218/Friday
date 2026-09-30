@@ -160,9 +160,13 @@ is the premise each board tracks against.
   task runs on one durable spine (Intake → acknowledge → Planner + GatePlan →
   run → deliver). 21 tickets; rename first, DAG path deleted in ticket 16;
   ticket 20 (opened 2026-09-30, after 14) keeps the Planner to goals — a brief
-  is not a method, an empty `toolsets` is the full grant, `replan` says when;
+  is not a method, the grant is the agent's (ticket 22: the Planner writes
+  no `toolsets`), `replan` says when;
   ticket 21 (after 20) puts the Planner's prompt through the one assembler
-  and the trust boundary, which it alone skips today.
+  and the trust boundary, which it alone skips today; ticket 22 (done
+  2026-09-30) takes the grant from the Planner and splits `core.memory`
+  (reads + propose) from `core.memory_write`, so `backend.diagnose` cannot
+  write memory.
   **In progress:** tickets 01–03 and 05–13 done (2026-09-29; names are
   `backend.*`/`ops.*`, live db wiped; the backend's tools are its four
   toolsets, reading code at the running tag; triage's prompt is assembled
@@ -174,7 +178,8 @@ is the premise each board tracks against.
   (`.scratch/build-the-spine/STATUS.md`). Evals run on Pydantic Evals
   (`uv run run_eval.py <name>`); `core.triage` measured 2026-09-29 (deepseek
   34/35; triage runs on qwen3-30b, 21/23 on `trace_problem`); `core.planner`
-  6/8 on glm-5.3-flash (2026-09-29). The
+  6/8 on glm-5.3-flash (2026-09-29), 7/8 and 8/8 after ticket 22
+  (2026-09-30, grant no longer graded). The
   `backend.trace_problem` eval has not been run on the new key yet.
 
 ## Roadmap — decided in direction, not yet boards (2026-09-22)
@@ -387,9 +392,11 @@ agent; the core runs it through the Harness. The spine's form of the
 
 **Toolset** — the unit an action's contract grants and an agent spec names:
 a set of tools under one name, `<plugin>.<thing>` (`backend.logs`) or
-`core.<thing>` for the core's own (`core.memory`, `core.skills`,
-`core.shell`, `core.workspace`, in `friday/kernel/toolsets/`), which any
-plugin may grant. Declared as a *toolset spec*. Not a Pydantic AI toolset,
+`core.<thing>` for the core's own (`core.memory`, `core.memory_write`,
+`core.skills`, `core.shell`, `core.workspace`, in `friday/kernel/toolsets/`),
+which any plugin may grant. `core.memory` reads and proposes;
+`core.memory_write` adds, updates and deletes — its own toolset so an agent
+can hold the reads without the writes (build-the-spine ticket 22). Declared as a *toolset spec*. Not a Pydantic AI toolset,
 though `core.workspace`'s factory hands one back.
 
 **Workspace** — Friday's own scratch folder for one task,
@@ -468,8 +475,9 @@ frozen or refused with its gate errors, is a row of `plans` since 14.
 
 **Brief** — an `agent` step's instruction from the Planner: what the step must
 establish and what the reporter gave, never how to investigate (that is the
-agent's own instructions). An empty `toolsets` beside it is the full grant,
-`contract ∩ ceiling`. (Build-the-spine ticket 20.)
+agent's own instructions). (Build-the-spine ticket 20.) The Planner writes
+no grant: the step's toolsets are always `contract ∩ ceiling`, filled by code
+(ticket 22).
 
 **Step** — one entry of a plan, one of four core-owned types: `agent` (a named
 agent, the toolsets granted to it, a brief), `ask` / `hand_over` (the Planner

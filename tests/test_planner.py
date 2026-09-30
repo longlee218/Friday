@@ -8,13 +8,14 @@ with its own rewrites (board `domains-plug-in`, tickets 11, 12, 17).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import pytest
 
 from friday.kernel.config import AgentConfig
 from friday.kernel.spine.plan import AgentStep, DraftStep, step_keys
 from friday.kernel.spine.plan_gate import Frozen
+from friday.kernel.spine.planner_prompt import PlannedStep
 from friday.kernel.spine.planner import (
     PLAN_REWRITES,
     PlannerFailed,
@@ -151,7 +152,6 @@ GOOD = {
             "id": "s1",
             "type": "agent",
             "agent": "backend.diagnose",
-            "toolsets": ["backend.logs", "backend.code"],
             "brief": "find correlationId 1234 in the logs first",
         },
         {"id": "s2", "type": "draft", "reads": ["s1"]},
@@ -203,35 +203,22 @@ async def test_a_plan_that_passes_is_frozen_as_version_one():
     assert len(model.calls) == 1
 
 
-async def test_an_agent_step_with_no_toolsets_freezes_with_the_full_grant():
-    """`contract ∩ ceiling`, filled before the plan is hashed — so the key and
-    the stored plan carry the real grant, and equal the spelled-out plan's."""
-    bare = {
+async def test_the_planner_writes_no_grant_and_every_agent_step_gets_the_full_one():
+    """Ticket 22: the answer has no `toolsets`; `contract ∩ ceiling` is filled
+    by code before the plan is hashed. A `toolsets` the model sends anyway —
+    the narrowing the old shape allowed — changes nothing."""
+    assert "toolsets" not in {f.name for f in fields(PlannedStep)}
+    narrowed = {
         **GOOD,
-        "steps": [{**GOOD["steps"][0], "toolsets": []}, GOOD["steps"][1]],
+        "steps": [{**GOOD["steps"][0], "toolsets": ["backend.logs"]}, GOOD["steps"][1]],
     }
 
-    got = await plan(_planning(ScriptedModel([_answer(bare)])))
-    spelled = await plan(_planning(ScriptedModel([_answer(GOOD)])))
+    got = await plan(_planning(ScriptedModel([_answer(narrowed)])))
+    plain = await plan(_planning(ScriptedModel([_answer(GOOD)])))
 
-    assert isinstance(got, Frozen) and isinstance(spelled, Frozen)
+    assert isinstance(got, Frozen) and isinstance(plain, Frozen)
     assert got.plan.steps[0].toolsets == ("backend.code", "backend.logs")
-    assert step_keys(got.plan, ("x",)) == step_keys(spelled.plan, ("x",))
-
-
-async def test_a_toolset_outside_the_ceiling_is_still_refused_never_clipped():
-    over = {
-        **GOOD,
-        "steps": [
-            {**GOOD["steps"][0], "toolsets": ["backend.logs", "backend.db"]},
-            GOOD["steps"][1],
-        ],
-    }
-
-    got = await plan(_planning(ScriptedModel([_answer(over)] * 3)))
-
-    assert isinstance(got, PlannerFailed)
-    assert any("backend.db" in e for e in got.errors[0])
+    assert step_keys(got.plan, ("x",)) == step_keys(plain.plan, ("x",))
 
 
 async def test_a_refusal_goes_back_in_the_same_conversation_and_the_rewrite_passes():
@@ -386,11 +373,12 @@ async def test_a_replan_is_a_fresh_conversation_with_its_own_rewrites():
 
 def test_the_instructions_ask_for_a_goal_and_not_a_method():
     """Ticket 20: `brief` is what to establish and what the reporter gave; the
-    agent's own instructions say how. Empty `toolsets` is the full grant."""
+    agent's own instructions say how. Ticket 22: the grant is code's, so the
+    instructions no longer mention `toolsets`."""
     from friday.kernel.spine.planner_prompt import INSTRUCTIONS
 
     said = " ".join(INSTRUCTIONS.split())
 
     assert "never a method" in said
     assert "where to look first" not in said
-    assert "Leave `toolsets` empty for the full grant" in said
+    assert "toolsets" not in said
