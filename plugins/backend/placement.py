@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from friday.sdk.intake import IntakeSeed
+from friday.sdk.sources import Repo
 from plugins.backend.memory import BACKEND_ENVIRONMENT, BACKEND_PROJECT, BACKEND_SERVICE
 from plugins.backend.resolve import domain_of, environment_of
 
@@ -49,6 +50,11 @@ class Placement:
     #: The hints below are outside it, so a reply adding a correlationId
     #: continues.
     IDENTITY: ClassVar[tuple[str, ...]] = ("env", "service", "clone_path", "repo_path")
+
+    #: Where a service's source sits inside its image, stripped from a stack
+    #: frame before it is joined to a repo's clone (ticket 23; moved off
+    #: `backend.code`'s `CONTAINER_ROOTS` constant).
+    CONTAINER_ROOTS: ClassVar[tuple[str, ...]] = ("/usr/src/app", "/app", "/srv/app")
 
     env: str
     service: str = ""
@@ -84,6 +90,16 @@ class Placement:
     def repo(self, name: str) -> Project | None:
         """The room's project called `name`, or `None`."""
         return next((p for p in self.projects if p.name == name), None)
+
+    def repos(self) -> tuple[Repo, ...]:
+        """`core.repos`'s view of the room's projects (ticket 23) — including
+        one with no clone recorded; the tools decide what to say about it."""
+        return tuple(
+            Repo(
+                name=p.name, repo_path=p.repo_path, container_roots=self.CONTAINER_ROOTS
+            )
+            for p in self.projects
+        )
 
     def retrieval_keys(self) -> dict[str, str]:
         """What memory is matched on besides the text: a runbook's

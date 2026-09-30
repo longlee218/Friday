@@ -85,3 +85,11 @@ Left open, on purpose:
 - `/tmp/friday/<id>` is on a shared `/tmp` with predictable ids; a
   pre-planted symlink there would redirect writes. Low risk on the operator's
   one-user machine.
+
+## Amended by ticket 23 (2026-09-30)
+
+`friday/kernel/toolsets/repos.py` adds a sixth core toolset, `core.repos`
+(`read`, `grep`, `glob`), generic over a domain's `RepoRoom` — see
+[23](23-core-repos-read-grep-glob-at-the-running-tag.md). It needs no process
+dependency, so its `ToolsetSpec` is built once in `repos.py` and reused
+as-is by `core_toolsets()` rather than closed over there.

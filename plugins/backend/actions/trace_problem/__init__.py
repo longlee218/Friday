@@ -57,7 +57,12 @@ ACTION = Action(
         allowed_step_types=frozenset({"agent", "ask", "hand_over", "draft"}),
         allowed_agents=frozenset({"backend.diagnose"}),
         allowed_toolsets=frozenset(
-            {"backend.logs", "backend.code", "core.memory", "core.skills"}
+            {
+                "backend.logs",
+                "core.repos",
+                "core.memory",
+                "core.skills",
+            }
         ),
         constraints=("every ref points at a line that was read",),
         approval_policy="a reply waits for the operator's approval",

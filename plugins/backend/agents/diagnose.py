@@ -208,7 +208,7 @@ DIAGNOSE = AgentSpec(
     instructions=build_instructions(reads=True),
     result=Diagnosis,
     tier="flash",
-    toolsets=("backend.logs", "backend.code", "core.memory", "core.skills"),
+    toolsets=("backend.logs", "core.repos", "core.memory", "core.skills"),
     budget=Budget(max_turns=20, tokens=500_000),
     temperature=0.0,
     check=check,

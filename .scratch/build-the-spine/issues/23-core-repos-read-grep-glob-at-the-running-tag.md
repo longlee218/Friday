@@ -107,3 +107,36 @@ tool of any kind.
 - [ ] `docs/DESIGN.md` (toolsets rows, D7 wording), `CONTEXT.md`
       (*Toolset*, new terms), tickets 08/09 amended.
 - [ ] Whole suite green; `code-review` done.
+
+## Amended 2026-09-30 (operator, same day): the model finds the tag, not the plugin
+
+The first pass built a `backend.release` toolset (no tools of its own) that
+resolved a repo's running tag once per run through `release_status` and
+bound it onto a new `Evidence.resolve_ref` hook every `core.repos` call
+consulted automatically — kept "D7: read the running version" as something
+code did for the model. **The operator rejected this design.** Instead:
+
+- `backend.release`, `RELEASE`, `release_tools`, `RunningVersion`,
+  `ReleaseSource`, `Evidence.resolve_ref` and `Evidence.tags` are all
+  deleted. There is no plugin-side or kernel-side running-version lookup.
+- `read`, `grep` and `glob` each gain their own optional `ref: str | None`
+  parameter (a tag, branch or sha), declared the same way as every other
+  parameter (`Annotated[..., Field(description=...)]`). With `ref`: `git
+  show`/`git grep`/`git ls-tree` at exactly that ref. Without one: the
+  checkout, with the fallback said in `not_checked` — D7 still holds, it is
+  just the model's tool call that pins the version now, not a per-run cache.
+  A `ref` shaped like a flag (`-...`) is refused in `args_validator=`; a
+  `ref` git cannot resolve is refused in the tool body (checking it is a git
+  call) rather than silently falling back.
+- The model is expected to find the tag itself — `release_status` (Helm) or
+  a pod's own image tag (k8s) — through devops tools that
+  [28](28-diagnose-reads-kubernetes-and-loki-through-devops-generic.md)
+  grants; ticket 23 does not grant them, so `backend.diagnose`/
+  `backend.explain` currently have no way to *find* a tag, only a place
+  (`ref`) to put one once ticket 28 lands. `DIAGNOSE.toolsets`/
+  `EXPLAIN.toolsets` name only `core.repos` (plus `backend.logs`/
+  `core.memory`/`core.skills` for diagnose) — no `backend.release`.
+  `diagnose_prompt.py`/`explain_prompt.py` tell the model to find the
+  running tag first and pass it as `ref`, ahead of that toolset existing.
+- `docs/DESIGN.md`'s D7 and `CONTEXT.md`'s *Running version* entry are
+  rewritten to this shape rather than the rejected one.

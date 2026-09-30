@@ -64,3 +64,16 @@ Left open, on purpose:
   with `caps` (14/16). `toolsets/logs.py` imports `graph/distil.py`; it moves
   when the graph is deleted (16). Duplicate `_rfc3339`/`_text_of` in
   `logs.py` predate this ticket.
+
+## Amended by ticket 23 (2026-09-30, revised same day)
+
+`code.py` (`backend.code`: `read_code`, `search_code`, `what_code_means`) and
+`docs.py` (`backend.docs`: `read_docs`) are gone. Reading, searching and
+listing a repository moved into the kernel as `core.repos` (generic over the
+sdk's `RepoRoom`); this plugin keeps only `Placement.repos()` (the `RepoRoom`
+implementation). A first pass also added `release.py`'s `backend.release`
+toolset, binding a per-run `RunningVersion.of` onto a new
+`Evidence.resolve_ref` — the operator rejected that the same day: `release.py`
+is gone too, and `core.repos`'s `read`/`grep`/`glob` take their own `ref`
+parameter, which the model fills in itself — see
+[23](23-core-repos-read-grep-glob-at-the-running-tag.md)'s amendment.

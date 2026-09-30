@@ -51,6 +51,7 @@ from friday.kernel.dag import adapter
 from friday.kernel.harness.run_agent import run_agent
 from friday.kernel.spine.brief import agent_input
 from friday.kernel.spine.intake import from_turns
+from friday.kernel.toolsets.repos import REPOS
 from friday.sdk.actions import Ask, HandOver
 from friday.sdk.evidence import Evidence
 from friday.sdk.toolset import RunContext
@@ -61,7 +62,7 @@ from plugins.backend.actions import TRACE_PROBLEM
 from plugins.backend.agents import DIAGNOSE
 from plugins.backend.params import TraceProblemParams
 from plugins.backend.placement import enrich
-from plugins.backend.toolsets import CODE, LOGS
+from plugins.backend.toolsets import LOGS
 from plugins.backend.toolsets.logs import LokiSource, SshKubectlSource, log_tools
 
 #: The brief the first plan gives `backend.diagnose` — a goal, not a method
@@ -74,11 +75,11 @@ BRIEF = (
 
 
 def _canned_toolsets(name: str, source: Any) -> tuple:
-    """`backend.logs` reading the captured case, beside the real `backend.code`
-    — the same tool, with only its source replaced."""
+    """`backend.logs` reading the captured case, beside the real
+    `core.repos` — the same tool, with only the log source replaced."""
     return (
         _dc_replace(LOGS, factory=lambda run: log_tools(run, {name: source})),
-        CODE,
+        REPOS,
     )
 
 
@@ -530,7 +531,7 @@ async def replay(task_id: int, *, with_model: bool, into: Path) -> int:
             turns=tuple(await db.original_turns_for(task.id)),
             channel_id=task.conversation.channel_id,
             reported_at=(task.created_at or datetime.now(UTC)).isoformat(),
-            toolsets=(LOGS, CODE),
+            toolsets=(LOGS, REPOS),
             config=config,
             with_model=with_model,
         )

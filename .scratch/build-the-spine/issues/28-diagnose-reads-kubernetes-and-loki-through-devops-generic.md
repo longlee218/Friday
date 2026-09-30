@@ -9,6 +9,10 @@ tools' arguments forwarded 1:1, not limited to the room (option b).
 Blocked by 25: it sets the naming rule, the argument rule and the shared
 log renderer.
 Amends: build-the-spine ticket 09; `docs/DESIGN.md` D4 and the toolsets rows.
+Depended on by 23 (amended 2026-09-30): `core.repos`'s `read`/`grep`/`glob`
+take a `ref` the model must find and pass in itself; until this ticket
+grants `release_status`/`k8s_pod_status`, diagnose and explain have a place
+to put a tag but no tool that finds one.
 
 ## What the server has (checked 2026-09-30)
 
@@ -76,3 +80,6 @@ the Loki value; the hints for `k8s_*` need the other.
       and `core.planner` run and reported.
 - [ ] `docs/DESIGN.md`, `CONTEXT.md`, ticket 09 amended.
 - [ ] Whole suite green; `code-review` done.
+- [ ] Diagnose and explain are granted `release_status` and k8s pod status,
+      so they can find the running tag and pass it as `ref` to `core.repos`
+      (ticket 23 depends on this).

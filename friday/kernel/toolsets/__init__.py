@@ -10,6 +10,7 @@ Build-the-spine ticket 08 (board `domains-plug-in` ticket 03, amendment
 | `skills.py` | `core.skills` | `fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file` |
 | `shell.py` | `core.shell` | `run_command` (read-command allowlist, local or SSH) |
 | `workspace.py` | `core.workspace` | the pydantic-ai-harness file tools over `/tmp/friday/<task_id>/` |
+| `repos.py` | `core.repos` | `read`, `grep`, `glob` over a domain's `RepoRoom`, each taking an optional `ref` the model finds itself (ticket 23) |
 
 **The list of tools is asserted, not described.** `tests/test_tools.py`
 asserts every name, builds the factories as well as scanning the modules, and
@@ -48,8 +49,10 @@ def _needs(value: Any, what: str, toolset: str) -> Any:
 def core_toolsets(
     *, db: Any = None, skills: Any = None, hosts: Sequence[str] = ()
 ) -> tuple[ToolsetSpec, ...]:
-    """The five core toolsets, their factories bound to `db` (the store),
-    `skills` (a `SkillLibrary`) and `hosts` (`config.shell_hosts`)."""
+    """The six core toolsets, their factories bound to `db` (the store),
+    `skills` (a `SkillLibrary`) and `hosts` (`config.shell_hosts`). `core.repos`
+    needs none of these — it reads `run.domain`/`run.evidence` alone — so its
+    spec is reused as-is rather than closed over here."""
 
     def memory(run: RunContext) -> list:
         return _memory("core.memory")
@@ -58,7 +61,11 @@ def core_toolsets(
         return _memory("core.memory_write")
 
     def _memory(toolset: str) -> list:
-        from friday.kernel.toolsets.memory import MEMORY_READS, MEMORY_WRITES, memory_tools
+        from friday.kernel.toolsets.memory import (
+            MEMORY_READS,
+            MEMORY_WRITES,
+            memory_tools,
+        )
 
         names = MEMORY_READS if toolset == "core.memory" else MEMORY_WRITES
         built = memory_tools(_needs(db, "a store", toolset))
@@ -82,6 +89,8 @@ def core_toolsets(
         from friday.kernel.toolsets.workspace import workspace_tools
 
         return workspace_tools(run.task_id)
+
+    from friday.kernel.toolsets.repos import REPOS
 
     return (
         ToolsetSpec(
@@ -114,6 +123,7 @@ def core_toolsets(
             "e.g. long command output saved by core.shell.",
             workspace,
         ),
+        REPOS,
     )
 
 

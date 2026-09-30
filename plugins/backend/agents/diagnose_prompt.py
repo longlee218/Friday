@@ -109,10 +109,14 @@ READS = [
     "Found nothing? Widen `minutes_back`, or search a different string. "
     "Found nothing twice? That is an answer about the request, and saying "
     "so beats a cause built from the endpoint's name.",
-    "A stack frame in what you read is worth `read_code`, with `repo` the "
+    "Before reading code, find the version that is running — `release_status` "
+    "or the pod's own image tag — and pass it as `ref` to `read`/`grep`/"
+    "`glob`. Without one they read the checkout, which may not match what "
+    "is deployed.",
+    "A stack frame in what you read is worth `read`, with `repo` the "
     "project named under where the service lives. A frame in "
     "`node_modules` is somebody else's code and is not. No frame? "
-    "`search_code` finds where a route or a symbol is written.",
+    "`grep` finds where a route or a symbol is written.",
 ]
 
 
@@ -157,12 +161,23 @@ def build_reads_input(
     if placement.repo_path:
         where.append(f"repository: {placement.repo_path}")
     if placement.project:
-        where.append(f"repo (for the code tools): {placement.project}")
+        where.append(f"repo (for read/grep/glob): {placement.project}")
     others = [p.name for p in placement.projects if p.name != placement.project]
     if others:
         where.append(f"the room's other repos: {', '.join(others)}")
     if placement.stack:
         where.append(f"stack: {placement.stack}")
+    for project in placement.projects:
+        if project.error_codes_doc:
+            where.append(
+                f"{project.name}'s error-code table: {project.error_codes_doc} "
+                "(read it with `read`)"
+            )
+        if project.docs_paths:
+            where.append(
+                f"{project.name}'s docs: {', '.join(project.docs_paths)} "
+                "(read/grep them directly)"
+            )
 
     return assemble(
         said("report", report)

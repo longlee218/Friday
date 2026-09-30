@@ -109,10 +109,11 @@ def reads_for(toolset: ToolsetSpec, servers: Mapping[str, Any]) -> dict[str, Rea
     """The servers `toolset` declared, each narrowed to the tools it listed.
 
     **The core alone holds a raw server** (board `domains-plug-in` ticket 03
-    §2): a factory is handed only this, so `backend.code`, which declares
-    `release_status`, cannot call `release_rollback` on the same server, and
-    `backend.logs` never sees `backend.db`'s reads. A declared server that is
-    not open this run is absent; the factory says which one it wanted.
+    §2): a factory is handed only this, so `backend.logs`, which declares
+    `loki_query_range`, cannot call `release_rollback` on the same
+    `devops-generic` server, and `backend.logs` never sees `backend.db`'s
+    reads. A declared server that is not open this run is absent; the
+    factory says which one it wanted.
     """
     return {
         name: Reads(servers[name], frozenset(tools))

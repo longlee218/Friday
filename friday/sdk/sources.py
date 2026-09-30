@@ -18,17 +18,18 @@ identifiers, which service arrive as arguments.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 __all__ = [
     "TOOL_CALL_TIMEOUT_SECONDS",
-    "CodeSource",
     "Lines",
     "LogSource",
     "Reads",
+    "Repo",
+    "RepoRoom",
 ]
 
 #: How long one tool call — an SSH `kubectl`, an MCP call, a git read — may
@@ -153,41 +154,24 @@ class LogSource(Protocol):
     ) -> Lines: ...
 
 
-class CodeSource(Protocol):
-    """The operator's clone, read the way a diagnosis needs it.
+@dataclass(frozen=True, slots=True)
+class Repo:
+    """One of the room's repositories, as `core.repos` reads it: name, clone
+    path, and the image's source-root policy (where a service's source sits
+    inside a container, stripped from a stack-frame path before it is joined
+    to `repo_path`) — domain knowledge, never the kernel's."""
 
-    A frame names a file inside a container (`/app/src/orders.ts:80`) and the
-    repository is a clone on the operator's machine; a `CodeSource` maps one to
-    the other and reads a window around the line — nothing else: no checkout, no
-    worktree, no fetch (finding H). **A frame is reporter-influenced text**, so
-    a path that resolves outside the clone is refused, not read.
+    name: str
+    repo_path: str = ""
+    container_roots: tuple[str, ...] = ()
 
-    The port is the read surface the `Diagnose` loop's `read_code` tool calls;
-    the concrete reader (a repo clone, its container-root policy loaded from
-    config or a memory row) implements it in the plugin. Every method returns
-    `None` for "not here / cannot read", never an exception into a graph node.
-    """
 
-    def repo_file(self, frame: str) -> Path | None:
-        """The frame's file inside this clone, or `None` if it is not in it —
-        which covers both "not ours" and "trying to leave the clone"."""
-        ...
+@runtime_checkable
+class RepoRoom(Protocol):
+    """What a domain exposes so `core.repos` can read, search and list the
+    room's repositories without naming the domain that resolves them. The
+    version that is running is deliberately not part of this contract: the
+    model finds a repo's running tag itself (through whatever devops tools
+    it is granted) and passes it as `core.repos`'s own `ref` parameter."""
 
-    def excerpt(self, path: Path, line: int) -> str:
-        """The lines around `line`, numbered, so a diagnosis can cite one."""
-        ...
-
-    def original(self, compiled: Path, line: int) -> tuple[Path, int] | None:
-        """The source file and line a compiled one came from, via its
-        `.js.map`, or `None` when there is no usable map."""
-        ...
-
-    def at_ref(self, path: Path, ref: str) -> str | None:
-        """The file's text as it is at a git ref (`git show`, never a
-        checkout), or `None` for every way of not having it."""
-        ...
-
-    def meanings(self, codes: tuple[str, ...]) -> dict[str, str]:
-        """What the repo's own error-code doc says each of these codes means —
-        only the codes that turned up; a code the doc does not list is absent."""
-        ...
+    def repos(self) -> Sequence[Repo]: ...

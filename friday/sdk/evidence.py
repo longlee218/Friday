@@ -14,12 +14,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["MAX_READS", "Evidence"]
-
-#: How many reads one investigation may make. Not a cost control — that is
-#: the agent's turns and tokens: a run that has looked twelve times and not
-#: found it is a run that should say so.
-MAX_READS = 12
+__all__ = ["Evidence"]
 
 
 @dataclass
@@ -45,10 +40,6 @@ class Evidence:
     #: half survives the model choosing what to look at.
     not_checked: list[str] = field(default_factory=list)
     reads: int = 0
-    #: The running tag learnt per repo, `(tag, why not)` — kept here, the one
-    #: per-run object every toolset shares, so `backend.code` and
-    #: `backend.docs` ask `release_status` once between them.
-    tags: dict[str, tuple[str, str]] = field(default_factory=dict)
 
     def show(self, lines: Iterable[str]) -> str:
         """Number these lines, continuing this run's numbering.
@@ -72,18 +63,6 @@ class Evidence:
             rendered.append(f"{ref} | {raw}")
         return "\n".join(rendered)
 
-    def spent(self) -> str:
-        """`""` while there is budget, else the sentence that says there is
-        not. Checked by every tool, so the ceiling cannot be forgotten in one
-        of them."""
-        if self.reads < MAX_READS:
-            return ""
-        return (
-            f"You have made {MAX_READS} reads, which is the limit for one "
-            f"investigation. Answer with what you have, and say in "
-            f"`next_checks` what you would have looked at next."
-        )
-
     def dump(self) -> dict[str, Any]:
         """As JSON data, for a stored `Ask`: `load` gives back an `Evidence`
         that numbers on from where this one stopped."""
@@ -92,7 +71,6 @@ class Evidence:
             "seen": dict(self._seen),
             "not_checked": list(self.not_checked),
             "reads": self.reads,
-            "tags": {repo: list(tag) for repo, tag in self.tags.items()},
         }
 
     @classmethod
@@ -102,5 +80,4 @@ class Evidence:
             _seen=dict(data["seen"]),
             not_checked=list(data["not_checked"]),
             reads=int(data["reads"]),
-            tags={repo: (tag[0], tag[1]) for repo, tag in data["tags"].items()},
         )

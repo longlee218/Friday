@@ -21,7 +21,7 @@ from friday.sdk.model import Model
 from friday.sdk.outbox import Kind
 from friday.sdk.plugin import Plugin, PluginAPI, TaskTypeSpec
 from friday.sdk.redact import scrub
-from friday.sdk.sources import CodeSource, Lines, LogSource, Reads
+from friday.sdk.sources import Lines, LogSource, Reads, Repo, RepoRoom
 from friday.sdk.toolset import RunContext, ToolContext, ToolsetSpec, ToolSpec, tool
 from friday.sdk.validation import (
     InSet,
@@ -39,7 +39,6 @@ __all__ = [
     "AgentSpec",
     "ArtifactRef",
     "Budget",
-    "CodeSource",
     "EvalCase",
     "EvalSpec",
     "Evidence",
@@ -62,6 +61,8 @@ __all__ = [
     "Problem",
     "Reads",
     "Recognition",
+    "Repo",
+    "RepoRoom",
     "RunContext",
     "TaskTypeSpec",
     "ToolContext",

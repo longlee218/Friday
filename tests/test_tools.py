@@ -68,6 +68,7 @@ def _factories() -> dict[str, object]:
     from friday.kernel.harness.skills import SkillLibrary
     from friday.kernel.toolsets import workspace
     from friday.kernel.toolsets.memory import memory_tools
+    from friday.kernel.toolsets.repos import repos_tools
     from friday.kernel.toolsets.shell import shell_tools
     from friday.kernel.toolsets.skills import (
         describe_skill_tool,
@@ -103,6 +104,17 @@ def _factories() -> dict[str, object]:
         read_skill_file_tool(library),
         *memory_tools(object()),
         *shell_tools(run, hosts=("local",), audit=object()),
+        # `core.repos` (ticket 23) needs a domain implementing `RepoRoom`;
+        # `Placement` already does.
+        *repos_tools(
+            RunContext(
+                task_id=1,
+                domain=Placement(env="dev", service="s"),
+                evidence=Evidence(),
+                mcp={},
+                reported_at=datetime(2026, 9, 21, tzinfo=UTC),
+            )
+        ),
         # Built per run rather than once: every one of these needs the
         # placement `Intake` produced, so there is nothing to inject here
         # but a stand-in for it. Every backend toolset, by its own factory.
@@ -167,10 +179,9 @@ def test_the_tools_this_system_has_are_all_in_one_place():
         "memory_update",
         "memory_delete",
         "read_log",
-        "read_code",
-        "search_code",
-        "what_code_means",
-        "read_docs",
+        "read",
+        "grep",
+        "glob",
         "describe_db",
         "query_db",
         "run_command",

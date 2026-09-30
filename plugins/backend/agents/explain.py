@@ -51,7 +51,7 @@ EXPLAIN = AgentSpec(
     instructions=build_instructions(),
     result=Explanation,
     tier="flash",
-    toolsets=("backend.code", "backend.docs"),
+    toolsets=("core.repos",),
     budget=Budget(max_turns=20, tokens=500_000),
     temperature=0.0,
 )

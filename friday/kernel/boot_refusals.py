@@ -172,7 +172,7 @@ def _contract(registry: Registry, action: Action) -> list[str]:
         if (
             ts is not None
             and ts.domain_type is not None
-            and ts.domain_type is not domain
+            and (domain is None or not issubclass(domain, ts.domain_type))
         ):
             out.append(
                 f"action {action.name!r} grants toolset {name!r}, which reads a "

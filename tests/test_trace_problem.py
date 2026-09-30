@@ -20,6 +20,7 @@ from typing import ClassVar
 
 import pytest
 
+from friday.kernel.toolsets.repos import repo_file
 from plugins.backend.graph import build_backend_dag
 from plugins.backend.graph.diagnose import (
     Diagnosis,
@@ -27,7 +28,9 @@ from plugins.backend.graph.diagnose import (
     unresolved_refs,
 )
 from plugins.backend.graph.report import report_node
-from plugins.backend.toolsets.code import CONTAINER_ROOTS, repo_file
+from plugins.backend.placement import Placement
+
+CONTAINER_ROOTS = Placement.CONTAINER_ROOTS
 
 
 class _StubCaps:
@@ -58,6 +61,11 @@ class _StubCaps:
         from friday.kernel.harness.run_agent import build_tools
 
         return build_tools(toolsets, context, self.servers)
+
+    def repos_toolset(self):
+        from friday.kernel.toolsets.repos import REPOS
+
+        return REPOS
 
 
 def _dag(*, diagnose_harness=None, budget_tokens=None, diagnose_agent=None):
@@ -576,6 +584,43 @@ def test_the_reads_input_names_the_stack_when_known():
         report="loi 500", placement=Placement(env="dev", service="s"), not_checked=()
     )
     assert "stack:" not in without
+
+
+def test_the_reads_input_names_each_projects_error_codes_doc_and_docs_paths():
+    """`what_code_means`/`read_docs` are gone (ticket 23): the model finds
+    `error_codes_doc` and `docs_paths` itself, with `read`/`grep`, so the
+    reads input has to say where they are rather than reading them in
+    advance."""
+    from plugins.backend.agents.diagnose_prompt import build_reads_input
+    from plugins.backend.placement import Placement, Project
+
+    built = build_reads_input(
+        report="loi 500",
+        placement=Placement(
+            env="dev",
+            service="s",
+            projects=(
+                Project(
+                    name="reelme",
+                    error_codes_doc="docs/error-codes.md",
+                    docs_paths=("docs", "README.md"),
+                ),
+            ),
+        ),
+        not_checked=(),
+    )
+
+    assert "reelme's error-code table: docs/error-codes.md" in built
+    assert "`read`" in built
+    assert "reelme's docs: docs, README.md" in built
+
+    without = build_reads_input(
+        report="loi 500",
+        placement=Placement(env="dev", service="s", projects=(Project(name="reelme"),)),
+        not_checked=(),
+    )
+    assert "error-code table" not in without
+    assert "docs:" not in without
 
 
 def test_the_reads_input_quotes_the_reporter_and_escapes_the_rest():
@@ -1439,9 +1484,8 @@ def test_what_a_server_is_filtered_to_is_read_off_the_readers():
     from plugins.backend.toolsets import declared
     from plugins.backend.toolsets.db import DbSource
     from plugins.backend.toolsets.logs import LokiSource
-    from plugins.backend.toolsets.release import ReleaseSource
 
-    assert declared() == LokiSource.TOOLS | DbSource.TOOLS | ReleaseSource.TOOLS
+    assert declared() == LokiSource.TOOLS | DbSource.TOOLS
     assert "execute_mongo_query" not in declared(), "no caller yet"
 
 
@@ -1491,7 +1535,7 @@ def test_a_compiled_frame_is_translated_back_to_the_source(tmp_path):
     is `workflow-credit.service.ts:109`, forty-nine lines away. Mapping the
     file and keeping the line would hand `Diagnose` the wrong place and call
     it the throw site."""
-    from plugins.backend.toolsets.code import original
+    from friday.kernel.toolsets.repos import original
 
     _built(tmp_path, js_line=3, ts_line=11)
 
@@ -1502,7 +1546,7 @@ def test_a_compiled_frame_is_translated_back_to_the_source(tmp_path):
 
 def test_a_compiled_file_with_no_map_beside_it_is_not_translated(tmp_path):
     """`None` means "read the built file and say so", never "guess"."""
-    from plugins.backend.toolsets.code import original
+    from friday.kernel.toolsets.repos import original
 
     _built(tmp_path)
     (tmp_path / "dist" / "x.js.map").unlink()
@@ -1511,7 +1555,7 @@ def test_a_compiled_file_with_no_map_beside_it_is_not_translated(tmp_path):
 
 
 def test_a_map_that_does_not_parse_is_not_translated(tmp_path):
-    from plugins.backend.toolsets.code import original
+    from friday.kernel.toolsets.repos import original
 
     _built(tmp_path)
     (tmp_path / "dist" / "x.js.map").write_text("{ not json")
@@ -1526,7 +1570,7 @@ def test_a_map_naming_a_file_outside_the_clone_is_refused(tmp_path):
     applied to the function added under it — found by review."""
     import json
 
-    from plugins.backend.toolsets.code import original
+    from friday.kernel.toolsets.repos import original
 
     _built(tmp_path, js_line=3, ts_line=11)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -1542,7 +1586,7 @@ def test_a_map_whose_sources_hold_null_is_not_followed(tmp_path):
     `TypeError` out of the graph node rather than answering `None`."""
     import json
 
-    from plugins.backend.toolsets.code import original
+    from friday.kernel.toolsets.repos import original
 
     _built(tmp_path)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -1565,7 +1609,7 @@ def test_a_map_with_a_character_that_is_not_vlq_is_rejected_whole(tmp_path):
     """
     import json
 
-    from plugins.backend.toolsets.code import original
+    from friday.kernel.toolsets.repos import original
 
     _built(tmp_path, js_line=3, ts_line=11)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -1578,131 +1622,19 @@ def test_a_map_with_a_character_that_is_not_vlq_is_rejected_whole(tmp_path):
     assert original(tmp_path / "dist" / "x.js", 3, tmp_path) is None
 
 
-# --- what a code means (ticket 04, the repo's own docs) ---------------------
-
-CODES_DOC = """# Error codes
-
-Branch on `errorCode`, never on `message`.
-
-## General
-
-| Code     | Name                | Meaning                        |
-| -------- | ------------------- | ------------------------------ |
-| `ERR16`  | `INVALID_INPUT`     | Invalid input                  |
-| `ERR19`  | `INTERNAL_ERROR`    | Something failed server-side   |
-
-## Midas
-
-| Code     | Name                | Meaning                        |
-| `ERR306` | `BILLING_ERROR`     | Midas refused the charge       |
-"""
-
-
-def test_only_the_codes_that_turned_up_are_read_out_of_the_doc(tmp_path):
-    """Ticket 16 measured 2,104 of 2,104 HTTP 500s carrying `ERR19` — the
-    generic code — so the doc is what turns a code into an answer. The whole
-    doc is 271 lines; a run needs the three lines it saw."""
-    from plugins.backend.toolsets.code import meanings
-
-    doc = tmp_path / "docs" / "error-codes.md"
-    doc.parent.mkdir(parents=True)
-    doc.write_text(CODES_DOC)
-
-    found = meanings(doc, ("ERR19", "ERR306"), tmp_path)
-
-    assert found == {
-        "ERR19": "INTERNAL_ERROR — Something failed server-side",
-        "ERR306": "BILLING_ERROR — Midas refused the charge",
-    }
-
-
-def test_a_code_the_doc_does_not_list_is_absent_rather_than_invented(tmp_path):
-    from plugins.backend.toolsets.code import meanings
-
-    doc = tmp_path / "error-codes.md"
-    doc.write_text(CODES_DOC)
-
-    assert meanings(doc, ("ERR999",), tmp_path) == {}
-
-
-def test_a_doc_outside_the_clone_is_not_read(tmp_path):
-    """`error_codes_doc` is a path from a row somebody typed, and this module
-    checks a path before it opens it — the same rule as a stack frame."""
-    from plugins.backend.toolsets.code import meanings
-
-    outside = tmp_path / "outside" / "error-codes.md"
-    outside.parent.mkdir(parents=True)
-    outside.write_text(CODES_DOC)
-    (tmp_path / "clone").mkdir()
-
-    assert meanings(outside, ("ERR19",), tmp_path / "clone") == {}
-
-
-def test_a_two_column_table_is_read_as_well_as_a_three(tmp_path):
-    """The real document has both — 130 rows of `code | name | meaning` and
-    69 of `code | meaning`. Wanting three silently dropped every Midas code,
-    `ERR306` among them, which ticket 16 counted 3,455 times in 30 days."""
-    from plugins.backend.toolsets.code import meanings
-
-    doc = tmp_path / "error-codes.md"
-    doc.write_text(
-        "| Code | Meaning |\n| ---- | ------- |\n| `ERR306` | Content pack required |\n"
-    )
-
-    assert meanings(doc, ("ERR306",), tmp_path) == {"ERR306": "Content pack required"}
+# `what_code_means`/`meanings` (ticket 04's error-code lookup) is deleted by
+# ticket 23: an agent is told a project's `error_codes_doc` in its `where`
+# facts (`diagnose_prompt.build_reads_input`) and reads it with `read`/`grep`
+# like any other file.
 
 
 # --- reading the code that is actually running (ticket 04) -------------------
 
 
-def test_the_running_tag_is_read_out_of_the_release_answer():
-    """Measured 2026-09-21: `release_status` answers 104,761 characters, of
-    which the tag is one field. It is read out at the source so nothing above
-    ever holds a rendered Helm chart — in memory or in a prompt."""
-    import asyncio
-    import json
-
-    from plugins.backend.toolsets.release import ReleaseSource
-
-    class Server:
-        async def call(self, tool, arguments):
-            assert tool == "release_status"
-            return json.dumps(
-                {
-                    "status": {
-                        "config": {
-                            "image": {
-                                "repository": "…/backend-reelme-v2",
-                                "tag": "0.4.4",
-                            }
-                        }
-                    },
-                    "manifest": "x" * 50_000,
-                }
-            )
-
-    got = asyncio.run(ReleaseSource(server=Server()).running_tag("p", "prod"))
-
-    assert got == "0.4.4"
-
-
-def test_not_knowing_which_version_runs_is_an_answer_not_a_failure():
-    """A node that raised here would turn "I could not check which version
-    runs" into a failed investigation."""
-    import asyncio
-
-    from plugins.backend.toolsets.release import ReleaseSource
-
-    class Broken:
-        async def call(self, tool, arguments):
-            raise RuntimeError("no route to host")
-
-    class Odd:
-        async def call(self, tool, arguments):
-            return '{"status": {"config": {}}}'
-
-    assert asyncio.run(ReleaseSource(server=Broken()).running_tag("p", "prod")) == ""
-    assert asyncio.run(ReleaseSource(server=Odd()).running_tag("p", "prod")) == ""
+# `ReleaseSource`/`RunningVersion` (`plugins/backend/toolsets/release.py`) are
+# gone (operator, 2026-09-30): the model finds the running tag itself, through
+# devops tools (ticket 28), and passes it as `core.repos`'s own `ref`
+# parameter — there is no plugin-side lookup left to test here.
 
 
 def test_reading_at_a_ref_never_moves_the_operators_clone(tmp_path):
@@ -1711,7 +1643,7 @@ def test_reading_at_a_ref_never_moves_the_operators_clone(tmp_path):
     disk, cleanup and a failure mode for a read that needs none of it."""
     import subprocess
 
-    from plugins.backend.toolsets.code import at_ref
+    from friday.kernel.toolsets.repos import at_ref
 
     root = tmp_path / "clone"
     root.mkdir()
@@ -1742,11 +1674,11 @@ def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monke
     Asserts git is never *invoked*, not that the call returned `None` — a
     bad ref makes `git show` fail and return `None` too, so the weaker
     assertion passed with the guard deleted."""
-    from plugins.backend.toolsets import code as code_source
+    from friday.kernel.toolsets import repos as repos_module
 
     ran = []
     monkeypatch.setattr(
-        code_source.subprocess,
+        repos_module.subprocess,
         "run",
         lambda *a, **k: (
             ran.append(a) or (_ for _ in ()).throw(AssertionError("git was run"))
@@ -1754,9 +1686,9 @@ def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monke
     )
 
     assert (
-        code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "--upload-pack=x") is None
+        repos_module.at_ref(str(tmp_path), tmp_path / "a.ts", "--upload-pack=x") is None
     )
-    assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "") is None
+    assert repos_module.at_ref(str(tmp_path), tmp_path / "a.ts", "") is None
     assert ran == []
 
 
@@ -1817,13 +1749,14 @@ def _reads_state():
 
 def _reading_toolsets(source):
     """`backend.logs` reading `source` instead of a cluster, beside the real
-    `backend.code` — the same tool, with only its source replaced."""
-    from plugins.backend.toolsets import CODE, LOGS
+    `core.repos` — the same tool, with only the log source replaced."""
+    from friday.kernel.toolsets.repos import REPOS
+    from plugins.backend.toolsets import LOGS
     from plugins.backend.toolsets.logs import log_tools
 
     return (
         replace(LOGS, factory=lambda run: log_tools(run, {"kubectl": source})),
-        CODE,
+        REPOS,
     )
 
 
@@ -2078,22 +2011,22 @@ def test_git_failing_is_no_ref_rather_than_an_exception(tmp_path, monkeypatch):
     """Its docstring promises `None` for "git not on PATH", and that was not
     true: `FileNotFoundError` and `TimeoutExpired` both came out of here, and
     a caller that read the promise and did not guard was a caller this
-    function misled — `read_code` was exactly that caller."""
+    function misled — `core.repos`'s `read` is exactly that caller."""
     import subprocess
 
-    from plugins.backend.toolsets import code as code_source
+    from friday.kernel.toolsets import repos as repos_module
 
     def explode(*_a, **_k):
         raise FileNotFoundError("git")
 
-    monkeypatch.setattr(code_source.subprocess, "run", explode)
-    assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "1.0.0") is None
+    monkeypatch.setattr(repos_module.subprocess, "run", explode)
+    assert repos_module.at_ref(str(tmp_path), tmp_path / "a.ts", "1.0.0") is None
 
     def hang(*_a, **_k):
         raise subprocess.TimeoutExpired(cmd="git", timeout=20)
 
-    monkeypatch.setattr(code_source.subprocess, "run", hang)
-    assert code_source.at_ref(str(tmp_path), tmp_path / "a.ts", "1.0.0") is None
+    monkeypatch.setattr(repos_module.subprocess, "run", hang)
+    assert repos_module.at_ref(str(tmp_path), tmp_path / "a.ts", "1.0.0") is None
 
 
 def test_check_deps_refuses_a_deps_factory_that_forgets_a_required_field():

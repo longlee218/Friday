@@ -28,8 +28,11 @@ their text.
 """.strip()
 
 THINKING = [
-    "Search first: `search_code` finds where a route or a symbol is written, "
-    "`read_docs` what the project says about it.",
+    "Find the version that is running first — `release_status` or the pod's "
+    "own image tag — and pass it as `ref` to `read`/`grep`/`glob`. Without "
+    "one they read the checkout, which may not be what is deployed.",
+    "Search first: `grep` finds where a route or a symbol is written, "
+    "`read` what the project's docs say about it.",
     "Read the place that would do it, not only a place that mentions it.",
     "Say what you could not check, and what you would read next.",
 ]

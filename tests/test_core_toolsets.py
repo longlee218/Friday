@@ -428,6 +428,7 @@ def test_the_core_toolsets_are_named_and_described():
         "core.skills",
         "core.shell",
         "core.workspace",
+        "core.repos",
     }
     assert all(spec.description.strip() for spec in specs.values())
 

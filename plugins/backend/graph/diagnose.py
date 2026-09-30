@@ -1,10 +1,11 @@
 """Node 4: say what caused it, and say what was not checked.
 
 **The reads loop is the only diagnose mode** (ticket 05): the model fetches
-its own evidence through the `backend.logs` and `backend.code` toolsets rather than
-being handed a fixed dossier. The two fixed pre-fetch nodes that used to
-build one — `FindRequestLog`, `ReadFailingCode` — are gone; `_reading` below
-is what is left.
+its own evidence through the `backend.logs` toolset and `core.repos`
+(`read`/`grep`/`glob`, given a `ref` the model finds itself and passes in,
+ticket 23) rather than being handed a fixed dossier. The two fixed pre-fetch
+nodes that used to build one — `FindRequestLog`, `ReadFailingCode` — are
+gone; `_reading` below is what is left.
 
 **The grounding gate** (`void_reason`) lives with the agent in
 `plugins/backend/agents/diagnose.py` since build-the-spine ticket 14; this
@@ -207,7 +208,7 @@ def diagnose_node(
     #: configured — a fresh install, and every test that does not set one up.
     make_harness: Any = None,
     #: This run's tools from a `RunContext` — the graph builder's
-    #: `caps.build_tools` over `backend.logs` and `backend.code`. `None`
+    #: `caps.build_tools` over `backend.logs` and `core.repos`. `None`
     #: builds none (a test that reads nothing).
     build_tools: Any = None,
 ) -> Node:

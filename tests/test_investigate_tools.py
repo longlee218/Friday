@@ -16,11 +16,14 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
-from friday.sdk.evidence import MAX_READS, Evidence
+import pytest
+
+from friday.kernel.harness.harness import ModelRetry
+from friday.kernel.toolsets.repos import repos_tools
+from friday.sdk.evidence import Evidence
 from friday.sdk.sources import Lines
 from friday.sdk.toolset import RunContext
 from plugins.backend.placement import Placement, Project
-from plugins.backend.toolsets.code import code_tools
 from plugins.backend.toolsets.logs import log_tools
 
 AT = datetime(2026, 9, 21, 10, 40, tzinfo=UTC)
@@ -62,7 +65,7 @@ def built(source=None, *, repo_path="", error_code_doc=""):
     )
     tools = [
         *log_tools(run, {} if source is None else {"kubectl": source}),
-        *code_tools(run),
+        *repos_tools(run),
     ]
     # Plugin tools are neutral `ToolSpec`s; the harness binds each to the
     # vendor's `Tool`. Bind here so the test sees what the model sees (ticket 14).
@@ -72,11 +75,15 @@ def built(source=None, *, repo_path="", error_code_doc=""):
 
 
 def call(tool, **kw):
-    """Invoke a tool's own function with the model's arguments. These tools take
-    no run context — they close over the evidence and placement a run resolved —
-    so the call is the function directly, awaited if it is async."""
+    """Invoke a tool the way the run would: `args_validator` first (ticket
+    23's semantic refusals — an unknown repo, a path outside it — live
+    there, raised as `ModelRetry`), then the function itself, awaited if it
+    is async. These tools take no run context of their own — they close
+    over the evidence and placement a run resolved — so `ctx` is `None`."""
     import inspect
 
+    if tool.args_validator is not None:
+        tool.args_validator(None, **kw)
     result = tool.function(**kw)
     if inspect.isawaitable(result):
         return asyncio.run(result)
@@ -143,29 +150,12 @@ def test_a_blank_line_keeps_its_place_and_takes_no_id():
     assert "" not in evidence.index.values()
 
 
-# --- the ceiling ------------------------------------------------------------
-
-
-def test_a_run_that_has_looked_enough_is_told_to_answer():
-    """A fixed pipeline's clock was the sum of a known list of nodes. A model
-    that can loop turns `trace_problem.timeout_seconds` into a hope."""
-    evidence = Evidence()
-    evidence.reads = MAX_READS
-
-    said = evidence.spent()
-
-    assert str(MAX_READS) in said and "next_checks" in said
-
-
-def test_the_ceiling_is_checked_by_the_tools_not_only_defined(tmp_path):
-    source = Log(["ERROR abc"])
-    evidence, tools = built(source)
-    evidence.reads = MAX_READS
-
-    said = call(tools["read_log"], needle="abc")
-
-    assert "limit" in said
-    assert source.asked == [], "and it did not read"
+# --- the ceiling -------------------------------------------------------------
+#
+# `MAX_READS`/`Evidence.spent()` are gone (ticket 23, "budgets as Claude Code
+# does them": no count of reads; each tool bounds its own output and the run
+# is bounded by `AgentSpec.budget` alone). `evidence.reads` itself stays —
+# `test_every_read_counts_against_it` below still pins it.
 
 
 def test_every_read_counts_against_it():
@@ -257,47 +247,91 @@ def test_with_no_source_configured_it_says_which_one_it_wanted():
     assert "kubectl" in said
 
 
-# --- reading code -----------------------------------------------------------
+# --- reading code, through core.repos's `read` (ticket 23) ------------------
 
 
 def test_code_is_read_from_the_checkout_and_says_so(tmp_path):
-    """`release_tag` left `Placement` (build-the-spine ticket 07): until ticket
-    09 reads at the running tag, the answer names what it read."""
+    """With no `ref` given, `read` reads the checkout and names what it
+    read."""
     (tmp_path / "orders.ts").write_text("edited since\nb\nc\nd\n")
     _, tools = built(repo_path=str(tmp_path))
 
-    said = call(tools["read_code"], repo="r", file="/app/orders.ts", line=1)
+    said = call(tools["read"], repo="r", path="/app/orders.ts")
 
     assert "edited since" in said
     assert "the clone's current checkout" in said
 
 
 def test_code_outside_the_clone_is_named_rather_than_opened():
+    """An absolute path naming none of the image's source roots — somebody
+    else's container, or a path a model made up — is refused by
+    confinement alone, before anything is read."""
     _, tools = built(repo_path="/nowhere")
 
-    said = call(tools["read_code"], repo="r", file="/app/node_modules/x/y.js", line=3)
-
-    assert "not in this clone" in said
+    with pytest.raises(ModelRetry, match="not in r's clone"):
+        call(tools["read"], repo="r", path="/etc/passwd")
 
 
 def test_the_lines_of_code_are_citable_like_any_other(tmp_path):
     (tmp_path / "a.ts").write_text("one\ntwo\nthree\n")
     evidence, tools = built(repo_path=str(tmp_path))
 
-    call(tools["read_code"], repo="r", file="/app/a.ts", line=2)
+    call(tools["read"], repo="r", path="/app/a.ts")
 
     assert any("two" in line for line in evidence.index.values())
 
 
-# --- what a code means ------------------------------------------------------
+def test_a_compiled_frame_resolves_through_read_via_its_source_map(tmp_path):
+    """A stack frame naming the compiled file is read from the TypeScript it
+    was built from, not the line of the bundle (D4's mapping, ported from
+    `read_code` onto `read`)."""
+    import json
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "src" / "x.ts").write_text(
+        "\n".join(f"ts line {i}" for i in range(1, 21))
+    )
+    (tmp_path / "dist" / "x.js").write_text(
+        "\n".join(f"js line {i}" for i in range(1, 6))
+    )
+
+    def vlq(n: int) -> str:
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        value, out = (abs(n) << 1) | (1 if n < 0 else 0), ""
+        while True:
+            digit, value = value & 31, value >> 5
+            out += alphabet[digit | (32 if value else 0)]
+            if not value:
+                return out
+
+    # Generated line 3 (`;;` skips two empty lines) maps to original line 11.
+    segment = "A" + "A" + vlq(10) + "A"
+    (tmp_path / "dist" / "x.js.map").write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "file": "x.js",
+                "sourceRoot": "",
+                "sources": ["../src/x.ts"],
+                "names": [],
+                "mappings": ";;" + segment,
+            }
+        )
+    )
+    _, tools = built(repo_path=str(tmp_path))
+
+    said = call(tools["read"], repo="r", path="/app/dist/x.js", offset=3)
+
+    assert "ts line 11" in said
+    assert "js line" not in said
 
 
-def test_a_project_with_no_table_says_so_rather_than_guessing():
+def test_a_service_with_no_repository_recorded_says_so():
     _, tools = built()
 
-    assert "records no error-code table" in call(
-        tools["what_code_means"], repo="r", code="ERR19"
-    )
+    with pytest.raises(ModelRetry, match="No repository is recorded"):
+        call(tools["read"], repo="r", path="/app/a.ts")
 
 
 def test_the_window_reaches_past_the_report():
@@ -359,40 +393,6 @@ def test_the_error_codes_in_what_was_read_are_counted():
     assert "ERR19 ×2" in said and "ERR306 ×1" in said
 
 
-def test_reading_code_counts_against_the_ceiling_too():
-    """`spent()` says it is checked by every tool. One of them did not."""
-    source = Log(["ERROR abc"])
-    evidence, tools = built(source, repo_path="/nowhere")
-    evidence.reads = MAX_READS
-
-    assert "limit" in call(tools["read_code"], repo="r", file="/app/a.ts", line=1)
-
-
-def test_asking_what_a_code_means_counts_too():
-    evidence, tools = built()
-    evidence.reads = MAX_READS
-
-    assert "limit" in call(tools["what_code_means"], repo="r", code="ERR19")
-
-
-def test_a_service_with_no_repository_recorded_says_so(tmp_path):
-    _, tools = built()
-
-    assert "No repository is recorded" in call(
-        tools["read_code"], repo="r", file="/app/a.ts", line=1
-    )
-
-
-def test_a_code_the_table_does_not_carry_says_so(tmp_path):
-    doc = tmp_path / "codes.md"
-    doc.write_text("| Code | Meaning |\n| --- | --- |\n| ERR19 | Internal |\n")
-    _, tools = built(repo_path=str(tmp_path), error_code_doc=doc.name)
-
-    assert "not in this project's table" in call(
-        tools["what_code_means"], repo="r", code="ERR999"
-    )
-
-
 # --- Diagnose reading for itself (v3.3, ticket 15) --------------------------
 
 
@@ -436,12 +436,13 @@ def _state():
 
 def _backend_tools(source=None):
     """`build_tools` over the real `backend.logs` (reading `source`) and
-    `backend.code`, through the core's narrowing — what `caps.build_tools`
+    `core.repos`, through the core's narrowing — what `caps.build_tools`
     does in the DAG."""
     from dataclasses import replace
 
     from friday.kernel.harness.run_agent import build_tools
-    from plugins.backend.toolsets import CODE, LOGS
+    from friday.kernel.toolsets.repos import REPOS
+    from plugins.backend.toolsets import LOGS
 
     logs = replace(
         LOGS,
@@ -449,7 +450,7 @@ def _backend_tools(source=None):
             run, {} if source is None else {"kubectl": source}
         ),
     )
-    return lambda run: build_tools((logs, CODE), run, {})
+    return lambda run: build_tools((logs, REPOS), run, {})
 
 
 class Answering:
@@ -497,9 +498,9 @@ async def test_the_model_is_given_the_reads_and_told_where_things_live(db):
 
     assert set(Answering.seen["tools"]) == {
         "read_log",
-        "read_code",
-        "search_code",
-        "what_code_means",
+        "read",
+        "grep",
+        "glob",
     }
     # Each field named, not one string that three of them happen to contain:
     # asserting the pod pattern alone stayed green with `service:` deleted.

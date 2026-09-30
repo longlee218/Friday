@@ -1,9 +1,14 @@
 """build-the-spine ticket 09 — the backend's toolsets, folded out of `sources/`.
+Ticket 23 moved reading, searching and listing a repository onto the
+generic `core.repos` (`read`/`grep`/`glob`); each takes its own optional
+`ref` (a tag, branch or sha) the *model* finds and passes in — there is no
+plugin-side running-version lookup (`backend.release`, rejected by the
+operator 2026-09-30: the model calls devops tools for the tag itself).
 
 What these guard: a factory reaches only the MCP tools its own toolset
-declared (the core narrows every server per toolset); the code and docs tools
-read at the version that is running, never the working copy, and say so when
-they cannot; `repo` is one of the room's projects and nothing else.
+declared (the core narrows every server per toolset); `read`/`grep`/`glob`
+read at a given `ref`, never the working copy, and say so when they fall
+back to the checkout; `repo` is one of the room's projects and nothing else.
 """
 
 from __future__ import annotations
@@ -16,28 +21,15 @@ from datetime import UTC, datetime
 
 import pytest
 
+from friday.kernel.harness.harness import ModelRetry
 from friday.kernel.harness.run_agent import build_tools, reads_for
+from friday.kernel.toolsets.repos import REPOS
 from friday.sdk.evidence import Evidence
 from friday.sdk.toolset import RunContext
 from plugins.backend.placement import Placement, Project
-from plugins.backend.toolsets import CODE, DB, DOCS, LOGS, TOOLSETS
+from plugins.backend.toolsets import DB, LOGS, TOOLSETS
 
 AT = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
-
-
-class Devops:
-    """The devops-generic server as the core holds it: it offers the writes
-    too, and answers `release_status` with the tag it was given."""
-
-    def __init__(self, tag: str = "1.0.0") -> None:
-        self.tag = tag
-        self.called: list[str] = []
-
-    async def call_tool(self, tool, arguments):
-        self.called.append(tool)
-        if tool == "release_status":
-            return json.dumps({"status": {"config": {"image": {"tag": self.tag}}}})
-        return "done"
 
 
 def _git(root, *args):
@@ -97,6 +89,10 @@ def _tools(toolsets, placement, servers, evidence=None):
 
 
 def call(tool, **kw):
+    """Invoke a tool the way the run would: `args_validator` first (ticket
+    23's semantic refusals, raised as `ModelRetry`), then the function."""
+    if tool.args_validator is not None:
+        tool.args_validator(None, **kw)
     result = tool.function(**kw)
     return asyncio.run(result) if inspect.isawaitable(result) else result
 
@@ -104,174 +100,124 @@ def call(tool, **kw):
 # --- a factory reaches only its own declared reads ---------------------------
 
 
-def test_a_factory_cannot_reach_release_rollback():
-    """The server offers `release_rollback`; `backend.code` declared only
-    `release_status`, so the `Reads` its factory is handed refuses the write
-    in this process — whatever the server would have done."""
-    server = Devops()
-    seen = {}
-
-    def factory(run):
-        seen.update(run.mcp)
-        return []
-
-    from dataclasses import replace
-
-    build_tools(
-        [replace(CODE, factory=factory)],
-        RunContext(
-            task_id=1,
-            domain=None,
-            evidence=None,
-            mcp={},
-            reported_at=AT,
-        ),
-        {"devops-generic": server},
-    )
-
-    reads = seen["devops-generic"]
-    assert reads.allowed == frozenset({"release_status"})
-    with pytest.raises(PermissionError):
-        asyncio.run(reads.call("release_rollback", {}))
-    assert server.called == []
-
-
 def test_each_toolset_is_narrowed_to_its_own_reads():
-    """Per toolset, not per plugin: `backend.logs` never sees
-    `release_status`, and a server a toolset did not declare is absent."""
-    servers = {"devops-generic": Devops(), "db-generic": object()}
+    """Per toolset, not per plugin: `backend.logs` never sees another
+    server's reads, and a server a toolset did not declare is absent."""
+    servers = {"devops-generic": object(), "db-generic": object()}
 
     assert reads_for(LOGS, servers)["devops-generic"].allowed == {"loki_query_range"}
-    assert reads_for(CODE, servers)["devops-generic"].allowed == {"release_status"}
     assert set(reads_for(LOGS, servers)) == {"devops-generic"}
     assert set(reads_for(DB, servers)) == {"db-generic"}
-    assert reads_for(CODE, {}) == {}
 
 
 def test_the_plugin_registers_every_toolset_under_its_own_name():
-    assert [t.name for t in TOOLSETS] == [
-        "backend.logs",
-        "backend.code",
-        "backend.docs",
-        "backend.db",
-    ]
+    assert [t.name for t in TOOLSETS] == ["backend.logs", "backend.db"]
     assert all(t.domain_type is Placement for t in TOOLSETS)
 
 
-# --- the running version -----------------------------------------------------
+# --- reading, searching and listing at a ref the model gives (ticket 23) ----
 
 
-def test_read_code_reads_at_the_running_tag_not_the_working_copy(clone):
-    tools = _tools([CODE], _placement(clone), {"devops-generic": Devops("1.0.0")})
-    head = _git(clone, "rev-parse", "HEAD").stdout
+def test_read_reads_at_the_given_ref_not_the_working_copy(clone):
+    tools = _tools([REPOS], _placement(clone), {})
 
-    said = call(tools["read_code"], repo="reelme", file="/app/src/orders.ts", line=1)
+    said = call(tools["read"], repo="reelme", path="/app/src/orders.ts", ref="1.0.0")
 
     assert "released" in said and "edited since" not in said
     assert "at 1.0.0" in said
+    head = _git(clone, "rev-parse", "HEAD").stdout
     # `git show`, never a checkout: the operator's tree and HEAD are untouched.
     assert (clone / "src" / "orders.ts").read_text().startswith("edited since")
     assert _git(clone, "rev-parse", "HEAD").stdout == head
 
 
-def test_the_running_tag_is_asked_once_per_run(clone):
-    server = Devops("1.0.0")
-    tools = _tools([CODE], _placement(clone), {"devops-generic": server})
-
-    call(tools["read_code"], repo="reelme", file="/app/src/orders.ts", line=1)
-    call(tools["search_code"], repo="reelme", query="Token")
-
-    assert server.called == ["release_status"]
-
-
-def test_no_devops_server_reads_the_checkout_and_says_why(clone):
+def test_no_ref_reads_the_checkout_and_says_so(clone):
     evidence = Evidence()
-    tools = _tools([CODE], _placement(clone), {}, evidence)
+    tools = _tools([REPOS], _placement(clone), {}, evidence)
 
-    said = call(tools["read_code"], repo="reelme", file="/app/src/orders.ts", line=1)
+    said = call(tools["read"], repo="reelme", path="/app/src/orders.ts")
 
     assert "edited since" in said
-    assert "running version unresolved: devops-generic is not connected" in said
-    assert any("not the running version" in line for line in evidence.not_checked)
+    assert "no ref was given" in said
+    assert any("not a pinned ref" in line for line in evidence.not_checked)
 
 
-def test_a_tag_the_clone_does_not_have_falls_back_and_says_so(clone):
-    tools = _tools([CODE], _placement(clone), {"devops-generic": Devops("9.9.9")})
+def test_a_ref_the_clone_cannot_resolve_is_refused(clone):
+    tools = _tools([REPOS], _placement(clone), {})
 
-    said = call(tools["read_code"], repo="reelme", file="/app/src/orders.ts", line=1)
-
-    assert "edited since" in said
-    assert "fetch its tags" in said
+    with pytest.raises(ModelRetry, match="could not be resolved"):
+        call(tools["read"], repo="reelme", path="/app/src/orders.ts", ref="9.9.9")
 
 
-def test_another_repo_of_the_room_has_no_known_version(clone):
-    """The release is the case's service's; another repo has no service here,
-    so it is read at the checkout rather than at somebody else's tag."""
-    server = Devops("1.0.0")
-    tools = _tools([CODE], _placement(clone), {"devops-generic": server})
+def test_a_ref_starting_with_a_dash_is_refused(clone):
+    tools = _tools([REPOS], _placement(clone), {})
 
-    said = call(tools["read_code"], repo="other", file="src/orders.ts", line=1)
+    with pytest.raises(ModelRetry, match="looks like a flag"):
+        call(
+            tools["read"],
+            repo="reelme",
+            path="/app/src/orders.ts",
+            ref="--upload-pack=x",
+        )
 
-    assert "no service of other is named in this case" in said
-    assert server.called == []
 
-
-def test_search_code_finds_at_the_running_tag(clone):
+def test_a_valid_ref_that_lacks_the_file_falls_back_to_the_checkout(clone):
+    (clone / "src" / "new.ts").write_text("brand new\n")
+    _git(clone, "add", ".")
+    _git(clone, "commit", "-qm", "two")
     evidence = Evidence()
-    tools = _tools(
-        [CODE], _placement(clone), {"devops-generic": Devops("1.0.0")}, evidence
+    tools = _tools([REPOS], _placement(clone), {}, evidence)
+
+    said = call(tools["read"], repo="reelme", path="/app/src/new.ts", ref="1.0.0")
+
+    assert "brand new" in said
+    assert "is not at '1.0.0'" in said
+    assert any("not at '1.0.0'" in line for line in evidence.not_checked)
+
+
+def test_grep_finds_at_the_given_ref(clone):
+    evidence = Evidence()
+    tools = _tools([REPOS], _placement(clone), {}, evidence)
+
+    said = call(
+        tools["grep"],
+        repo="reelme",
+        pattern="Token\\(\\)",
+        ref="1.0.0",
+        output_mode="content",
     )
-
-    said = call(tools["search_code"], repo="reelme", query="Token()")
 
     assert "src/orders.ts:2:checkToken()" in said
     assert "noToken" not in said
     assert any("checkToken" in line for line in evidence.index.values()), "citable"
 
 
-def test_search_code_takes_a_dash_query_as_text_not_an_option(clone):
-    tools = _tools([CODE], _placement(clone), {})
+def test_grep_takes_a_dash_pattern_as_text_not_an_option(clone):
+    tools = _tools([REPOS], _placement(clone), {})
 
-    said = call(tools["search_code"], repo="reelme", query="--no-index")
+    said = call(tools["grep"], repo="reelme", pattern="--no-index")
 
-    assert "carries '--no-index'" in said
+    assert "Nothing" in said or "carries" in said
 
 
 def test_a_repo_that_is_not_the_rooms_is_refused(clone):
-    tools = _tools([CODE, DOCS], _placement(clone), {})
+    tools = _tools([REPOS], _placement(clone), {})
 
     for name, kw in (
-        ("read_code", {"file": "src/orders.ts", "line": 1}),
-        ("search_code", {"query": "x"}),
-        ("what_code_means", {"code": "ERR19"}),
-        ("read_docs", {"path": "docs/webhooks.md"}),
+        ("read", {"path": "src/orders.ts"}),
+        ("grep", {"pattern": "x"}),
+        ("glob", {"pattern": "*"}),
     ):
-        said = call(tools[name], repo="/etc", **kw)
-        assert "is not one of this room's projects" in said, name
+        with pytest.raises(ModelRetry, match="is not one of this room's projects"):
+            call(tools[name], repo="/etc", **kw)
 
 
-# --- docs ----------------------------------------------------------------------
+def test_glob_lists_paths_at_the_given_ref(clone):
+    tools = _tools([REPOS], _placement(clone), {})
 
+    said = call(tools["glob"], repo="reelme", pattern="**/*.ts", ref="1.0.0")
 
-def test_read_docs_reads_under_docs_paths_at_the_running_tag(clone):
-    tools = _tools([DOCS], _placement(clone), {"devops-generic": Devops("1.0.0")})
-
-    said = call(tools["read_docs"], repo="reelme", path="docs/webhooks.md")
-
-    assert "signed at 1.0.0" in said and "edited since" not in said
-
-
-def test_read_docs_lists_what_it_can_read(clone):
-    tools = _tools([DOCS], _placement(clone), {})
-
-    assert call(tools["read_docs"], repo="reelme") == "docs/webhooks.md"
-
-
-def test_a_file_outside_docs_paths_is_not_a_doc(clone):
-    tools = _tools([DOCS], _placement(clone), {})
-
-    for path in ("README.md", "src/orders.ts", "docs/../../etc/passwd"):
-        assert "is not a document" in call(tools["read_docs"], repo="reelme", path=path)
+    assert "src/orders.ts" in said
 
 
 # --- db --------------------------------------------------------------------------
@@ -303,35 +249,10 @@ def test_no_db_server_says_so():
 # --- review fixes ----------------------------------------------------------------
 
 
-def test_the_tag_is_asked_once_between_code_and_docs(clone):
-    """`answer_question` is granted both; the ~105k-char `release_status`
-    answer is fetched once per run, not once per toolset."""
-    server = Devops("1.0.0")
-    tools = _tools([CODE, DOCS], _placement(clone), {"devops-generic": server})
-
-    call(tools["read_code"], repo="reelme", file="src/orders.ts", line=1)
-    call(tools["read_docs"], repo="reelme", path="docs/webhooks.md")
-
-    assert server.called == ["release_status"]
-
-
-def test_a_file_deleted_since_the_release_is_still_read_at_the_tag(clone):
+def test_a_file_deleted_since_the_tag_is_still_read_at_it(clone):
     (clone / "src" / "orders.ts").unlink()
-    tools = _tools([CODE], _placement(clone), {"devops-generic": Devops("1.0.0")})
+    tools = _tools([REPOS], _placement(clone), {})
 
-    said = call(tools["read_code"], repo="reelme", file="/app/src/orders.ts", line=1)
+    said = call(tools["read"], repo="reelme", path="/app/src/orders.ts", ref="1.0.0")
 
     assert "released" in said and "at 1.0.0" in said
-
-
-def test_a_docs_path_of_the_whole_clone_opens_nothing(clone):
-    """`docs_paths: ["."]` would make `.env` and `.git/config` docs."""
-    (clone / ".env").write_text("SECRET=1\n")
-    placement = Placement(
-        env="dev",
-        projects=(Project(name="reelme", repo_path=str(clone), docs_paths=(".", "")),),
-    )
-    tools = _tools([DOCS], placement, {})
-
-    assert "is not a document" in call(tools["read_docs"], repo="reelme", path=".env")
-    assert "hold no files" in call(tools["read_docs"], repo="reelme")

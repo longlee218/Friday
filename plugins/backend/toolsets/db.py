@@ -277,8 +277,6 @@ def _describe_db(evidence: Evidence, source: DbSource | None):
             db_id: the database, as this room records it.
             table: one table's name, or empty for every table.
         """
-        if spent := evidence.spent():
-            return spent
         if source is None:
             return f"{DB_SERVER} is not connected, so no database can be read."
         evidence.reads += 1
@@ -303,8 +301,6 @@ def _query_db(evidence: Evidence, source: DbSource | None):
             db_id: the database, as this room records it.
             sql: one statement that reads.
         """
-        if spent := evidence.spent():
-            return spent
         if source is None:
             return f"{DB_SERVER} is not connected, so no database can be read."
         evidence.reads += 1

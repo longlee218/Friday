@@ -393,8 +393,8 @@ agent; the core runs it through the Harness. The spine's form of the
 **Toolset** — the unit an action's contract grants and an agent spec names:
 a set of tools under one name, `<plugin>.<thing>` (`backend.logs`) or
 `core.<thing>` for the core's own (`core.memory`, `core.memory_write`,
-`core.skills`, `core.shell`, `core.workspace`, in `friday/kernel/toolsets/`),
-which any plugin may grant. `core.memory` reads and proposes;
+`core.skills`, `core.shell`, `core.workspace`, `core.repos`, in
+`friday/kernel/toolsets/`), which any plugin may grant. `core.memory` reads and proposes;
 `core.memory_write` adds, updates and deletes — its own toolset so an agent
 can hold the reads without the writes (build-the-spine ticket 22). Declared as a *toolset spec*. Not a Pydantic AI toolset,
 though `core.workspace`'s factory hands one back.
@@ -432,19 +432,25 @@ only `harness.py` names.
 
 **Toolset file** — one file per data source under `plugins/<domain>/toolsets/`
 holding both the client that reaches out (a *source*) and the tools a model
-calls over it (`backend.logs`, `backend.code`, `backend.docs`, `backend.db`).
-The only plugin code that may start a process or call through a tool server.
-(Build-the-spine ticket 09; `plugins/backend/sources/` folded here.)
+calls over it (`backend.logs`, `backend.db`). The only plugin code that may
+start a process or call through a tool server. (Build-the-spine ticket 09;
+`plugins/backend/sources/` folded here. Reading, searching and listing a
+repository — `backend.code`/`backend.docs` — moved into the kernel as
+`core.repos` in ticket 23, generic over the sdk's `RepoRoom`.)
 
 **Running version** — the image tag a service is deployed at, which is its
-release tag. `RunningVersion` (`plugins/backend/toolsets/release.py`) asks
-`release_status` once per run per repo; the code and docs tools read at it
-with `git show`, or read the checkout and say why. Only the case's own repo
-(`Placement.project`) has one.
+release tag. Amended 2026-09-30: **the model finds it**, not a per-run
+cache. `core.repos`'s `read`/`grep`/`glob` take an optional `ref` (a tag,
+branch or sha); the model calls `release_status` or reads a pod's own image
+tag (ticket 28) and passes the result in. With `ref`: `git show`/`git
+grep`/`git ls-tree` at it. Without: the checkout, said in `not_checked`.
+(`RunningVersion`/`ReleaseSource`/`backend.release`/`Evidence.resolve_ref` —
+a per-run cache the operator rejected — are deleted.)
 
 **Repo** (a tool argument) — one of the room's `backend.project` rows by
-name (`Placement.projects`); every `backend.code`/`backend.docs` tool takes
-one and refuses any other.
+name (`Placement.projects`, exposed to `core.repos` as `Placement.repos()`,
+the sdk's `RepoRoom`); every `read`/`grep`/`glob` call takes one and refuses
+any other.
 
 **Outcome** (`friday/sdk/actions.py`; named `Action` until build-the-spine
 ticket 06, the file moves to `friday/kernel/spine/plan.py` in 16):

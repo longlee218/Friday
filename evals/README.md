@@ -194,7 +194,8 @@ the run takes over ten minutes.
   unchanged and the case that fails moves: read it as noise until a second
   run says otherwise.
 - With `toolsets` empty the diagnose step is granted all four of its toolsets
-  (`backend.logs`, `backend.code`, `core.memory`, `core.skills`).
+  (`backend.logs`, `backend.code`, `core.memory`, `core.skills` — before ticket 23
+  replaced `backend.code` with `core.repos`).
 
 ### After ticket 22 (2026-09-30, same `strong` model)
 
@@ -206,6 +207,24 @@ of tickets 20 and 21.
   first run, asked in the second: the one case that still moves.
 - `question-about-the-docs` passed both runs. In the first run one Planner
   try hit its request limit (11), and the rewrite passed.
+
+### After ticket 23 (2026-09-30, same `strong` model)
+
+`backend.code`/`backend.docs` are gone; `backend.diagnose` and
+`backend.explain`'s toolsets named `backend.release` + `core.repos` (`read`,
+`grep`, `glob`) at the time of this run. One run: 7/8 (`planner_failed` 0/8)
+— no worse than ticket 22's, and no case failed on an invented or deleted
+tool name.
+
+- `trace-too-vague-to-start` — drafted `diagnose` via `['backend.diagnose']`
+  instead of asking, the same case that has moved on every run since the
+  first numbers.
+
+**Revised same day**: the operator rejected `backend.release` (a per-run
+running-tag cache); it and `RunningVersion`/`Evidence.resolve_ref` are
+deleted, and `core.repos`'s tools take their own `ref` parameter instead —
+`backend.diagnose`/`backend.explain` now grant `core.repos` alone. Not
+re-run against this change yet.
 
 ### When to run it
 

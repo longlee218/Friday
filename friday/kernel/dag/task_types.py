@@ -67,6 +67,14 @@ class BootContext:
 
         return build_tools(toolsets, context, self.servers)
 
+    def repos_toolset(self) -> Any:
+        """`core.repos`'s `ToolsetSpec` (ticket 23), exposed so a plugin's DAG
+        builder can grant it without importing the kernel's toolset package —
+        a plugin imports `friday.sdk` only."""
+        from friday.kernel.toolsets.repos import REPOS
+
+        return REPOS
+
     def simple_dag(self, name: str, params: type) -> Any:
         """The one-node graph a type with no investigation past node 0 uses —
         prepare, then ask for what is missing or hand over (D1). Exposed here so

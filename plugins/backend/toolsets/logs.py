@@ -482,8 +482,6 @@ def _read_log(
                 is thirty; six hours is 360. Thirty days is the most any of
                 these back ends keeps.
         """
-        if spent := evidence.spent():
-            return spent
         if source is None:
             return (
                 f"No {wanted} log source is configured, so {placement.env} "

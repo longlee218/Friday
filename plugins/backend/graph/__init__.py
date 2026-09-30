@@ -7,8 +7,9 @@ deterministic node (ticket 03), so there is no extraction pass and no
 separate resolve step left to run. The two fixed pre-fetch nodes the diagram
 used to name here — `FindRequestLog`, `ReadFailingCode` — were already gone
 (ticket 05): `Diagnose` reads the log and the code itself, through
-the `backend.logs` and `backend.code` toolsets, so there is nothing left to fetch in
-advance of it.
+the `backend.logs` toolset and `core.repos` (`read`/`grep`/`glob`, given a
+`ref` the model finds itself and passes in, ticket 23), so there is nothing
+left to fetch in advance of it.
 
 **Built against the sdk, and the caps the composition root hands in.** A plugin
 imports `friday.sdk` only, so this builder never reaches for the kernel's
@@ -98,11 +99,10 @@ def build_backend_dag(api: Any, *, toolsets: Any = None) -> DAG:
     parameters, so there is nothing here for `caps.prepare_node` to fill in
     first.
 
-    `Diagnose`'s tools come from the plugin's own toolsets (`backend.logs`,
-    `backend.code`), built per run by `caps.build_tools` — the core's door
-    that narrows each server to what the toolset declared (build-the-spine
-    ticket 09). `toolsets` replaces them: a replay hands in `backend.logs`
-    reading a captured case.
+    `Diagnose`'s tools come from `backend.logs` and `core.repos`, built per
+    run by `caps.build_tools` — the core's door that narrows each server to
+    what the toolset declared (build-the-spine ticket 09). `toolsets`
+    replaces them: a replay hands in `backend.logs` reading a captured case.
 
     The diagnose model is `caps.make_harness`. In production `whole.agent`
     always resolves `DIAGNOSE` (an undeclared tier refuses the boot); it is
@@ -112,12 +112,15 @@ def build_backend_dag(api: Any, *, toolsets: Any = None) -> DAG:
     """
     # Here, not at the top: `toolsets.logs` imports `graph.distil`, so a
     # module-level import would be a cycle.
-    from plugins.backend.toolsets import CODE, LOGS
+    from plugins.backend.toolsets import LOGS
 
     caps = api.caps
     whole = caps.config  # the full application Config, for the shared agent
     diagnose_agent = whole.agent(DIAGNOSE)
-    granted = (LOGS, CODE) if toolsets is None else tuple(toolsets)
+    # `core.repos` is a kernel toolset; a plugin reaches it through `caps`
+    # rather than importing `friday.kernel.toolsets.repos` (a plugin imports
+    # `friday.sdk` only).
+    granted = (LOGS, caps.repos_toolset()) if toolsets is None else tuple(toolsets)
 
     # A factory, because the tools carry this run's placement and numbering —
     # one harness built at boot would read the previous case's service.
