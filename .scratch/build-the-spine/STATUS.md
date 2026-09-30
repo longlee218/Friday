@@ -25,8 +25,8 @@ Legend: ⬜ not started · 🔵 in progress · ✅ done · 🧑 waiting on opera
 | 17 | Re-triage | ⬜ | 16 |
 | 18 | The board shows plans and re-triage | ⬜ | 17 |
 | 19 | Doc sweep | ⬜ | 18 |
-| 20 | The Planner hands over goals, not methods | 🧑 code in (main, 2026-09-30); waiting on the operator: the paid `core.planner` run (baseline 6/8) | 14 |
-| 21 | The Planner reads the reporter through the same boundary | 🧑 code in (main, 2026-09-30); waiting on the operator: one paid `core.planner` run for 20 and 21 (baseline 6/8) | 20 |
+| 20 | The Planner hands over goals, not methods | 🧑 code in (main, 2026-09-30); `core.planner` 6/8 after 21 but one case worse (`question-about-the-docs` planner_failed) — a second run to settle it | 14 |
+| 21 | The Planner reads the reporter through the same boundary | ✅ done (main, 2026-09-30); extended to every agent's prompt; `core.planner` 6/8 | 20 |
 
 Operator steps: the db wipe in 02 (asked first), the eval relabel
 confirmations in 13, one real end-to-end run in 14.

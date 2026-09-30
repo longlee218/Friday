@@ -162,8 +162,10 @@ Recorded so the review is not lost; none has a case to build against today.
 
 ## Left for the operator (2026-09-30)
 
-- **`core.planner` run** (paid): `uv run run_eval.py core.planner`; baseline
-  is 6/8 on `strong`. The prompt changed (brief wording, empty `toolsets`).
+- **`core.planner` run**: done after 21 — 6/8, but not "no case worse":
+  `question-about-the-docs` passed at baseline and now hit `planner_failed`
+  (request limit), while `permission-for-what` moved the other way. See
+  `evals/README.md`. Run it again before ticking the box.
 - **The narrowing case** in `evals/datasets/planner/` was not added: the
   grader only checks "at least these toolsets", and no registered action
   gives a reason to narrow. It needs an `excludes` check and a synthetic

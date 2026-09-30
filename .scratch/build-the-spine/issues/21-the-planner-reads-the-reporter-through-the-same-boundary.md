@@ -1,4 +1,4 @@
-Status: ready-for-human
+Status: done
 Blocked by: 20
 
 # The Planner reads the reporter through the same boundary
@@ -72,17 +72,9 @@ diagnose.py` and goes with the DAG path in ticket 16; not this ticket.
       word in its opening and replan messages is between the markers,
       escaped (test).
 - [x] `_prompt_modules` includes the Planner; both assembler guards green.
-- [ ] `core.planner` reported with the change.
+- [x] `core.planner` reported with the change (6/8, `evals/README.md`).
 - [x] `docs/DESIGN.md` corrected.
 - [x] Whole suite green; `code-review` done.
-
-## Left for the operator (2026-09-30)
-
-- **`core.planner` run** (paid): `uv run run_eval.py core.planner`; baseline
-  6/8 on `strong`. The Planner's whole prompt changed here and, one ticket
-  earlier, its brief wording (20): one run measures both.
-- Built with two generic sdk builders, `facts` (escaped section) and `said`
-  (quoted and escaped), rather than `case`/`action`/`plan` builders.
 
 ## Extended to every agent (2026-09-30)
 

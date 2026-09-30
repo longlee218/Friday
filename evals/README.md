@@ -179,6 +179,22 @@ Two runs, 6/8 each (terminal 6/8, agents 6/8, toolsets 7/8):
   3 tries' 10 turns on tool calls and never answered (`planner_failed`); the
   first answered `hand_over` where the case expects `ask`.
 
+### After tickets 20 and 21 (2026-09-30, same `strong` model)
+
+One run, 6/8 (terminal 6/8, agents 6/8, toolsets 7/8, `planner_failed` 1/8);
+the run takes over ten minutes.
+
+- `trace-too-vague-to-start` — drafted `diagnose` instead of asking, as in
+  both first runs.
+- `question-about-the-docs` — `planner_failed`: the Planner spent its
+  request limit (11) on read tools and never answered; it passed before.
+  The same failure mode `permission-for-what` had in the first numbers.
+- `permission-for-what` passed this time. One run each way, so the count is
+  unchanged and the case that fails moves: read it as noise until a second
+  run says otherwise.
+- With `toolsets` empty the diagnose step is granted all four of its toolsets
+  (`backend.logs`, `backend.code`, `core.memory`, `core.skills`).
+
 ### When to run it
 
 A change to the Planner's prompt — `friday/kernel/spine/planner_prompt.py`
