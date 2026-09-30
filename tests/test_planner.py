@@ -15,7 +15,6 @@ import pytest
 from friday.kernel.config import AgentConfig
 from friday.kernel.spine.plan import AgentStep, DraftStep, step_keys
 from friday.kernel.spine.plan_gate import Frozen
-from friday.kernel.spine.planner_prompt import PlannedStep
 from friday.kernel.spine.planner import (
     PLAN_REWRITES,
     PlannerFailed,
@@ -23,6 +22,7 @@ from friday.kernel.spine.planner import (
     plan,
     replan,
 )
+from friday.kernel.spine.planner_prompt import PlannedStep
 from friday.sdk.action import Action, ActionContract, Limits, Recognition
 from friday.sdk.actions import HandOver, Replan
 from friday.sdk.agent import AgentSpec, Budget

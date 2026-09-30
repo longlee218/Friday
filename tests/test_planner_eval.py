@@ -79,7 +79,10 @@ def _expected_plan(case: EvalCase, action) -> Plan:
     agents = REGISTRY.agents()
     steps: list = [
         AgentStep(
-            f"a{i}", agent, tuple(sorted(full_grant(action.contract, agents[agent]))), "b"
+            f"a{i}",
+            agent,
+            tuple(sorted(full_grant(action.contract, agents[agent]))),
+            "b",
         )
         for i, agent in enumerate(want.agents)
     ]
