@@ -4,7 +4,7 @@ Four `Database` methods, all scope-filtered by channel: `remember` staged a
 guess for a promotion pass that never ran long enough to matter (nothing wrote
 one for months); this is an agent writing directly and reading back what it
 wrote, with the floor moved from an approval count to three narrower
-guarantees — see `friday/kernel/toolsets/memory.py`'s module docstring for the argument.
+guarantees — see `friday/kernel/toolsets/memory/`'s module docstring for the argument.
 
 These tests drive the store directly, without the tool layer: `FridayState` is
 the only shape a caller needs, and every one of the properties below has to
@@ -265,7 +265,7 @@ async def test_deleting_a_memory_frees_its_slot_at_the_cap(db):
 
 
 async def test_the_store_enforces_the_same_text_length_the_tool_advertises(db):
-    """`friday/kernel/toolsets/memory.py`'s `TEXT_CHARS` is what `memory_add` cuts to
+    """`friday/kernel/toolsets/memory/`'s `TEXT_CHARS` is what `memory_add` cuts to
     and what its docstring quotes to the model — but the store is what a
     second caller would actually reach, the same argument
     `MEMORY_PER_CHANNEL`'s own comment already makes for the count. A store

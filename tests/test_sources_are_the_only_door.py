@@ -34,8 +34,13 @@ ALLOWED = (
     # `core.shell` (ticket 08): the one core toolset that runs a command.
     "friday/kernel/toolsets/shell.py",
     # `core.repos` (ticket 23): `read`/`grep`/`glob` start `git` themselves,
-    # generic over any domain's repositories.
-    "friday/kernel/toolsets/repos.py",
+    # generic over any domain's repositories — `git.py` for the shared
+    # helpers, `grep.py`/`glob.py` for their own inline `git grep`/`git
+    # ls-tree`. `read.py`/`paths.py`/`sourcemap.py`/`__init__.py` start no
+    # process of their own, so they are not listed here.
+    "friday/kernel/toolsets/repos/git.py",
+    "friday/kernel/toolsets/repos/grep.py",
+    "friday/kernel/toolsets/repos/glob.py",
     # `Reads` is the narrowing every MCP call goes through — the one place
     # allowed to hold a server and pass a call on, and the place that refuses
     # a tool no toolset declared. An sdk port since ticket 14.

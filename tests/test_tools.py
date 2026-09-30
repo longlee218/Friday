@@ -201,7 +201,7 @@ def test_every_factory_is_registered_here():
     and invisibly so — the list above would still pass, describing a smaller
     system than the one that exists. This is the guard on the guard."""
     declared = set()
-    for path in TOOLS.glob("*.py"):
+    for path in TOOLS.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
                 node.name.endswith("_tool") or node.name.endswith("_tools")

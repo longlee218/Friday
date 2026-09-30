@@ -20,7 +20,7 @@ from typing import ClassVar
 
 import pytest
 
-from friday.kernel.toolsets.repos import repo_file
+from friday.kernel.toolsets.repos.paths import repo_file
 from plugins.backend.graph import build_backend_dag
 from plugins.backend.graph.diagnose import (
     Diagnosis,
@@ -1535,7 +1535,7 @@ def test_a_compiled_frame_is_translated_back_to_the_source(tmp_path):
     is `workflow-credit.service.ts:109`, forty-nine lines away. Mapping the
     file and keeping the line would hand `Diagnose` the wrong place and call
     it the throw site."""
-    from friday.kernel.toolsets.repos import original
+    from friday.kernel.toolsets.repos.sourcemap import original
 
     _built(tmp_path, js_line=3, ts_line=11)
 
@@ -1546,7 +1546,7 @@ def test_a_compiled_frame_is_translated_back_to_the_source(tmp_path):
 
 def test_a_compiled_file_with_no_map_beside_it_is_not_translated(tmp_path):
     """`None` means "read the built file and say so", never "guess"."""
-    from friday.kernel.toolsets.repos import original
+    from friday.kernel.toolsets.repos.sourcemap import original
 
     _built(tmp_path)
     (tmp_path / "dist" / "x.js.map").unlink()
@@ -1555,7 +1555,7 @@ def test_a_compiled_file_with_no_map_beside_it_is_not_translated(tmp_path):
 
 
 def test_a_map_that_does_not_parse_is_not_translated(tmp_path):
-    from friday.kernel.toolsets.repos import original
+    from friday.kernel.toolsets.repos.sourcemap import original
 
     _built(tmp_path)
     (tmp_path / "dist" / "x.js.map").write_text("{ not json")
@@ -1570,7 +1570,7 @@ def test_a_map_naming_a_file_outside_the_clone_is_refused(tmp_path):
     applied to the function added under it — found by review."""
     import json
 
-    from friday.kernel.toolsets.repos import original
+    from friday.kernel.toolsets.repos.sourcemap import original
 
     _built(tmp_path, js_line=3, ts_line=11)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -1586,7 +1586,7 @@ def test_a_map_whose_sources_hold_null_is_not_followed(tmp_path):
     `TypeError` out of the graph node rather than answering `None`."""
     import json
 
-    from friday.kernel.toolsets.repos import original
+    from friday.kernel.toolsets.repos.sourcemap import original
 
     _built(tmp_path)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -1609,7 +1609,7 @@ def test_a_map_with_a_character_that_is_not_vlq_is_rejected_whole(tmp_path):
     """
     import json
 
-    from friday.kernel.toolsets.repos import original
+    from friday.kernel.toolsets.repos.sourcemap import original
 
     _built(tmp_path, js_line=3, ts_line=11)
     map_file = tmp_path / "dist" / "x.js.map"
@@ -1643,7 +1643,7 @@ def test_reading_at_a_ref_never_moves_the_operators_clone(tmp_path):
     disk, cleanup and a failure mode for a read that needs none of it."""
     import subprocess
 
-    from friday.kernel.toolsets.repos import at_ref
+    from friday.kernel.toolsets.repos.git import at_ref
 
     root = tmp_path / "clone"
     root.mkdir()
@@ -1674,7 +1674,7 @@ def test_a_ref_that_could_be_read_as_an_option_never_reaches_git(tmp_path, monke
     Asserts git is never *invoked*, not that the call returned `None` — a
     bad ref makes `git show` fail and return `None` too, so the weaker
     assertion passed with the guard deleted."""
-    from friday.kernel.toolsets import repos as repos_module
+    from friday.kernel.toolsets.repos import git as repos_module
 
     ran = []
     monkeypatch.setattr(
@@ -2014,7 +2014,7 @@ def test_git_failing_is_no_ref_rather_than_an_exception(tmp_path, monkeypatch):
     function misled — `core.repos`'s `read` is exactly that caller."""
     import subprocess
 
-    from friday.kernel.toolsets import repos as repos_module
+    from friday.kernel.toolsets.repos import git as repos_module
 
     def explode(*_a, **_k):
         raise FileNotFoundError("git")

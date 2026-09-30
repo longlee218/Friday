@@ -20,18 +20,19 @@ from datetime import UTC, datetime
 import pytest
 
 from friday.kernel.harness.harness import ModelRetry, _bind_tool_spec
-from friday.kernel.toolsets.repos import (
+from friday.kernel.toolsets.repos import repos_tools
+from friday.kernel.toolsets.repos.glob import MAX_GLOB_RESULTS, _glob_description
+from friday.kernel.toolsets.repos.grep import (
     DEFAULT_HEAD_LIMIT,
-    DEFAULT_READ_LINES,
-    MAX_GLOB_RESULTS,
     MAX_GREP_CHARS,
     MAX_GREP_LINE_CHARS,
+    _grep_description,
+)
+from friday.kernel.toolsets.repos.read import (
+    DEFAULT_READ_LINES,
     MAX_READ_BYTES,
     MAX_READ_TOKENS,
-    _glob_description,
-    _grep_description,
     _read_description,
-    repos_tools,
 )
 from friday.sdk.evidence import Evidence
 from friday.sdk.toolset import RunContext
@@ -252,7 +253,7 @@ def test_glob_reports_a_git_failure_at_a_resolved_ref_rather_than_no_matches(
     same answer as a true zero-match glob."""
     import subprocess as subprocess_module
 
-    from friday.kernel.toolsets import repos as repos_module
+    from friday.kernel.toolsets.repos import glob as repos_module
 
     (tmp_path / "a.py").write_text("x\n")
     _git_init(tmp_path)

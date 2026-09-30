@@ -5,12 +5,12 @@ Build-the-spine ticket 08 (board `domains-plug-in` ticket 03, amendment
 
 | Module | Toolset | Tools |
 | --- | --- | --- |
-| `memory.py` | `core.memory` | `memory_search`, `memory_propose` |
-| `memory.py` | `core.memory_write` | `memory_add`, `memory_update`, `memory_delete` |
+| `memory/` | `core.memory` | `memory_search`, `memory_propose` |
+| `memory/` | `core.memory_write` | `memory_add`, `memory_update`, `memory_delete` |
 | `skills.py` | `core.skills` | `fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file` |
 | `shell.py` | `core.shell` | `run_command` (read-command allowlist, local or SSH) |
 | `workspace.py` | `core.workspace` | the pydantic-ai-harness file tools over `/tmp/friday/<task_id>/` |
-| `repos.py` | `core.repos` | `read`, `grep`, `glob` over a domain's `RepoRoom`, each taking an optional `ref` the model finds itself (ticket 23) |
+| `repos/` | `core.repos` | `read`, `grep`, `glob` over a domain's `RepoRoom`, each taking an optional `ref` the model finds itself (ticket 23; split into a package, one file per tool plus shared helpers, once the module passed 850 lines) |
 
 **The list of tools is asserted, not described.** `tests/test_tools.py`
 asserts every name, builds the factories as well as scanning the modules, and

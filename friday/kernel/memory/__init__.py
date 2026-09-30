@@ -8,7 +8,7 @@ There was a third — staged observations promoted into notes once an approved
 outcome corroborated them — and it is gone (ticket 09's D9): nothing wrote an
 observation once `remember` left the tool list, so it promoted nothing for
 months before it was dropped. Its replacement is not a tier here at all — an
-agent's own memory now lives in `friday/kernel/toolsets/memory.py`, scoped per channel
+agent's own memory now lives in `friday/kernel/toolsets/memory/`, scoped per channel
 and reached through a tool call, following the rule that every tool lives in
 `friday/kernel/toolsets/` regardless of what state it touches.
 

@@ -16,7 +16,7 @@ that reaches out and the tools a model calls over it:
 `code.py`/`docs.py` (`backend.code`/`backend.docs`: `read_code`, `search_code`,
 `what_code_means`, `read_docs`) are gone since ticket 23: reading, searching
 and listing a repository is generic now (`core.repos`,
-`friday/kernel/toolsets/repos.py`); this plugin's own contribution to it is
+`friday/kernel/toolsets/repos/`); this plugin's own contribution to it is
 `Placement.repos()` (the sdk's `RepoRoom`). `core.repos`'s `read`/`grep`/`glob`
 take an optional `ref` the model fills in itself (from `release_status`/pod
 status, once ticket 28 grants those) — there is no plugin-side running-version
