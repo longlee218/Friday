@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from friday.sdk import AgentSpec, Budget
 from plugins.backend.agents.diagnose_prompt import build_instructions
@@ -36,7 +36,14 @@ __all__ = [
 #: Five rungs, named rather than numeric. A model asked for 0.0–1.0 answers
 #: 0.85 whatever it means; a model asked to pick a rung picks one that can be
 #: counted against the operator's own mark (ticket 14).
-CONFIDENCE = ("certain", "likely", "possible", "unlikely", "guess")
+#:
+#: The `Literal` is the source and `CONFIDENCE` is read off it with
+#: `get_args`, not the other way around: a `Literal` built from a variable
+#: (`Literal[CONFIDENCE]`) is not a type a checker can see the members of,
+#: whatever it does at runtime — this way there is still one place the five
+#: rungs are spelled, and it is the one a checker can verify against.
+_Confidence = Literal["certain", "likely", "possible", "unlikely", "guess"]
+CONFIDENCE = get_args(_Confidence)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +66,7 @@ class Diagnosis:
             "calls, or the request itself."
         }
     )
-    confidence: Literal[CONFIDENCE] = field(  # type: ignore[valid-type]
+    confidence: _Confidence = field(
         metadata={"doc": "How sure you are, as one of the five rungs."}
     )
     conclusive: bool = field(
@@ -90,7 +97,7 @@ class Diagnosis:
     #: rival is worth more than one that was simply the first thing the
     #: evidence suggested. The cheapest of the three tiers, and the only one
     #: that costs no extra call.
-    alternatives_rejected: list[dict] = field(
+    alternatives_rejected: list[dict[str, Any]] = field(
         default_factory=list,
         metadata={
             "doc": "The other explanations you considered and ruled out. "
@@ -102,7 +109,7 @@ class Diagnosis:
     )
 
 
-def _rejected(answer: Diagnosis) -> list[dict]:
+def _rejected(answer: Diagnosis) -> list[dict[str, Any]]:
     """The alternatives that are actually filled in.
 
     A model answering the shape can hand back `[{}]` or entries missing the

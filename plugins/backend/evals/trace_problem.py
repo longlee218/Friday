@@ -41,6 +41,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from friday.sdk import EvalCase, EvalSpec
 
@@ -82,7 +83,7 @@ class Scored:
     grounded: bool
 
 
-def score(case: dict, diagnosis: dict | None) -> Scored:
+def score(case: dict[str, Any], diagnosis: dict[str, Any] | None) -> Scored:
     """Compare one run's diagnosis against the case's labels.
 
     **Substring matching, and its weakness said out loud.** The operator

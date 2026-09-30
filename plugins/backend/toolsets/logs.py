@@ -446,7 +446,7 @@ def log_sources(run: RunContext) -> dict[str, Any]:
     return sources
 
 
-def log_tools(run: RunContext, sources: dict[str, Any]) -> list:
+def log_tools(run: RunContext, sources: dict[str, Any]) -> list[Any]:
     """`read_log` over `sources`. Split from the factory so a replay (a
     captured case) or a test hands its own sources to the same tool."""
     return [_read_log(run.evidence, run.domain, sources, run.reported_at)]

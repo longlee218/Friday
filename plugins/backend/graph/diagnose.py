@@ -100,7 +100,9 @@ def diagnosis_of(result: Any) -> Diagnosis | None:
         return None
 
 
-def _judged(answer: Any, index: dict, not_checked: tuple, deps: Any) -> Any:
+def _judged(
+    answer: Any, index: dict[str, str], not_checked: tuple[str, ...], deps: Any
+) -> Any:
     """The gates a diagnosis has to pass before it is reported — one copy,
     `void_reason`, shared with the spine's `backend.diagnose.check`."""
     void = void_reason(answer, index)

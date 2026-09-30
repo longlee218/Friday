@@ -61,7 +61,12 @@ def intake_of(result: Any) -> IntakeContext:
     for field_name in ("dbs", "candidates"):
         domain[field_name] = tuple(domain[field_name])
     domain["projects"] = tuple(
-        Project(**{**p, "docs_paths": tuple(p["docs_paths"])})
+        Project(
+            name=p["name"],
+            repo_path=p["repo_path"],
+            docs_paths=tuple(p["docs_paths"]),
+            error_codes_doc=p["error_codes_doc"],
+        )
         for p in domain.get("projects", ())
     )
     hints = data["hints"]

@@ -11,7 +11,7 @@ what the type is, one line each, the same place its fields are defined.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from friday.sdk.validation import InSet, Matches, OneOf
 
@@ -159,7 +159,7 @@ class TraceProblemParams:
     #: matching on the path alone returns every *other* caller's successful
     #: request to it — 18 dossier lines where the id gives 8 — so the id is
     #: what narrows it to this reporter.
-    _RULES: ClassVar[dict] = {
+    _RULES: ClassVar[dict[str, Any]] = {
         "environment": InSet(frozenset({"production", "dev"})),
         "correlation_id": Matches(
             r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",

@@ -321,7 +321,7 @@ def _query_db(evidence: Evidence, source: DbSource | None):
     return query_db
 
 
-def db_tools(run: RunContext) -> list:
+def db_tools(run: RunContext) -> list[Any]:
     """`backend.db`'s factory: the room's databases (`Placement.dbs`) only."""
     reads = run.mcp.get(DB_SERVER)
     source = (

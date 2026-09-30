@@ -67,7 +67,7 @@ class IntakeContext:
     skills: tuple[str, ...] = ()
 
     @property
-    def identity(self) -> tuple:
+    def identity(self) -> tuple[Any, ...]:
         """The staleness anchor: the domain type's `IDENTITY` fields, in
         order. `()` with no domain, so a reply always continues."""
         if self.domain is None:

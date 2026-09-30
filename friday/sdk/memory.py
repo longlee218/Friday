@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 __all__ = ["MemoryKindSpec", "MemoryOrigin", "Origin"]
 
@@ -72,4 +72,4 @@ class MemoryKindSpec:
     #: `(data, given) -> key`, where `data` is the row's validated payload and
     #: `given` an operator-supplied name (only `skill` uses `given`). Read by
     #: `friday.kernel.memory.registry.natural_key`.
-    key: Callable[[dict | None, str | None], str | None] | None = None
+    key: Callable[[dict[str, Any] | None, str | None], str | None] | None = None

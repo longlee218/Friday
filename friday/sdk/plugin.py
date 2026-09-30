@@ -55,12 +55,13 @@ class TaskTypeSpec:
     #: holds the contract, not the runner — importing the extraction stack into
     #: a contracts-only module would invert the dependency the kernel owns.
     extractor: Callable[[Deps], Any] | None = None
-    #: Builds the whole `DAG` for this type. The `Deps` argument is a legacy of
-    #: the boot-built graph and is ignored; a plugin's builder closes over
-    #: `api.caps` instead (the composition root's `prepare_node`/`make_harness`/
-    #: servers), which is what lets it build node 0 and a model node without
-    #: importing anything of the kernel's.
-    graph: Callable[[Deps], DAG] | None = None
+    #: Builds the whole `DAG` for this type. The argument is a legacy of the
+    #: boot-built graph and is ignored — `register_all` calls it with `None` —
+    #: a plugin's builder closes over `api.caps` instead (the composition
+    #: root's `prepare_node`/`make_harness`/servers), which is what lets it
+    #: build node 0 and a model node without importing anything of the
+    #: kernel's.
+    graph: Callable[[Deps | None], DAG] | None = None
     #: The per-run deps factory (ticket 13, was a `type` in the ticket-10
     #: skeleton). Given the kernel-built base `Deps` — which already carries the
     #: task, the store and the tool servers resolved from the run's serializable

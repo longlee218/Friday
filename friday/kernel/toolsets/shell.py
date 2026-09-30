@@ -55,7 +55,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from friday.kernel.harness.harness import tool
-from friday.kernel.toolsets import workspace
+from friday.kernel.toolsets.workspace import save
 from friday.sdk.redact import scrub
 from friday.sdk.toolset import RunContext
 
@@ -540,7 +540,7 @@ async def _run(host: str, script: str) -> tuple[int, str]:
     return await process.wait(), out.decode(errors="replace")
 
 
-def shell_tools(run: RunContext, *, hosts: Sequence[str], audit: Any) -> list:
+def shell_tools(run: RunContext, *, hosts: Sequence[str], audit: Any) -> list[Any]:
     """`run_command`, bound to this run and the declared `hosts`. `audit` is
     the kernel's `AuditLog`; every refusal is written through it."""
     declared = tuple(hosts)
@@ -584,7 +584,7 @@ def shell_tools(run: RunContext, *, hosts: Sequence[str], audit: Any) -> list:
         log.info("shell ran on %s: %r -> exit %s", host, command, code)
         lines = output.splitlines()
         if save_to:
-            saved = await workspace.save(run.task_id, save_to, output)
+            saved = await save(run.task_id, save_to, output)
             return f"exit {code}, {len(lines)} lines; {saved}"
         shown = lines[:MAX_LINES]
         text = (

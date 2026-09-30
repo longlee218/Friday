@@ -53,23 +53,23 @@ _REDACTED = "[REDACTED]"
 #: contains a shorter one is redacted whole rather than leaving a tail. Set by
 #: `register_secret_values` at boot; empty until then, which is the right answer
 #: for every test that has not declared a secret.
-_VALUES: tuple[str, ...] = ()
+_secret_values: tuple[str, ...] = ()
 
 
 def register_secret_values(values: Iterable[str]) -> None:
     """Declare the literal secrets to redact by value. Idempotent — the boot
     calls it once with everything it holds. Blank and one-character strings are
     dropped: they are not secrets and would blank out ordinary text."""
-    global _VALUES
+    global _secret_values
     kept = {v for v in values if isinstance(v, str) and len(v.strip()) > 1}
-    _VALUES = tuple(sorted(kept, key=len, reverse=True))
+    _secret_values = tuple(sorted(kept, key=len, reverse=True))
 
 
 def clear_secret_values() -> None:
     """Forget every registered value. For tests, which must not leak a declared
     secret into the process the next test runs in."""
-    global _VALUES
-    _VALUES = ()
+    global _secret_values
+    _secret_values = ()
 
 
 def scrub(text: str) -> str:
@@ -78,7 +78,7 @@ def scrub(text: str) -> str:
     Values first: a configured key that also happens to match a pattern is still
     redacted, and one that matches nothing would otherwise slip through.
     """
-    for value in _VALUES:
+    for value in _secret_values:
         text = text.replace(value, _REDACTED)
     return _SECRETS.sub(_REDACTED, text)
 
@@ -91,4 +91,4 @@ def matches_secret_pattern(text: str) -> bool:
 
 def matches_secret_value(text: str) -> bool:
     """Whether the text contains a declared secret verbatim."""
-    return any(value in text for value in _VALUES)
+    return any(value in text for value in _secret_values)

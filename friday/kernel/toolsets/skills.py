@@ -15,6 +15,7 @@ not escape.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from friday.kernel.harness.harness import tool
 from friday.kernel.harness.instruction_prompt import skill_metadata
@@ -32,7 +33,7 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 
-def skill_toolset(library: SkillLibrary) -> list:
+def skill_toolset(library: SkillLibrary) -> list[Any]:
     """The four, bound to one library — what `core.skills` hands an agent."""
     return [
         fetch_skill_tool(library),

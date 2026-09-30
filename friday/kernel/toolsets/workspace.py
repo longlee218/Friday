@@ -16,6 +16,7 @@ reuse-before-rewrite seam rule: one module per adopted library.
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from pydantic_ai_harness import FileSystem
 
@@ -32,7 +33,7 @@ def workspace_dir(task_id: int) -> Path:
     return path
 
 
-def workspace_tools(task_id: int) -> list:
+def workspace_tools(task_id: int) -> list[Any]:
     """The file tools over this task's folder — one pydantic-ai toolset,
     which the harness hands the agent beside its plain tools."""
     return [FileSystem(root_dir=workspace_dir(task_id)).get_toolset()]

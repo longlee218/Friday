@@ -54,13 +54,13 @@ def core_toolsets(
     needs none of these — it reads `run.domain`/`run.evidence` alone — so its
     spec is reused as-is rather than closed over here."""
 
-    def memory(run: RunContext) -> list:
+    def memory(run: RunContext) -> list[Any]:
         return _memory("core.memory")
 
-    def memory_write(run: RunContext) -> list:
+    def memory_write(run: RunContext) -> list[Any]:
         return _memory("core.memory_write")
 
-    def _memory(toolset: str) -> list:
+    def _memory(toolset: str) -> list[Any]:
         from friday.kernel.toolsets.memory import (
             MEMORY_READS,
             MEMORY_WRITES,
@@ -76,12 +76,12 @@ def core_toolsets(
             if (getattr(t, "name", None) or getattr(t, "__name__", None)) in names
         ]
 
-    def skill(run: RunContext) -> list:
+    def skill(run: RunContext) -> list[Any]:
         from friday.kernel.toolsets.skills import skill_toolset
 
         return skill_toolset(_needs(skills, "a skill library", "core.skills"))
 
-    def shell(run: RunContext) -> list:
+    def shell(run: RunContext) -> list[Any]:
         from friday.kernel.audit import AuditLog
         from friday.kernel.toolsets.shell import shell_tools
 
@@ -89,7 +89,7 @@ def core_toolsets(
             run, hosts=hosts, audit=AuditLog(_needs(db, "a store", "core.shell"))
         )
 
-    def workspace(run: RunContext) -> list:
+    def workspace(run: RunContext) -> list[Any]:
         from friday.kernel.toolsets.workspace import workspace_tools
 
         return workspace_tools(run.task_id)
