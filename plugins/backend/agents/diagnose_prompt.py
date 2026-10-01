@@ -109,10 +109,13 @@ READS = [
     "Found nothing? Widen `minutes_back`, or search a different string. "
     "Found nothing twice? That is an answer about the request, and saying "
     "so beats a cause built from the endpoint's name.",
-    "Before reading code, find the version that is running — `release_status` "
-    "or the pod's own image tag — and pass it as `ref` to `read`/`grep`/"
-    "`glob`. Without one they read the checkout, which may not match what "
-    "is deployed.",
+    "Before reading code, find the version that is running: `release_status` "
+    "(project = the service's release name, env from the placement) says "
+    "what Helm deployed; `k8s_pod_status` (cluster/namespace/pod — namespace "
+    "from the placement, pod from a name you saw in the logs) says what a "
+    "pod is actually running. They can disagree — prefer the pod's tag. "
+    "Pass whichever you get as `ref` to `read`/`grep`/`glob`. Without one "
+    "they read the checkout, which may not match what is deployed.",
     "A stack frame in what you read is worth `read`, with `repo` the "
     "project named under where the service lives. A frame in "
     "`node_modules` is somebody else's code and is not. No frame? "

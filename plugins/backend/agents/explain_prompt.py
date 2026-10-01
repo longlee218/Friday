@@ -28,9 +28,12 @@ their text.
 """.strip()
 
 THINKING = [
-    "Find the version that is running first — `release_status` or the pod's "
-    "own image tag — and pass it as `ref` to `read`/`grep`/`glob`. Without "
-    "one they read the checkout, which may not be what is deployed.",
+    "Find the version that is running first: `release_status` (project = "
+    "the service's release name, env from the placement) says what Helm "
+    "deployed; `k8s_pod_status` (cluster/namespace/pod) says what a pod is "
+    "actually running, and wins if the two disagree. Pass whichever you get "
+    "as `ref` to `read`/`grep`/`glob`. Without one they read the checkout, "
+    "which may not be what is deployed.",
     "Search first: `grep` finds where a route or a symbol is written, "
     "`read` what the project's docs say about it.",
     "Read the place that would do it, not only a place that mentions it.",

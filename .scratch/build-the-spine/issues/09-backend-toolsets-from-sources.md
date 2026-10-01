@@ -77,3 +77,17 @@ toolset, binding a per-run `RunningVersion.of` onto a new
 is gone too, and `core.repos`'s `read`/`grep`/`glob` take their own `ref`
 parameter, which the model fills in itself — see
 [23](23-core-repos-read-grep-glob-at-the-running-tag.md)'s amendment.
+
+## Amended by ticket 28's minimal slice (2026-09-30)
+
+`release_status.py` (`backend.release_status`: `ReleaseSource`,
+`release_status` — what Helm deployed) and `k8s/` (`backend.k8s`:
+`PodStatusSource`, `k8s_pod_status` — what a pod is actually running,
+preferred over `release_status`'s tag when the two disagree) give the model
+what `release.py`'s deleted per-run cache used to hand it automatically: a
+tag to pass as `core.repos`'s `ref`. `k8s/` is a package rather than a flat
+file since ticket 28's later `k8s_list_pods`/`k8s_list_events`/
+`k8s_read_configmap` slot in beside `pod_status.py`. Both granted to
+`backend.diagnose` and `backend.explain`, and to `trace_problem`'s and
+`answer_question`'s `allowed_toolsets`. See
+[28](28-diagnose-reads-kubernetes-and-loki-through-devops-generic.md).

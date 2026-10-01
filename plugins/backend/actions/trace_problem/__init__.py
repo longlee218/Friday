@@ -59,6 +59,8 @@ ACTION = Action(
         allowed_toolsets=frozenset(
             {
                 "backend.logs",
+                "backend.release_status",
+                "backend.k8s",
                 "core.repos",
                 "core.memory",
                 "core.skills",

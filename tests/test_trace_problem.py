@@ -1483,9 +1483,17 @@ def test_what_a_server_is_filtered_to_is_read_off_the_readers():
     set grows when a reader is added and by no other means."""
     from plugins.backend.toolsets import declared
     from plugins.backend.toolsets.db import DbSource
+    from plugins.backend.toolsets.k8s.pod_status import PodStatusSource
     from plugins.backend.toolsets.logs import LokiSource
+    from plugins.backend.toolsets.release_status import ReleaseSource
 
-    assert declared() == LokiSource.TOOLS | DbSource.TOOLS
+    assert (
+        declared()
+        == LokiSource.TOOLS
+        | DbSource.TOOLS
+        | ReleaseSource.TOOLS
+        | PodStatusSource.TOOLS
+    )
     assert "execute_mongo_query" not in declared(), "no caller yet"
 
 

@@ -12,16 +12,19 @@ that reaches out and the tools a model calls over it:
 | --- | --- | --- |
 | `logs.py` | `backend.logs` | `read_log` |
 | `db.py` | `backend.db` | `describe_db`, `query_db` |
+| `release_status.py` | `backend.release_status` | `release_status` |
+| `k8s/` | `backend.k8s` | `k8s_pod_status` |
 
 `code.py`/`docs.py` (`backend.code`/`backend.docs`: `read_code`, `search_code`,
 `what_code_means`, `read_docs`) are gone since ticket 23: reading, searching
 and listing a repository is generic now (`core.repos`,
 `friday/kernel/toolsets/repos/`); this plugin's own contribution to it is
 `Placement.repos()` (the sdk's `RepoRoom`). `core.repos`'s `read`/`grep`/`glob`
-take an optional `ref` the model fills in itself (from `release_status`/pod
-status, once ticket 28 grants those) — there is no plugin-side running-version
-lookup any more (`backend.release`/`RunningVersion`, deleted per the
-operator's 2026-09-30 call: the model finds the tag with tools, not code).
+take an optional `ref` the model fills in itself, from `release_status` or
+`k8s_pod_status` (ticket 28's minimal slice) — there is no plugin-side
+running-version lookup any more (`backend.release`/`RunningVersion`, deleted
+per the operator's 2026-09-30 call: the model finds the tag with tools, not
+code).
 
 Each `ToolsetSpec` declares the MCP tools it may call (`mcp={server:
 TOOLS}`); the core narrows every server to exactly that before a factory sees
@@ -35,12 +38,14 @@ something else.
 from __future__ import annotations
 
 from plugins.backend.toolsets.db import DB
+from plugins.backend.toolsets.k8s import K8S
 from plugins.backend.toolsets.logs import LOGS
+from plugins.backend.toolsets.release_status import RELEASE_STATUS
 
-__all__ = ["DB", "DECLARED", "LOGS", "TOOLSETS", "declared"]
+__all__ = ["DB", "DECLARED", "K8S", "LOGS", "RELEASE_STATUS", "TOOLSETS", "declared"]
 
 #: Every toolset the backend registers.
-TOOLSETS = (LOGS, DB)
+TOOLSETS = (LOGS, DB, RELEASE_STATUS, K8S)
 
 
 def declared() -> frozenset[str]:

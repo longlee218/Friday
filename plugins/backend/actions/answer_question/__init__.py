@@ -39,7 +39,9 @@ ACTION = Action(
     contract=ActionContract(
         allowed_step_types=frozenset({"agent", "ask", "hand_over", "draft"}),
         allowed_agents=frozenset({"backend.explain"}),
-        allowed_toolsets=frozenset({"core.repos"}),
+        allowed_toolsets=frozenset(
+            {"core.repos", "backend.release_status", "backend.k8s"}
+        ),
         constraints=("every ref points at a line that was read",),
         approval_policy="a reply waits for the operator's approval",
         acceptance_template="a verdict; conclusive ⇒ at least one ref; no + conclusive ⇒ "

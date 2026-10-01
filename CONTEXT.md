@@ -432,8 +432,10 @@ only `harness.py` names.
 
 **Toolset file** — one file per data source under `plugins/<domain>/toolsets/`
 holding both the client that reaches out (a *source*) and the tools a model
-calls over it (`backend.logs`, `backend.db`). The only plugin code that may
-start a process or call through a tool server. (Build-the-spine ticket 09;
+calls over it (`backend.logs`, `backend.db`, `backend.release_status`); a
+package instead of a file once a second tool needs to sit beside the first
+(`backend.k8s`'s `k8s/`, ticket 28). The only plugin code that may start a
+process or call through a tool server. (Build-the-spine ticket 09;
 `plugins/backend/sources/` folded here. Reading, searching and listing a
 repository — `backend.code`/`backend.docs` — moved into the kernel as
 `core.repos` in ticket 23, generic over the sdk's `RepoRoom`.)
@@ -441,9 +443,12 @@ repository — `backend.code`/`backend.docs` — moved into the kernel as
 **Running version** — the image tag a service is deployed at, which is its
 release tag. Amended 2026-09-30: **the model finds it**, not a per-run
 cache. `core.repos`'s `read`/`grep`/`glob` take an optional `ref` (a tag,
-branch or sha); the model calls `release_status` or reads a pod's own image
-tag (ticket 28) and passes the result in. With `ref`: `git show`/`git
-grep`/`git ls-tree` at it. Without: the checkout, said in `not_checked`.
+branch or sha); the model calls `backend.release_status`'s `release_status`
+(what Helm deployed) or `backend.k8s`'s `k8s_pod_status` (what a pod is
+actually running — preferred when the two disagree; ticket 28's minimal
+slice, granted to `backend.diagnose`/`backend.explain`) and passes the
+result in as `ref`. With `ref`: `git show`/`git grep`/`git ls-tree` at it.
+Without: the checkout, said in `not_checked`.
 (`RunningVersion`/`ReleaseSource`/`backend.release`/`Evidence.resolve_ref` —
 a per-run cache the operator rejected — are deleted.)
 

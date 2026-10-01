@@ -80,6 +80,24 @@ the Loki value; the hints for `k8s_*` need the other.
       and `core.planner` run and reported.
 - [ ] `docs/DESIGN.md`, `CONTEXT.md`, ticket 09 amended.
 - [ ] Whole suite green; `code-review` done.
-- [ ] Diagnose and explain are granted `release_status` and k8s pod status,
+- [x] Diagnose and explain are granted `release_status` and k8s pod status,
       so they can find the running tag and pass it as `ref` to `core.repos`
-      (ticket 23 depends on this).
+      (ticket 23 depends on this). — **Landed 2026-09-30, minimal slice
+      only**: `backend.release_status` (`release_status`) and `backend.k8s`
+      (`k8s_pod_status`), each forwarding the MCP tool's own arguments 1:1,
+      granted to `backend.diagnose`/`backend.explain` and both actions'
+      `allowed_toolsets`. `k8s_pod_status`'s renderer is checked against a
+      real capture (team-lead, 2026-09-30: `cluster=oregon-llm,
+      namespace=vsl, pod=backend-reelme-v2-856bb78b6c-8qhsv`, kept as
+      `K8S_POD_STATUS_ANSWER` in `tests/test_backend_toolsets.py`) — the
+      raw Kubernetes Pod object, `metadata` + `status`, no wrapper; renders
+      phase, unhealthy conditions only, and every container's image, ready,
+      restarts and `lastState.terminated` (that pod's own `OOMKilled`/exit
+      137 at 9 restarts, kept). The same capture showed `release_status`
+      (Helm) and `k8s_pod_status` (the pod) genuinely disagree for the same
+      service the same day — `0.4.8` vs `0.4.9` — covered by
+      `test_release_status_and_k8s_pod_status_can_genuinely_disagree`.
+      Everything else in this ticket (`loki_pod_logs`, `loki_query`,
+      `k8s_list_pods`, `k8s_list_events`, `k8s_read_configmap`,
+      `k8s_cluster` on `ProdPlacement`, the board form) is out of scope for
+      this slice and stays unbuilt below.

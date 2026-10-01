@@ -184,6 +184,8 @@ def test_the_tools_this_system_has_are_all_in_one_place():
         "glob",
         "describe_db",
         "query_db",
+        "release_status",
+        "k8s_pod_status",
         "run_command",
         "read_file",
         "write_file",

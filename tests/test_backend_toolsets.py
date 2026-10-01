@@ -27,7 +27,7 @@ from friday.kernel.toolsets.repos import REPOS
 from friday.sdk.evidence import Evidence
 from friday.sdk.toolset import RunContext
 from plugins.backend.placement import Placement, Project
-from plugins.backend.toolsets import DB, LOGS, TOOLSETS
+from plugins.backend.toolsets import DB, K8S, LOGS, RELEASE_STATUS, TOOLSETS
 
 AT = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
@@ -108,10 +108,19 @@ def test_each_toolset_is_narrowed_to_its_own_reads():
     assert reads_for(LOGS, servers)["devops-generic"].allowed == {"loki_query_range"}
     assert set(reads_for(LOGS, servers)) == {"devops-generic"}
     assert set(reads_for(DB, servers)) == {"db-generic"}
+    assert reads_for(RELEASE_STATUS, servers)["devops-generic"].allowed == {
+        "release_status"
+    }
+    assert reads_for(K8S, servers)["devops-generic"].allowed == {"k8s_pod_status"}
 
 
 def test_the_plugin_registers_every_toolset_under_its_own_name():
-    assert [t.name for t in TOOLSETS] == ["backend.logs", "backend.db"]
+    assert [t.name for t in TOOLSETS] == [
+        "backend.logs",
+        "backend.db",
+        "backend.release_status",
+        "backend.k8s",
+    ]
     assert all(t.domain_type is Placement for t in TOOLSETS)
 
 
@@ -244,6 +253,282 @@ def test_no_db_server_says_so():
     tools = _tools([DB], Placement(env="production"), {})
 
     assert "db-generic is not connected" in call(tools["describe_db"], db_id="x")
+
+
+# --- release_status / k8s (ticket 28's minimal slice) -----------------------
+
+
+class _ScriptedDevops:
+    """A `devops-generic` stand-in that records every call and answers with
+    whatever the test hands it — a dict is serialized, a string (a captured
+    fixture, already JSON) is returned as-is."""
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def call_tool(self, tool, arguments):
+        self.calls.append((tool, arguments))
+        return (
+            self.payload if isinstance(self.payload, str) else json.dumps(self.payload)
+        )
+
+
+#: Captured from `devops-generic` on 2026-09-30: `cluster=oregon-llm,
+#: namespace=vsl, pod=backend-reelme-v2-856bb78b6c-8qhsv`. The raw response
+#: is the pod's own Kubernetes object (`metadata` + `status`, no wrapper);
+#: trimmed here to drop `managedFields`, annotations (one of them a Vault
+#: secret template) and `ownerReferences`. Running `…/backend-reelme-v2:0.4.9`
+#: with 9 restarts and a `lastState.terminated` of `OOMKilled`/exit 137 —
+#: `release_status` for the same service, the same day, said `0.4.8`.
+K8S_POD_STATUS_ANSWER = """{"metadata":{"name":"backend-reelme-v2-856bb78b6c-8qhsv",
+"namespace":"vsl","creationTimestamp":"2026-09-30T05:39:00Z",
+"labels":{"app":"backend-reelme-v2"}},
+"status":{"phase":"Running","conditions":[
+ {"type":"PodReadyToStartContainers","status":"True"},
+ {"type":"Initialized","status":"True"},
+ {"type":"Ready","status":"True"},
+ {"type":"ContainersReady","status":"True"},
+ {"type":"PodScheduled","status":"True"}],
+"hostIP":"10.15.163.40","podIP":"10.15.169.98","startTime":"2026-09-30T05:39:00Z",
+"initContainerStatuses":[
+ {"name":"vault-agent-init",
+  "state":{"terminated":{"exitCode":0,"reason":"Completed",
+                          "startedAt":"2026-09-30T05:39:00Z",
+                          "finishedAt":"2026-09-30T05:39:01Z"}},
+  "lastState":{},"ready":true,"restartCount":0,
+  "image":"docker.io/hashicorp/vault:1.21"}],
+"containerStatuses":[
+ {"name":"backend-reelme-v2",
+  "state":{"running":{"startedAt":"2026-09-30T11:28:17Z"}},
+  "lastState":{"terminated":{"exitCode":137,"reason":"OOMKilled",
+                              "startedAt":"2026-09-30T11:22:10Z",
+                              "finishedAt":"2026-09-30T11:26:47Z"}},
+  "ready":true,"restartCount":9,
+  "image":"803614452193.dkr.ecr.ap-southeast-1.amazonaws.com/backend-reelme-v2:0.4.9"}],
+"qosClass":"Burstable"}}"""
+
+
+def test_release_status_forwards_its_arguments_unchanged():
+    server = _ScriptedDevops(
+        {
+            "status": {
+                "config": {
+                    "image": {"repository": "r/backend-reelme-v2", "tag": "0.4.8"}
+                },
+                "info": {"status": "deployed", "last_deployed": "2026-09-21T00:00:00Z"},
+            },
+            "history": [],
+        }
+    )
+    tools = _tools(
+        [RELEASE_STATUS], Placement(env="production"), {"devops-generic": server}
+    )
+
+    said = call(tools["release_status"], project="backend-reelme-v2", env="prod")
+
+    assert server.calls == [
+        ("release_status", {"project": "backend-reelme-v2", "env": "prod"})
+    ]
+    assert "0.4.8" in said
+    assert "{" not in said
+    assert said.startswith("L1 |")
+
+
+def test_release_status_dev_empty_reads_as_no_release_not_an_error():
+    server = _ScriptedDevops({"status": {}, "history": []})
+    tools = _tools(
+        [RELEASE_STATUS], Placement(env="production"), {"devops-generic": server}
+    )
+
+    said = call(tools["release_status"], project="backend-reelme-v2", env="dev")
+
+    assert "no release found in dev" in said
+
+
+def test_release_status_an_explicit_null_config_reads_as_no_release_not_a_crash():
+    """`status.get("config", {})` only substitutes the default when the key
+    is *absent* — an explicit JSON `null` (`{"config": null}`) is a stored
+    value the default never replaces, and `.get("image")` on it raised
+    `AttributeError` (code review finding). `info`'s neighboring line already
+    used `or {}` for the same reason; `config`'s line now matches it."""
+    server = _ScriptedDevops({"status": {"config": None, "info": {}}, "history": []})
+    tools = _tools(
+        [RELEASE_STATUS], Placement(env="production"), {"devops-generic": server}
+    )
+
+    said = call(tools["release_status"], project="p", env="prod")
+
+    assert "no release found in prod" in said
+
+
+def test_release_status_caps_history_and_says_so():
+    history = [
+        {
+            "revision": i,
+            "status": "superseded",
+            "chart": "c",
+            "app_version": "a",
+            "updated": "t",
+            "description": "d",
+        }
+        for i in range(1, 11)
+    ]
+    server = _ScriptedDevops(
+        {
+            "status": {
+                "config": {"image": {"repository": "r", "tag": "0.4.8"}},
+                "info": {"status": "deployed", "last_deployed": "t"},
+            },
+            "history": history,
+        }
+    )
+    tools = _tools(
+        [RELEASE_STATUS], Placement(env="production"), {"devops-generic": server}
+    )
+
+    said = call(tools["release_status"], project="p", env="prod")
+
+    assert "5 older revisions not shown" in said
+
+
+def test_no_release_status_server_says_so():
+    tools = _tools([RELEASE_STATUS], Placement(env="production"), {})
+
+    assert "devops-generic is not connected" in call(
+        tools["release_status"], project="p", env="prod"
+    )
+
+
+def test_k8s_pod_status_forwards_its_arguments_unchanged():
+    server = _ScriptedDevops(K8S_POD_STATUS_ANSWER)
+    tools = _tools([K8S], Placement(env="production"), {"devops-generic": server})
+
+    said = call(
+        tools["k8s_pod_status"],
+        cluster="oregon-llm",
+        namespace="vsl",
+        pod="backend-reelme-v2-856bb78b6c-8qhsv",
+    )
+
+    assert server.calls == [
+        (
+            "k8s_pod_status",
+            {
+                "cluster": "oregon-llm",
+                "namespace": "vsl",
+                "pod": "backend-reelme-v2-856bb78b6c-8qhsv",
+            },
+        )
+    ]
+    assert "0.4.9" in said
+    assert "{" not in said
+
+
+def test_k8s_pod_status_renders_restart_history_and_init_containers():
+    """The fields the operator called out by name: a restarted container's
+    `lastState.terminated` (`OOMKilled`, exit 137) and an init container,
+    rendered shorter than the main one."""
+    server = _ScriptedDevops(K8S_POD_STATUS_ANSWER)
+    tools = _tools([K8S], Placement(env="production"), {"devops-generic": server})
+
+    said = call(
+        tools["k8s_pod_status"],
+        cluster="oregon-llm",
+        namespace="vsl",
+        pod="backend-reelme-v2-856bb78b6c-8qhsv",
+    )
+
+    assert "restarts 9" in said
+    assert "OOMKilled" in said and "exit 137" in said
+    init_line = next(line for line in said.splitlines() if "vault-agent-init" in line)
+    assert "restarts" not in init_line, (
+        "init containers render shorter: no ready/restarts"
+    )
+
+
+def test_k8s_pod_status_lists_only_unhealthy_conditions():
+    server = _ScriptedDevops(K8S_POD_STATUS_ANSWER)
+    tools = _tools([K8S], Placement(env="production"), {"devops-generic": server})
+
+    said = call(
+        tools["k8s_pod_status"],
+        cluster="oregon-llm",
+        namespace="vsl",
+        pod="backend-reelme-v2-856bb78b6c-8qhsv",
+    )
+
+    assert "5/5 healthy" in said
+    assert not any(
+        line.split(" | ", 1)[-1].startswith("condition ") for line in said.splitlines()
+    )
+
+
+def test_no_k8s_server_says_so():
+    tools = _tools([K8S], Placement(env="production"), {})
+
+    assert "devops-generic is not connected" in call(
+        tools["k8s_pod_status"], cluster="c", namespace="n", pod="p"
+    )
+
+
+def test_release_status_and_k8s_pod_status_can_genuinely_disagree():
+    """Measured 2026-09-30: `release_status` said `backend-reelme-v2` was on
+    `0.4.8` in prod; the pod it was actually running was `0.4.9`. Both
+    sources render their own answer — the model is told to prefer the pod's."""
+    placement = Placement(env="production", service="backend-reelme-v2")
+    helm = _ScriptedDevops(
+        {
+            "status": {
+                "config": {
+                    "image": {"repository": "r/backend-reelme-v2", "tag": "0.4.8"}
+                },
+                "info": {"status": "deployed", "last_deployed": "t"},
+            },
+            "history": [],
+        }
+    )
+    pod = _ScriptedDevops(K8S_POD_STATUS_ANSWER)
+    release_tools = _tools([RELEASE_STATUS], placement, {"devops-generic": helm})
+    k8s_tools = _tools([K8S], placement, {"devops-generic": pod})
+
+    helm_said = call(
+        release_tools["release_status"], project="backend-reelme-v2", env="prod"
+    )
+    pod_said = call(
+        k8s_tools["k8s_pod_status"],
+        cluster="oregon-llm",
+        namespace="vsl",
+        pod="backend-reelme-v2-856bb78b6c-8qhsv",
+    )
+
+    assert "0.4.8" in helm_said
+    assert "0.4.9" in pod_said
+
+
+def test_release_status_and_k8s_pod_status_are_the_same_definition_without_a_docstring():
+    from friday.kernel.harness.harness import _bind_tool_spec
+    from plugins.backend.toolsets.k8s.pod_status import k8s_tools
+    from plugins.backend.toolsets.release_status import release_status_tools
+
+    run = RunContext(
+        task_id=1,
+        domain=Placement(env="production", service="s"),
+        evidence=Evidence(),
+        mcp={},
+        reported_at=AT,
+    )
+    for factory in (release_status_tools, k8s_tools):
+        (with_doc_spec,) = factory(run)
+        with_doc = _bind_tool_spec(with_doc_spec)
+        (stripped_spec,) = factory(run)
+        stripped_spec.fn.__doc__ = None
+        without_doc = _bind_tool_spec(stripped_spec)
+        assert with_doc.description == without_doc.description
+        assert (
+            with_doc.function_schema.json_schema
+            == without_doc.function_schema.json_schema
+        )
 
 
 # --- review fixes ----------------------------------------------------------------
