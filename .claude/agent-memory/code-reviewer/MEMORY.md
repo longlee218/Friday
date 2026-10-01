@@ -1,1 +1,2 @@
 - [Harness retry vs pydantic_ai error mapping](harness-retry-vs-pydantic-ai-error-mapping.md) — openai errors get wrapped before `_transient` sees them; retry tests skip the wrapping
+- [pydantic-ai args_validator ordering](pydantic-ai-args-validator-ordering.md) — always runs before the tool fn in the real agent loop; checks live in args_validator only, verified against installed lib source
