@@ -16,12 +16,58 @@ from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 
 from friday.kernel.harness.harness import ModelRetry
-from friday.kernel.toolsets.shell import SECRET_DIRS, SECRET_FILES
 from friday.sdk.sources import Repo, RepoRoom
 
 __all__ = ["numbered", "repo_file"]
 
 log = logging.getLogger(__name__)
+
+#: File names whose content is a credential, as globs on the last path part.
+#: Refused as an argument to `read`; was `core.shell`'s own list before
+#: ticket 24 deleted its allowlist — `core.repos` is the only reader left
+#: that still needs one, since `bash` has full rights now.
+SECRET_FILES = (
+    ".env",
+    ".env.*",
+    "*.env",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "id_rsa*",
+    "id_ecdsa*",
+    "id_ed25519*",
+    "id_dsa*",
+    "ssh_host_*",
+    ".netrc",
+    ".pgpass",
+    ".git-credentials",
+    ".npmrc",
+    "*.tfstate",
+    "*.tfstate.*",
+    "environ",
+    "admin.conf",
+    "super-admin.conf",
+    "kubelet.conf",
+    "controller-manager.conf",
+    "scheduler.conf",
+    "token",
+)
+
+#: Directories that hold credentials; any path through one is refused.
+SECRET_DIRS = frozenset(
+    {
+        ".ssh",
+        ".aws",
+        ".kube",
+        ".gnupg",
+        ".docker",
+        ".azure",
+        "gcloud",
+        "secrets",
+        "serviceaccount",
+    }
+)
 
 #: The line every tool's description gives for `ref`: find the tag first (a
 #: devops tool, e.g. `release_status` or a pod's own image tag), then pass

@@ -35,7 +35,8 @@ HandOver              never reused: the step runs again
 anything else         reused
 ```
 
-A stored `Ask` keeps its message history and its `Evidence` (as JSON). A
+A stored `Ask` keeps its message history, its `Evidence` and its `core.todo`
+checklist (`Todos`, build-the-spine ticket 24), each as JSON. A
 `HandOver` is stored without `interruption`, the DAG path's field (deleted in
 16). Over 200 lines: the walk, its reuse rules and the one codec for
 what it stores are one unit.
@@ -63,6 +64,7 @@ from friday.kernel.spine.plan_gate import Frozen
 from friday.sdk.actions import Ask, HandOver, Replan, Reply, Retriage
 from friday.sdk.agent import AgentSpec
 from friday.sdk.evidence import Evidence
+from friday.sdk.todos import Todos
 
 __all__ = ["STEP_ATTEMPTS", "Resume", "RunEnd", "Steps", "run_plan", "stored_results"]
 
@@ -285,7 +287,8 @@ def _encode(
     value: Any, step: Step, agents: Mapping[str, AgentSpec]
 ) -> tuple[str, dict]:
     """`(kind, JSON body)`. An agent's own result goes through its declared
-    `result` type; an `Ask`'s `Evidence` as its own JSON (ticket 14)."""
+    `result` type; an `Ask`'s `Evidence` and `Todos` as their own JSON
+    (ticket 14, extended by ticket 24)."""
     kind = next((k for t, k in _KINDS.items() if isinstance(value, t)), None)
     if kind is None:
         return "result", TypeAdapter(agents[step.agent].result).dump_python(
@@ -298,6 +301,8 @@ def _encode(
     }
     if isinstance(body.get("evidence"), Evidence):
         body["evidence"] = body["evidence"].dump()
+    if isinstance(body.get("todos"), Todos):
+        body["todos"] = body["todos"].dump()
     return kind, body
 
 
@@ -308,4 +313,6 @@ def _decode(kind: str, body: dict, step: Step, agents: Mapping[str, AgentSpec]) 
         body = {k: v for k, v in body.items() if k != "heard_until"}
         if body.get("evidence") is not None:
             body["evidence"] = Evidence.load(body["evidence"])
+        if body.get("todos") is not None:
+            body["todos"] = Todos.load(body["todos"])
     return _TYPES[kind](**body)

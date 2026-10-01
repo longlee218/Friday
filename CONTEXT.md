@@ -393,7 +393,7 @@ agent; the core runs it through the Harness. The spine's form of the
 **Toolset** — the unit an action's contract grants and an agent spec names:
 a set of tools under one name, `<plugin>.<thing>` (`backend.logs`) or
 `core.<thing>` for the core's own (`core.memory`, `core.memory_write`,
-`core.skills`, `core.shell`, `core.workspace`, `core.repos`, in
+`core.skills`, `core.shell`, `core.workspace`, `core.repos`, `core.todo`, in
 `friday/kernel/toolsets/`), which any plugin may grant. `core.memory` reads and proposes;
 `core.memory_write` adds, updates and deletes — its own toolset so an agent
 can hold the reads without the writes (build-the-spine ticket 22). Declared as a *toolset spec*. Not a Pydantic AI toolset,
@@ -405,30 +405,47 @@ freely inside it, nothing outside (pydantic-ai-harness `FileSystem(root_dir=…)
 The one place Friday writes; lost on reboot by design. `core.shell`'s
 `save_to` writes long output there.
 
-**Read-command allowlist** — the core constant (`READ_COMMANDS`,
-`KUBECTL_VERBS`, `REFUSED_FLAGS`, `SECRET_FILES`, `SECRET_DIRS` in
-`friday/kernel/toolsets/shell.py`) deciding what `core.shell` runs, the same
-for every plugin: `shlex`-parsed, `|` only between listed commands;
-operators, substitutions, write flags, `kubectl`'s credential/server flags,
-the `secret` resource (and `--raw`, `-f`, `-k`, `*-file` templates),
-process environments and credential paths (case-insensitive, for the
-commands that print content; grep's pattern word exempt, found as getopt
-would) refused; credential files excluded from every
-`grep`, which may not `--include` or `-R`. A guardrail by name, not a
-boundary.
-Off the list is **refused, not queued** and written to `audit_log`; the
-operator widens it by commit.
+**`bash`, full rights** — **Amended 2026-09-30 (operator, ticket 24):** the
+read-command allowlist (`READ_COMMANDS`, `KUBECTL_VERBS`, `REFUSED_FLAGS`,
+the old `shell.py`'s secret-path checks) is deleted; `core.shell`'s `bash`
+runs any command, as the operator, local or on a host in `shell_hosts`
+(`friday/kernel/toolsets/bash/`). An undeclared host is still refused. What
+is kept: a timeout with a process-group kill (120s default, 600s max — a
+`timeout_ms` parameter, Claude Code's own numbers), output capped at 30k
+characters and spilled to the workspace over it (`save_to`), redaction
+before the model sees it, `sleep N` with N ≥ 2 leading the command refused
+(used to wait, not to run something), and an **audit row for every
+command**, not only a refusal (`shell_ran`, host/command/exit
+code/duration). `SECRET_FILES`/`SECRET_DIRS` moved to `core.repos`'s
+`paths.py`, the only reader left that still refuses a credential path.
+
+**Sensitive command** — the hook ticket 27 fills (`sensitive(command, host)`
+in `friday/kernel/toolsets/bash/sensitive.py`), called before every `bash`
+call. `False` for everything until 27 lands: no deny list, a sensitive
+command will wait for the operator's approval rather than being refused
+outright.
 
 **Toolset spec** — a named set of tools a plugin registers (`ToolsetSpec`):
 description, a factory that builds the tools per run, the MCP reads it may
 make (`{server: TOOLS}`) and the domain type it reads.
 
 **Run context** — what the core hands a toolset factory once per run
-(`RunContext`): task id, the domain value, the evidence read so far, when
-the reporter spoke (`reported_at`), and each declared MCP server narrowed to
-the toolset's reads — filled per toolset by the core (`reads_for`), so two
-toolsets in one run never share reads. Not Pydantic AI's `RunContext`, which
-only `harness.py` names.
+(`RunContext`): task id, the domain value, the evidence read so far, the
+agent's `core.todo` checklist (`todos`, ticket 24), when the reporter spoke
+(`reported_at`), and each declared MCP server narrowed to the toolset's
+reads — filled per toolset by the core (`reads_for`), so two toolsets in one
+run never share reads. Not Pydantic AI's `RunContext`, which only
+`harness.py` names.
+
+**`core.todo` checklist** — the agent's own investigation plan
+(`friday.sdk.todos.Todos`, build-the-spine ticket 24), modelled on Claude
+Code's `TodoWrite`: not grounded evidence, never shown to the reporter, and
+unchecked by any grounding gate — the Planner's own plan (tickets 20, 22) is
+a different thing. `todo_write` replaces the whole list per call; at most
+one item may be `in_progress`, enforced in code (Claude Code leaves it to
+the prompt). Lives on `RunContext.todos` and travels with a stored `Ask` the
+same way `Evidence` does (`friday.kernel.spine.runner`'s `_encode`/`_decode`
+dump and load it beside `Evidence`).
 
 **Toolset file** — one file per data source under `plugins/<domain>/toolsets/`
 holding both the client that reaches out (a *source*) and the tools a model

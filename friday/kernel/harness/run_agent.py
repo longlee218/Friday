@@ -158,15 +158,20 @@ async def run_agent(
     raw `servers` (whatever `context.mcp` held is replaced). `ask_reporter` is offered only when the
     contract allows an `ask` step.
 
-    `history` is a stored `Ask` to continue from: its messages and `Evidence`
-    are carried on and `brief` is the reporter's reply, so nothing already
-    read is read again and line ids keep their meaning. `model` (a scripted
-    transport) and `record` (the call sink) pass through to the `Harness`.
+    `history` is a stored `Ask` to continue from: its messages, `Evidence`
+    and `core.todo` checklist are carried on and `brief` is the reporter's
+    reply, so nothing already read is read again, line ids keep their
+    meaning, and the checklist picks up where it left off. `model` (a
+    scripted transport) and `record` (the call sink) pass through to the
+    `Harness`.
     """
-    if history is not None and history.evidence is not None:
-        # A copy: the stored `Ask` stays as it was, so a step that crashes
+    if history is not None:
+        # Copies: the stored `Ask` stays as it was, so a step that crashes
         # and re-runs from it numbers its reads from the same place.
-        context = replace(context, evidence=deepcopy(history.evidence))
+        if history.evidence is not None:
+            context = replace(context, evidence=deepcopy(history.evidence))
+        if history.todos is not None:
+            context = replace(context, todos=deepcopy(history.todos))
 
     granted = contract.allowed_toolsets & set(spec.toolsets)
     tools = build_tools(
@@ -202,7 +207,12 @@ async def run_agent(
         history=None if history is None else history.history,
     )
     if isinstance(got, Ask):
-        return Ask(got.text, history=harness.messages, evidence=context.evidence)
+        return Ask(
+            got.text,
+            history=harness.messages,
+            evidence=context.evidence,
+            todos=context.todos,
+        )
     if isinstance(got, (HandOver, Replan, Retriage)):
         return got
     if got is not None:

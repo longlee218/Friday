@@ -222,6 +222,8 @@ DIAGNOSE = AgentSpec(
         "core.repos",
         "core.memory",
         "core.skills",
+        "core.shell",
+        "core.todo",
     ),
     budget=Budget(max_turns=20, tokens=500_000),
     temperature=0.0,

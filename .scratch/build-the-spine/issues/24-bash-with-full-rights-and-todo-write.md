@@ -70,20 +70,32 @@ command runs.
 
 ## Acceptance
 
-- [ ] `bash` runs a command locally and on a declared SSH host, refuses an
+- [x] `bash` runs a command locally and on a declared SSH host, refuses an
       undeclared host, kills on timeout, spills over-cap output, and writes
-      an audit row for every command (tests).
-- [ ] `bash` calls the `sensitive` check before it runs a command (test).
-- [ ] `todo_write` refuses two `in_progress`; the list survives an `Ask`
-      continuation (tests).
-- [ ] `backend.diagnose`, run through `run_agent`, is offered `bash` and
+      an audit row for every command (tests). — SSH is tested by replacing
+      `process.run`, not a live host: `test_bash_routes_to_ssh_for_a_declared_host`
+      asserts the host and `ControlPath` it was called with.
+- [x] `bash` calls the `sensitive` check before it runs a command (test).
+      Deleted-and-watched red.
+- [x] `todo_write` refuses two `in_progress`; the list survives an `Ask`
+      continuation (tests). The in-progress guard deleted-and-watched red;
+      the continuation is `tests/test_run_agent.py::test_the_core_todo_checklist_survives_an_ask_continuation`,
+      a real two-call `run_agent` round trip through a stored `Ask`.
+- [x] `backend.diagnose`, run through `run_agent`, is offered `bash` and
       `todo_write` (test).
-- [ ] `bash` and `todo_write` definitions are identical with every
-      `__doc__` set to `None` (test).
-- [ ] Guard tests updated: `tests/test_tools.py`,
+- [x] `bash` and `todo_write` definitions are identical with every
+      `__doc__` set to `None` (test) — built twice from a function copy
+      with its docstring cleared, since both are bound eagerly
+      (`friday.kernel.harness.harness.tool`), not through the sdk's
+      lazily-bound `ToolSpec`.
+- [x] Guard tests updated: `tests/test_tools.py`,
       `tests/test_core_toolsets.py` (the refusal tests go),
       `tests/test_sources_are_the_only_door.py`.
-- [ ] `backend.trace_problem` eval and `core.planner` run and reported.
-- [ ] `docs/DESIGN.md` D6 and the toolsets row, `CONTEXT.md`, ticket 08
+- [ ] `backend.trace_problem` eval and `core.planner` run and reported. —
+      not run; team-lead runs evals.
+- [x] `docs/DESIGN.md` D6 and the toolsets row, `CONTEXT.md`, ticket 08
       amended.
-- [ ] Whole suite green; `code-review` done.
+- [x] Whole suite green (1773 passed, 1 skipped); `code-review` done — no
+      bugs found; the `Todos`/`Ask`/`RunContext` round trip, the SSH
+      `ControlPath`/`ControlMaster` construction and the host-before-`sensitive`
+      check order were each traced independently and confirmed correct.

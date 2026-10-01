@@ -8,7 +8,8 @@ Build-the-spine ticket 08 (board `domains-plug-in` ticket 03, amendment
 | `memory/` | `core.memory` | `memory_search`, `memory_propose` |
 | `memory/` | `core.memory_write` | `memory_add`, `memory_update`, `memory_delete` |
 | `skills.py` | `core.skills` | `fetch_skill`, `search_skills`, `describe_skill`, `read_skill_file` |
-| `shell.py` | `core.shell` | `run_command` (read-command allowlist, local or SSH) |
+| `bash/` | `core.shell` | `bash` — full rights, no allowlist (ticket 24; was `shell.py`'s `run_command`, read-only) |
+| `todo/` | `core.todo` | `todo_write` — the agent's own checklist, replaced whole per call (ticket 24) |
 | `workspace.py` | `core.workspace` | the pydantic-ai-harness file tools over `/tmp/friday/<task_id>/` |
 | `repos/` | `core.repos` | `read`, `grep`, `glob` over a domain's `RepoRoom`, each taking an optional `ref` the model finds itself (ticket 23; split into a package, one file per tool plus shared helpers, once the module passed 850 lines) |
 
@@ -49,10 +50,10 @@ def _needs(value: Any, what: str, toolset: str) -> Any:
 def core_toolsets(
     *, db: Any = None, skills: Any = None, hosts: Sequence[str] = ()
 ) -> tuple[ToolsetSpec, ...]:
-    """The six core toolsets, their factories bound to `db` (the store),
+    """The seven core toolsets, their factories bound to `db` (the store),
     `skills` (a `SkillLibrary`) and `hosts` (`config.shell_hosts`). `core.repos`
-    needs none of these — it reads `run.domain`/`run.evidence` alone — so its
-    spec is reused as-is rather than closed over here."""
+    and `core.todo` need none of these — `core.todo` reads `run.todos` alone —
+    so their specs are reused as-is rather than closed over here."""
 
     def memory(run: RunContext) -> list[Any]:
         return _memory("core.memory")
@@ -83,7 +84,7 @@ def core_toolsets(
 
     def shell(run: RunContext) -> list[Any]:
         from friday.kernel.audit import AuditLog
-        from friday.kernel.toolsets.shell import shell_tools
+        from friday.kernel.toolsets.bash import shell_tools
 
         return shell_tools(
             run, hosts=hosts, audit=AuditLog(_needs(db, "a store", "core.shell"))
@@ -95,6 +96,7 @@ def core_toolsets(
         return workspace_tools(run.task_id)
 
     from friday.kernel.toolsets.repos import REPOS
+    from friday.kernel.toolsets.todo import TODO
 
     return (
         ToolsetSpec(
@@ -117,8 +119,8 @@ def core_toolsets(
         ),
         ToolsetSpec(
             "core.shell",
-            "Run one read-only command (kubectl get/logs/describe/top, cat, "
-            "grep, tail, …) on this machine or a declared SSH host.",
+            "Run any command, full rights, on this machine or a declared SSH "
+            "host — no allowlist.",
             shell,
         ),
         ToolsetSpec(
@@ -128,6 +130,7 @@ def core_toolsets(
             workspace,
         ),
         REPOS,
+        TODO,
     )
 
 

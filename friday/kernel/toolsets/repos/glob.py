@@ -26,8 +26,13 @@ from pydantic import Field
 
 from friday.kernel.harness.harness import ModelRetry
 from friday.kernel.toolsets.repos.git import ref_resolves
-from friday.kernel.toolsets.repos.paths import REF_LINE, resolve_repo, validate_room
-from friday.kernel.toolsets.shell import SECRET_DIRS, SECRET_FILES
+from friday.kernel.toolsets.repos.paths import (
+    REF_LINE,
+    SECRET_DIRS,
+    SECRET_FILES,
+    resolve_repo,
+    validate_room,
+)
 from friday.sdk.sources import TOOL_CALL_TIMEOUT_SECONDS, RepoRoom
 from friday.sdk.toolset import tool
 

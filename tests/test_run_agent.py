@@ -28,6 +28,7 @@ from friday.sdk.testing import (
     Usage,
     function_call,
 )
+from friday.sdk.todos import Todos
 from friday.sdk.toolset import RunContext, ToolsetSpec, tool
 
 
@@ -119,6 +120,7 @@ def _context() -> RunContext:
         task_id=7,
         domain=None,
         evidence=Evidence(),
+        todos=Todos(),
         mcp={},
         reported_at=datetime(2026, 9, 29, tzinfo=UTC),
     )
@@ -188,8 +190,66 @@ async def test_ask_reporter_ends_the_run_with_an_ask():
 
     assert isinstance(got, Ask) and got.text == "which env?"
     assert got.evidence is context.evidence
+    assert got.todos is context.todos
     # Stored at `(task_id, step_key)` by the runner, so it must be plain data.
     assert json.loads(json.dumps(got.history))
+
+
+async def test_the_core_todo_checklist_survives_an_ask_continuation():
+    """Ticket 24: `todo_write`'s list is the agent's own, not grounded
+    evidence — but it travels with a stored `Ask` the same way `Evidence`
+    does, so a continuation picks it back up rather than starting blank."""
+    from friday.kernel.toolsets.todo import TODO, todo_tools
+
+    got, _ = await _run(
+        ScriptedModel(
+            [
+                [
+                    function_call(
+                        "todo_write",
+                        {
+                            "todos": [
+                                {"content": "check the log", "status": "in_progress"},
+                                {"content": "read the code", "status": "pending"},
+                            ]
+                        },
+                    )
+                ],
+                [function_call("ask_reporter", {"question": "which env?"})],
+            ]
+        ),
+        toolsets=[TODO],
+        spec=_spec(toolsets=("core.todo",)),
+        contract=_contract(toolsets=("core.todo",)),
+    )
+
+    assert isinstance(got, Ask)
+    assert got.todos is not None
+    assert [t.content for t in got.todos.items] == ["check the log", "read the code"]
+
+    seen: dict = {}
+
+    def capture_factory(run: RunContext) -> list:
+        seen["todos"] = run.todos
+        return todo_tools(run)
+
+    await _run(
+        ScriptedModel([[function_call("answer", {"summary": "done", "refs": []})]]),
+        toolsets=[
+            ToolsetSpec(name="core.todo", description="d", factory=capture_factory)
+        ],
+        spec=_spec(toolsets=("core.todo",)),
+        contract=_contract(toolsets=("core.todo",)),
+        history=got,
+    )
+
+    # A copy, like `Evidence`'s: the stored `Ask` stays as it was so a step
+    # that crashes and re-runs from it starts from the same checklist.
+    assert seen["todos"] == got.todos
+    assert [t.content for t in seen["todos"].items] == [
+        "check the log",
+        "read the code",
+    ]
 
 
 async def test_hand_over_ends_the_run_with_a_hand_over():

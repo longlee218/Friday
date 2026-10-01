@@ -12,6 +12,9 @@ rotates) or a decision held only in a process that has since restarted:
   plugin's `deps`/`needs` that cannot be satisfied fails the boot with a
   `ConfigError`, before this log opens), so that entry is added with that
   path, on its trigger (§16), not shipped inert ahead of it;
+- **every command `bash` ran** (`shell_ran`, build-the-spine ticket 24) —
+  host, command, exit code and duration. `bash` has full rights now (no
+  allowlist), so this row, not a refusal, is the record of what ran;
 - **plugin loads with tiers** — what was loaded into the process and at what
   trust level (§3.1);
 - **MCP-grant changes** — the code-declared tool allow-list each server was
@@ -97,6 +100,32 @@ class AuditLog:
                 "host": host,
                 "command": command,
                 "reason": reason,
+            },
+        )
+
+    async def shell_ran(
+        self,
+        *,
+        task_id: int,
+        toolset: str,
+        host: str,
+        command: str,
+        exit_code: int,
+        duration_ms: int,
+    ) -> None:
+        """Every command `bash` actually ran — not only a refusal (build-the-spine
+        ticket 24: full rights, no allowlist, so this row is the only record
+        of what ran, on whose behalf, and what it cost)."""
+        await self._append(
+            "shell_ran",
+            actor=None,
+            detail={
+                "task_id": task_id,
+                "toolset": toolset,
+                "host": host,
+                "command": command,
+                "exit_code": exit_code,
+                "duration_ms": duration_ms,
             },
         )
 

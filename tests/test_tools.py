@@ -67,15 +67,16 @@ def _factories() -> dict[str, object]:
 
     from friday.kernel.harness.skills import SkillLibrary
     from friday.kernel.toolsets import workspace
+    from friday.kernel.toolsets.bash import shell_tools
     from friday.kernel.toolsets.memory import memory_tools
     from friday.kernel.toolsets.repos import repos_tools
-    from friday.kernel.toolsets.shell import shell_tools
     from friday.kernel.toolsets.skills import (
         describe_skill_tool,
         fetch_skill_tool,
         read_skill_file_tool,
         search_skills_tool,
     )
+    from friday.kernel.toolsets.todo import todo_tools
     from friday.kernel.toolsets.workspace import workspace_tools
     from friday.sdk.evidence import Evidence
     from friday.sdk.toolset import RunContext
@@ -104,6 +105,7 @@ def _factories() -> dict[str, object]:
         read_skill_file_tool(library),
         *memory_tools(object()),
         *shell_tools(run, hosts=("local",), audit=object()),
+        *todo_tools(run),
         # `core.repos` (ticket 23) needs a domain implementing `RepoRoom`;
         # `Placement` already does.
         *repos_tools(
@@ -186,7 +188,8 @@ def test_the_tools_this_system_has_are_all_in_one_place():
         "query_db",
         "release_status",
         "k8s_pod_status",
-        "run_command",
+        "bash",
+        "todo_write",
         "read_file",
         "write_file",
         "edit_file",

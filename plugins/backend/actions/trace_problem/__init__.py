@@ -64,6 +64,8 @@ ACTION = Action(
                 "core.repos",
                 "core.memory",
                 "core.skills",
+                "core.shell",
+                "core.todo",
             }
         ),
         constraints=("every ref points at a line that was read",),

@@ -31,8 +31,11 @@ PACKAGES = (ROOT / "friday", ROOT / "plugins")
 #: holding the client and its tools). Globs over repo-relative posix paths.
 ALLOWED = (
     "plugins/*/toolsets/*.py",
-    # `core.shell` (ticket 08): the one core toolset that runs a command.
-    "friday/kernel/toolsets/shell.py",
+    # `core.shell` (ticket 08, full rights since ticket 24): `process.py` is
+    # where `bash` starts one. The rest of the package (`run.py`, `spill.py`,
+    # `exit_codes.py`, `sensitive.py`, `audit.py`, `__init__.py`) starts no
+    # process and reaches no tool server of its own.
+    "friday/kernel/toolsets/bash/process.py",
     # `core.repos` (ticket 23): `read`/`grep`/`glob` start `git` themselves,
     # generic over any domain's repositories — `git.py` for the shared
     # helpers, `grep.py`/`glob.py` for their own inline `git grep`/`git

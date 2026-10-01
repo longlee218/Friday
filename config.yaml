@@ -57,9 +57,9 @@ mcp_servers:
     auth: {}
 
 # ── Shell hosts ────────────────────────────────────────────────────────────
-# Where `core.shell` may run a read-only command: `local` is this machine, any
-# other name is an alias in ~/.ssh/config. Which commands may run is declared
-# in code (the read-command allowlist), not here.
+# Where `core.shell`'s `bash` may run a command: `local` is this machine, any
+# other name is an alias in ~/.ssh/config. Full rights, no allowlist (ticket
+# 24, operator: "đây là máy của tôi") — an undeclared host is still refused.
 shell_hosts: [local, dev]
 
 # ── Workflows ───────────────────────────────────────────────────────────────

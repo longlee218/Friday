@@ -1,15 +1,16 @@
-"""The core toolsets (build-the-spine ticket 08): `core.shell` reads and only
-reads, `core.workspace` never leaves `/tmp/friday/<task_id>/`, and one module
-imports pydantic-ai-harness.
-
-One test per refusal class of the read-command allowlist, each refused before
-anything runs; a refusal is written to `audit_log`.
+"""The core toolsets (build-the-spine ticket 08, `core.shell` rebuilt with
+full rights in ticket 24): `core.workspace` never leaves
+`/tmp/friday/<task_id>/`, one module imports pydantic-ai-harness, and `bash`
+— no allowlist any more — still keeps a timeout with a process-group kill,
+an output cap spilled to the workspace, redaction, the `sensitive` hook
+ticket 27 fills, and an audit row for every command, not only a refusal.
 """
 
 from __future__ import annotations
 
 import ast
 import asyncio
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,10 +18,16 @@ from types import SimpleNamespace
 import pytest
 
 from friday.kernel.audit import AuditLog
+from friday.kernel.harness.harness import ModelRetry
 from friday.kernel.toolsets import NotWired, core_toolsets, workspace
-from friday.kernel.toolsets.shell import refusal, shell_tools
+from friday.kernel.toolsets.bash import run as bash_run
+from friday.kernel.toolsets.bash import shell_tools
+from friday.kernel.toolsets.bash.exit_codes import exit_meaning
+from friday.kernel.toolsets.bash.spill import MAX_CHARS
+from friday.kernel.toolsets.todo import todo_tools
 from friday.sdk.evidence import Evidence
 from friday.sdk.redact import clear_secret_values, register_secret_values
+from friday.sdk.todos import Todos
 from friday.sdk.toolset import RunContext
 
 REPO = Path(__file__).resolve().parents[1]
@@ -38,350 +45,118 @@ def _run(task_id: int = 7) -> RunContext:
         task_id=task_id,
         domain=None,
         evidence=Evidence(),
+        todos=Todos(),
         mcp={},
         reported_at=datetime(2026, 9, 29, tzinfo=UTC),
     )
 
 
-def _run_command(db, run=None, hosts=("local",)):
+def _bash(db, run=None, hosts=("local",)):
     (tool,) = shell_tools(run or _run(), hosts=hosts, audit=AuditLog(db))
-    return tool.function
+    return tool
 
 
-# ── the allowlist: one test per refusal class ──────────────────────────────
+async def call(tool, **kw):
+    """Invoke a tool the way the run would: `args_validator` first, then the
+    function."""
+    if tool.args_validator is not None:
+        tool.args_validator(None, **kw)
+    result = tool.function(**kw)
+    return await result if asyncio.iscoroutine(result) else result
 
 
-def test_a_command_off_the_list_is_refused():
-    assert "not on the read-command allowlist" in refusal("rm -rf /tmp/x")
+# ── exit-code meaning ───────────────────────────────────────────────────────
 
 
-def test_kubectl_is_refused_outside_its_read_verbs():
-    assert "kubectl reads only" in refusal("kubectl delete pod api-0")
+def test_grep_and_rg_one_means_no_matches_not_an_error():
+    assert exit_meaning("grep x file", 1) == "no matches found, not an error"
+    assert exit_meaning("rg x file", 1) == "no matches found, not an error"
+    assert exit_meaning("grep x file", 2) is None
 
 
-@pytest.mark.parametrize(
-    "command", ["ls; rm x", "ls && rm x", "ls || rm x", "ls & rm x", "(ls)"]
-)
-def test_a_control_operator_is_refused(command):
-    assert "only `|` between read commands" in refusal(command)
+def test_the_last_pipeline_segment_is_what_sets_the_code():
+    assert exit_meaning("cat file | grep x", 1) == "no matches found, not an error"
 
 
-@pytest.mark.parametrize("command", ["cat a > b", "grep x < a", "cat a >> b"])
-def test_a_redirection_is_refused(command):
-    assert "only `|` between read commands" in refusal(command)
+def test_an_unlisted_command_or_code_has_no_note():
+    assert exit_meaning("ls", 1) is None
+    assert exit_meaning("grep x file", 0) is None
 
 
-@pytest.mark.parametrize("command", ["cat $(which sh)", "cat `which sh`"])
-def test_a_substitution_is_refused(command):
-    assert "command substitution" in refusal(command)
+# ── sleep used to wait, refused before anything runs ─────────────────────────
 
 
-async def test_a_quoted_operator_stays_an_argument(db, tmp_path):
-    """`grep "|"` searches for a bar; it does not become a pipe."""
-    log = tmp_path / "a.log"
-    log.write_text("a | b\nplain\n")
-    assert refusal(f'grep "|" {log}') is None
-    got = await _run_command(db)(host="local", command=f'grep "|" {log}')
-    assert "a | b" in got and "plain" not in got
-    assert refusal('grep ";" x') is None
+def test_sleep_to_wait_is_refused():
+    tool = _bash(object())
+    with pytest.raises(ModelRetry, match="sleep"):
+        tool.args_validator(None, command="sleep 5")
 
 
-def test_a_pipe_is_refused_when_one_segment_is_off_the_list():
-    assert "'xargs' is not on" in refusal("ls | xargs rm")
-    assert refusal("kubectl get pods -n api | grep Crash | head -5") is None
+def test_sleep_leading_a_longer_command_is_still_refused():
+    tool = _bash(object())
+    with pytest.raises(ModelRetry, match="sleep"):
+        tool.args_validator(None, command="sleep 10 && curl x")
 
 
-@pytest.mark.parametrize(
-    "command", ["find . -delete", "find . -exec rm {} +", "journalctl --vacuum-time=1s"]
-)
-def test_a_write_flag_is_refused(command):
-    assert "is refused" in refusal(command)
+def test_a_short_sleep_is_allowed():
+    tool = _bash(object())
+    tool.args_validator(None, command="sleep 1")  # does not raise
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "kubectl get pods --kubeconfig=/tmp/friday/7/k.yaml",
-        "kubectl get pods --kubeconfig /tmp/friday/7/k.yaml",
-        "kubectl get pods --server=https://elsewhere",
-        "kubectl get pods -shttps://elsewhere",
-        "kubectl logs api-0 --token abc",
-        "kubectl get pods --cache-dir=/etc",
-        "journalctl --cursor-file=/etc/x",
-    ],
-)
-def test_a_credential_or_write_flag_is_refused(command):
-    """`--kubeconfig` names a file whose `exec` entry runs any binary — and
-    the workspace can write that file."""
-    assert "is refused" in refusal(command)
+def test_sleep_elsewhere_in_the_command_is_not_caught():
+    tool = _bash(object())
+    tool.args_validator(None, command="echo 'sleep 5'")  # does not raise
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "kubectl get secrets -n api",
-        "kubectl get secret/db-creds -o yaml",
-        "kubectl get pods,secrets",
-        "kubectl describe secret db-creds",
-        "kubectl get secrets.v1 -o json",
-    ],
-)
-def test_the_secret_resource_is_refused(command):
-    assert "secret resource" in refusal(command)
-    assert refusal("kubectl get pods -o wide") is None
+# ── the tool: full rights, local and over a declared host ──────────────────
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "cat /srv/app/.env",
-        "cat /srv/app/.env.production",
-        "head /Users/op/.ssh/id_ed25519",
-        "cat /etc/nginx/tls/server.key",
-        "cat /home/op/.aws/credentials",
-        "grep --file=/srv/app/.env x /srv/app/log",
-        "tail /home/op/.config/gcloud/credentials.db",
-    ],
-)
-def test_a_credential_path_is_refused(command):
-    assert "credential file or directory" in refusal(command)
+async def test_bash_runs_a_command_locally(db):
+    got = await call(_bash(db), command="echo hi")
+
+    assert got.startswith("exit 0")
+    assert "hi" in got
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        # kubectl around the resource check
-        "kubectl get --raw /api/v1/namespaces/default/secrets/db",
-        "kubectl get --raw=/api/v1/secrets",
-        "kubectl get -f /tmp/friday/7/s.yaml -o yaml",
-        "kubectl get --filename=/tmp/friday/7/s.yaml",
-        "kubectl get -k /tmp/friday/7/kust",
-        # grep around its excludes
-        "grep -r --include=* x /home/u",
-        "grep -R x /home/u/link",
-        "grep -nR x /home/u/link",
-        "grep --dereference-recursive x /home/u",
-        "grep -r x /home/u/gcloud",
-        # names the first lists missed, and case
-        "cat /Users/u/.SSH/ID_RSA",
-        "cat /var/run/secrets/kubernetes.io/serviceaccount/token",
-        "cat /etc/kubernetes/admin.conf",
-        "cat /etc/ssh/ssh_host_ed25519_key",
-        "cat /app/prod.env",
-        "cat /home/u/.npmrc",
-        "cat /infra/terraform.tfstate",
-        "cat /proc/1234/environ",
-        # process environments
-        "ps eww",
-        "ps auxe",
-        "ps -E",
-        # the second review's
-        "grep -ie. /root/.aws/credentials",
-        "grep --regex=. /root/.aws/credentials",
-        "grep --inc=* -r x /home",
-        "kubectl get -Af m.yaml",
-        "kubectl get -Rk dir",
-        "kubectl get pods -o jsonpath-file=/root/.ssh/id_rsa",
-        "kubectl get pods -o=go-template-file=/app/.env",
-        "kubectl get pods --template={{.x}}",
-        "cat /etc/kubernetes/super-admin.conf",
-    ],
-)
-def test_a_reported_bypass_is_refused(command):
-    assert refusal(command) is not None, command
+async def test_bash_routes_to_ssh_for_a_declared_host(db, monkeypatch, root):
+    """No live SSH host in a test: `process.run` is replaced, and what `bash`
+    calls it with is the assertion — the host, and a `ControlPath` inside
+    this task's own workspace."""
+    seen = {}
 
+    async def fake_run(host, command, *, timeout, control_path):
+        seen["host"], seen["command"] = host, command
+        seen["control_path"] = control_path
+        return 0, "ok from dev"
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "grep -c KEY /srv/app/.env.example",
-        "grep -A 2 timeout /var/log/app.log",
-        "ps -o user",
-        "ps -u deploy",
-        "ps -C sleep",
-        "find . -name *.env",
-        "ls /home/u/.ssh",
-        "cat /etc/pki/tls/certs/ca-bundle.crt",
-        "grep -rn timeout /srv/app/config",
-        "ps aux",
-        "ps -ef",
-        "kubectl logs api-0 --follow",
-        "kubectl get pods -l app=api -o wide",
-    ],
-)
-def test_ordinary_debugging_still_passes(command):
-    assert refusal(command) is None, refusal(command)
+    monkeypatch.setattr(bash_run, "run_process", fake_run)
 
+    got = await call(_bash(db, hosts=("local", "dev")), command="ls", host="dev")
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "grep id_rsa /var/log/auth.log",
-        'grep "\\.pem" /etc/nginx/nginx.conf',
-        "grep -A 2 id_rsa /var/log/auth.log",
-        "grep -iA2 id_rsa /var/log/auth.log",
-        "grep -iA 2 id_rsa /var/log/auth.log",
-        "grep --max-count 5 id_rsa /var/log/auth.log",
-        "grep --files-with-matches id_rsa /var/log",
-        "grep -- .env /srv/app/README.md",
-        "kubectl get pods -n secrets",
-        "kubectl get pods --namespace secrets -o wide",
-        "kubectl get pods -A -n secrets --no-headers",
-        "kubectl get pods --namespace=secrets -n secrets",
-        "kubectl logs -f api-0",
-        "kubectl logs -fp api-0",
-        "kubectl get -ojsonpath={.status.phase} pods",
-        "kubectl get pods -lapp=frontend",
-    ],
-)
-def test_the_four_false_refusals_are_allowed(command):
-    """grep's pattern is a search term; `-n secrets` a namespace; `logs -f`
-    is --follow; a value written into a kubectl cluster is that value."""
-    assert refusal(command) is None, refusal(command)
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        # the pattern comes from an option: every word is a file
-        "grep -e x /srv/app/.env",
-        "grep -ie. /root/.aws/credentials",
-        "grep -e. -i /root/.aws/credentials",
-        "grep --regex=. /root/.aws/credentials",
-        "grep --reg . /root/.aws/credentials",
-        "grep -if/tmp/p /root/.aws/credentials",
-        "grep --fil=/tmp/p /root/.aws/credentials",
-        # only the first word after the options is the pattern
-        "grep id_rsa /home/u/.ssh/id_rsa",
-        "grep -A 2 x /root/.env",
-        "grep -m 5 x /root/.env",
-        "grep x -r /home/u/.ssh",
-        # the namespace skip and the cluster walk do not open the resource
-        "kubectl get -n default secrets",
-        "kubectl get secrets -n default",
-        "kubectl get -An secrets",
-        "kubectl get -Af m.yaml",
-        "kubectl get -Rk dir",
-        "kubectl logs -fs https://elsewhere api-0",
-        "kubectl get pods -f m.yaml",
-        # the third review's: a misparse moved the pattern onto the file
-        "grep --binary root /home/u/.ssh/id_rsa",
-        "grep --context root /home/u/.ssh/id_rsa",
-        "grep -C root /home/u/.ssh/id_rsa",
-        "grep --line-num x /root/.env",
-        "grep -iy x /root/.env",
-        "grep --color=always x /root/.env",
-        "grep -A /root/.env x",
-        "kubectl get -L -L secrets -o yaml",
-        "kubectl get -l -n secrets",
-        "kubectl get --label-columns -n secrets",
-        "kubectl get --profile-output -n secrets",
-        "kubectl describe --tls-server-name -n secrets",
-    ],
-)
-def test_the_allowances_open_no_bypass(command):
-    assert refusal(command) is not None, command
-
-
-async def test_a_recursive_grep_skips_credential_files(db, tmp_path):
-    """`grep -r` names only the directory, so the per-argument check cannot
-    see the `.env` beneath it; the excludes do."""
-    (tmp_path / "app").mkdir()
-    (tmp_path / "app" / ".env").write_text("MARK=hunter2\n")
-    (tmp_path / "app" / ".ssh").mkdir()
-    (tmp_path / "app" / ".ssh" / "config").write_text("MARK in ssh\n")
-    (tmp_path / "app" / "main.log").write_text("MARK used\n")
-
-    got = await _run_command(db)(
-        host="local", command=f"grep -r MARK {tmp_path / 'app'}"
-    )
-
-    assert "MARK used" in got
-    assert "hunter2" not in got and "in ssh" not in got
-
-
-@pytest.mark.parametrize("command", ["", "  ", "ls |", "| ls", "cat 'unclosed"])
-def test_an_empty_or_unparseable_command_is_refused(command):
-    assert refusal(command) is not None
-
-
-# ── the tool ────────────────────────────────────────────────────────────────
-
-
-async def test_a_refused_command_writes_an_audit_row_and_runs_nothing(db, tmp_path):
-    marker = tmp_path / "marker"
-    got = await _run_command(db)(host="local", command=f"ls; touch {marker}")
-
-    assert got.startswith("refused:")
-    assert not marker.exists()
-    (entry,) = await db.audit_entries(event="shell_refused")
-    assert entry.detail["task_id"] == 7
-    assert entry.detail["toolset"] == "core.shell"
-    assert entry.detail["host"] == "local"
-    assert entry.detail["command"] == f"ls; touch {marker}"
+    assert seen["host"] == "dev" and seen["command"] == "ls"
+    assert seen["control_path"] is not None
+    assert str(seen["control_path"]).endswith(".ssh-dev.sock")
+    assert str(root / "7") in str(seen["control_path"])
+    assert "ok from dev" in got
 
 
 async def test_an_undeclared_host_is_refused_and_audited(db):
-    got = await _run_command(db, hosts=("local",))(host="prod", command="ls")
+    got = await call(_bash(db, hosts=("local",)), command="ls", host="prod")
 
+    assert got.startswith("refused:")
     assert "host 'prod' is not declared" in got
     (entry,) = await db.audit_entries(event="shell_refused")
     assert entry.detail["host"] == "prod"
+    assert entry.detail["toolset"] == "core.shell"
 
 
-async def test_output_is_redacted_and_enters_evidence(db, tmp_path):
-    log = tmp_path / "app.log"
-    log.write_text("ok start\nfailed with key s3cr3t-value\nok end\n")
-    run = _run()
-    register_secret_values(["s3cr3t-value"])
-    try:
-        got = await _run_command(db, run)(
-            host="local", command=f"cat {log} | grep failed"
-        )
-    finally:
-        clear_secret_values()
-
-    assert got.startswith("exit 0")
-    assert "s3cr3t-value" not in got
-    assert run.evidence.index == {"L1": "failed with key [REDACTED]"}
-    assert "L1 | failed with key [REDACTED]" in got
-
-
-async def test_an_argument_reaches_the_shell_as_a_literal(db, tmp_path):
-    """Re-quoted before `sh -c`: a `$HOME` in an argument is not expanded,
-    even in the double quotes a shell would expand it in."""
-    log = tmp_path / "a.log"
-    log.write_text("price $HOME\n")
-    got = await _run_command(db)(host="local", command=f'grep "$HOME" {log}')
-    assert "price $HOME" in got
-
-
-async def test_save_to_writes_the_output_into_the_workspace(db, tmp_path, root):
-    log = tmp_path / "big.log"
-    log.write_text("".join(f"line {n}\n" for n in range(500)))
-    run = _run()
-    got = await _run_command(db, run)(
-        host="local", command=f"cat {log}", save_to="out/big.txt"
-    )
-
-    assert "500 lines" in got and "saved to out/big.txt" in got
-    assert (root / "7" / "out" / "big.txt").read_text() == log.read_text()
-    assert run.evidence.index == {}
-
-
-async def test_a_timeout_kills_the_whole_pipeline(db, tmp_path, monkeypatch):
-    """`tail -f | grep` past the timeout: no process of the pipeline survives."""
-    import subprocess
-
-    from friday.kernel.toolsets import shell
-
-    monkeypatch.setattr(shell, "TIMEOUT_SECONDS", 0.5)
+async def test_a_timeout_kills_the_whole_pipeline(db, tmp_path):
+    """`tail -f | grep` past the timeout: no process of the pipeline
+    survives."""
     log = tmp_path / "follow-me.log"
     log.write_text("x\n")
-    # Bounded here too: a pipeline child left holding the pipe would otherwise
-    # hang the test rather than fail it.
     got = await asyncio.wait_for(
-        _run_command(db)(host="local", command=f"tail -f {log} | grep x"), 5
+        call(_bash(db), command=f"tail -f {log} | grep x", timeout_ms=500), 5
     )
 
     assert "stopped after" in got
@@ -389,6 +164,185 @@ async def test_a_timeout_kills_the_whole_pipeline(db, tmp_path, monkeypatch):
         ["pgrep", "-f", str(log)], capture_output=True, text=True, check=False
     )
     assert alive.stdout.strip() == ""
+
+
+async def test_bash_caps_output_and_says_how_to_get_the_rest(db):
+    got = await call(
+        _bash(db), command=f"python3 -c \"print('x' * {MAX_CHARS + 5000})\""
+    )
+
+    assert "not shown" in got
+    assert "save_to" in got
+
+
+async def test_save_to_writes_the_whole_output_into_the_workspace(db, tmp_path, root):
+    log = tmp_path / "big.log"
+    log.write_text("".join(f"line {n}\n" for n in range(500)))
+    run = _run()
+
+    got = await call(_bash(db, run), command=f"cat {log}", save_to="out/big.txt")
+
+    assert "saved to out/big.txt" in got
+    assert (root / "7" / "out" / "big.txt").read_text() == log.read_text()
+    assert run.evidence.index == {}
+
+
+async def test_output_is_redacted_and_enters_evidence(db):
+    run = _run()
+    register_secret_values(["s3cr3t-value"])
+    try:
+        got = await call(
+            _bash(db, run), command="printf 'ok\\nfailed with key s3cr3t-value\\n'"
+        )
+    finally:
+        clear_secret_values()
+
+    assert got.startswith("exit 0")
+    assert "s3cr3t-value" not in got
+    assert "failed with key [REDACTED]" in got
+    assert any("[REDACTED]" in line for line in run.evidence.index.values())
+
+
+async def test_exit_code_meaning_is_noted_in_the_header(db, tmp_path):
+    log = tmp_path / "a.log"
+    log.write_text("nothing matches here\n")
+
+    got = await call(_bash(db), command=f"grep ZZZ {log}")
+
+    assert got.startswith("exit 1 (no matches found, not an error)")
+
+
+async def test_bash_calls_the_sensitive_check_before_it_runs(db, monkeypatch):
+    seen = []
+
+    def fake_sensitive(command, host):
+        seen.append((command, host))
+        return False
+
+    monkeypatch.setattr(bash_run, "sensitive", fake_sensitive)
+
+    await call(_bash(db), command="echo hi", host="local")
+
+    assert seen == [("echo hi", "local")]
+
+
+async def test_a_sensitive_command_is_refused_and_does_not_run(
+    db, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(bash_run, "sensitive", lambda command, host: True)
+    marker = tmp_path / "marker"
+
+    got = await call(_bash(db), command=f"touch {marker}")
+
+    assert got.startswith("refused:")
+    assert "sensitive" in got
+    assert not marker.exists()
+    (entry,) = await db.audit_entries(event="shell_refused")
+    assert "sensitive" in entry.detail["reason"]
+
+
+async def test_bash_writes_an_audit_row_for_every_command_not_only_refusals(db):
+    await call(_bash(db), command="echo one")
+    await call(_bash(db), command="false")
+
+    ran = await db.audit_entries(event="shell_ran")
+    assert len(ran) == 2
+    assert ran[0].detail["command"] == "echo one"
+    assert ran[0].detail["exit_code"] == 0
+    assert ran[1].detail["command"] == "false"
+    assert ran[1].detail["exit_code"] == 1
+    assert all(isinstance(e.detail["duration_ms"], int) for e in ran)
+
+
+def test_bash_and_todo_write_are_the_same_definition_without_a_docstring():
+    """Rebuilds each tool from a copy of its own function with `__doc__`
+    cleared — `function_schema` is computed once, at `Tool.__init__`, so
+    clearing it after the fact (on the original) proves nothing; a second,
+    fresh `Tool` built from the doc-stripped copy is what actually exercises
+    whichever parser reads `__doc__`, if any still does."""
+    import types
+
+    from friday.kernel.harness.harness import tool as build_vendor_tool
+    from friday.kernel.toolsets.bash.run import _bash_description, _validate_bash
+    from friday.kernel.toolsets.todo.write import _validate_write, _write_description
+
+    bash = _bash(object())
+    (todo_write,) = todo_tools(_run())
+
+    for built, description, validator in (
+        (bash, _bash_description(), _validate_bash),
+        (todo_write, _write_description(), _validate_write),
+    ):
+        fn = built.function
+        copy = types.FunctionType(
+            fn.__code__, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__
+        )
+        copy.__annotations__ = fn.__annotations__
+        copy.__doc__ = None
+        stripped = build_vendor_tool(
+            copy, description=description, args_validator=validator
+        )
+        assert built.description == stripped.description
+        assert built.function_schema.json_schema == stripped.function_schema.json_schema
+
+
+# ── core.todo: todo_write ────────────────────────────────────────────────────
+
+
+def test_todo_write_replaces_the_whole_list():
+    run = _run()
+    (tool,) = todo_tools(run)
+
+    out = asyncio.run(
+        tool.function(
+            todos=[
+                {"content": "check the log", "status": "in_progress"},
+                {"content": "read the code", "status": "pending"},
+            ]
+        )
+    )
+
+    assert "2 todos set, 1 in progress" in out
+    assert [t.content for t in run.todos.items] == ["check the log", "read the code"]
+
+    asyncio.run(tool.function(todos=[{"content": "only this", "status": "pending"}]))
+    assert [t.content for t in run.todos.items] == ["only this"]
+
+
+def test_todo_write_refuses_two_in_progress():
+    run = _run()
+    (tool,) = todo_tools(run)
+
+    with pytest.raises(ModelRetry, match="in_progress"):
+        tool.args_validator(
+            None,
+            todos=[
+                {"content": "a", "status": "in_progress"},
+                {"content": "b", "status": "in_progress"},
+            ],
+        )
+
+
+def test_todo_write_refuses_an_unknown_status():
+    run = _run()
+    (tool,) = todo_tools(run)
+
+    with pytest.raises(ModelRetry, match="status"):
+        tool.args_validator(None, todos=[{"content": "a", "status": "done"}])
+
+
+def test_todo_tools_falls_back_to_a_fresh_checklist_without_one():
+    run = RunContext(
+        task_id=1,
+        domain=None,
+        evidence=Evidence(),
+        mcp={},
+        reported_at=datetime(2026, 9, 29, tzinfo=UTC),
+    )
+    (tool,) = todo_tools(run)
+    asyncio.run(tool.function(todos=[{"content": "a", "status": "pending"}]))
+    # Nothing to assert on `run.todos` (it was never set) — the point is
+    # that building and calling the tool does not raise.
 
 
 # ── the workspace ───────────────────────────────────────────────────────────
@@ -429,6 +383,7 @@ def test_the_core_toolsets_are_named_and_described():
         "core.shell",
         "core.workspace",
         "core.repos",
+        "core.todo",
     }
     assert all(spec.description.strip() for spec in specs.values())
 
@@ -482,6 +437,37 @@ async def test_backend_diagnose_is_offered_memory_reads_and_no_memory_writes():
     assert not {"memory_add", "memory_update", "memory_delete"} & set(offered)
 
 
+async def test_backend_diagnose_is_offered_bash_and_todo_write():
+    from friday.kernel.config import TierConfig
+    from friday.kernel.harness.run_agent import run_agent
+    from friday.sdk.testing import FunctionModel, ModelResponse, function_call
+    from plugins.backend.actions.trace_problem import ACTION
+    from plugins.backend.agents.diagnose import DIAGNOSE
+
+    offered: list[str] = []
+
+    def reply(messages, info):
+        offered.extend(t.name for t in info.function_tools)
+        return ModelResponse(parts=[function_call("hand_over", {"reason": "x"})])
+
+    await run_agent(
+        DIAGNOSE,
+        TierConfig(name="flash", api_key="k", base_url="https://x.invalid", model="m"),
+        ACTION.contract,
+        [
+            s
+            for s in core_toolsets(db=object())
+            if s.name in ("core.shell", "core.todo")
+        ],
+        _run(),
+        "look",
+        None,
+        model=FunctionModel(reply, model_name="m"),
+    )
+
+    assert {"bash", "todo_write"} <= set(offered)
+
+
 def test_a_core_toolset_built_without_its_dependency_says_which():
     shell = next(s for s in core_toolsets() if s.name == "core.shell")
     with pytest.raises(NotWired, match="core.shell was built without a store"):
@@ -533,5 +519,5 @@ def test_boot_registers_the_core_toolsets_under_core(monkeypatch):
     )
     loaded = load_plugins(SimpleNamespace(shell_hosts=("local",)))
     toolsets = loaded.registry.toolsets()
-    assert {"core.shell", "core.workspace"} <= set(toolsets)
+    assert {"core.shell", "core.workspace", "core.todo"} <= set(toolsets)
     assert loaded.registry.owner_of("core.shell").id == "core"

@@ -93,3 +93,27 @@ Left open, on purpose:
 [23](23-core-repos-read-grep-glob-at-the-running-tag.md). It needs no process
 dependency, so its `ToolsetSpec` is built once in `repos.py` and reused
 as-is by `core_toolsets()` rather than closed over there.
+
+## Amended by ticket 24 (2026-09-30)
+
+**`core.shell`'s read-command allowlist is deleted**, operator's own call:
+"đây là máy của tôi và tôi có thể control nên tạm thời tôi cho phép Bash
+được full quyền". `run_command` and the allowlist (`READ_COMMANDS`,
+`KUBECTL_VERBS`, `REFUSED_FLAGS`, the secret-path checks this ticket's "Left
+open" section records at length above) are gone with their refusal tests;
+`core.shell` now holds `bash`, full rights, local or over a declared SSH
+host — see [24](24-bash-with-full-rights-and-todo-write.md). What a full
+shell still keeps: a timeout with a process-group kill, output capped and
+spilled to the workspace over it, redaction, the `sensitive(command, host)`
+hook ticket 27 will gate on, and an audit row for every command, not only a
+refusal. `shell.py` is now the package `bash/` (`run.py`, `process.py`,
+`exit_codes.py`, `spill.py`, `sensitive.py`, `audit.py`); `SECRET_FILES`/
+`SECRET_DIRS` moved to `friday/kernel/toolsets/repos/paths.py`, the only
+reader left that still needs them.
+
+A seventh core toolset, `core.todo` (`todo_write`, the agent's own
+checklist — not grounded evidence, never shown to the reporter), is added
+the same ticket. It needs no process dependency, so like `core.repos` its
+`ToolsetSpec` is built once (in `friday/kernel/toolsets/todo/`) and reused
+as-is. Its state is `RunContext.todos` (`friday.sdk.todos.Todos`), which
+travels with a stored `Ask` the same way `Evidence` does.

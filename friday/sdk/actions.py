@@ -29,13 +29,15 @@ class Ask:
     An `Ask` an agent raised through `ask_reporter` is a **continuation
     point** (board `domains-plug-in`, ticket 14 §4): `history` is the run's
     message history as plain JSON data and `evidence` what it had read, so a
-    reply continues the run rather than restarting it. Both `None` for an
-    `Ask` written by code or the Planner.
+    reply continues the run rather than restarting it. `todos` is its
+    `core.todo` checklist (build-the-spine ticket 24), carried the same way.
+    All three `None` for an `Ask` written by code or the Planner.
     """
 
     text: str
     history: list[Any] | None = None
     evidence: Any = None
+    todos: Any = None
 
 
 @dataclass(frozen=True, slots=True)

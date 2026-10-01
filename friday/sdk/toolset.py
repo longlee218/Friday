@@ -77,6 +77,8 @@ class RunContext:
     toolset, so two toolsets in one run never see each other's reads.
     `reported_at` is when the reporter spoke (core Intake's seed), what a log
     window is measured back from; core data, so not on the domain type.
+    `todos` is the agent's own checklist (`friday.sdk.todos.Todos`,
+    build-the-spine ticket 24), `None` for a run that grants no `core.todo`.
     """
 
     task_id: int
@@ -84,6 +86,7 @@ class RunContext:
     evidence: Any
     mcp: Mapping[str, Any]
     reported_at: datetime
+    todos: Any = None
 
 
 @dataclass(frozen=True, slots=True)

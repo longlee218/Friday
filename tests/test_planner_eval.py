@@ -26,7 +26,7 @@ from friday.kernel.spine.plan_gate import Frozen, full_grant, gate_plan
 from friday.sdk.eval import EvalCase
 from friday.sdk.testing import ScriptedModel, function_call
 
-REGISTRY = load_plugins(SimpleNamespace(shell_hosts=())).registry
+REGISTRY = load_plugins(SimpleNamespace(shell_hosts=("local",))).registry
 
 
 @pytest.fixture(autouse=True)

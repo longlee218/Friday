@@ -43,6 +43,7 @@ from friday.sdk.actions import Replan, Reply
 from friday.sdk.agent import AgentSpec
 from friday.sdk.evidence import Evidence
 from friday.sdk.intake import IntakeContext
+from friday.sdk.todos import Todos
 from friday.sdk.toolset import RunContext, ToolsetSpec
 
 __all__ = ["Intaken", "Spine", "pass_id", "run_pass"]
@@ -255,13 +256,15 @@ class Spine:
         reads: Mapping[str, Any],
         resume: Resume | None,
     ) -> Any:
-        """One agent step: its granted toolsets over a fresh `Evidence`, or
-        continued from its stored `Ask` with the reporter's reply."""
+        """One agent step: its granted toolsets over a fresh `Evidence` and
+        `Todos`, or continued from its stored `Ask` with the reporter's
+        reply."""
         spec = self.agents[step.agent]
         run = RunContext(
             task_id=task.id,
             domain=context.domain,
             evidence=Evidence(),
+            todos=Todos(),
             mcp={},
             reported_at=datetime.fromisoformat(context.reported_at),
         )
